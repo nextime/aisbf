@@ -1,0 +1,383 @@
+# AISBF - AI Service Broker Framework || AI Should Be Free
+
+## AI.PROMPT Management
+
+This AI.PROMPT file is automatically updated when significant changes are made to the project structure, installation process, or key functionality. The file should be updated when:
+
+1. **Module Structure Changes**: When files are moved between directories or new modules are added
+2. **Installation Process Changes**: When setup.py, installation scripts, or installation documentation is modified
+3. **Configuration Management Changes**: When config.py, configuration file locations, or configuration behavior is modified
+4. **Key Functionality Changes**: When major features are added or existing functionality is significantly modified
+5. **Command Line Interface Changes**: When the aisbf script commands or behavior are modified
+6. **Development vs Production Workflow Changes**: When the development/production distinction or workflows are modified
+
+### How to Update AI.PROMPT
+
+When making changes that affect the project structure or functionality:
+
+1. **Identify the scope of changes** - Determine which sections of AI.PROMPT need updating
+2. **Update relevant sections** - Modify the appropriate parts of the documentation
+3. **Add new sections if needed** - Create new documentation for new features
+4. **Remove outdated information** - Delete sections that are no longer relevant
+5. **Test the changes** - Verify that the documentation accurately reflects the current state
+6. **Update the AI.PROMPT Management section** - Add notes about what was changed and why
+
+### Common Update Scenarios
+
+- **Moving files**: Update the Directory Structure and Module Structure sections
+- **Changing installation**: Update the Installation Process and Key Functions sections
+- **Modifying configuration**: Update the Configuration Management section
+- **Adding new commands**: Update the AISBF Script Commands section
+- **Changing workflows**: Update the Development vs Production section
+
+### Version Control
+
+AI.PROMPT should be committed to version control along with other project files to ensure that documentation stays synchronized with the codebase.
+
+## Project Overview
+
+## Project Overview
+
+AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Ollama) with support for provider rotation and error tracking.
+
+## Directory Structure
+
+```
+geminiproxy/
+├── aisbf/                    # Main Python module
+│   ├── __init__.py          # Module initialization with exports
+│   ├── config.py            # Configuration management
+│   ├── models.py            # Pydantic models
+│   ├── providers.py         # Provider handlers
+│   ├── handlers.py          # Request handlers
+│   ├── providers.json       # Default provider configs (moved to config/)
+│   └── rotations.json       # Default rotation configs (moved to config/)
+├── config/                   # Configuration files directory
+│   ├── providers.json       # Default provider configurations
+│   └── rotations.json       # Default rotation configurations
+├── main.py                   # FastAPI application entry point
+├── setup.py                  # Installation script
+├── start_proxy.sh           # Development start script
+├── aisbf.sh                 # Alternative start script
+├── requirements.txt         # Python dependencies
+├── INSTALL.md               # Installation guide
+└── README.md                # Project documentation
+```
+
+## Module Structure
+
+### aisbf/__init__.py
+Exports all main components:
+- `config`, `Config`, `ProviderConfig`, `RotationConfig`, `AppConfig`
+- `Message`, `ChatCompletionRequest`, `ChatCompletionResponse`, `Model`, `Provider`, `ErrorTracking`
+- `BaseProviderHandler`, `GoogleProviderHandler`, `OpenAIProviderHandler`, `AnthropicProviderHandler`, `OllamaProviderHandler`, `get_provider_handler`, `PROVIDER_HANDLERS`
+- `RequestHandler`, `RotationHandler`
+
+### aisbf/config.py
+Configuration management with smart file location detection:
+- Checks installed location first (`/usr/local/share/aisbf/` or `~/.local/share/aisbf/`)
+- Falls back to source tree `config/` directory for development
+- Creates `~/.aisbf/` directory on first run
+- Copies default configs to user directory
+- Reads from `~/.aisbf/` on subsequent runs
+
+### aisbf/models.py
+Pydantic models for data validation:
+- `Message` - Chat message structure
+- `ChatCompletionRequest` - Request model
+- `ChatCompletionResponse` - Response model
+- `Model` - Model information
+- `Provider` - Provider information
+- `ErrorTracking` - Error tracking data
+
+### aisbf/providers.py
+Provider handler implementations:
+- `BaseProviderHandler` - Base class with rate limiting and error tracking
+- `GoogleProviderHandler` - Google GenAI integration
+- `OpenAIProviderHandler` - OpenAI API integration
+- `AnthropicProviderHandler` - Anthropic API integration
+- `OllamaProviderHandler` - Ollama local integration
+- `get_provider_handler()` - Factory function to get appropriate handler
+
+### aisbf/handlers.py
+Request handling logic:
+- `RequestHandler` - Handles chat completions and model lists
+- `RotationHandler` - Handles provider rotation
+- Supports both streaming and non-streaming responses
+
+### main.py
+FastAPI application:
+- Imports from `aisbf` module
+- Defines API endpoints:
+  - `GET /` - Root endpoint with provider list
+  - `POST /api/{provider_id}/chat/completions` - Chat completions
+  - `GET /api/{provider_id}/models` - List models
+- Supports both providers and rotations
+- CORS enabled for all origins
+
+## Installation Process
+
+### User Installation (no root required)
+```bash
+python setup.py install
+```
+Automatically adds `--user` flag for non-root users.
+
+Installs to:
+- `~/.local/lib/python*/site-packages/aisbf/` - Package
+- `~/.local/aisbf-venv/` - Virtual environment
+- `~/.local/share/aisbf/` - Config files
+- `~/.local/bin/aisbf` - Executable script
+
+### System-wide Installation (requires root)
+```bash
+sudo python setup.py install
+```
+
+Installs to:
+- `/usr/local/lib/python*/dist-packages/aisbf/` - Package
+- `/usr/local/aisbf-venv/` - Virtual environment
+- `/usr/local/share/aisbf/` - Config files
+- `/usr/local/bin/aisbf` - Executable script
+
+## Configuration Management
+
+### Configuration File Locations
+
+**Installed Configuration Files (read-only defaults):**
+- User: `~/.local/share/aisbf/providers.json`, `~/.local/share/aisbf/rotations.json`
+- System: `/usr/local/share/aisbf/providers.json`, `/usr/local/share/aisbf/rotations.json`
+
+**User Configuration Files (writable):**
+- `~/.aisbf/providers.json` - Provider configurations
+- `~/.aisbf/rotations.json` - Rotation configurations
+
+**Development Mode:**
+- `config/providers.json` and `config/rotations.json` in source tree
+
+### First Run Behavior
+1. Checks for config files in installed location
+2. Creates `~/.aisbf/` directory if needed
+3. Copies default configs from installed location to `~/.aisbf/`
+4. Loads configuration from `~/.aisbf/` on subsequent runs
+
+## AISBF Script Commands
+
+The installed `aisbf` script supports:
+
+### Starting in Foreground (Default)
+```bash
+aisbf
+```
+Starts server in foreground with visible output.
+
+### Starting as Daemon
+```bash
+aisbf daemon
+```
+- Starts in background
+- Saves PID to `/tmp/aisbf.pid`
+- Redirects output to `/dev/null`
+- Prints PID of started process
+
+### Checking Status
+```bash
+aisbf status
+```
+Checks if AISBF is running and reports status/PID.
+
+### Stopping the Daemon
+```bash
+aisbf stop
+```
+Stops running daemon and removes PID file.
+
+## Development vs Production
+
+### Development
+Use `start_proxy.sh`:
+- Creates local venv in `./venv/`
+- Installs dependencies from `requirements.txt`
+- Starts server with auto-reload enabled
+- Uses `config/` directory for configuration
+
+### Production
+Install with `python setup.py install`:
+- Creates isolated venv
+- Installs all dependencies
+- Provides `aisbf` command with daemon support
+- Uses installed config files
+
+## Important Conventions
+
+1. **Module Imports**: Always use relative imports within the `aisbf` module (e.g., `from .config import config`)
+2. **Configuration**: Never hardcode paths; use the config system to locate files
+3. **Error Handling**: Provider handlers track failures and implement rate limiting
+4. **Installation**: Always use `python setup.py install` for proper setup
+5. **Virtual Environment**: The installed `aisbf` script uses the venv created during installation
+6. **PID File**: Daemon mode uses `/tmp/aisbf.pid` for process tracking
+
+## Key Functions
+
+### aisbf/config.py
+- `Config._get_config_source_dir()` - Returns appropriate config directory
+- `Config._ensure_config_directory()` - Creates user config directory
+- `Config._load_providers()` - Loads provider configurations
+- `Config._load_rotations()` - Loads rotation configurations
+
+### aisbf/providers.py
+- `get_provider_handler(provider_id, api_key)` - Factory function for provider handlers
+- Provider handlers implement `handle_request()` and `get_models()` methods
+
+### aisbf/handlers.py
+- `RequestHandler.handle_chat_completion()` - Non-streaming chat completion
+- `RequestHandler.handle_streaming_chat_completion()` - Streaming chat completion
+- `RequestHandler.handle_model_list()` - List available models
+- `RotationHandler.handle_rotation_request()` - Handle rotation requests
+- `RotationHandler.handle_rotation_model_list()` - List rotation models
+
+### main.py
+- `main()` - Entry point for the application
+- FastAPI endpoints defined as async functions
+
+## Dependencies
+
+Key dependencies from requirements.txt:
+- fastapi - Web framework
+- uvicorn - ASGI server
+- pydantic - Data validation
+- httpx - HTTP client
+- google-genai - Google AI SDK
+- openai - OpenAI SDK
+- anthropic - Anthropic SDK
+
+## Testing
+
+When making changes:
+1. Test with `start_proxy.sh` for development
+2. Install with `python setup.py install` for production testing
+3. Test all `aisbf` script commands (default, daemon, status, stop)
+4. Verify configuration file locations and behavior
+5. Test both user and system installations
+
+## Common Tasks
+
+### Adding a New Provider
+1. Create handler class in `aisbf/providers.py` inheriting from `BaseProviderHandler`
+2. Add to `PROVIDER_HANDLERS` dictionary
+3. Add provider configuration to `config/providers.json`
+
+### Modifying Configuration
+1. Edit files in `~/.aisbf/` for user-specific changes
+2. Edit files in installed location for system-wide defaults
+3. Restart AISBF for changes to take effect
+
+### Updating Installation
+1. Modify `setup.py` for installation changes
+2. Reinstall with `python setup.py install`
+3. Test all functionality
+
+## File Naming Conventions
+
+### Adding License Headers
+
+When creating new scripts or Python source files, always include the following license header at the top of the file:
+
+```python
+"""
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+AISBF - AI Service Broker Framework || AI Should Be Free
+
+[File description]
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Why did the programmer quit his job? Because he didn't get arrays!
+"""
+```
+
+### Adding Script Headers
+
+For shell scripts, include the following header:
+
+```bash
+#!/bin/bash
+# Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+#
+# This program is free software: you can redistribute it and/or modify
+# it under the terms of the GNU General Public License as published by
+# the Free Software Foundation, either version 3 of the License, or
+# (at your option) any later version.
+#
+# This program is distributed in the hope that it will be useful,
+# but WITHOUT ANY WARRANTY; without even the implied warranty of
+# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+# GNU General Public License for more details.
+#
+# You should have received a copy of the GNU General Public License
+# along with this program.  If not, see <https://www.gnu.org/licenses/>.
+#
+# Why did the programmer quit his job? Because he didn't get arrays!
+```
+
+### File Naming Conventions
+
+- Python modules: lowercase with underscores (e.g., `config.py`, `handlers.py`)
+- Configuration files: lowercase with underscores (e.g., `providers.json`)
+- Scripts: lowercase with underscores (e.g., `start_proxy.sh`)
+- Classes: PascalCase (e.g., `RequestHandler`, `ProviderConfig`)
+- Functions: lowercase with underscores (e.g., `get_provider_handler`)
+
+## Important Notes
+
+- The `aisbf` module is designed to be installed as a package
+- Configuration files are separated from code for easy customization
+- Virtual environment isolation ensures dependency management
+- Daemon mode allows for production deployment
+- Development mode supports rapid iteration with auto-reload
+
+## AI.PROMPT Management
+
+This AI.PROMPT file is automatically updated when significant changes are made to the project structure, installation process, or key functionality. The file should be updated when:
+
+1. **Module Structure Changes**: When files are moved between directories or new modules are added
+2. **Installation Process Changes**: When setup.py, installation scripts, or installation documentation is modified
+3. **Configuration Management Changes**: When config.py, configuration file locations, or configuration behavior is modified
+4. **Key Functionality Changes**: When major features are added or existing functionality is significantly modified
+5. **Command Line Interface Changes**: When the aisbf script commands or behavior are modified
+6. **Development vs Production Workflow Changes**: When the development/production distinction or workflows are modified
+
+### How to Update AI.PROMPT
+
+When making changes that affect the project structure or functionality:
+
+1. **Identify the scope of changes** - Determine which sections of AI.PROMPT need updating
+2. **Update relevant sections** - Modify the appropriate parts of the documentation
+3. **Add new sections if needed** - Create new documentation for new features
+4. **Remove outdated information** - Delete sections that are no longer relevant
+5. **Test the changes** - Verify that the documentation accurately reflects the current state
+6. **Update the AI.PROMPT Management section** - Add notes about what was changed and why
+
+### Common Update Scenarios
+
+- **Moving files**: Update the Directory Structure and Module Structure sections
+- **Changing installation**: Update the Installation Process and Key Functions sections
+- **Modifying configuration**: Update the Configuration Management section
+- **Adding new commands**: Update the AISBF Script Commands section
+- **Changing workflows**: Update the Development vs Production section
+
+### Version Control
+
+AI.PROMPT should be committed to version control along with other project files to ensure that documentation stays synchronized with the codebase.

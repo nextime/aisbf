@@ -1,0 +1,263 @@
+"""
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+AISBF - AI Service Broker Framework || AI Should Be Free
+
+Provider handlers for AISBF.
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+Why did the programmer quit his job? Because he didn't get arrays!
+
+Provider handlers for AISBF.
+"""
+import httpx
+import asyncio
+import time
+from typing import Dict, List, Optional, Union
+from google import genai
+from openai import OpenAI
+from anthropic import Anthropic
+from pydantic import BaseModel
+from .models import Provider, Model, ErrorTracking
+from .config import config
+
+class BaseProviderHandler:
+    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+        self.provider_id = provider_id
+        self.api_key = api_key
+        self.error_tracking = config.error_tracking[provider_id]
+
+    def is_rate_limited(self) -> bool:
+        if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
+            return True
+        return False
+
+    def record_failure(self):
+        self.error_tracking['failures'] += 1
+        self.error_tracking['last_failure'] = time.time()
+        if self.error_tracking['failures'] >= 3:
+            self.error_tracking['disabled_until'] = time.time() + 300  # 5 minutes
+
+    def record_success(self):
+        self.error_tracking['failures'] = 0
+        self.error_tracking['disabled_until'] = None
+
+class GoogleProviderHandler(BaseProviderHandler):
+    def __init__(self, provider_id: str, api_key: str):
+        super().__init__(provider_id, api_key)
+        # Initialize google-genai library
+        from google import genai
+        self.client = genai.Client(api_key=api_key)
+
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            logging.info(f"GoogleProviderHandler: Handling request for model {model}")
+            logging.info(f"GoogleProviderHandler: Messages: {messages}")
+            
+            # Build content from messages
+            content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            
+            # Generate content using the google-genai client
+            response = self.client.models.generate_content(
+                model=model,
+                contents=content,
+                config={
+                    "temperature": temperature,
+                    "max_output_tokens": max_tokens
+                }
+            )
+            
+            logging.info(f"GoogleProviderHandler: Response received: {response}")
+            self.record_success()
+            
+            # Return the response as a dictionary
+            return {
+                "candidates": [{
+                    "content": {
+                        "parts": [{"text": response.text}],
+                        "role": "model"
+                    },
+                    "finishReason": "STOP",
+                    "index": 0
+                }],
+                "usageMetadata": {
+                    "promptTokenCount": getattr(response, "prompt_token_count", 0),
+                    "candidatesTokenCount": getattr(response, "candidates_token_count", 0),
+                    "totalTokenCount": getattr(response, "total_token_count", 0)
+                }
+            }
+        except Exception as e:
+            import logging
+            logging.error(f"GoogleProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+
+    async def get_models(self) -> List[Model]:
+        try:
+            import logging
+            logging.info("GoogleProviderHandler: Getting models list")
+            
+            # List models using the google-genai client
+            models = self.client.models.list()
+            logging.info(f"GoogleProviderHandler: Models received: {models}")
+            
+            # Convert to our Model format
+            result = []
+            for model in models:
+                result.append(Model(
+                    id=model.name,
+                    name=model.display_name or model.name,
+                    provider_id=self.provider_id
+                ))
+            
+            return result
+        except Exception as e:
+            import logging
+            logging.error(f"GoogleProviderHandler: Error getting models: {str(e)}", exc_info=True)
+            raise e
+
+class OpenAIProviderHandler(BaseProviderHandler):
+    def __init__(self, provider_id: str, api_key: str):
+        super().__init__(provider_id, api_key)
+        self.client = OpenAI(base_url=config.providers[provider_id].endpoint, api_key=api_key)
+
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            logging.info(f"OpenAIProviderHandler: Handling request for model {model}")
+            logging.info(f"OpenAIProviderHandler: Messages: {messages}")
+            
+            response = self.client.chat.completions.create(
+                model=model,
+                messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=stream
+            )
+            logging.info(f"OpenAIProviderHandler: Response received: {response}")
+            self.record_success()
+            return response.model_dump()
+        except Exception as e:
+            import logging
+            logging.error(f"OpenAIProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+
+    async def get_models(self) -> List[Model]:
+        try:
+            import logging
+            logging.info("OpenAIProviderHandler: Getting models list")
+            
+            models = self.client.models.list()
+            logging.info(f"OpenAIProviderHandler: Models received: {models}")
+            
+            return [Model(id=model.id, name=model.id, provider_id=self.provider_id) for model in models]
+        except Exception as e:
+            import logging
+            logging.error(f"OpenAIProviderHandler: Error getting models: {str(e)}", exc_info=True)
+            raise e
+
+class AnthropicProviderHandler(BaseProviderHandler):
+    def __init__(self, provider_id: str, api_key: str):
+        super().__init__(provider_id, api_key)
+        self.client = Anthropic(api_key=api_key)
+
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            logging.info(f"AnthropicProviderHandler: Handling request for model {model}")
+            logging.info(f"AnthropicProviderHandler: Messages: {messages}")
+            
+            response = self.client.messages.create(
+                model=model,
+                messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
+                max_tokens=max_tokens,
+                temperature=temperature
+            )
+            logging.info(f"AnthropicProviderHandler: Response received: {response}")
+            self.record_success()
+            return response.model_dump()
+        except Exception as e:
+            import logging
+            logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+
+    async def get_models(self) -> List[Model]:
+        # Anthropic doesn't have a models list endpoint, so we'll return a static list
+        return [
+            Model(id="claude-3-haiku-20240307", name="Claude 3 Haiku", provider_id=self.provider_id),
+            Model(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", provider_id=self.provider_id),
+            Model(id="claude-3-opus-20240229", name="Claude 3 Opus", provider_id=self.provider_id)
+        ]
+
+class OllamaProviderHandler(BaseProviderHandler):
+    def __init__(self, provider_id: str):
+        super().__init__(provider_id)
+        self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint)
+
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            response = await self.client.post("/api/generate", json={
+                "model": model,
+                "prompt": "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages]),
+                "options": {
+                    "temperature": temperature,
+                    "num_predict": max_tokens
+                }
+            })
+            response.raise_for_status()
+            self.record_success()
+            return response.json()
+        except Exception as e:
+            self.record_failure()
+            raise e
+
+    async def get_models(self) -> List[Model]:
+        response = await self.client.get("/api/tags")
+        response.raise_for_status()
+        models = response.json().get('models', [])
+        return [Model(id=model, name=model, provider_id=self.provider_id) for model in models]
+
+PROVIDER_HANDLERS = {
+    'google': GoogleProviderHandler,
+    'openai': OpenAIProviderHandler,
+    'anthropic': AnthropicProviderHandler,
+    'ollama': OllamaProviderHandler
+}
+
+def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:
+    provider_config = config.get_provider(provider_id)
+    handler_class = PROVIDER_HANDLERS.get(provider_config.type)
+    if not handler_class:
+        raise ValueError(f"Unsupported provider type: {provider_config.type}")
+    return handler_class(provider_id, api_key)

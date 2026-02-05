@@ -1,0 +1,84 @@
+{
+  "rotations": {
+    "coding": {
+      "model_name": "coding",
+      "providers": [
+        {
+          "provider_id": "gemini",
+          "api_key": "YOUR_GEMINI_API_KEY",
+          "models": [
+            {
+              "name": "gemini-2.0-flash",
+              "weight": 3
+            },
+            {
+              "name": "gemini-1.5-pro",
+              "weight": 1
+            }
+          ]
+        },
+        {
+          "provider_id": "openai",
+          "api_key": "YOUR_OPENAI_API_KEY",
+          "models": [
+            {
+              "name": "gpt-4",
+              "weight": 2
+            },
+            {
+              "name": "gpt-3.5-turbo",
+              "weight": 1
+            }
+          ]
+        },
+        {
+          "provider_id": "anthropic",
+          "api_key": "YOUR_ANTHROPIC_API_KEY",
+          "models": [
+            {
+              "name": "claude-3-5-sonnet-20241022",
+              "weight": 2
+            },
+            {
+              "name": "claude-3-haiku-20240307",
+              "weight": 1
+            }
+          ]
+        }
+      ]
+    },
+    "general": {
+      "model_name": "general",
+      "providers": [
+        {
+          "provider_id": "gemini",
+          "api_key": "YOUR_GEMINI_API_KEY",
+          "models": [
+            {
+              "name": "gemini-1.5-pro",
+              "weight": 2
+            },
+            {
+              "name": "gemini-2.0-flash",
+              "weight": 1
+            }
+          ]
+        },
+        {
+          "provider_id": "openai",
+          "api_key": "YOUR_OPENAI_API_KEY",
+          "models": [
+            {
+              "name": "gpt-4",
+              "weight": 2
+            },
+            {
+              "name": "gpt-3.5-turbo",
+              "weight": 1
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

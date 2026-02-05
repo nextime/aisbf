@@ -1,0 +1,431 @@
+{
+  "providers": {
+    "gemini": {
+      "id": "gemini",
+      "name": "Google AI Studio",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+      "type": "google",
+      "api_key_required": true
+    },
+    "openai": {
+      "id": "openai",
+      "name": "OpenAI",
+      "endpoint": "https://api.openai.com/v1",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "anthropic": {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "endpoint": "https://api.anthropic.com/v1",
+      "type": "anthropic",
+      "api_key_required": true
+    },
+    "ollama": {
+      "id": "ollama",
+      "name": "Ollama",
+      "endpoint": "http://localhost:11434",
+      "type": "ollama",
+      "api_key_required": false
+    },
+    "azure_openai": {
+      "id": "azure_openai",
+      "name": "Azure OpenAI",
+      "endpoint": "https://your-azure-endpoint.openai.azure.com",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "cohere": {
+      "id": "cohere",
+      "name": "Cohere",
+      "endpoint": "https://api.cohere.com/v1",
+      "type": "cohere",
+      "api_key_required": true
+    },
+    "huggingface": {
+      "id": "huggingface",
+      "name": "Hugging Face",
+      "endpoint": "https://api-inference.huggingface.co",
+      "type": "huggingface",
+      "api_key_required": true
+    },
+    "replicate": {
+      "id": "replicate",
+      "name": "Replicate",
+      "endpoint": "https://api.replicate.com/v1",
+      "type": "replicate",
+      "api_key_required": true
+    },
+    "togetherai": {
+      "id": "togetherai",
+      "name": "Together AI",
+      "endpoint": "https://api.together.xyz/v1",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "groq": {
+      "id": "groq",
+      "name": "Groq",
+      "endpoint": "https://api.groq.com/openai/v1",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "mistralai": {
+      "id": "mistralai",
+      "name": "Mistral AI",
+      "endpoint": "https://api.mistral.ai/v1",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "stabilityai": {
+      "id": "stabilityai",
+      "name": "Stability AI",
+      "endpoint": "https://api.stability.ai/v2beta",
+      "type": "stabilityai",
+      "api_key_required": true
+    },
+    "perplexity": {
+      "id": "perplexity",
+      "name": "Perplexity AI",
+      "endpoint": "https://api.perplexity.ai",
+      "type": "openai",
+      "api_key_required": true
+    },
+    "poe": {
+      "id": "poe",
+      "name": "Poe",
+      "endpoint": "https://api.poe.com/v1",
+      "type": "poe",
+      "api_key_required": true
+    },
+    "lanai": {
+      "id": "lanai",
+      "name": "Llama AI",
+      "endpoint": "https://api.lanai.ai/v1",
+      "type": "lanai",
+      "api_key_required": true
+    },
+    "amazon": {
+      "id": "amazon",
+      "name": "Amazon Bedrock",
+      "endpoint": "https://api.amazon.com/bedrock/v1",
+      "type": "amazon",
+      "api_key_required": true
+    },
+    "ibm": {
+      "id": "ibm",
+      "name": "IBM Watson",
+      "endpoint": "https://api.ibm.com/watson/v1",
+      "type": "ibm",
+      "api_key_required": true
+    },
+    "microsoft": {
+      "id": "microsoft",
+      "name": "Microsoft Azure AI",
+      "endpoint": "https://api.microsoft.com/v1",
+      "type": "microsoft",
+      "api_key_required": true
+    },
+    "salesforce": {
+      "id": "salesforce",
+      "name": "Salesforce Einstein",
+      "endpoint": "https://api.salesforce.com/einstein/v1",
+      "type": "salesforce",
+      "api_key_required": true
+    },
+    "oracle": {
+      "id": "oracle",
+      "name": "Oracle AI",
+      "endpoint": "https://api.oracle.com/v1",
+      "type": "oracle",
+      "api_key_required": true
+    },
+    "sap": {
+      "id": "sap",
+      "name": "SAP AI",
+      "endpoint": "https://api.sap.com/v1",
+      "type": "sap",
+      "api_key_required": true
+    },
+    "workday": {
+      "id": "workday",
+      "name": "Workday AI",
+      "endpoint": "https://api.workday.com/v1",
+      "type": "workday",
+      "api_key_required": true
+    },
+    "adobe": {
+      "id": "adobe",
+      "name": "Adobe Sensei",
+      "endpoint": "https://api.adobe.com/sensei/v1",
+      "type": "adobe",
+      "api_key_required": true
+    },
+    "autodesk": {
+      "id": "autodesk",
+      "name": "Autodesk AI",
+      "endpoint": "https://api.autodesk.com/v1",
+      "type": "autodesk",
+      "api_key_required": true
+    },
+    "nvidia": {
+      "id": "nvidia",
+      "name": "NVIDIA AI",
+      "endpoint": "https://api.nvidia.com/v1",
+      "type": "nvidia",
+      "api_key_required": true
+    },
+    "amd": {
+      "id": "amd",
+      "name": "AMD AI",
+      "endpoint": "https://api.amd.com/v1",
+      "type": "amd",
+      "api_key_required": true
+    },
+    "intel": {
+      "id": "intel",
+      "name": "Intel AI",
+      "endpoint": "https://api.intel.com/v1",
+      "type": "intel",
+      "api_key_required": true
+    },
+    "qualcomm": {
+      "id": "qualcomm",
+      "name": "Qualcomm AI",
+      "endpoint": "https://api.qualcomm.com/v1",
+      "type": "qualcomm",
+      "api_key_required": true
+    },
+    "arm": {
+      "id": "arm",
+      "name": "ARM AI",
+      "endpoint": "https://api.arm.com/v1",
+      "type": "arm",
+      "api_key_required": true
+    },
+    "mediatek": {
+      "id": "mediatek",
+      "name": "MediaTek AI",
+      "endpoint": "https://api.mediatek.com/v1",
+      "type": "mediatek",
+      "api_key_required": true
+    },
+    "hisilicon": {
+      "id": "hisilicon",
+      "name": "HiSilicon AI",
+      "endpoint": "https://api.hisilicon.com/v1",
+      "type": "hisilicon",
+      "api_key_required": true
+    },
+    "rockchip": {
+      "id": "rockchip",
+      "name": "Rockchip AI",
+      "endpoint": "https://api.rockchip.com/v1",
+      "type": "rockchip",
+      "api_key_required": true
+    },
+    "allwinner": {
+      "id": "allwinner",
+      "name": "Allwinner AI",
+      "endpoint": "https://api.allwinner.com/v1",
+      "type": "allwinner",
+      "api_key_required": true
+    },
+    "spreadtrum": {
+      "id": "spreadtrum",
+      "name": "Spreadtrum AI",
+      "endpoint": "https://api.spreadtrum.com/v1",
+      "type": "spreadtrum",
+      "api_key_required": true
+    },
+    "unisoc": {
+      "id": "unisoc",
+      "name": "UNISOC AI",
+      "endpoint": "https://api.unisoc.com/v1",
+      "type": "unisoc",
+      "api_key_required": true
+    },
+    "marvell": {
+      "id": "marvell",
+      "name": "Marvell AI",
+      "endpoint": "https://api.marvell.com/v1",
+      "type": "marvell",
+      "api_key_required": true
+    },
+    "broadcom": {
+      "id": "broadcom",
+      "name": "Broadcom AI",
+      "endpoint": "https://api.broadcom.com/v1",
+      "type": "broadcom",
+      "api_key_required": true
+    },
+    "cavium": {
+      "id": "cavium",
+      "name": "Cavium AI",
+      "endpoint": "https://api.cavium.com/v1",
+      "type": "cavium",
+      "api_key_required": true
+    },
+    "xilinx": {
+      "id": "xilinx",
+      "name": "Xilinx AI",
+      "endpoint": "https://api.xilinx.com/v1",
+      "type": "xilinx",
+      "api_key_required": true
+    },
+    "altera": {
+      "id": "altera",
+      "name": "Altera AI",
+      "endpoint": "https://api.altera.com/v1",
+      "type": "altera",
+      "api_key_required": true
+    },
+    "lattice": {
+      "id": "lattice",
+      "name": "Lattice AI",
+      "endpoint": "https://api.lattice.com/v1",
+      "type": "lattice",
+      "api_key_required": true
+    },
+    "microchip": {
+      "id": "microchip",
+      "name": "Microchip AI",
+      "endpoint": "https://api.microchip.com/v1",
+      "type": "microchip",
+      "api_key_required": true
+    },
+    "atmel": {
+      "id": "atmel",
+      "name": "Atmel AI",
+      "endpoint": "https://api.atmel.com/v1",
+      "type": "atmel",
+      "api_key_required": true
+    },
+    "stmicroelectronics": {
+      "id": "stmicroelectronics",
+      "name": "STMicroelectronics AI",
+      "endpoint": "https://api.st.com/v1",
+      "type": "stmicroelectronics",
+      "api_key_required": true
+    },
+    "infineon": {
+      "id": "infineon",
+      "name": "Infineon AI",
+      "endpoint": "https://api.infineon.com/v1",
+      "type": "infineon",
+      "api_key_required": true
+    },
+    "renesas": {
+      "id": "renesas",
+      "name": "Renesas AI",
+      "endpoint": "https://api.renesas.com/v1",
+      "type": "renesas",
+      "api_key_required": true
+    },
+    "nordic": {
+      "id": "nordic",
+      "name": "Nordic AI",
+      "endpoint": "https://api.nordicsemi.com/v1",
+      "type": "nordic",
+      "api_key_required": true
+    },
+    "silabs": {
+      "id": "silabs",
+      "name": "Silicon Labs AI",
+      "endpoint": "https://api.silabs.com/v1",
+      "type": "silabs",
+      "api_key_required": true
+    },
+    "maxim": {
+      "id": "maxim",
+      "name": "Maxim AI",
+      "endpoint": "https://api.maximintegrated.com/v1",
+      "type": "maxim",
+      "api_key_required": true
+    },
+    "ti": {
+      "id": "ti",
+      "name": "Texas Instruments AI",
+      "endpoint": "https://api.ti.com/v1",
+      "type": "ti",
+      "api_key_required": true
+    },
+    "analog": {
+      "id": "analog",
+      "name": "Analog Devices AI",
+      "endpoint": "https://api.analog.com/v1",
+      "type": "analog",
+      "api_key_required": true
+    },
+    "linear": {
+      "id": "linear",
+      "name": "Linear Technology AI",
+      "endpoint": "https://api.linear.com/v1",
+      "type": "linear",
+      "api_key_required": true
+    },
+    "rohm": {
+      "id": "rohm",
+      "name": "Rohm AI",
+      "endpoint": "https://api.rohm.com/v1",
+      "type": "rohm",
+      "api_key_required": true
+    },
+    "panasonic": {
+      "id": "panasonic",
+      "name": "Panasonic AI",
+      "endpoint": "https://api.panasonic.com/v1",
+      "type": "panasonic",
+      "api_key_required": true
+    },
+    "sharp": {
+      "id": "sharp",
+      "name": "Sharp AI",
+      "endpoint": "https://api.sharp.com/v1",
+      "type": "sharp",
+      "api_key_required": true
+    },
+    "toshiba": {
+      "id": "toshiba",
+      "name": "Toshiba AI",
+      "endpoint": "https://api.toshiba.com/v1",
+      "type": "toshiba",
+      "api_key_required": true
+    },
+    "hitachi": {
+      "id": "hitachi",
+      "name": "Hitachi AI",
+      "endpoint": "https://api.hitachi.com/v1",
+      "type": "hitachi",
+      "api_key_required": true
+    },
+    "mitsubishi": {
+      "id": "mitsubishi",
+      "name": "Mitsubishi AI",
+      "endpoint": "https://api.mitsubishi.com/v1",
+      "type": "mitsubishi",
+      "api_key_required": true
+    },
+    "fujitsu": {
+      "id": "fujitsu",
+      "name": "Fujitsu AI",
+      "endpoint": "https://api.fujitsu.com/v1",
+      "type": "fujitsu",
+      "api_key_required": true
+    },
+    "nec": {
+      "id": "nec",
+      "name": "NEC AI",
+      "endpoint": "https://api.nec.com/v1",
+      "type": "nec",
+      "api_key_required": true
+    },
+    "sony": {
+      "id": "sony",
+      "name": "Sony AI",
+      "endpoint": "https://api.sony.com/v1",
+      "type": "sony",
+      "api_key_required": true
+    }
+  }
+}
