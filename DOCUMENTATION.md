@@ -4,6 +4,14 @@
 
 AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Ollama) with support for provider rotation and error tracking.
 
+## Author
+
+Stefy Lanza <stefy@nexlab.net>
+
+## Repository
+
+Official repository: https://git.nexlab.net/nexlab/aisbf.git
+
 ## Project Structure
 
 ```
