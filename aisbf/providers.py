@@ -38,11 +38,28 @@ class BaseProviderHandler:
         self.provider_id = provider_id
         self.api_key = api_key
         self.error_tracking = config.error_tracking[provider_id]
+        self.last_request_time = 0
+        self.rate_limit = config.providers[provider_id].rate_limit
 
     def is_rate_limited(self) -> bool:
         if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
             return True
         return False
+
+    async def apply_rate_limit(self, rate_limit: Optional[float] = None):
+        """Apply rate limiting by waiting if necessary"""
+        if rate_limit is None:
+            rate_limit = self.rate_limit
+
+        if rate_limit and rate_limit > 0:
+            current_time = time.time()
+            time_since_last_request = current_time - self.last_request_time
+            required_wait = rate_limit - time_since_last_request
+
+            if required_wait > 0:
+                await asyncio.sleep(required_wait)
+
+            self.last_request_time = time.time()
 
     def record_failure(self):
         self.error_tracking['failures'] += 1
@@ -70,10 +87,13 @@ class GoogleProviderHandler(BaseProviderHandler):
             import logging
             logging.info(f"GoogleProviderHandler: Handling request for model {model}")
             logging.info(f"GoogleProviderHandler: Messages: {messages}")
-            
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             # Build content from messages
             content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
-            
+
             # Generate content using the google-genai client
             response = self.client.models.generate_content(
                 model=model,
@@ -83,10 +103,10 @@ class GoogleProviderHandler(BaseProviderHandler):
                     "max_output_tokens": max_tokens
                 }
             )
-            
+
             logging.info(f"GoogleProviderHandler: Response received: {response}")
             self.record_success()
-            
+
             # Return the response as a dictionary
             return {
                 "candidates": [{
@@ -113,11 +133,14 @@ class GoogleProviderHandler(BaseProviderHandler):
         try:
             import logging
             logging.info("GoogleProviderHandler: Getting models list")
-            
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             # List models using the google-genai client
             models = self.client.models.list()
             logging.info(f"GoogleProviderHandler: Models received: {models}")
-            
+
             # Convert to our Model format
             result = []
             for model in models:
@@ -126,7 +149,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     name=model.display_name or model.name,
                     provider_id=self.provider_id
                 ))
-            
+
             return result
         except Exception as e:
             import logging
@@ -147,7 +170,10 @@ class OpenAIProviderHandler(BaseProviderHandler):
             import logging
             logging.info(f"OpenAIProviderHandler: Handling request for model {model}")
             logging.info(f"OpenAIProviderHandler: Messages: {messages}")
-            
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             response = self.client.chat.completions.create(
                 model=model,
                 messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
@@ -168,10 +194,13 @@ class OpenAIProviderHandler(BaseProviderHandler):
         try:
             import logging
             logging.info("OpenAIProviderHandler: Getting models list")
-            
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             models = self.client.models.list()
             logging.info(f"OpenAIProviderHandler: Models received: {models}")
-            
+
             return [Model(id=model.id, name=model.id, provider_id=self.provider_id) for model in models]
         except Exception as e:
             import logging
@@ -192,7 +221,10 @@ class AnthropicProviderHandler(BaseProviderHandler):
             import logging
             logging.info(f"AnthropicProviderHandler: Handling request for model {model}")
             logging.info(f"AnthropicProviderHandler: Messages: {messages}")
-            
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             response = self.client.messages.create(
                 model=model,
                 messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
@@ -227,6 +259,9 @@ class OllamaProviderHandler(BaseProviderHandler):
             raise Exception("Provider rate limited")
 
         try:
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
             response = await self.client.post("/api/generate", json={
                 "model": model,
                 "prompt": "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages]),
@@ -243,6 +278,9 @@ class OllamaProviderHandler(BaseProviderHandler):
             raise e
 
     async def get_models(self) -> List[Model]:
+        # Apply rate limiting
+        await self.apply_rate_limit()
+
         response = await self.client.get("/api/tags")
         response.raise_for_status()
         models = response.json().get('models', [])

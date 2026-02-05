@@ -61,14 +61,14 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     logger.debug(f"Received chat_completions request for provider: {provider_id}")
     logger.debug(f"Request headers: {dict(request.headers)}")
     logger.debug(f"Request body: {body}")
-    
+
     body_dict = body.model_dump()
 
     # Check if it's a rotation
     if provider_id in config.rotations:
         logger.debug("Handling rotation request")
         return await rotation_handler.handle_rotation_request(provider_id, body_dict)
-    
+
     # Check if it's a provider
     if provider_id not in config.providers:
         logger.error(f"Provider {provider_id} not found")
@@ -93,12 +93,12 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 @app.get("/api/{provider_id}/models")
 async def list_models(request: Request, provider_id: str):
     logger.debug(f"Received list_models request for provider: {provider_id}")
-    
+
     # Check if it's a rotation
     if provider_id in config.rotations:
         logger.debug("Handling rotation model list request")
         return await rotation_handler.handle_rotation_model_list(provider_id)
-    
+
     # Check if it's a provider
     if provider_id not in config.providers:
         logger.error(f"Provider {provider_id} not found")

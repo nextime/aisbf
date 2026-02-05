@@ -5,134 +5,152 @@
       "name": "Google AI Studio",
       "endpoint": "https://generativelanguage.googleapis.com/v1beta",
       "type": "google",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "openai": {
       "id": "openai",
       "name": "OpenAI",
       "endpoint": "https://api.openai.com/v1",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "anthropic": {
       "id": "anthropic",
       "name": "Anthropic",
       "endpoint": "https://api.anthropic.com/v1",
       "type": "anthropic",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "ollama": {
       "id": "ollama",
       "name": "Ollama",
       "endpoint": "http://localhost:11434",
       "type": "ollama",
-      "api_key_required": false
+      "api_key_required": false,
+      "rate_limit": 0
     },
     "azure_openai": {
       "id": "azure_openai",
       "name": "Azure OpenAI",
       "endpoint": "https://your-azure-endpoint.openai.azure.com",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "cohere": {
       "id": "cohere",
       "name": "Cohere",
       "endpoint": "https://api.cohere.com/v1",
       "type": "cohere",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "huggingface": {
       "id": "huggingface",
       "name": "Hugging Face",
       "endpoint": "https://api-inference.huggingface.co",
       "type": "huggingface",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "replicate": {
       "id": "replicate",
       "name": "Replicate",
       "endpoint": "https://api.replicate.com/v1",
       "type": "replicate",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "togetherai": {
       "id": "togetherai",
       "name": "Together AI",
       "endpoint": "https://api.together.xyz/v1",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "groq": {
       "id": "groq",
       "name": "Groq",
       "endpoint": "https://api.groq.com/openai/v1",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "mistralai": {
       "id": "mistralai",
       "name": "Mistral AI",
       "endpoint": "https://api.mistral.ai/v1",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "stabilityai": {
       "id": "stabilityai",
       "name": "Stability AI",
       "endpoint": "https://api.stability.ai/v2beta",
       "type": "stabilityai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "kilo": {
       "id": "kilo",
       "name": "KiloCode",
       "endpoint": "https://kilocode.ai/api/openrouter",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
-
     "perplexity": {
       "id": "perplexity",
       "name": "Perplexity AI",
       "endpoint": "https://api.perplexity.ai",
       "type": "openai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "poe": {
       "id": "poe",
       "name": "Poe",
       "endpoint": "https://api.poe.com/v1",
       "type": "poe",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "lanai": {
       "id": "lanai",
       "name": "Llama AI",
       "endpoint": "https://api.lanai.ai/v1",
       "type": "lanai",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "amazon": {
       "id": "amazon",
       "name": "Amazon Bedrock",
       "endpoint": "https://api.amazon.com/bedrock/v1",
       "type": "amazon",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "ibm": {
       "id": "ibm",
       "name": "IBM Watson",
       "endpoint": "https://api.ibm.com/watson/v1",
       "type": "ibm",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     },
     "microsoft": {
       "id": "microsoft",
       "name": "Microsoft Azure AI",
       "endpoint": "https://api.microsoft.com/v1",
       "type": "microsoft",
-      "api_key_required": true
+      "api_key_required": true,
+      "rate_limit": 0
     }
   }
 }

@@ -51,6 +51,7 @@ class Model(BaseModel):
     name: str
     provider_id: str
     weight: int = 1
+    rate_limit: Optional[float] = None
 
 class Provider(BaseModel):
     id: str

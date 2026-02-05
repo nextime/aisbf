@@ -50,6 +50,9 @@ class RequestHandler:
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
 
         try:
+            # Apply rate limiting
+            await handler.apply_rate_limit()
+
             response = await handler.handle_request(
                 model=request_data['model'],
                 messages=request_data['messages'],
@@ -80,6 +83,9 @@ class RequestHandler:
 
         async def stream_generator():
             try:
+                # Apply rate limiting
+                await handler.apply_rate_limit()
+
                 response = await handler.handle_request(
                     model=request_data['model'],
                     messages=request_data['messages'],
@@ -108,6 +114,9 @@ class RequestHandler:
 
         handler = get_provider_handler(provider_id, api_key)
         try:
+            # Apply rate limiting
+            await handler.apply_rate_limit()
+
             models = await handler.get_models()
             return [model.dict() for model in models]
         except Exception as e:
@@ -145,6 +154,10 @@ class RotationHandler:
             raise HTTPException(status_code=503, detail="All providers temporarily unavailable")
 
         try:
+            # Apply rate limiting with model-specific rate limit if available
+            rate_limit = selected_model.get('rate_limit')
+            await handler.apply_rate_limit(rate_limit)
+
             response = await handler.handle_request(
                 model=model_name,
                 messages=request_data['messages'],
@@ -170,7 +183,8 @@ class RotationHandler:
                     "id": f"{provider['provider_id']}/{model['name']}",
                     "name": model['name'],
                     "provider_id": provider['provider_id'],
-                    "weight": model['weight']
+                    "weight": model['weight'],
+                    "rate_limit": model.get('rate_limit')
                 })
 
         return all_models
