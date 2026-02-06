@@ -10,6 +10,7 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 4. **Key Functionality Changes**: When major features are added or existing functionality is significantly modified
 5. **Command Line Interface Changes**: When the aisbf script commands or behavior are modified
 6. **Development vs Production Workflow Changes**: When the development/production distinction or workflows are modified
+7. **PyPI Packaging Changes**: When packaging configuration, build scripts, or PyPI-related files are modified
 
 ### How to Update AI.PROMPT
 
@@ -49,18 +50,22 @@ geminiproxy/
 │   ├── config.py            # Configuration management
 │   ├── models.py            # Pydantic models
 │   ├── providers.py         # Provider handlers
-│   ├── handlers.py          # Request handlers
-│   ├── providers.json       # Default provider configs (moved to config/)
-│   └── rotations.json       # Default rotation configs (moved to config/)
+│   └── handlers.py          # Request handlers
 ├── config/                   # Configuration files directory
 │   ├── providers.json       # Default provider configurations
 │   └── rotations.json       # Default rotation configurations
 ├── main.py                   # FastAPI application entry point
-├── setup.py                  # Installation script
+├── setup.py                  # Installation script with custom install logic
+├── pyproject.toml            # Modern packaging configuration for PyPI
+├── MANIFEST.in               # Package manifest for distribution
+├── build.sh                  # Build script for PyPI packages
+├── clean.sh                  # Clean script for build artifacts
 ├── start_proxy.sh           # Development start script
 ├── aisbf.sh                 # Alternative start script
 ├── requirements.txt         # Python dependencies
 ├── INSTALL.md               # Installation guide
+├── PYPI.md                 # PyPI publishing guide
+├── DOCUMENTATION.md          # Complete API documentation
 └── README.md                # Project documentation
 ```
 
@@ -117,7 +122,12 @@ FastAPI application:
 
 ## Installation Process
 
-### User Installation (no root required)
+### Installation from PyPI (Recommended)
+```bash
+pip install aisbf
+```
+
+### User Installation from Source (no root required)
 ```bash
 python setup.py install
 ```
@@ -126,10 +136,10 @@ Automatically adds `--user` flag for non-root users.
 Installs to:
 - `~/.local/lib/python*/site-packages/aisbf/` - Package
 - `~/.local/aisbf-venv/` - Virtual environment
-- `~/.local/share/aisbf/` - Config files
+- `~/.local/share/aisbf/` - Config files and main.py
 - `~/.local/bin/aisbf` - Executable script
 
-### System-wide Installation (requires root)
+### System-wide Installation from Source (requires root)
 ```bash
 sudo python setup.py install
 ```
@@ -137,7 +147,7 @@ sudo python setup.py install
 Installs to:
 - `/usr/local/lib/python*/dist-packages/aisbf/` - Package
 - `/usr/local/aisbf-venv/` - Virtual environment
-- `/usr/local/share/aisbf/` - Config files
+- `/usr/local/share/aisbf/` - Config files and main.py
 - `/usr/local/bin/aisbf` - Executable script
 
 ## Configuration Management
@@ -145,8 +155,8 @@ Installs to:
 ### Configuration File Locations
 
 **Installed Configuration Files (read-only defaults):**
-- User: `~/.local/share/aisbf/providers.json`, `~/.local/share/aisbf/rotations.json`
-- System: `/usr/local/share/aisbf/providers.json`, `/usr/local/share/aisbf/rotations.json`
+- User: `~/.local/share/aisbf/providers.json`, `~/.local/share/aisbf/rotations.json`, `~/.local/share/aisbf/main.py`
+- System: `/usr/local/share/aisbf/providers.json`, `/usr/local/share/aisbf/rotations.json`, `/usr/local/share/aisbf/main.py`
 
 **User Configuration Files (writable):**
 - `~/.aisbf/providers.json` - Provider configurations
@@ -202,11 +212,65 @@ Use `start_proxy.sh`:
 - Uses `config/` directory for configuration
 
 ### Production
-Install with `python setup.py install`:
+Install with `python setup.py install` or `pip install aisbf`:
 - Creates isolated venv
 - Installs all dependencies
 - Provides `aisbf` command with daemon support
-- Uses installed config files
+- Uses installed config files and main.py from share directory
+
+## PyPI Packaging
+
+### Build Scripts
+
+#### build.sh
+Automated build script for creating PyPI distribution packages:
+- Checks for build tools (build, twine)
+- Installs them if not present
+- Cleans previous build artifacts
+- Builds package using `python -m build`
+- Verifies package with `twine check`
+- Displays created files and upload instructions
+
+Usage:
+```bash
+./build.sh
+```
+
+#### clean.sh
+Comprehensive cleanup script for removing build artifacts:
+- Removes `dist/`, `build/`, `*.egg-info` directories
+- Removes Python cache directories and compiled files
+- Removes test and coverage artifacts
+
+Usage:
+```bash
+./clean.sh
+```
+
+### Package Files
+
+- **pyproject.toml**: Modern packaging configuration with project metadata
+- **MANIFEST.in**: Package manifest specifying files to include in distribution
+- **setup.py**: Installation script with custom install logic (venv creation, file copying)
+- **PYPI.md**: Comprehensive PyPI publishing guide
+
+### Build Artifacts (Ignored by Git)
+
+The following files and directories are created during build and should not be committed:
+- `dist/` - Distribution packages (*.tar.gz, *.whl)
+- `build/` - Build artifacts
+- `*.egg-info/` - Package metadata directories
+- `__pycache__/` - Python bytecode cache
+- `*.pyc`, `*.pyo`, `*.pyd` - Compiled Python files
+
+### Publishing Workflow
+
+1. Build the package: `./build.sh`
+2. Test on TestPyPI: `python -m twine upload --repository testpypi dist/*`
+3. Install from TestPyPI: `pip install --index-url https://test.pypi.org/simple/ aisbf`
+4. Publish to PyPI: `python -m twine upload dist/*`
+
+See [`PYPI.md`](PYPI.md) for detailed instructions.
 
 ## Important Conventions
 
@@ -358,6 +422,7 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 4. **Key Functionality Changes**: When major features are added or existing functionality is significantly modified
 5. **Command Line Interface Changes**: When the aisbf script commands or behavior are modified
 6. **Development vs Production Workflow Changes**: When the development/production distinction or workflows are modified
+7. **PyPI Packaging Changes**: When packaging configuration, build scripts, or PyPI-related files are modified
 
 ### How to Update AI.PROMPT
 

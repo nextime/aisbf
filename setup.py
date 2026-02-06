@@ -56,6 +56,9 @@ class InstallCommand(_install):
         # Install config files
         self._install_config_files()
         
+        # Install main.py to share directory
+        self._install_main_file()
+        
         # Create venv and install requirements
         self._create_venv_and_install_requirements()
         
@@ -114,6 +117,28 @@ class InstallCommand(_install):
         else:
             print(f"Warning: Config directory {config_dir} not found")
     
+    def _install_main_file(self):
+        """Install main.py to the appropriate share directory"""
+        # Determine the share directory
+        if '--user' in sys.argv or os.geteuid() != 0:
+            # User installation - use ~/.local/share
+            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
+        else:
+            # System installation - use /usr/local/share
+            share_dir = Path('/usr/local/share/aisbf')
+        
+        # Create the share directory if it doesn't exist
+        share_dir.mkdir(parents=True, exist_ok=True)
+        
+        # Copy main.py
+        main_file = this_directory / 'main.py'
+        if main_file.exists():
+            dst = share_dir / 'main.py'
+            shutil.copy2(main_file, dst)
+            print(f"Installed main.py to {dst}")
+        else:
+            print(f"Warning: main.py not found")
+    
     def _install_aisbf_script(self):
         """Install the aisbf script that uses the venv"""
         # Determine the installation directory
@@ -121,26 +146,32 @@ class InstallCommand(_install):
             # User installation - use ~/.local/bin
             bin_dir = Path.home() / '.local' / 'bin'
             venv_dir = Path.home() / '.local' / 'aisbf-venv'
+            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
         else:
             # System installation - use /usr/local/bin
             bin_dir = Path('/usr/local/bin')
             venv_dir = Path('/usr/local') / 'aisbf-venv'
+            share_dir = Path('/usr/local/share/aisbf')
         
         # Create the bin directory if it doesn't exist
         bin_dir.mkdir(parents=True, exist_ok=True)
         
         # Create the aisbf script that uses the venv
         script_content = f"""#!/bin/bash
-        # AISBF - AI Service Broker Framework || AI Should Be Free
-        # This script manages the AISBF server using the installed virtual environment
+# AISBF - AI Service Broker Framework || AI Should Be Free
+# This script manages the AISBF server using the installed virtual environment
 
 PIDFILE="/tmp/aisbf.pid"
 VENV_DIR="{venv_dir}"
+SHARE_DIR="{share_dir}"
 
 # Function to start the server
 start_server() {{
     # Activate the virtual environment
     source $VENV_DIR/bin/activate
+    
+    # Change to share directory where main.py is located
+    cd $SHARE_DIR
     
     # Start the proxy server
     uvicorn main:app --host 0.0.0.0 --port 8000
@@ -161,7 +192,7 @@ start_daemon() {{
     fi
     
     # Start in background with nohup
-    nohup bash -c "source $VENV_DIR/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000" > /dev/null 2>&1 &
+    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" > /dev/null 2>&1 &
     PID=$!
     echo $PID > "$PIDFILE"
     echo "AISBF started in background (PID: $PID)"
@@ -232,23 +263,24 @@ setup(
     name="aisbf",
     version="0.1.0",
     author="AISBF Contributors",
-    author_email="",
+    author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/aisbf",
+    url="https://git.nexlab.net/nexlab/aisbf.git",
     packages=find_packages(),
     classifiers=[
         "Development Status :: 3 - Alpha",
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries :: Python Modules",
-        "License :: OSI Approved :: MIT License",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
         "Programming Language :: Python :: 3",
         "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
         "Programming Language :: Python :: 3.12",
+        "Operating System :: OS Independent",
     ],
     python_requires=">=3.8",
     install_requires=requirements,

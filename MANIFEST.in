@@ -1,0 +1,6 @@
+include README.md
+include LICENSE.txt
+include requirements.txt
+include main.py
+recursive-include config *.json
+recursive-include aisbf *.py

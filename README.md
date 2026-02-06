@@ -13,6 +13,13 @@ Official repository: https://git.nexlab.net/nexlab/aisbf.git
 ## Quick Start
 
 ### Installation
+
+#### From PyPI (Recommended)
+```bash
+pip install aisbf
+```
+
+#### From Source
 ```bash
 python setup.py install
 ```
@@ -23,6 +30,30 @@ aisbf
 ```
 
 Server starts on `http://localhost:8000`
+
+## Development
+
+### Building the Package
+
+To build the package for PyPI distribution:
+
+```bash
+./build.sh
+```
+
+This creates distribution files in the `dist/` directory.
+
+### Cleaning Build Artifacts
+
+To remove all build artifacts and temporary files:
+
+```bash
+./clean.sh
+```
+
+### PyPI Publishing
+
+See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 
 ## Supported Providers
 - Google (google-genai)

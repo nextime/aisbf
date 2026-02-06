@@ -29,10 +29,15 @@ geminiproxy/
 │   └── rotations.json       # Default rotation configurations
 ├── main.py                   # FastAPI application entry point
 ├── setup.py                  # Installation script
+├── pyproject.toml            # Modern packaging configuration
+├── MANIFEST.in               # Package manifest for distribution
+├── build.sh                  # Build script for PyPI packages
+├── clean.sh                  # Clean script for build artifacts
 ├── start_proxy.sh           # Development start script
 ├── aisbf.sh                 # Alternative start script
 ├── requirements.txt         # Python dependencies
 ├── INSTALL.md               # Installation guide
+├── PYPI.md                 # PyPI publishing guide
 └── README.md                # Project documentation
 ```
 
@@ -179,6 +184,72 @@ Install with `python setup.py install`:
 - Installs all dependencies
 - Provides `aisbf` command with daemon support
 - Uses installed config files
+
+## PyPI Packaging
+
+### Building the Package
+
+To build the package for PyPI distribution:
+
+```bash
+./build.sh
+```
+
+This script:
+- Checks for build tools (build, twine)
+- Installs them if not present
+- Cleans previous build artifacts
+- Builds the package using `python -m build`
+- Verifies the package with `twine check`
+- Displays created files and upload instructions
+
+### Cleaning Build Artifacts
+
+To remove all build artifacts and temporary files:
+
+```bash
+./clean.sh
+```
+
+This removes:
+- `dist/` directory (distribution packages)
+- `build/` directory (build artifacts)
+- `*.egg-info` directories (package metadata)
+- `__pycache__/` directories (Python bytecode cache)
+- `*.pyc`, `*.pyo`, `*.pyd` files (compiled Python files)
+- `.pytest_cache/`, `.mypy_cache/` directories
+- `.coverage` file, `htmlcov/` directory
+
+### Package Structure
+
+The package includes:
+- **Python Module**: `aisbf/` directory with all Python code
+- **Configuration Files**: `config/` directory with JSON configs
+- **Main Application**: `main.py` - FastAPI application
+- **Documentation**: `README.md`, `DOCUMENTATION.md`
+- **License**: `LICENSE.txt` (GPL-3.0-or-later)
+- **Requirements**: `requirements.txt`
+
+### Installation from PyPI
+
+Users can install AISBF with:
+
+```bash
+# User installation (recommended)
+pip install aisbf
+
+# System-wide installation (requires root)
+sudo pip install aisbf
+```
+
+### Publishing to PyPI
+
+See [`PYPI.md`](PYPI.md) for detailed instructions on:
+- Setting up PyPI account and API tokens
+- Building and testing packages
+- Publishing to TestPyPI and PyPI
+- Version management
+- Troubleshooting
 
 ## AISBF Script Commands
 

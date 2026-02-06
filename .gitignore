@@ -143,6 +143,10 @@ build/
 *.egg
 *.whl
 
+# PyPI build artifacts
+*.tar.gz
+*.whl
+
 # Local configuration files
 .local/
 .local/share/aisbf/
