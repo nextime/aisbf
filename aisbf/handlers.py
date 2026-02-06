@@ -181,6 +181,15 @@ class RotationHandler:
             logger.info(f"")
             logger.info(f"--- Processing provider: {provider_id} ---")
             
+            # Check if provider exists in configuration
+            provider_config = self.config.get_provider(provider_id)
+            if not provider_config:
+                logger.error(f"  [ERROR] Provider {provider_id} not found in providers configuration")
+                logger.error(f"  Available providers: {list(self.config.providers.keys())}")
+                logger.error(f"  Skipping this provider")
+                skipped_providers.append(provider_id)
+                continue
+            
             # Check if provider is rate limited/deactivated
             provider_handler = get_provider_handler(provider_id, provider.get('api_key'))
             if provider_handler.is_rate_limited():
