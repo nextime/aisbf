@@ -164,57 +164,103 @@ class RotationHandler:
             logger.error(f"Rotation {rotation_id} not found")
             raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found")
 
-        logger.info(f"Rotation config: {rotation_config}")
+        logger.info(f"Rotation config loaded successfully")
         providers = rotation_config.providers
         logger.info(f"Number of providers in rotation: {len(providers)}")
         
         # Collect all available models with their weights
         available_models = []
+        skipped_providers = []
+        total_models_considered = 0
 
+        logger.info(f"=== MODEL SELECTION PROCESS START ===")
+        logger.info(f"Scanning providers for available models...")
+        
         for provider in providers:
-            logger.info(f"Processing provider: {provider['provider_id']}")
             provider_id = provider['provider_id']
+            logger.info(f"")
+            logger.info(f"--- Processing provider: {provider_id} ---")
             
             # Check if provider is rate limited/deactivated
             provider_handler = get_provider_handler(provider_id, provider.get('api_key'))
             if provider_handler.is_rate_limited():
-                logger.info(f"  Provider {provider_id} is rate limited/deactivated, skipping")
+                logger.warning(f"  [SKIPPED] Provider {provider_id} is rate limited/deactivated")
+                logger.warning(f"  Reason: Provider has exceeded failure threshold or is in cooldown period")
+                skipped_providers.append(provider_id)
                 continue
             
+            logger.info(f"  [AVAILABLE] Provider {provider_id} is active and ready")
+            
+            models_in_provider = len(provider['models'])
+            total_models_considered += models_in_provider
+            logger.info(f"  Found {models_in_provider} model(s) in this provider")
+            
             for model in provider['models']:
-                logger.info(f"  Model: {model['name']}, weight: {model['weight']}")
+                model_name = model['name']
+                model_weight = model['weight']
+                model_rate_limit = model.get('rate_limit', 'N/A')
+                
+                logger.info(f"    - Model: {model_name}")
+                logger.info(f"      Weight (Priority): {model_weight}")
+                logger.info(f"      Rate Limit: {model_rate_limit}")
+                
                 # Add provider_id and api_key to model for later use
                 model_with_provider = model.copy()
                 model_with_provider['provider_id'] = provider_id
                 model_with_provider['api_key'] = provider.get('api_key')
                 available_models.append(model_with_provider)
 
-        logger.info(f"Total available models: {len(available_models)}")
+        logger.info(f"")
+        logger.info(f"=== MODEL SELECTION SUMMARY ===")
+        logger.info(f"Total providers scanned: {len(providers)}")
+        logger.info(f"Providers skipped (rate limited): {len(skipped_providers)}")
+        if skipped_providers:
+            logger.info(f"Skipped providers: {', '.join(skipped_providers)}")
+        logger.info(f"Total models considered: {total_models_considered}")
+        logger.info(f"Total models available: {len(available_models)}")
+        
         if not available_models:
             logger.error("No models available in rotation (all providers may be rate limited)")
+            logger.error("All providers in this rotation are currently deactivated")
             raise HTTPException(status_code=503, detail="No models available in rotation (all providers may be rate limited)")
 
         # Sort models by weight in descending order (higher weight = higher priority)
         available_models.sort(key=lambda m: m['weight'], reverse=True)
-        logger.info(f"Models sorted by weight (descending): {[m['name'] + ':' + str(m['weight']) for m in available_models]}")
+        
+        logger.info(f"")
+        logger.info(f"=== PRIORITY-BASED SELECTION ===")
+        logger.info(f"Models sorted by weight (descending priority):")
+        for idx, model in enumerate(available_models, 1):
+            logger.info(f"  {idx}. {model['name']} (provider: {model['provider_id']}, weight: {model['weight']})")
 
         # Find the highest weight
         highest_weight = available_models[0]['weight']
-        logger.info(f"Highest weight: {highest_weight}")
+        logger.info(f"")
+        logger.info(f"Highest priority weight: {highest_weight}")
 
         # Filter models with the highest weight
         highest_weight_models = [m for m in available_models if m['weight'] == highest_weight]
-        logger.info(f"Models with highest weight: {[m['name'] for m in highest_weight_models]}")
+        logger.info(f"Models with highest priority ({highest_weight}): {len(highest_weight_models)}")
+        for model in highest_weight_models:
+            logger.info(f"  - {model['name']} (provider: {model['provider_id']})")
 
         # If multiple models have the same highest weight, randomly select among them
         import random
         if len(highest_weight_models) > 1:
-            logger.info(f"Multiple models with highest weight, selecting randomly")
+            logger.info(f"Multiple models with same highest priority - performing random selection")
             selected_model = random.choice(highest_weight_models)
+            logger.info(f"Randomly selected from {len(highest_weight_models)} candidates")
         else:
             selected_model = highest_weight_models[0]
+            logger.info(f"Single model with highest priority - deterministic selection")
         
-        logger.info(f"Selected model: {selected_model}")
+        logger.info(f"")
+        logger.info(f"=== FINAL SELECTION ===")
+        logger.info(f"Selected model: {selected_model['name']}")
+        logger.info(f"Selected provider: {selected_model['provider_id']}")
+        logger.info(f"Model weight (priority): {selected_model['weight']}")
+        logger.info(f"Model rate limit: {selected_model.get('rate_limit', 'N/A')}")
+        logger.info(f"=== MODEL SELECTION PROCESS END ===")
 
         provider_id = selected_model['provider_id']
         api_key = selected_model.get('api_key')
