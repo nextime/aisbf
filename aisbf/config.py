@@ -38,9 +38,20 @@ class ProviderConfig(BaseModel):
 class RotationConfig(BaseModel):
     providers: List[Dict]
 
+class AutoselectModelInfo(BaseModel):
+    model_id: str
+    description: str
+
+class AutoselectConfig(BaseModel):
+    model_name: str
+    description: str
+    fallback: str
+    available_models: List[AutoselectModelInfo]
+
 class AppConfig(BaseModel):
     providers: Dict[str, ProviderConfig]
     rotations: Dict[str, RotationConfig]
+    autoselect: Dict[str, AutoselectConfig]
     error_tracking: Dict[str, Dict]
 
 class Config:
@@ -48,6 +59,7 @@ class Config:
         self._ensure_config_directory()
         self._load_providers()
         self._load_rotations()
+        self._load_autoselect()
         self._initialize_error_tracking()
 
     def _get_config_source_dir(self):
@@ -64,7 +76,7 @@ class Config:
         
         # Fallback to source tree config directory
         # This is for development mode
-        source_dir = Path(__file__).parent.parent.parent / 'config'
+        source_dir = Path(__file__).parent.parent / 'config'
         if source_dir.exists() and (source_dir / 'providers.json').exists():
             return source_dir
         
@@ -90,7 +102,7 @@ class Config:
             return
         
         # Copy default config files if they don't exist
-        for config_file in ['providers.json', 'rotations.json']:
+        for config_file in ['providers.json', 'rotations.json', 'autoselect.json']:
             src = source_dir / config_file
             dst = config_dir / config_file
             
@@ -126,6 +138,20 @@ class Config:
             data = json.load(f)
             self.rotations = {k: RotationConfig(**v) for k, v in data['rotations'].items()}
 
+    def _load_autoselect(self):
+        autoselect_path = Path.home() / '.aisbf' / 'autoselect.json'
+        if not autoselect_path.exists():
+            # Fallback to source config if user config doesn't exist
+            try:
+                source_dir = self._get_config_source_dir()
+                autoselect_path = source_dir / 'autoselect.json'
+            except FileNotFoundError:
+                raise FileNotFoundError("Could not find autoselect.json configuration file")
+        
+        with open(autoselect_path) as f:
+            data = json.load(f)
+            self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
+
     def _initialize_error_tracking(self):
         self.error_tracking = {}
         for provider_id in self.providers:
@@ -140,5 +166,8 @@ class Config:
 
     def get_rotation(self, rotation_id: str) -> RotationConfig:
         return self.rotations.get(rotation_id)
+
+    def get_autoselect(self, autoselect_id: str) -> AutoselectConfig:
+        return self.autoselect.get(autoselect_id)
 
 config = Config()

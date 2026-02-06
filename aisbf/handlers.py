@@ -23,7 +23,9 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Request handlers for AISBF.
 """
 import asyncio
+import re
 from typing import Dict, List, Optional
+from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from .models import ChatCompletionRequest, ChatCompletionResponse
@@ -188,3 +190,194 @@ class RotationHandler:
                 })
 
         return all_models
+
+class AutoselectHandler:
+    def __init__(self):
+        self.config = config
+        self._skill_file_content = None
+
+    def _get_skill_file_content(self) -> str:
+        """Load the autoselect.md skill file content"""
+        if self._skill_file_content is None:
+            # Try installed locations first
+            installed_dirs = [
+                Path('/usr/share/aisbf'),
+                Path.home() / '.local' / 'share' / 'aisbf',
+            ]
+            
+            for installed_dir in installed_dirs:
+                skill_file = installed_dir / 'autoselect.md'
+                if skill_file.exists():
+                    with open(skill_file) as f:
+                        self._skill_file_content = f.read()
+                    return self._skill_file_content
+            
+            # Fallback to source tree config directory
+            source_dir = Path(__file__).parent.parent / 'config'
+            skill_file = source_dir / 'autoselect.md'
+            if skill_file.exists():
+                with open(skill_file) as f:
+                    self._skill_file_content = f.read()
+                return self._skill_file_content
+            
+            raise FileNotFoundError("Could not find autoselect.md skill file")
+        
+        return self._skill_file_content
+
+    def _build_autoselect_prompt(self, user_prompt: str, autoselect_config) -> str:
+        """Build the prompt for model selection"""
+        skill_content = self._get_skill_file_content()
+        
+        # Build the available models list
+        models_list = ""
+        for model_info in autoselect_config.available_models:
+            models_list += f"<model><model_id>{model_info.model_id}</model_id><model_description>{model_info.description}</model_description></model>\n"
+        
+        # Build the complete prompt
+        prompt = f"""{skill_content}
+
+<aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
+<aisbf_autoselect_list>
+{models_list}
+</aisbf_autoselect_list>
+<aisbf_autoselect_fallback>{autoselect_config.fallback}</aisbf_autoselect_fallback>
+"""
+        return prompt
+
+    def _extract_model_selection(self, response: str) -> Optional[str]:
+        """Extract the model_id from the autoselection response"""
+        match = re.search(r'<aisbf_model_autoselection>(.*?)</aisbf_model_autoselection>', response, re.DOTALL)
+        if match:
+            return match.group(1).strip()
+        return None
+
+    async def _get_model_selection(self, prompt: str) -> str:
+        """Send the autoselect prompt to a model and get the selection"""
+        # Use the first available provider/model for the selection
+        # This is a simple implementation - could be enhanced to use a specific selection model
+        rotation_handler = RotationHandler()
+        
+        # Create a minimal request for model selection
+        selection_request = {
+            "messages": [{"role": "user", "content": prompt}],
+            "temperature": 0.1,  # Low temperature for more deterministic selection
+            "max_tokens": 100,   # We only need a short response
+            "stream": False
+        }
+        
+        # Use the fallback rotation for the selection
+        try:
+            response = await rotation_handler.handle_rotation_request("general", selection_request)
+            content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+            model_id = self._extract_model_selection(content)
+            return model_id
+        except Exception as e:
+            # If selection fails, we'll handle it in the main handler
+            return None
+
+    async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict) -> Dict:
+        """Handle an autoselect request"""
+        autoselect_config = self.config.get_autoselect(autoselect_id)
+        if not autoselect_config:
+            raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")
+
+        # Extract the user prompt from the request
+        user_messages = request_data.get('messages', [])
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No messages provided")
+        
+        # Build a string representation of the user prompt
+        user_prompt = ""
+        for msg in user_messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                # Handle complex content (e.g., with images)
+                content = str(content)
+            user_prompt += f"{role}: {content}\n"
+
+        # Build the autoselect prompt
+        autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
+
+        # Get the model selection
+        selected_model_id = await self._get_model_selection(autoselect_prompt)
+
+        # Validate the selected model
+        if not selected_model_id:
+            # Fallback to the configured fallback model
+            selected_model_id = autoselect_config.fallback
+        else:
+            # Check if the selected model is in the available models list
+            available_ids = [m.model_id for m in autoselect_config.available_models]
+            if selected_model_id not in available_ids:
+                selected_model_id = autoselect_config.fallback
+
+        # Now proxy the actual request to the selected rotation
+        rotation_handler = RotationHandler()
+        return await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+
+    async def handle_autoselect_streaming_request(self, autoselect_id: str, request_data: Dict):
+        """Handle an autoselect streaming request"""
+        autoselect_config = self.config.get_autoselect(autoselect_id)
+        if not autoselect_config:
+            raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")
+
+        # Extract the user prompt from the request
+        user_messages = request_data.get('messages', [])
+        if not user_messages:
+            raise HTTPException(status_code=400, detail="No messages provided")
+        
+        # Build a string representation of the user prompt
+        user_prompt = ""
+        for msg in user_messages:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                content = str(content)
+            user_prompt += f"{role}: {content}\n"
+
+        # Build the autoselect prompt
+        autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
+
+        # Get the model selection
+        selected_model_id = await self._get_model_selection(autoselect_prompt)
+
+        # Validate the selected model
+        if not selected_model_id:
+            selected_model_id = autoselect_config.fallback
+        else:
+            available_ids = [m.model_id for m in autoselect_config.available_models]
+            if selected_model_id not in available_ids:
+                selected_model_id = autoselect_config.fallback
+
+        # Now proxy the actual streaming request to the selected rotation
+        rotation_handler = RotationHandler()
+        
+        async def stream_generator():
+            try:
+                response = await rotation_handler.handle_rotation_request(
+                    selected_model_id,
+                    {**request_data, "stream": True}
+                )
+                for chunk in response:
+                    yield f"data: {chunk}\n\n".encode('utf-8')
+            except Exception as e:
+                yield f"data: {str(e)}\n\n".encode('utf-8')
+
+        return StreamingResponse(stream_generator(), media_type="text/event-stream")
+
+    async def handle_autoselect_model_list(self, autoselect_id: str) -> List[Dict]:
+        """List available models for an autoselect endpoint"""
+        autoselect_config = self.config.get_autoselect(autoselect_id)
+        if not autoselect_config:
+            raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")
+
+        # Return the available models that can be selected
+        return [
+            {
+                "id": model_info.model_id,
+                "name": model_info.model_id,
+                "description": model_info.description
+            }
+            for model_info in autoselect_config.available_models
+        ]

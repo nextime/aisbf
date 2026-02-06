@@ -26,7 +26,7 @@ from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
-from aisbf.handlers import RequestHandler, RotationHandler
+from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.config import config
 import time
 import logging
@@ -101,6 +101,7 @@ logger = setup_logging()
 # Initialize handlers
 request_handler = RequestHandler()
 rotation_handler = RotationHandler()
+autoselect_handler = AutoselectHandler()
 
 app = FastAPI(title="AI Proxy Server")
 
@@ -124,6 +125,22 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     logger.debug(f"Request body: {body}")
 
     body_dict = body.model_dump()
+
+    # Check if it's an autoselect
+    if provider_id in config.autoselect:
+        logger.debug("Handling autoselect request")
+        try:
+            if body.stream:
+                logger.debug("Handling streaming autoselect request")
+                return await autoselect_handler.handle_autoselect_streaming_request(provider_id, body_dict)
+            else:
+                logger.debug("Handling non-streaming autoselect request")
+                result = await autoselect_handler.handle_autoselect_request(provider_id, body_dict)
+                logger.debug(f"Autoselect response result: {result}")
+                return result
+        except Exception as e:
+            logger.error(f"Error handling autoselect: {str(e)}", exc_info=True)
+            raise
 
     # Check if it's a rotation
     if provider_id in config.rotations:
@@ -154,6 +171,17 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 @app.get("/api/{provider_id}/models")
 async def list_models(request: Request, provider_id: str):
     logger.debug(f"Received list_models request for provider: {provider_id}")
+
+    # Check if it's an autoselect
+    if provider_id in config.autoselect:
+        logger.debug("Handling autoselect model list request")
+        try:
+            result = await autoselect_handler.handle_autoselect_model_list(provider_id)
+            logger.debug(f"Autoselect models result: {result}")
+            return result
+        except Exception as e:
+            logger.error(f"Error handling autoselect model list: {str(e)}", exc_info=True)
+            raise
 
     # Check if it's a rotation
     if provider_id in config.rotations:

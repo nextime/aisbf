@@ -1,0 +1,17 @@
+{
+  "autoselect": {
+    "model_name": "autoselect",
+    "description": "Auto-selects the best rotating model based on user prompt analysis",
+    "fallback": "general",
+    "available_models": [
+      {
+        "model_id": "coding",
+        "description": "Best for programming, code generation, debugging, and technical tasks. Optimized for software development, code reviews, and algorithm design."
+      },
+      {
+        "model_id": "general",
+        "description": "General purpose model for everyday tasks, conversations, and general knowledge queries. Good for a wide range of topics including writing, analysis, and explanations."
+      }
+    ]
+  }
+}
