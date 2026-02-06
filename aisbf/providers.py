@@ -161,54 +161,9 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"GoogleProviderHandler: Streaming response received")
                 self.record_success()
                 
-                # Create an async generator that yields OpenAI-compatible chunks
-                # Google's generate_content_stream() returns a synchronous iterator
-                # We need to wrap it in an async generator
-                async def stream_generator():
-                    try:
-                        chunk_id = 0
-                        # Iterate over the sync iterator
-                        for chunk in response:
-                            logging.info(f"GoogleProviderHandler: Processing stream chunk")
-                            
-                            # Extract text from the chunk
-                            chunk_text = ""
-                            try:
-                                if hasattr(chunk, 'candidates') and chunk.candidates:
-                                    candidate = chunk.candidates[0] if chunk.candidates else None
-                                    if candidate and hasattr(candidate, 'content') and candidate.content:
-                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                                            for part in candidate.content.parts:
-                                                if hasattr(part, 'text') and part.text:
-                                                    chunk_text += part.text
-                            except Exception as e:
-                                logging.error(f"Error extracting text from stream chunk: {e}")
-                            
-                            # Create OpenAI-compatible chunk (complete object, not separate fields)
-                            openai_chunk = {
-                                "id": f"google-{model}-{int(time.time())}-chunk-{chunk_id}",
-                                "object": "chat.completion.chunk",
-                                "created": int(time.time()),
-                                "model": model,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "content": chunk_text
-                                    },
-                                    "finish_reason": None
-                                }]
-                            }
-                            
-                            chunk_id += 1
-                            logging.info(f"Yielding OpenAI chunk: {openai_chunk}")
-                            # Yield to complete chunk object as a single line
-                            yield openai_chunk
-                            
-                    except Exception as e:
-                        logging.error(f"Error in stream generator: {e}", exc_info=True)
-                        raise
-                
-                return stream_generator()
+                # Return the synchronous iterator directly
+                # The handler will iterate over it and convert to OpenAI format
+                return response
             else:
                 # Non-streaming request
                 # Generate content using the google-genai client

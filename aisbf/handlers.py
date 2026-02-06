@@ -146,35 +146,93 @@ class RequestHandler:
                     tools=request_data.get('tools'),
                     tool_choice=request_data.get('tool_choice')
                 )
-                for chunk in response:
-                    try:
-                        # Debug: Log chunk type and content before serialization
-                        logger.debug(f"Chunk type: {type(chunk)}")
-                        logger.debug(f"Chunk: {chunk}")
-                        
-                        # Convert chunk to dict and serialize as JSON
-                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                        import json
-                        yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                    except Exception as chunk_error:
-                        # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                        # This is a critical error - the model is trying to call tools without proper configuration
-                        # We should treat this as a provider failure
-                        error_msg = str(chunk_error)
-                        if "tool" in error_msg.lower():
-                            logger.error(f"Tool call error during streaming: {error_msg}")
+                
+                # Check if this is a Google streaming response (synchronous iterator)
+                # Google's generate_content_stream() returns a sync iterator, not async
+                is_google_stream = hasattr(response, '__iter__') and not hasattr(response, '__aiter__')
+                logger.info(f"Is Google streaming response: {is_google_stream}")
+                
+                if is_google_stream:
+                    # Handle Google's synchronous streaming response
+                    # Convert Google chunks to OpenAI format
+                    chunk_id = 0
+                    for chunk in response:
+                        try:
+                            logger.debug(f"Google chunk type: {type(chunk)}")
+                            logger.debug(f"Google chunk: {chunk}")
+                            
+                            # Extract text from Google chunk
+                            chunk_text = ""
+                            try:
+                                if hasattr(chunk, 'candidates') and chunk.candidates:
+                                    candidate = chunk.candidates[0] if chunk.candidates else None
+                                    if candidate and hasattr(candidate, 'content') and candidate.content:
+                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                            for part in candidate.content.parts:
+                                                if hasattr(part, 'text') and part.text:
+                                                    chunk_text += part.text
+                            except Exception as e:
+                                logger.error(f"Error extracting text from Google chunk: {e}")
+                            
+                            # Create OpenAI-compatible chunk
+                            openai_chunk = {
+                                "id": f"google-{request_data['model']}-{int(time.time())}-chunk-{chunk_id}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": request_data['model'],
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "content": chunk_text
+                                    },
+                                    "finish_reason": None
+                                }]
+                            }
+                            
+                            chunk_id += 1
+                            logger.debug(f"OpenAI chunk: {openai_chunk}")
+                            
+                            # Serialize as JSON
+                            import json
+                            yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            error_msg = str(chunk_error)
+                            logger.error(f"Error processing Google chunk: {error_msg}")
                             logger.error(f"Chunk type: {type(chunk)}")
                             logger.error(f"Chunk content: {chunk}")
-                            # Record this as a provider failure
-                            handler.record_failure()
-                            # Re-raise to trigger retry in rotation handler
-                            raise
-                        else:
-                            logger.warning(f"Error serializing chunk: {error_msg}")
-                            logger.warning(f"Chunk type: {type(chunk)}")
-                            logger.warning(f"Chunk content: {chunk}")
-                            # Skip this chunk and continue with the next one
+                            # Skip this chunk and continue
                             continue
+                else:
+                    # Handle OpenAI/Anthropic streaming responses (async iterators)
+                    for chunk in response:
+                        try:
+                            # Debug: Log chunk type and content before serialization
+                            logger.debug(f"Chunk type: {type(chunk)}")
+                            logger.debug(f"Chunk: {chunk}")
+                            
+                            # Convert chunk to dict and serialize as JSON
+                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                            import json
+                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
+                            # This is a critical error - the model is trying to call tools without proper configuration
+                            # We should treat this as a provider failure
+                            error_msg = str(chunk_error)
+                            if "tool" in error_msg.lower():
+                                logger.error(f"Tool call error during streaming: {error_msg}")
+                                logger.error(f"Chunk type: {type(chunk)}")
+                                logger.error(f"Chunk content: {chunk}")
+                                # Record this as a provider failure
+                                handler.record_failure()
+                                # Re-raise to trigger retry in rotation handler
+                                raise
+                            else:
+                                logger.warning(f"Error serializing chunk: {error_msg}")
+                                logger.warning(f"Chunk type: {type(chunk)}")
+                                logger.warning(f"Chunk content: {chunk}")
+                                # Skip this chunk and continue with the next one
+                                continue
                 handler.record_success()
             except Exception as e:
                 handler.record_failure()
@@ -702,32 +760,90 @@ class AutoselectHandler:
                     selected_model_id,
                     {**request_data, "stream": True}
                 )
-                for chunk in response:
-                    try:
-                        # Debug: Log chunk type and content before serialization
-                        logger.debug(f"Chunk type: {type(chunk)}")
-                        logger.debug(f"Chunk: {chunk}")
-                        
-                        # Convert chunk to dict and serialize as JSON
-                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                        import json
-                        yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                    except Exception as chunk_error:
-                        # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                        # This is a critical error - the model is trying to call tools without proper configuration
-                        error_msg = str(chunk_error)
-                        if "tool" in error_msg.lower():
-                            logger.error(f"Tool call error during streaming: {error_msg}")
+                
+                # Check if this is a Google streaming response (synchronous iterator)
+                # Google's generate_content_stream() returns a sync iterator, not async
+                is_google_stream = hasattr(response, '__iter__') and not hasattr(response, '__aiter__')
+                logger.info(f"Is Google streaming response: {is_google_stream}")
+                
+                if is_google_stream:
+                    # Handle Google's synchronous streaming response
+                    # Convert Google chunks to OpenAI format
+                    chunk_id = 0
+                    for chunk in response:
+                        try:
+                            logger.debug(f"Google chunk type: {type(chunk)}")
+                            logger.debug(f"Google chunk: {chunk}")
+                            
+                            # Extract text from Google chunk
+                            chunk_text = ""
+                            try:
+                                if hasattr(chunk, 'candidates') and chunk.candidates:
+                                    candidate = chunk.candidates[0] if chunk.candidates else None
+                                    if candidate and hasattr(candidate, 'content') and candidate.content:
+                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                            for part in candidate.content.parts:
+                                                if hasattr(part, 'text') and part.text:
+                                                    chunk_text += part.text
+                            except Exception as e:
+                                logger.error(f"Error extracting text from Google chunk: {e}")
+                            
+                            # Create OpenAI-compatible chunk
+                            openai_chunk = {
+                                "id": f"google-{selected_model_id}-{int(time.time())}-chunk-{chunk_id}",
+                                "object": "chat.completion.chunk",
+                                "created": int(time.time()),
+                                "model": selected_model_id,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "content": chunk_text
+                                    },
+                                    "finish_reason": None
+                                }]
+                            }
+                            
+                            chunk_id += 1
+                            logger.debug(f"OpenAI chunk: {openai_chunk}")
+                            
+                            # Serialize as JSON
+                            import json
+                            yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            error_msg = str(chunk_error)
+                            logger.error(f"Error processing Google chunk: {error_msg}")
                             logger.error(f"Chunk type: {type(chunk)}")
                             logger.error(f"Chunk content: {chunk}")
-                            # Re-raise to trigger retry in rotation handler
-                            raise
-                        else:
-                            logger.warning(f"Error serializing chunk: {error_msg}")
-                            logger.warning(f"Chunk type: {type(chunk)}")
-                            logger.warning(f"Chunk content: {chunk}")
-                            # Skip this chunk and continue with the next one
+                            # Skip this chunk and continue
                             continue
+                else:
+                    # Handle OpenAI/Anthropic streaming responses (async iterators)
+                    for chunk in response:
+                        try:
+                            # Debug: Log chunk type and content before serialization
+                            logger.debug(f"Chunk type: {type(chunk)}")
+                            logger.debug(f"Chunk: {chunk}")
+                            
+                            # Convert chunk to dict and serialize as JSON
+                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                            import json
+                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
+                            # This is a critical error - the model is trying to call tools without proper configuration
+                            error_msg = str(chunk_error)
+                            if "tool" in error_msg.lower():
+                                logger.error(f"Tool call error during streaming: {error_msg}")
+                                logger.error(f"Chunk type: {type(chunk)}")
+                                logger.error(f"Chunk content: {chunk}")
+                                # Re-raise to trigger retry in rotation handler
+                                raise
+                            else:
+                                logger.warning(f"Error serializing chunk: {error_msg}")
+                                logger.warning(f"Chunk type: {type(chunk)}")
+                                logger.warning(f"Chunk content: {chunk}")
+                                # Skip this chunk and continue with the next one
+                                continue
             except Exception as e:
                 logger.error(f"Error in streaming response: {str(e)}")
                 import json
