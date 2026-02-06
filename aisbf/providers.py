@@ -368,11 +368,16 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"Response validated successfully against ChatCompletionResponse model")
                 logging.info(f"Validated response type: {type(validated_response)}")
                 # Return as dict for JSON serialization
-                return validated_response.model_dump()
+                response_dict = validated_response.model_dump()
             except Exception as e:
                 logging.error(f"Response validation failed: {e}", exc_info=True)
                 logging.error(f"Returning unvalidated response")
-                return openai_response
+                response_dict = openai_response
+            
+            # Wrap in JSONResponse for proper serialization
+            from fastapi.responses import JSONResponse
+            logging.info(f"GoogleProviderHandler: Returning JSONResponse")
+            return JSONResponse(content=response_dict)
         except Exception as e:
             import logging
             logging.error(f"GoogleProviderHandler: Error: {str(e)}", exc_info=True)
@@ -662,11 +667,16 @@ class AnthropicProviderHandler(BaseProviderHandler):
                 logging.info(f"Response validated successfully against ChatCompletionResponse model")
                 logging.info(f"Validated response type: {type(validated_response)}")
                 # Return as dict for JSON serialization
-                return validated_response.model_dump()
+                response_dict = validated_response.model_dump()
             except Exception as e:
                 logging.error(f"Response validation failed: {e}", exc_info=True)
                 logging.error(f"Returning unvalidated response")
-                return openai_response
+                response_dict = openai_response
+            
+            # Wrap in JSONResponse for proper serialization
+            from fastapi.responses import JSONResponse
+            logging.info(f"AnthropicProviderHandler: Returning JSONResponse")
+            return JSONResponse(content=response_dict)
         except Exception as e:
             import logging
             logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)

@@ -106,15 +106,11 @@ class RequestHandler:
                 else:
                     logger.error(f"Response does NOT have 'choices' key!")
             else:
-                logger.error(f"Response is NOT a dict, it's {type(response)}")
+                logger.info(f"Response is a JSONResponse (from Google/Anthropic provider)")
             
             handler.record_success()
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
-            
-            # Import JSONResponse to explicitly wrap the response
-            from fastapi.responses import JSONResponse
-            logger.info(f"Returning JSONResponse with response")
-            return JSONResponse(content=response)
+            return response
         except Exception as e:
             handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
