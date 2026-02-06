@@ -23,7 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 A modular proxy server for managing multiple AI provider integrations.
 """
 
-from .config import config, Config, ProviderConfig, RotationConfig, AppConfig
+from .config import config, Config, ProviderConfig, RotationConfig, AppConfig, AutoselectConfig, AutoselectModelInfo
 from .models import (
     Message,
     ChatCompletionRequest,
@@ -41,9 +41,9 @@ from .providers import (
     get_provider_handler,
     PROVIDER_HANDLERS
 )
-from .handlers import RequestHandler, RotationHandler
+from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 
-__version__ = "0.1.0"
+__version__ = "0.2.0"
 __all__ = [
     # Config
     "config",
@@ -51,6 +51,8 @@ __all__ = [
     "ProviderConfig",
     "RotationConfig",
     "AppConfig",
+    "AutoselectConfig",
+    "AutoselectModelInfo",
     # Models
     "Message",
     "ChatCompletionRequest",
@@ -58,6 +60,8 @@ __all__ = [
     "Model",
     "Provider",
     "ErrorTracking",
+    "AutoselectModelInfo",
+    "AutoselectConfig",
     # Providers
     "BaseProviderHandler",
     "GoogleProviderHandler",
@@ -69,4 +73,5 @@ __all__ = [
     # Handlers
     "RequestHandler",
     "RotationHandler",
+    "AutoselectHandler",
 ]
