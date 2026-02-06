@@ -423,6 +423,15 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 5. **Command Line Interface Changes**: When the aisbf script commands or behavior are modified
 6. **Development vs Production Workflow Changes**: When the development/production distinction or workflows are modified
 7. **PyPI Packaging Changes**: When packaging configuration, build scripts, or PyPI-related files are modified
+8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
+
+### Recent Updates
+
+**2026-02-06 - Version 0.2.6**
+- Bumped version to 0.2.6 in setup.py, pyproject.toml, and aisbf/__init__.py
+- Updated README.md and DOCUMENTATION.md with comprehensive API endpoint documentation
+- Added detailed sections for General, Provider, Rotation, and Autoselect endpoints
+- Documented rotation load balancing and AI-assisted autoselect based on content analysis
 
 ### How to Update AI.PROMPT
 
