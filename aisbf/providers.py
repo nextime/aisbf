@@ -252,7 +252,13 @@ class OllamaProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
         super().__init__(provider_id, api_key)
         # Increase timeout for Ollama requests (especially for cloud models)
-        timeout = httpx.Timeout(300.0, connect=60.0)  # 5 minutes total, 60 seconds to connect
+        # Using separate timeouts for connect, read, write, and pool
+        timeout = httpx.Timeout(
+            connect=60.0,      # 60 seconds to establish connection
+            read=300.0,         # 5 minutes to read response
+            write=60.0,         # 60 seconds to write request
+            pool=60.0           # 60 seconds for pool acquisition
+        )
         self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint, timeout=timeout)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
@@ -275,6 +281,18 @@ class OllamaProviderHandler(BaseProviderHandler):
             raise Exception("Provider rate limited")
 
         try:
+            # Test connection first
+            logger.info("Testing Ollama connection...")
+            try:
+                health_response = await self.client.get("/api/tags", timeout=10.0)
+                logger.info(f"Ollama health check passed: {health_response.status_code}")
+                logger.info(f"Available models: {health_response.json().get('models', [])}")
+            except Exception as e:
+                logger.error(f"Ollama health check failed: {str(e)}")
+                logger.error(f"Cannot connect to Ollama at {self.client.base_url}")
+                logger.error(f"Please ensure Ollama is running and accessible")
+                raise Exception(f"Cannot connect to Ollama at {self.client.base_url}: {str(e)}")
+            
             # Apply rate limiting
             logger.info("Applying rate limiting...")
             await self.apply_rate_limit()
@@ -302,6 +320,7 @@ class OllamaProviderHandler(BaseProviderHandler):
             logger.info(f"Sending POST request to {self.client.base_url}/api/generate")
             logger.info(f"Request data: {request_data}")
             logger.info(f"Request headers: {headers}")
+            logger.info(f"Client timeout: {self.client.timeout}")
             
             response = await self.client.post("/api/generate", json=request_data, headers=headers)
             logger.info(f"Response status code: {response.status_code}")
