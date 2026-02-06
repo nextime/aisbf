@@ -88,6 +88,26 @@ class RequestHandler:
                 tool_choice=request_data.get('tool_choice')
             )
             logger.info(f"Response received from provider")
+            logger.info(f"Response type: {type(response)}")
+            logger.info(f"Response: {response}")
+            
+            # Log response structure before returning
+            if isinstance(response, dict):
+                logger.info(f"Response is a dict")
+                logger.info(f"Response keys: {response.keys()}")
+                if 'choices' in response:
+                    logger.info(f"Response has 'choices' key")
+                    logger.info(f"Choices type: {type(response['choices'])}")
+                    logger.info(f"Choices: {response['choices']}")
+                    if isinstance(response['choices'], list) and len(response['choices']) > 0:
+                        logger.info(f"Choices[0]: {response['choices'][0]}")
+                    else:
+                        logger.error(f"Choices is empty or not a list!")
+                else:
+                    logger.error(f"Response does NOT have 'choices' key!")
+            else:
+                logger.error(f"Response is NOT a dict, it's {type(response)}")
+            
             handler.record_success()
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
             return response
