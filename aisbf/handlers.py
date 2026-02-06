@@ -121,11 +121,16 @@ class RequestHandler:
                     stream=True
                 )
                 for chunk in response:
-                    yield f"data: {chunk}\n\n".encode('utf-8')
+                    # Convert chunk to dict and serialize as JSON
+                    chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                    import json
+                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                 handler.record_success()
             except Exception as e:
                 handler.record_failure()
-                yield f"data: {str(e)}\n\n".encode('utf-8')
+                import json
+                error_dict = {"error": str(e)}
+                yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
 
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
@@ -645,10 +650,15 @@ class AutoselectHandler:
                     {**request_data, "stream": True}
                 )
                 for chunk in response:
-                    yield f"data: {chunk}\n\n".encode('utf-8')
+                    # Convert chunk to dict and serialize as JSON
+                    chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                    import json
+                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
             except Exception as e:
                 logger.error(f"Error in streaming response: {str(e)}")
-                yield f"data: {str(e)}\n\n".encode('utf-8')
+                import json
+                error_dict = {"error": str(e)}
+                yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
 
         logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
