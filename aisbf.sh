@@ -52,6 +52,11 @@ ensure_venv() {
             echo "Installing requirements from $SHARE_DIR/requirements.txt"
             "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
         fi
+        
+        # Install aisbf package from system site-packages into venv
+        # This allows the venv to find the aisbf module
+        echo "Installing aisbf package in venv"
+        "$VENV_DIR/bin/pip" install aisbf
     fi
 }
 

@@ -67,144 +67,15 @@ class InstallCommand(_install):
         # Create the bin directory if it doesn't exist
         bin_dir.mkdir(parents=True, exist_ok=True)
         
-        # Create the aisbf script that uses the venv
-        # The script will dynamically determine the correct paths at runtime
-        script_content = """#!/bin/bash
-# AISBF - AI Service Broker Framework || AI Should Be Free
-# This script manages the AISBF server using the installed virtual environment
-
-PIDFILE="/tmp/aisbf.pid"
-
-# Determine the correct share directory at runtime
-# Check for system installation first (/usr/share/aisbf)
-if [ -d "/usr/share/aisbf" ]; then
-    SHARE_DIR="/usr/share/aisbf"
-    VENV_DIR="/usr/share/aisbf/venv"
-    # Running as root - use /var/log/aisbf
-    LOG_DIR="/var/log/aisbf"
-else
-    # Fall back to user installation (~/.local/share/aisbf)
-    SHARE_DIR="$HOME/.local/share/aisbf"
-    VENV_DIR="$HOME/.local/share/aisbf/venv"
-    # Running as user - use ~/.local/var/log/aisbf
-    LOG_DIR="$HOME/.local/var/log/aisbf"
-fi
-
-# Create log directory if it doesn't exist
-mkdir -p "$LOG_DIR"
-
-# Function to create venv if it doesn't exist
-ensure_venv() {{
-    if [ ! -d "$VENV_DIR" ]; then
-        echo "Creating virtual environment at $VENV_DIR"
-        python3 -m venv "$VENV_DIR"
-        
-        # Install requirements if requirements.txt exists
-        if [ -f "$SHARE_DIR/requirements.txt" ]; then
-            echo "Installing requirements from $SHARE_DIR/requirements.txt"
-            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
-        fi
-    fi
-}}
-
-# Function to start the server
-start_server() {{
-    # Ensure venv exists
-    ensure_venv
-    
-    # Activate the virtual environment
-    source $VENV_DIR/bin/activate
-    
-    # Change to share directory where main.py is located
-    cd $SHARE_DIR
-    
-    # Start the proxy server with logging
-    uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
-}}
-
-# Function to start as daemon
-start_daemon() {{
-    # Check if already running
-    if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if ps -p "$PID" > /dev/null 2>&1; then
-            echo "AISBF is already running (PID: $PID)"
-            exit 1
-        else
-            # Stale PID file, remove it
-            rm -f "$PIDFILE"
-        fi
-    fi
-    
-    # Ensure venv exists
-    ensure_venv
-    
-    # Start in background with nohup and logging
-    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
-    PID=$!
-    echo $PID > "$PIDFILE"
-    echo "AISBF started in background (PID: $PID)"
-    echo "Logs are being written to: $LOG_DIR"
-}}
-
-# Function to check status
-check_status() {{
-    if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if ps -p "$PID" > /dev/null 2>&1; then
-            echo "AISBF is running (PID: $PID)"
-            exit 0
-        else
-            echo "AISBF is not running (stale PID file)"
-            rm -f "$PIDFILE"
-            exit 1
-        fi
-    else
-        echo "AISBF is not running"
-        exit 1
-    fi
-}}
-
-# Function to stop the daemon
-stop_daemon() {{
-    if [ -f "$PIDFILE" ]; then
-        PID=$(cat "$PIDFILE")
-        if ps -p "$PID" > /dev/null 2>&1; then
-            kill "$PID"
-            rm -f "$PIDFILE"
-            echo "AISBF stopped (PID: $PID)"
-        else
-            echo "AISBF is not running (stale PID file)"
-            rm -f "$PIDFILE"
-        fi
-    else
-        echo "AISBF is not running"
-    fi
-}}
-
-# Main command handling
-case "$1" in
-    daemon)
-        start_daemon
-        ;;
-    status)
-        check_status
-        ;;
-    stop)
-        stop_daemon
-        ;;
-    *)
-        # Default: start in foreground
-        start_server
-        ;;
-esac
-"""
-        
+        # Copy the existing aisbf.sh script to the bin directory
+        src = Path(__file__).parent / 'aisbf.sh'
         dst = bin_dir / 'aisbf'
         
-        with open(dst, 'w') as f:
-            f.write(script_content)
+        # Copy the script
+        import shutil
+        shutil.copy(src, dst)
         
+        # Make it executable
         os.chmod(dst, 0o755)
         print(f"Installed 'aisbf' script to {dst}")
 
@@ -244,6 +115,16 @@ setup(
             'requirements.txt',
             'config/providers.json',
             'config/rotations.json',
+            'config/autoselect.json',
+            'config/autoselect.md',
+        ]),
+        # Install aisbf package to share directory for venv installation
+        ('share/aisbf/aisbf', [
+            'aisbf/__init__.py',
+            'aisbf/config.py',
+            'aisbf/models.py',
+            'aisbf/providers.py',
+            'aisbf/handlers.py',
         ]),
     ],
     entry_points={
