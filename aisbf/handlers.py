@@ -755,6 +755,7 @@ class AutoselectHandler:
         rotation_handler = RotationHandler()
         
         async def stream_generator():
+            import time  # Import time module
             try:
                 response = await rotation_handler.handle_rotation_request(
                     selected_model_id,
@@ -763,9 +764,30 @@ class AutoselectHandler:
                 
                 logger.info(f"Autoselect stream response type: {type(response)}")
                 
-                # Check if this is a Google streaming response (synchronous iterator)
-                # Google's generate_content_stream() returns a sync iterator, not async
+                # Check if this is a Google streaming response
+                # Google's generate_content_stream() returns a sync iterator with chunks that have 'candidates' attribute
                 is_google_stream = hasattr(response, '__iter__') and not hasattr(response, '__aiter__')
+                
+                # Test the first chunk to verify if it's a Google response
+                if is_google_stream:
+                    try:
+                        # Get the first chunk to test
+                        import itertools
+                        first_chunk = next(iter(response))
+                        # Check if it's a Google chunk by looking for 'candidates' attribute
+                        if hasattr(first_chunk, 'candidates'):
+                            logger.info(f"Confirmed Google streaming response")
+                        else:
+                            logger.warning(f"Response is sync iterator but not Google format - treating as OpenAI/Anthropic stream")
+                            is_google_stream = False
+                        # Recreate the iterator with the first chunk
+                        response = itertools.chain([first_chunk], response)
+                    except Exception as e:
+                        logger.error(f"Error testing stream type: {e}")
+                        is_google_stream = False
+                else:
+                    logger.info(f"Not a sync iterator - treating as OpenAI/Anthropic async stream")
+                
                 logger.info(f"Is Google streaming response: {is_google_stream}")
                 
                 if is_google_stream:
