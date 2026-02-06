@@ -162,9 +162,24 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Extract text from the nested response structure
             # The response has candidates[0].content.parts[0].text
             response_text = ""
+            finish_reason = "stop"
             try:
                 if hasattr(response, 'candidates') and response.candidates:
                     candidate = response.candidates[0]
+                    
+                    # Extract finish reason
+                    if hasattr(candidate, 'finish_reason'):
+                        # Map Google finish reasons to OpenAI format
+                        finish_reason_map = {
+                            'STOP': 'stop',
+                            'MAX_TOKENS': 'length',
+                            'SAFETY': 'content_filter',
+                            'RECITATION': 'content_filter',
+                            'OTHER': 'stop'
+                        }
+                        google_finish_reason = str(candidate.finish_reason)
+                        finish_reason = finish_reason_map.get(google_finish_reason, 'stop')
+                    
                     if hasattr(candidate, 'content') and candidate.content:
                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
                             raw_text = candidate.content.parts[0].text
@@ -200,6 +215,21 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.warning(f"GoogleProviderHandler: Could not extract text from response: {e}")
                 response_text = ""
 
+            # Extract usage metadata from the response
+            prompt_tokens = 0
+            completion_tokens = 0
+            total_tokens = 0
+            
+            try:
+                if hasattr(response, 'usage_metadata') and response.usage_metadata:
+                    usage_metadata = response.usage_metadata
+                    prompt_tokens = getattr(usage_metadata, 'prompt_token_count', 0)
+                    completion_tokens = getattr(usage_metadata, 'candidates_token_count', 0)
+                    total_tokens = getattr(usage_metadata, 'total_token_count', 0)
+                    logging.info(f"GoogleProviderHandler: Usage metadata - prompt: {prompt_tokens}, completion: {completion_tokens}, total: {total_tokens}")
+            except Exception as e:
+                logging.warning(f"GoogleProviderHandler: Could not extract usage metadata: {e}")
+
             # Return the response in OpenAI-style format
             return {
                 "id": f"google-{model}-{int(time.time())}",
@@ -212,12 +242,12 @@ class GoogleProviderHandler(BaseProviderHandler):
                         "role": "assistant",
                         "content": response_text
                     },
-                    "finish_reason": "stop"
+                    "finish_reason": finish_reason
                 }],
                 "usage": {
-                    "prompt_tokens": getattr(response, "prompt_token_count", 0),
-                    "completion_tokens": getattr(response, "candidates_token_count", 0),
-                    "total_tokens": getattr(response, "total_token_count", 0)
+                    "prompt_tokens": prompt_tokens,
+                    "completion_tokens": completion_tokens,
+                    "total_tokens": total_tokens
                 }
             }
         except Exception as e:
