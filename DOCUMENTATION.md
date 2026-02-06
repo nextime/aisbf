@@ -2,7 +2,17 @@
 
 ## Overview
 
-AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Ollama) with support for provider rotation and error tracking.
+AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Ollama) with support for provider rotation, AI-assisted model selection, and error tracking.
+
+### Key Features
+
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, and Ollama
+- **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
+- **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
+- **Streaming Support**: Full support for streaming responses from all providers with proper serialization
+- **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
+- **Rate Limiting**: Built-in rate limiting and graceful error handling
+- **Security**: Default localhost-only access for improved security
 
 ## Author
 
@@ -99,15 +109,23 @@ Installs to:
 ### Rotation Endpoints
 - `GET /api/rotations` - List all available rotation configurations
 - `POST /api/rotations/chat/completions` - Chat completions using rotation (load balancing across providers)
-  - Weighted random selection of models
-  - Automatic failover between providers
+  - **Rotation Models**: Weighted random selection of models across multiple providers
+  - Automatic failover between providers on errors
+  - Configurable weights for each model to prioritize preferred options
   - Supports both streaming and non-streaming responses
+  - Error tracking and rate limiting per provider
 - `GET /api/rotations/models` - List all models across all rotation configurations
 
 ### Autoselect Endpoints
 - `GET /api/autoselect` - List all available autoselect configurations
 - `POST /api/autoselect/chat/completions` - Chat completions using AI-assisted selection based on content analysis
-  - Automatically selects the best provider based on request content
+  - **Autoselect Models**: AI analyzes request content to select the most appropriate model
+  - Automatic routing to specialized models based on task type:
+    - Coding/Programming tasks → Models optimized for code generation
+    - Analysis tasks → Models optimized for reasoning and problem-solving
+    - Creative tasks → Models optimized for creative writing
+    - General queries → General-purpose models
+  - Fallback to default model if selection fails
   - Supports both streaming and non-streaming responses
 - `GET /api/autoselect/models` - List all models across all autoselect configurations
 
@@ -135,9 +153,17 @@ AISBF supports the following AI providers:
 - No API key required
 - Local model hosting support
 
-## Rotation Support
+## Rotation Models
 
-AISBF supports provider rotation with weighted model selection:
+AISBF supports provider rotation with weighted model selection, allowing intelligent load balancing across multiple AI providers:
+
+### How Rotation Models Work
+
+Rotation models provide automatic load balancing and failover by:
+1. **Weighted Selection**: Each model is assigned a weight that determines its selection probability
+2. **Automatic Failover**: If a provider fails, the system automatically tries the next best model
+3. **Error Tracking**: Providers are temporarily disabled after 3 consecutive failures (5-minute cooldown)
+4. **Rate Limiting**: Respects provider rate limits to avoid service disruptions
 
 ### Rotation Configuration
 ```json
@@ -165,9 +191,78 @@ AISBF supports provider rotation with weighted model selection:
 ```
 
 ### Rotation Behavior
-- Weighted random selection of models
-- Automatic failover between providers
-- Error tracking and rate limiting
+
+When using rotation models:
+- Models with higher weights are selected more frequently
+- The system automatically retries with alternative models on failures
+- Failed providers are temporarily disabled and automatically re-enabled after cooldown
+- All requests are logged for monitoring and debugging
+
+### Example Use Cases
+
+- **High Availability**: Configure multiple providers with the same model for redundancy
+- **Cost Optimization**: Use cheaper models with higher weights, fallback to expensive models when needed
+- **Performance**: Prioritize faster models, fallback to slower models if they fail
+- **Geographic Distribution**: Route requests to providers in different regions
+
+## Autoselect Models
+
+AISBF supports AI-assisted model selection that automatically routes requests to the most appropriate model based on content analysis:
+
+### How Autoselect Models Work
+
+Autoselect models use AI to analyze the user's request and select the best model:
+1. **Content Analysis**: The AI analyzes the request to determine task type, complexity, and domain
+2. **Model Matching**: Matches request characteristics to available model capabilities
+3. **Automatic Routing**: Routes the request to the most suitable model
+4. **Fallback**: Uses a default model if selection fails or is uncertain
+
+### Autoselect Configuration
+
+```json
+{
+  "autoselect": {
+    "smart": {
+      "model_name": "smart",
+      "description": "AI-assisted model selection",
+      "fallback": "general",
+      "available_models": [
+        {
+          "model_id": "coding",
+          "description": "Best for programming, code generation, debugging, and technical tasks"
+        },
+        {
+          "model_id": "analysis",
+          "description": "Best for analysis, reasoning, and problem-solving"
+        },
+        {
+          "model_id": "creative",
+          "description": "Best for creative writing, storytelling, and content generation"
+        },
+        {
+          "model_id": "general",
+          "description": "General purpose model for everyday tasks and conversations"
+        }
+      ]
+    }
+  }
+}
+```
+
+### Autoselect Behavior
+
+When using autoselect models:
+- The AI analyzes the request content to determine the best model
+- Requests are automatically routed to specialized models based on task type
+- The system provides explicit output requirements to ensure reliable model selection
+- Falls back to a default model if selection is uncertain
+
+### Example Use Cases
+
+- **Intelligent Routing**: Automatically route coding tasks to code-optimized models
+- **Cost Efficiency**: Use cheaper models for simple tasks, expensive models for complex ones
+- **User Experience**: Provide optimal responses without manual model selection
+- **Adaptive Selection**: Dynamically adjust model selection based on request characteristics
 
 ## Error Tracking and Rate Limiting
 
@@ -269,13 +364,13 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on:
 ```bash
 aisbf
 ```
-Starts server in foreground with visible output.
+Starts server in foreground with visible output on `http://127.0.0.1:17765`.
 
 ### Starting as Daemon
 ```bash
 aisbf daemon
 ```
-- Starts in background
+- Starts in background on `http://127.0.0.1:17765`
 - Saves PID to `/tmp/aisbf.pid`
 - Redirects output to `/dev/null`
 - Prints PID of started process
@@ -317,8 +412,9 @@ Stops running daemon and removes PID file.
 - `get_provider_handler()` - Factory function for provider handlers
 
 ### aisbf/handlers.py
-- `RequestHandler` - Request handling logic
-- `RotationHandler` - Rotation handling logic
+- `RequestHandler` - Request handling logic with streaming support
+- `RotationHandler` - Rotation handling logic with streaming support
+- `AutoselectHandler` - AI-assisted model selection with streaming support
 
 ## Dependencies
 
@@ -394,6 +490,8 @@ Key dependencies from requirements.txt:
 4. Test all `aisbf` script commands (default, daemon, status, stop)
 5. Verify configuration file locations and behavior
 6. Test both user and system installations
+7. Test streaming responses with OpenAI-compatible providers
+8. Verify autoselect model selection returns only the model ID tag
 
 ### Common Development Tasks
 - Adding new providers
@@ -409,14 +507,32 @@ This program is distributed in the hope that it will be useful, but WITHOUT ANY 
 
 You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
 
+## Version 0.3.0 Changes
+
+### Streaming Improvements
+- Fixed streaming response serialization for OpenAI-compatible providers
+- Properly serialize Stream chunks to JSON format
+- Convert ChatCompletionChunk objects before yielding
+- Resolves socket.send() exceptions during streaming
+
+### Autoselect Enhancements
+- Made autoselect skill file more explicit about output requirements
+- Added prominent warnings about outputting ONLY the model selection tag
+- Improved reliability of AI-assisted model selection
+
+### Security Improvements
+- Changed default listening address from 0.0.0.0:8000 to 127.0.0.1:17765
+- Server now only accepts connections from localhost by default
+
 ## Contributing
 
 When making changes:
 1. Update AI.PROMPT file with significant changes
-2. Test all functionality
+2. Test all functionality including streaming
 3. Update documentation as needed
 4. Follow the project's coding conventions
 5. Ensure all tests pass
+6. Verify localhost-only access when appropriate
 
 ## Support
 

@@ -1,6 +1,15 @@
 # AISBF - AI Service Broker Framework || AI Should Be Free
 
-A modular proxy server for managing multiple AI provider integrations with unified API interface.
+A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, and AI-assisted model selection to optimize AI service usage across multiple providers.
+
+## Key Features
+
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, and Ollama
+- **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
+- **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
+- **Streaming Support**: Full support for streaming responses from all providers
+- **Error Tracking**: Automatic provider disabling after consecutive failures with cooldown periods
+- **Rate Limiting**: Built-in rate limiting and graceful error handling
 
 ## Author
 
@@ -29,7 +38,7 @@ python setup.py install
 aisbf
 ```
 
-Server starts on `http://localhost:8000`
+Server starts on `http://127.0.0.1:17765`
 
 ## Development
 
@@ -76,17 +85,27 @@ See `config/providers.json` and `config/rotations.json` for configuration exampl
 ### Rotation Endpoints
 - `GET /api/rotations` - List all available rotation configurations
 - `POST /api/rotations/chat/completions` - Chat completions using rotation (load balancing across providers)
+  - **Rotation Models**: Weighted random selection of models across multiple providers
+  - Automatic failover between providers on errors
+  - Configurable weights for each model to prioritize preferred options
+  - Supports both streaming and non-streaming responses
 - `GET /api/rotations/models` - List all models across all rotation configurations
 
 ### Autoselect Endpoints
 - `GET /api/autoselect` - List all available autoselect configurations
 - `POST /api/autoselect/chat/completions` - Chat completions using AI-assisted selection based on content analysis
+  - **Autoselect Models**: AI analyzes request content to select the most appropriate model
+  - Automatic routing to specialized models based on task type (coding, analysis, creative writing, etc.)
+  - Fallback to default model if selection fails
+  - Supports both streaming and non-streaming responses
 - `GET /api/autoselect/models` - List all models across all autoselect configurations
 
 ## Error Handling
 - Rate limiting for failed requests
 - Automatic retry with provider rotation
 - Proper error tracking and logging
+- Fixed streaming response serialization for OpenAI-compatible providers
+- Improved autoselect model selection with explicit output requirements
 
 ## Donations
 The project includes multiple donation options to support its development:
