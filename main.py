@@ -293,15 +293,15 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
                                 logger.error(f"Error processing Google chunk: {str(chunk_error)}")
                                 continue
                     else:
-                        # Handle OpenAI/Anthropic streaming responses (async iterators)
-                        for chunk in response:
-                            try:
-                                chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                                import json
-                                yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                            except Exception as chunk_error:
-                                logger.warning(f"Error serializing chunk: {str(chunk_error)}")
-                                continue
+                       # Handle OpenAI/Anthropic streaming responses (async iterators)
+                       async for chunk in response:
+                           try:
+                               chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                               import json
+                               yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                           except Exception as chunk_error:
+                               logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                               continue
                 except Exception as e:
                     logger.error(f"Error in streaming response: {str(e)}")
                     import json
