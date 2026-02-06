@@ -126,13 +126,14 @@ class GoogleProviderHandler(BaseProviderHandler):
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
-                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
         try:
             import logging
             logging.info(f"GoogleProviderHandler: Handling request for model {model}")
+            logging.info(f"GoogleProviderHandler: Stream: {stream}")
             if AISBF_DEBUG:
                 logging.info(f"GoogleProviderHandler: Messages: {messages}")
             else:
@@ -149,21 +150,83 @@ class GoogleProviderHandler(BaseProviderHandler):
             if max_tokens is not None:
                 config["max_output_tokens"] = max_tokens
 
-            # Generate content using the google-genai client
-            response = self.client.models.generate_content(
-                model=model,
-                contents=content,
-                config=config
-            )
+            # Handle streaming request
+            if stream:
+                logging.info(f"GoogleProviderHandler: Using streaming API")
+                response = self.client.models.generate_content_stream(
+                    model=model,
+                    contents=content,
+                    config=config
+                )
+                logging.info(f"GoogleProviderHandler: Streaming response received")
+                self.record_success()
+                return response
+            else:
+                # Generate content using the google-genai client
+                response = self.client.models.generate_content(
+                    model=model,
+                    contents=content,
+                    config=config
+                )
 
-            logging.info(f"GoogleProviderHandler: Response received: {response}")
-            self.record_success()
-
-            # Extract content from the nested response structure
-            # The response has candidates[0].content.parts
-            response_text = ""
-            tool_calls = None
-            finish_reason = "stop"
+                # Handle streaming response
+                if stream:
+                    logging.info(f"GoogleProviderHandler: Processing streaming response")
+                    
+                    # Create a generator that yields OpenAI-compatible chunks
+                    async def stream_generator():
+                        try:
+                            chunk_id = 0
+                            for chunk in response:
+                                logging.info(f"GoogleProviderHandler: Processing stream chunk")
+                                
+                                # Extract text from the chunk
+                                chunk_text = ""
+                                try:
+                                    if hasattr(chunk, 'candidates') and chunk.candidates:
+                                        candidate = chunk.candidates[0] if chunk.candidates else None
+                                        if candidate and hasattr(candidate, 'content') and candidate.content:
+                                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                                for part in candidate.content.parts:
+                                                    if hasattr(part, 'text') and part.text:
+                                                        chunk_text += part.text
+                                except Exception as e:
+                                    logging.error(f"Error extracting text from stream chunk: {e}")
+                                
+                                # Create OpenAI-compatible chunk
+                                openai_chunk = {
+                                    "id": f"google-{model}-{int(time.time())}-chunk-{chunk_id}",
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": model,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {
+                                            "content": chunk_text
+                                        },
+                                        "finish_reason": None
+                                    }]
+                                }
+                                
+                                chunk_id += 1
+                                logging.info(f"Yielding OpenAI chunk: {openai_chunk}")
+                                yield openai_chunk
+                                
+                        except Exception as e:
+                            logging.error(f"Error in stream generator: {e}", exc_info=True)
+                            raise
+                    
+                    return stream_generator()
+                
+                # Non-streaming response
+                logging.info(f"GoogleProviderHandler: Response received: {response}")
+                self.record_success()
+    
+                # Extract content from the nested response structure
+                # The response has candidates[0].content.parts
+                response_text = ""
+                tool_calls = None
+                finish_reason = "stop"
             
             logging.info(f"=== GOOGLE RESPONSE PARSING START ===")
             logging.info(f"Response type: {type(response)}")
