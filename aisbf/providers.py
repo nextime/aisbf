@@ -204,7 +204,8 @@ class OpenAIProviderHandler(BaseProviderHandler):
         self.client = OpenAI(base_url=config.providers[provider_id].endpoint, api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Union[Dict, object]:
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -212,17 +213,28 @@ class OpenAIProviderHandler(BaseProviderHandler):
             import logging
             logging.info(f"OpenAIProviderHandler: Handling request for model {model}")
             logging.info(f"OpenAIProviderHandler: Messages: {messages}")
+            logging.info(f"OpenAIProviderHandler: Tools: {tools}")
+            logging.info(f"OpenAIProviderHandler: Tool choice: {tool_choice}")
 
             # Apply rate limiting
             await self.apply_rate_limit()
 
-            response = self.client.chat.completions.create(
-                model=model,
-                messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
-                max_tokens=max_tokens,
-                temperature=temperature,
-                stream=stream
-            )
+            # Build request parameters
+            request_params = {
+                "model": model,
+                "messages": [{"role": msg["role"], "content": msg["content"]} for msg in messages],
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": stream
+            }
+            
+            # Add tools and tool_choice if provided
+            if tools is not None:
+                request_params["tools"] = tools
+            if tool_choice is not None:
+                request_params["tool_choice"] = tool_choice
+
+            response = self.client.chat.completions.create(**request_params)
             logging.info(f"OpenAIProviderHandler: Response received: {response}")
             self.record_success()
             

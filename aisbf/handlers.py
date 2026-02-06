@@ -83,7 +83,9 @@ class RequestHandler:
                 messages=request_data['messages'],
                 max_tokens=request_data.get('max_tokens'),
                 temperature=request_data.get('temperature', 1.0),
-                stream=request_data.get('stream', False)
+                stream=request_data.get('stream', False),
+                tools=request_data.get('tools'),
+                tool_choice=request_data.get('tool_choice')
             )
             logger.info(f"Response received from provider")
             handler.record_success()
@@ -120,7 +122,9 @@ class RequestHandler:
                     messages=request_data['messages'],
                     max_tokens=request_data.get('max_tokens'),
                     temperature=request_data.get('temperature', 1.0),
-                    stream=True
+                    stream=True,
+                    tools=request_data.get('tools'),
+                    tool_choice=request_data.get('tool_choice')
                 )
                 for chunk in response:
                     try:
@@ -134,11 +138,23 @@ class RequestHandler:
                         yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                     except Exception as chunk_error:
                         # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                        logger.warning(f"Error serializing chunk: {str(chunk_error)}")
-                        logger.warning(f"Chunk type: {type(chunk)}")
-                        logger.warning(f"Chunk content: {chunk}")
-                        # Skip this chunk and continue with the next one
-                        continue
+                        # This is a critical error - the model is trying to call tools without proper configuration
+                        # We should treat this as a provider failure
+                        error_msg = str(chunk_error)
+                        if "tool" in error_msg.lower():
+                            logger.error(f"Tool call error during streaming: {error_msg}")
+                            logger.error(f"Chunk type: {type(chunk)}")
+                            logger.error(f"Chunk content: {chunk}")
+                            # Record this as a provider failure
+                            handler.record_failure()
+                            # Re-raise to trigger retry in rotation handler
+                            raise
+                        else:
+                            logger.warning(f"Error serializing chunk: {error_msg}")
+                            logger.warning(f"Chunk type: {type(chunk)}")
+                            logger.warning(f"Chunk content: {chunk}")
+                            # Skip this chunk and continue with the next one
+                            continue
                 handler.record_success()
             except Exception as e:
                 handler.record_failure()
@@ -348,7 +364,9 @@ class RotationHandler:
                     messages=request_data['messages'],
                     max_tokens=request_data.get('max_tokens'),
                     temperature=request_data.get('temperature', 1.0),
-                    stream=request_data.get('stream', False)
+                    stream=request_data.get('stream', False),
+                    tools=request_data.get('tools'),
+                    tool_choice=request_data.get('tool_choice')
                 )
                 logger.info(f"Response received from provider")
                 handler.record_success()
@@ -675,11 +693,20 @@ class AutoselectHandler:
                         yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                     except Exception as chunk_error:
                         # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                        logger.warning(f"Error serializing chunk: {str(chunk_error)}")
-                        logger.warning(f"Chunk type: {type(chunk)}")
-                        logger.warning(f"Chunk content: {chunk}")
-                        # Skip this chunk and continue with the next one
-                        continue
+                        # This is a critical error - the model is trying to call tools without proper configuration
+                        error_msg = str(chunk_error)
+                        if "tool" in error_msg.lower():
+                            logger.error(f"Tool call error during streaming: {error_msg}")
+                            logger.error(f"Chunk type: {type(chunk)}")
+                            logger.error(f"Chunk content: {chunk}")
+                            # Re-raise to trigger retry in rotation handler
+                            raise
+                        else:
+                            logger.warning(f"Error serializing chunk: {error_msg}")
+                            logger.warning(f"Chunk type: {type(chunk)}")
+                            logger.warning(f"Chunk content: {chunk}")
+                            # Skip this chunk and continue with the next one
+                            continue
             except Exception as e:
                 logger.error(f"Error in streaming response: {str(e)}")
                 import json

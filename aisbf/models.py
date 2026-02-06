@@ -36,6 +36,8 @@ class ChatCompletionRequest(BaseModel):
     max_tokens: Optional[int] = None
     temperature: Optional[float] = 1.0
     stream: Optional[bool] = False
+    tools: Optional[List[Dict]] = None
+    tool_choice: Optional[Union[str, Dict]] = None
 
 class ChatCompletionResponse(BaseModel):
     id: str
