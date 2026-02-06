@@ -121,7 +121,8 @@ class GoogleProviderHandler(BaseProviderHandler):
         self.client = genai.Client(api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -222,11 +223,24 @@ class OpenAIProviderHandler(BaseProviderHandler):
             # Build request parameters
             request_params = {
                 "model": model,
-                "messages": [{"role": msg["role"], "content": msg["content"]} for msg in messages],
+                "messages": [],
                 "max_tokens": max_tokens,
                 "temperature": temperature,
                 "stream": stream
             }
+            
+            # Build messages with all fields (including tool_calls and tool_call_id)
+            for msg in messages:
+                message = {"role": msg["role"]}
+                if "content" in msg and msg["content"] is not None:
+                    message["content"] = msg["content"]
+                if "tool_calls" in msg and msg["tool_calls"] is not None:
+                    message["tool_calls"] = msg["tool_calls"]
+                if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                    message["tool_call_id"] = msg["tool_call_id"]
+                if "name" in msg and msg["name"] is not None:
+                    message["name"] = msg["name"]
+                request_params["messages"].append(message)
             
             # Add tools and tool_choice if provided
             if tools is not None:
@@ -271,7 +285,8 @@ class AnthropicProviderHandler(BaseProviderHandler):
         self.client = Anthropic(api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -320,7 +335,8 @@ class OllamaProviderHandler(BaseProviderHandler):
         self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint, timeout=timeout)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
         import logging
         import json
         logger = logging.getLogger(__name__)

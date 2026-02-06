@@ -31,7 +31,10 @@ class Message(BaseModel):
     content: Union[str, List[Dict], List, None] = None
     tool_calls: Optional[List[Dict]] = None
     tool_call_id: Optional[str] = None
+    name: Optional[str] = None
 
+    class Config:
+        extra = "allow"  # Allow extra fields not defined in the model
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Message]

@@ -212,7 +212,27 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     try:
         if body.stream:
             logger.debug("Handling streaming rotation request")
-            return await rotation_handler.handle_rotation_request(body.model, body_dict)
+            rotation_config = config.get_rotation(body.model)
+            if not rotation_config:
+                raise HTTPException(status_code=400, detail=f"Rotation {body.model} not found")
+            
+            async def stream_generator():
+                try:
+                    response = await rotation_handler.handle_rotation_request(body.model, body_dict)
+                    for chunk in response:
+                        try:
+                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                            import json
+                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                            continue
+                except Exception as e:
+                    logger.error(f"Error in streaming response: {str(e)}")
+                    import json
+                    yield f"data: {json.dumps({'error': str(e)})}\n\n".encode('utf-8')
+            
+            return StreamingResponse(stream_generator(), media_type="text/event-stream")
         else:
             logger.debug("Handling non-streaming rotation request")
             result = await rotation_handler.handle_rotation_request(body.model, body_dict)
