@@ -121,10 +121,17 @@ class RequestHandler:
                     stream=True
                 )
                 for chunk in response:
-                    # Convert chunk to dict and serialize as JSON
-                    chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                    import json
-                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                    try:
+                        # Convert chunk to dict and serialize as JSON
+                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                        import json
+                        yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                    except Exception as chunk_error:
+                        # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
+                        import logging
+                        logging.warning(f"Error serializing chunk: {str(chunk_error)}")
+                        # Skip this chunk and continue with the next one
+                        continue
                 handler.record_success()
             except Exception as e:
                 handler.record_failure()
@@ -650,10 +657,16 @@ class AutoselectHandler:
                     {**request_data, "stream": True}
                 )
                 for chunk in response:
-                    # Convert chunk to dict and serialize as JSON
-                    chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                    import json
-                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                    try:
+                        # Convert chunk to dict and serialize as JSON
+                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                        import json
+                        yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                    except Exception as chunk_error:
+                        # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
+                        logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                        # Skip this chunk and continue with the next one
+                        continue
             except Exception as e:
                 logger.error(f"Error in streaming response: {str(e)}")
                 import json
