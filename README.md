@@ -65,9 +65,23 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 See `config/providers.json` and `config/rotations.json` for configuration examples.
 
 ## API Endpoints
-- `GET /` - Server status and provider list
-- `POST /api/{provider_id}/chat/completions` - Chat completions
-- `GET /api/{provider_id}/models` - List available models
+
+### General Endpoints
+- `GET /` - Server status and provider list (includes providers, rotations, and autoselect)
+
+### Provider Endpoints
+- `POST /api/{provider_id}/chat/completions` - Chat completions for a specific provider
+- `GET /api/{provider_id}/models` - List available models for a specific provider
+
+### Rotation Endpoints
+- `GET /api/rotations` - List all available rotation configurations
+- `POST /api/rotations/chat/completions` - Chat completions using rotation (load balancing across providers)
+- `GET /api/rotations/models` - List all models across all rotation configurations
+
+### Autoselect Endpoints
+- `GET /api/autoselect` - List all available autoselect configurations
+- `POST /api/autoselect/chat/completions` - Chat completions using AI-assisted selection based on content analysis
+- `GET /api/autoselect/models` - List all models across all autoselect configurations
 
 ## Error Handling
 - Rate limiting for failed requests

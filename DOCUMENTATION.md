@@ -88,16 +88,28 @@ Installs to:
 
 ## API Endpoints
 
-### Root Endpoint
-- `GET /` - Returns server status and list of available providers
+### General Endpoints
+- `GET /` - Returns server status and list of available providers, rotations, and autoselect configurations
 
-### Chat Completions
-- `POST /api/{provider_id}/chat/completions` - Handle chat completion requests
-- Supports both streaming and non-streaming responses
-- Provider ID can be a specific provider or rotation name
+### Provider Endpoints
+- `POST /api/{provider_id}/chat/completions` - Handle chat completion requests for a specific provider
+  - Supports both streaming and non-streaming responses
+- `GET /api/{provider_id}/models` - List available models for a specific provider
 
-### Model List
-- `GET /api/{provider_id}/models` - List available models for a provider or rotation
+### Rotation Endpoints
+- `GET /api/rotations` - List all available rotation configurations
+- `POST /api/rotations/chat/completions` - Chat completions using rotation (load balancing across providers)
+  - Weighted random selection of models
+  - Automatic failover between providers
+  - Supports both streaming and non-streaming responses
+- `GET /api/rotations/models` - List all models across all rotation configurations
+
+### Autoselect Endpoints
+- `GET /api/autoselect` - List all available autoselect configurations
+- `POST /api/autoselect/chat/completions` - Chat completions using AI-assisted selection based on content analysis
+  - Automatically selects the best provider based on request content
+  - Supports both streaming and non-streaming responses
+- `GET /api/autoselect/models` - List all models across all autoselect configurations
 
 ## Provider Support
 
