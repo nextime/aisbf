@@ -256,6 +256,7 @@ class OllamaProviderHandler(BaseProviderHandler):
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
         import logging
+        import json
         logger = logging.getLogger(__name__)
         logger.info(f"=== OllamaProviderHandler.handle_request START ===")
         logger.info(f"Provider ID: {self.provider_id}")
@@ -286,7 +287,8 @@ class OllamaProviderHandler(BaseProviderHandler):
                 "options": {
                     "temperature": temperature,
                     "num_predict": max_tokens
-                }
+                },
+                "stream": False  # Explicitly disable streaming for non-streaming requests
             }
             
             # Add API key to headers if provided (for Ollama cloud models)
@@ -301,10 +303,44 @@ class OllamaProviderHandler(BaseProviderHandler):
             
             response = await self.client.post("/api/generate", json=request_data, headers=headers)
             logger.info(f"Response status code: {response.status_code}")
+            logger.info(f"Response content type: {response.headers.get('content-type')}")
+            logger.info(f"Response content length: {len(response.content)} bytes")
+            logger.info(f"Raw response content (first 500 chars): {response.text[:500]}")
             response.raise_for_status()
             
-            response_json = response.json()
-            logger.info(f"Response received: {response_json}")
+            # Ollama may return multiple JSON objects, parse them all
+            content = response.text
+            logger.info(f"Attempting to parse response as JSON...")
+            
+            try:
+                # Try parsing as single JSON first
+                response_json = response.json()
+                logger.info(f"Response parsed as single JSON: {response_json}")
+            except json.JSONDecodeError as e:
+                # If that fails, try parsing multiple JSON objects
+                logger.warning(f"Failed to parse as single JSON: {e}")
+                logger.info(f"Attempting to parse as multiple JSON objects...")
+                
+                # Parse multiple JSON objects (one per line)
+                responses = []
+                for line in content.strip().split('\n'):
+                    if line.strip():
+                        try:
+                            obj = json.loads(line)
+                            responses.append(obj)
+                        except json.JSONDecodeError as line_error:
+                            logger.error(f"Failed to parse line: {line}")
+                            logger.error(f"Error: {line_error}")
+                
+                if not responses:
+                    raise Exception("No valid JSON objects found in response")
+                
+                # Combine responses - take the last complete response
+                # Ollama sends multiple chunks, we want the final one
+                response_json = responses[-1]
+                logger.info(f"Parsed {len(responses)} JSON objects, using last one: {response_json}")
+            
+            logger.info(f"Final response: {response_json}")
             self.record_success()
             logger.info(f"=== OllamaProviderHandler.handle_request END ===")
             return response_json
