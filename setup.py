@@ -60,15 +60,17 @@ class InstallCommand(_install):
         if '--user' in sys.argv or os.geteuid() != 0:
             # User installation - use ~/.local/bin
             bin_dir = Path.home() / '.local' / 'bin'
+            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
         else:
             # System installation - use /usr/local/bin
             bin_dir = Path('/usr/local/bin')
+            share_dir = Path('/usr/share/aisbf')
         
         # Create the bin directory if it doesn't exist
         bin_dir.mkdir(parents=True, exist_ok=True)
         
-        # Copy the existing aisbf.sh script to the bin directory
-        src = Path(__file__).parent / 'aisbf.sh'
+        # Copy the aisbf.sh script from the share directory to the bin directory
+        src = share_dir / 'aisbf.sh'
         dst = bin_dir / 'aisbf'
         
         # Copy the script
@@ -113,6 +115,7 @@ setup(
         ('share/aisbf', [
             'main.py',
             'requirements.txt',
+            'aisbf.sh',
             'config/providers.json',
             'config/rotations.json',
             'config/autoselect.json',
