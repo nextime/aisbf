@@ -30,6 +30,7 @@ class Message(BaseModel):
     role: str
     content: Union[str, List[Dict], List, None] = None
     tool_calls: Optional[List[Dict]] = None
+    tool_call_id: Optional[str] = None
 
 class ChatCompletionRequest(BaseModel):
     model: str
