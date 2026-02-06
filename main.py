@@ -105,6 +105,30 @@ autoselect_handler = AutoselectHandler()
 
 app = FastAPI(title="AI Proxy Server")
 
+# Exception handler for validation errors
+@app.exception_handler(status.HTTP_422_UNPROCESSABLE_ENTITY)
+async def validation_exception_handler(request: Request, exc):
+    """Handle validation errors and log details"""
+    logger.error(f"=== VALIDATION ERROR (422) ===")
+    logger.error(f"Request path: {request.url.path}")
+    logger.error(f"Request method: {request.method}")
+    logger.error(f"Request headers: {dict(request.headers)}")
+    
+    # Try to get the raw body
+    try:
+        raw_body = await request.body()
+        logger.error(f"Raw request body: {raw_body.decode('utf-8')}")
+    except Exception as e:
+        logger.error(f"Error reading raw body: {str(e)}")
+    
+    logger.error(f"Validation error details: {exc.detail()}")
+    logger.error(f"=== END VALIDATION ERROR ===")
+    
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
+        content={"detail": exc.detail(), "body": exc.body()}
+    )
+
 # CORS middleware
 app.add_middleware(
     CORSMiddleware,
