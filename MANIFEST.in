@@ -3,5 +3,8 @@ include LICENSE.txt
 include requirements.txt
 include main.py
 include pyproject.toml
+include aisbf.sh
+include cli.py
 recursive-include config *.json
+recursive-include config *.md
 recursive-include aisbf *.py
