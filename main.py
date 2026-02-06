@@ -25,6 +25,7 @@ Main application for AISBF.
 from fastapi import FastAPI, HTTPException, Request, status
 from fastapi.responses import JSONResponse, StreamingResponse
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.exceptions import RequestValidationError
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.config import config
@@ -106,9 +107,24 @@ autoselect_handler = AutoselectHandler()
 app = FastAPI(title="AI Proxy Server")
 
 # Exception handler for validation errors
-@app.exception_handler(status.HTTP_422_UNPROCESSABLE_ENTITY)
-async def validation_exception_handler(request: Request, exc):
+@app.exception_handler(RequestValidationError)
+async def validation_exception_handler(request: Request, exc: RequestValidationError):
     """Handle validation errors and log details"""
+    print(f"\n=== VALIDATION ERROR (422) ===")
+    print(f"Request path: {request.url.path}")
+    print(f"Request method: {request.method}")
+    print(f"Request headers: {dict(request.headers)}")
+    
+    # Try to get the raw body
+    try:
+        raw_body = await request.body()
+        print(f"Raw request body: {raw_body.decode('utf-8')}")
+    except Exception as e:
+        print(f"Error reading raw body: {str(e)}")
+    
+    print(f"Validation error details: {exc.errors()}")
+    print(f"=== END VALIDATION ERROR ===\n")
+    
     logger.error(f"=== VALIDATION ERROR (422) ===")
     logger.error(f"Request path: {request.url.path}")
     logger.error(f"Request method: {request.method}")
@@ -121,12 +137,12 @@ async def validation_exception_handler(request: Request, exc):
     except Exception as e:
         logger.error(f"Error reading raw body: {str(e)}")
     
-    logger.error(f"Validation error details: {exc.detail()}")
+    logger.error(f"Validation error details: {exc.errors()}")
     logger.error(f"=== END VALIDATION ERROR ===")
     
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.detail(), "body": exc.body()}
+        content={"detail": exc.errors(), "body": exc.body}
     )
 
 # CORS middleware
