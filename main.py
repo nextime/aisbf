@@ -414,8 +414,8 @@ async def catch_all_post(provider_id: str, request: Request):
 def main():
     """Main entry point for the AISBF server"""
     import uvicorn
-    logger.info("Starting AI Proxy Server on http://localhost:8000")
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    logger.info("Starting AI Proxy Server on http://127.0.0.1:17765")
+    uvicorn.run(app, host="127.0.0.1", port=17765)
 
 if __name__ == "__main__":
     main()
