@@ -216,17 +216,69 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
             if not rotation_config:
                 raise HTTPException(status_code=400, detail=f"Rotation {body.model} not found")
             
+            # Check if this is a Google streaming response
             async def stream_generator():
                 try:
                     response = await rotation_handler.handle_rotation_request(body.model, body_dict)
-                    for chunk in response:
-                        try:
-                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                            import json
-                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                        except Exception as chunk_error:
-                            logger.warning(f"Error serializing chunk: {str(chunk_error)}")
-                            continue
+                    
+                    # Check if response is a Google-style streaming response (sync iterator)
+                    is_google_stream = hasattr(response, '__iter__') and not hasattr(response, '__aiter__')
+                    logger.debug(f"Rotation stream type: {'Google' if is_google_stream else 'OpenAI/Anthropic'}")
+                    
+                    if is_google_stream:
+                        # Handle Google's synchronous streaming response
+                        chunk_id = 0
+                        for chunk in response:
+                            try:
+                                logger.debug(f"Google chunk type: {type(chunk)}")
+                                logger.debug(f"Google chunk: {chunk}")
+                                
+                                # Extract text from Google chunk
+                                chunk_text = ""
+                                try:
+                                    if hasattr(chunk, 'candidates') and chunk.candidates:
+                                        candidate = chunk.candidates[0] if chunk.candidates else None
+                                        if candidate and hasattr(candidate, 'content') and candidate.content:
+                                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                                for part in candidate.content.parts:
+                                                    if hasattr(part, 'text') and part.text:
+                                                        chunk_text += part.text
+                                except Exception as e:
+                                    logger.error(f"Error extracting text from Google chunk: {e}")
+                                
+                                # Create OpenAI-compatible chunk
+                                openai_chunk = {
+                                    "id": f"google-{body.model}-{int(time.time())}-chunk-{chunk_id}",
+                                    "object": "chat.completion.chunk",
+                                    "created": int(time.time()),
+                                    "model": body.model,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {
+                                            "content": chunk_text
+                                        },
+                                        "finish_reason": None
+                                    }]
+                                }
+                                
+                                chunk_id += 1
+                                logger.debug(f"OpenAI chunk: {openai_chunk}")
+                                
+                                import json
+                                yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                logger.error(f"Error processing Google chunk: {str(chunk_error)}")
+                                continue
+                    else:
+                        # Handle OpenAI/Anthropic streaming responses (async iterators)
+                        for chunk in response:
+                            try:
+                                chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                                import json
+                                yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                                continue
                 except Exception as e:
                     logger.error(f"Error in streaming response: {str(e)}")
                     import json

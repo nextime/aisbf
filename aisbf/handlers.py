@@ -761,6 +761,8 @@ class AutoselectHandler:
                     {**request_data, "stream": True}
                 )
                 
+                logger.info(f"Autoselect stream response type: {type(response)}")
+                
                 # Check if this is a Google streaming response (synchronous iterator)
                 # Google's generate_content_stream() returns a sync iterator, not async
                 is_google_stream = hasattr(response, '__iter__') and not hasattr(response, '__aiter__')
@@ -790,10 +792,10 @@ class AutoselectHandler:
                             
                             # Create OpenAI-compatible chunk
                             openai_chunk = {
-                                "id": f"google-{selected_model_id}-{int(time.time())}-chunk-{chunk_id}",
+                                "id": f"google-{request_data['model']}-{int(time.time())}-chunk-{chunk_id}",
                                 "object": "chat.completion.chunk",
                                 "created": int(time.time()),
-                                "model": selected_model_id,
+                                "model": request_data['model'],
                                 "choices": [{
                                     "index": 0,
                                     "delta": {
@@ -818,34 +820,38 @@ class AutoselectHandler:
                             continue
                 else:
                     # Handle OpenAI/Anthropic streaming responses (async iterators)
-                    for chunk in response:
-                        try:
-                            # Debug: Log chunk type and content before serialization
-                            logger.debug(f"Chunk type: {type(chunk)}")
-                            logger.debug(f"Chunk: {chunk}")
-                            
-                            # Convert chunk to dict and serialize as JSON
-                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                            import json
-                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                        except Exception as chunk_error:
-                            # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                            # This is a critical error - the model is trying to call tools without proper configuration
-                            error_msg = str(chunk_error)
-                            if "tool" in error_msg.lower():
-                                logger.error(f"Tool call error during streaming: {error_msg}")
-                                logger.error(f"Chunk type: {type(chunk)}")
-                                logger.error(f"Chunk content: {chunk}")
-                                # Re-raise to trigger retry in rotation handler
-                                raise
-                            else:
-                                logger.warning(f"Error serializing chunk: {error_msg}")
-                                logger.warning(f"Chunk type: {type(chunk)}")
-                                logger.warning(f"Chunk content: {chunk}")
-                                # Skip this chunk and continue with the next one
-                                continue
+                    if hasattr(response, '__aiter__'):
+                        # It's an async iterator
+                        async for chunk in response:
+                            try:
+                                # Debug: Log chunk type and content before serialization
+                                logger.debug(f"Chunk type: {type(chunk)}")
+                                logger.debug(f"Chunk: {chunk}")
+                                
+                                # Convert chunk to dict and serialize as JSON
+                                chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                                import json
+                                yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
+                                # This is a critical error - the model is trying to call tools without proper configuration
+                                error_msg = str(chunk_error)
+                                if "tool" in error_msg.lower():
+                                    logger.error(f"Tool call error during streaming: {error_msg}")
+                                    logger.error(f"Chunk type: {type(chunk)}")
+                                    logger.error(f"Chunk content: {chunk}")
+                                    # Re-raise to trigger retry in rotation handler
+                                    raise
+                                else:
+                                    logger.warning(f"Error serializing chunk: {error_msg}")
+                                    logger.warning(f"Chunk type: {type(chunk)}")
+                                    logger.warning(f"Chunk content: {chunk}")
+                                    # Skip this chunk and continue with the next one
+                                    continue
+                    else:
+                        logger.warning(f"Unknown stream type: {type(response)}")
             except Exception as e:
-                logger.error(f"Error in streaming response: {str(e)}")
+                logger.error(f"Error in streaming response: {str(e)}", exc_info=True)
                 import json
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
