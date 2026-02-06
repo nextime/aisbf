@@ -275,6 +275,7 @@ class RotationHandler:
         max_retries = 2
         tried_models = []
         last_error = None
+        successful_model = None
         
         for attempt in range(max_retries):
             logger.info(f"")
@@ -332,8 +333,13 @@ class RotationHandler:
                 )
                 logger.info(f"Response received from provider")
                 handler.record_success()
+                
+                # Update successful_model to the one that worked
+                successful_model = current_model
+                
                 logger.info(f"=== RotationHandler.handle_rotation_request END ===")
                 logger.info(f"Request succeeded on attempt {attempt + 1}")
+                logger.info(f"Successfully used model: {successful_model['name']} (provider: {successful_model['provider_id']})")
                 return response
             except Exception as e:
                 last_error = str(e)
