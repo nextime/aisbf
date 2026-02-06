@@ -152,6 +152,19 @@ class GoogleProviderHandler(BaseProviderHandler):
             logging.info(f"GoogleProviderHandler: Response received: {response}")
             self.record_success()
 
+            # Extract text from the nested response structure
+            # The response has candidates[0].content.parts[0].text
+            response_text = ""
+            try:
+                if hasattr(response, 'candidates') and response.candidates:
+                    candidate = response.candidates[0]
+                    if hasattr(candidate, 'content') and candidate.content:
+                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                            response_text = candidate.content.parts[0].text
+            except Exception as e:
+                logging.warning(f"GoogleProviderHandler: Could not extract text from response: {e}")
+                response_text = ""
+
             # Return the response in OpenAI-style format
             return {
                 "id": f"google-{model}-{int(time.time())}",
@@ -162,7 +175,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": response.text
+                        "content": response_text
                     },
                     "finish_reason": "stop"
                 }],
