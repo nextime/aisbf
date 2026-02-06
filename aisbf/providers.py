@@ -25,6 +25,7 @@ Provider handlers for AISBF.
 import httpx
 import asyncio
 import time
+import os
 from typing import Dict, List, Optional, Union
 from google import genai
 from openai import OpenAI
@@ -32,6 +33,9 @@ from anthropic import Anthropic
 from pydantic import BaseModel
 from .models import Provider, Model, ErrorTracking
 from .config import config
+
+# Check if debug mode is enabled
+AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
 class BaseProviderHandler:
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
@@ -129,7 +133,10 @@ class GoogleProviderHandler(BaseProviderHandler):
         try:
             import logging
             logging.info(f"GoogleProviderHandler: Handling request for model {model}")
-            logging.info(f"GoogleProviderHandler: Messages: {messages}")
+            if AISBF_DEBUG:
+                logging.info(f"GoogleProviderHandler: Messages: {messages}")
+            else:
+                logging.info(f"GoogleProviderHandler: Messages count: {len(messages)}")
 
             # Apply rate limiting
             await self.apply_rate_limit()
@@ -232,9 +239,13 @@ class OpenAIProviderHandler(BaseProviderHandler):
         try:
             import logging
             logging.info(f"OpenAIProviderHandler: Handling request for model {model}")
-            logging.info(f"OpenAIProviderHandler: Messages: {messages}")
-            logging.info(f"OpenAIProviderHandler: Tools: {tools}")
-            logging.info(f"OpenAIProviderHandler: Tool choice: {tool_choice}")
+            if AISBF_DEBUG:
+                logging.info(f"OpenAIProviderHandler: Messages: {messages}")
+            else:
+                logging.info(f"OpenAIProviderHandler: Messages count: {len(messages)}")
+            if AISBF_DEBUG:
+                logging.info(f"OpenAIProviderHandler: Tools: {tools}")
+                logging.info(f"OpenAIProviderHandler: Tool choice: {tool_choice}")
 
             # Apply rate limiting
             await self.apply_rate_limit()
@@ -323,7 +334,10 @@ class AnthropicProviderHandler(BaseProviderHandler):
         try:
             import logging
             logging.info(f"AnthropicProviderHandler: Handling request for model {model}")
-            logging.info(f"AnthropicProviderHandler: Messages: {messages}")
+            if AISBF_DEBUG:
+                logging.info(f"AnthropicProviderHandler: Messages: {messages}")
+            else:
+                logging.info(f"AnthropicProviderHandler: Messages count: {len(messages)}")
 
             # Apply rate limiting
             await self.apply_rate_limit()
