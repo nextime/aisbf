@@ -110,7 +110,11 @@ class RequestHandler:
             
             handler.record_success()
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
-            return response
+            
+            # Import JSONResponse to explicitly wrap the response
+            from fastapi.responses import JSONResponse
+            logger.info(f"Returning JSONResponse with response")
+            return JSONResponse(content=response)
         except Exception as e:
             handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
