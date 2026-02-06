@@ -204,6 +204,83 @@ async def list_rotation_models():
     logger.info(f"Total rotation models available: {len(all_models)}")
     return {"data": all_models}
 
+@app.get("/api/autoselect")
+async def list_autoselect():
+    """List all available autoselect configurations"""
+    logger.info("=== LIST AUTOSELECT REQUEST ===")
+    autoselect_info = {}
+    for autoselect_id, autoselect_config in config.autoselect.items():
+        autoselect_info[autoselect_id] = {
+            "model_name": autoselect_config.model_name,
+            "description": autoselect_config.description,
+            "fallback": autoselect_config.fallback,
+            "available_models": [
+                {
+                    "model_id": m.model_id,
+                    "description": m.description
+                }
+                for m in autoselect_config.available_models
+            ]
+        }
+    logger.info(f"Available autoselect: {list(autoselect_info.keys())}")
+    return autoselect_info
+
+@app.post("/api/autoselect/chat/completions")
+async def autoselect_chat_completions(request: Request, body: ChatCompletionRequest):
+    """Handle chat completions for autoselect using model name to select autoselect configuration"""
+    logger.info(f"=== AUTOSELECT CHAT COMPLETION REQUEST START ===")
+    logger.info(f"Request path: {request.url.path}")
+    logger.info(f"Model requested: {body.model}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request body: {body}")
+    logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
+
+    body_dict = body.model_dump()
+
+    # Check if the model name corresponds to an autoselect configuration
+    if body.model not in config.autoselect:
+        logger.error(f"Model '{body.model}' not found in autoselect")
+        logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{body.model}' not found. Available autoselect: {list(config.autoselect.keys())}"
+        )
+
+    logger.info(f"Model '{body.model}' found in autoselect")
+    logger.debug("Handling autoselect request")
+
+    try:
+        if body.stream:
+            logger.debug("Handling streaming autoselect request")
+            return await autoselect_handler.handle_autoselect_streaming_request(body.model, body_dict)
+        else:
+            logger.debug("Handling non-streaming autoselect request")
+            result = await autoselect_handler.handle_autoselect_request(body.model, body_dict)
+            logger.debug(f"Autoselect response result: {result}")
+            return result
+    except Exception as e:
+        logger.error(f"Error handling autoselect chat_completions: {str(e)}", exc_info=True)
+        raise
+
+@app.get("/api/autoselect/models")
+async def list_autoselect_models():
+    """List all models across all autoselect configurations"""
+    logger.info("=== LIST AUTOSELECT MODELS REQUEST ===")
+    all_models = []
+    for autoselect_id, autoselect_config in config.autoselect.items():
+        for model_info in autoselect_config.available_models:
+            all_models.append({
+                "id": model_info.model_id,
+                "name": autoselect_id,  # Use autoselect name as the model name for selection
+                "object": "model",
+                "owned_by": "autoselect",
+                "autoselect_id": autoselect_id,
+                "description": model_info.description,
+                "fallback": autoselect_config.fallback
+            })
+    logger.info(f"Total autoselect models available: {len(all_models)}")
+    return {"data": all_models}
+
 @app.post("/api/{provider_id}/chat/completions")
 async def chat_completions(provider_id: str, request: Request, body: ChatCompletionRequest):
     logger.info(f"=== CHAT COMPLETION REQUEST START ===")
