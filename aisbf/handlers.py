@@ -109,6 +109,8 @@ class RequestHandler:
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
 
         async def stream_generator():
+            import logging
+            logger = logging.getLogger(__name__)
             try:
                 # Apply rate limiting
                 await handler.apply_rate_limit()
@@ -122,14 +124,19 @@ class RequestHandler:
                 )
                 for chunk in response:
                     try:
+                        # Debug: Log chunk type and content before serialization
+                        logger.debug(f"Chunk type: {type(chunk)}")
+                        logger.debug(f"Chunk: {chunk}")
+                        
                         # Convert chunk to dict and serialize as JSON
                         chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
                         import json
                         yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                     except Exception as chunk_error:
                         # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
-                        import logging
-                        logging.warning(f"Error serializing chunk: {str(chunk_error)}")
+                        logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                        logger.warning(f"Chunk type: {type(chunk)}")
+                        logger.warning(f"Chunk content: {chunk}")
                         # Skip this chunk and continue with the next one
                         continue
                 handler.record_success()
@@ -658,6 +665,10 @@ class AutoselectHandler:
                 )
                 for chunk in response:
                     try:
+                        # Debug: Log chunk type and content before serialization
+                        logger.debug(f"Chunk type: {type(chunk)}")
+                        logger.debug(f"Chunk: {chunk}")
+                        
                         # Convert chunk to dict and serialize as JSON
                         chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
                         import json
@@ -665,6 +676,8 @@ class AutoselectHandler:
                     except Exception as chunk_error:
                         # Handle errors during chunk serialization (e.g., tool calls without tool_choice)
                         logger.warning(f"Error serializing chunk: {str(chunk_error)}")
+                        logger.warning(f"Chunk type: {type(chunk)}")
+                        logger.warning(f"Chunk content: {chunk}")
                         # Skip this chunk and continue with the next one
                         continue
             except Exception as e:
