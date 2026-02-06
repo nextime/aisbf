@@ -116,7 +116,93 @@ app.add_middleware(
 
 @app.get("/")
 async def root():
-    return {"message": "AI Proxy Server is running", "providers": list(config.providers.keys())}
+    return {
+        "message": "AI Proxy Server is running",
+        "providers": list(config.providers.keys()),
+        "rotations": list(config.rotations.keys()),
+        "autoselect": list(config.autoselect.keys())
+    }
+
+@app.get("/api/rotations")
+async def list_rotations():
+    """List all available rotations"""
+    logger.info("=== LIST ROTATIONS REQUEST ===")
+    rotations_info = {}
+    for rotation_id, rotation_config in config.rotations.items():
+        models = []
+        for provider in rotation_config.providers:
+            for model in provider['models']:
+                models.append({
+                    "name": model['name'],
+                    "provider_id": provider['provider_id'],
+                    "weight": model['weight'],
+                    "rate_limit": model.get('rate_limit')
+                })
+        rotations_info[rotation_id] = {
+            "model_name": rotation_config.model_name,
+            "models": models
+        }
+    logger.info(f"Available rotations: {list(rotations_info.keys())}")
+    return rotations_info
+
+@app.post("/api/rotations/chat/completions")
+async def rotation_chat_completions(request: Request, body: ChatCompletionRequest):
+    """Handle chat completions for rotations using model name to select rotation"""
+    logger.info(f"=== ROTATION CHAT COMPLETION REQUEST START ===")
+    logger.info(f"Request path: {request.url.path}")
+    logger.info(f"Model requested: {body.model}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request body: {body}")
+    logger.info(f"Available rotations: {list(config.rotations.keys())}")
+
+    body_dict = body.model_dump()
+
+    # Check if the model name corresponds to a rotation
+    if body.model not in config.rotations:
+        logger.error(f"Model '{body.model}' not found in rotations")
+        logger.error(f"Available rotations: {list(config.rotations.keys())}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"Model '{body.model}' not found. Available rotations: {list(config.rotations.keys())}"
+        )
+
+    logger.info(f"Model '{body.model}' found in rotations")
+    logger.debug("Handling rotation request")
+
+    try:
+        if body.stream:
+            logger.debug("Handling streaming rotation request")
+            return await rotation_handler.handle_rotation_request(body.model, body_dict)
+        else:
+            logger.debug("Handling non-streaming rotation request")
+            result = await rotation_handler.handle_rotation_request(body.model, body_dict)
+            logger.debug(f"Rotation response result: {result}")
+            return result
+    except Exception as e:
+        logger.error(f"Error handling rotation chat_completions: {str(e)}", exc_info=True)
+        raise
+
+@app.get("/api/rotations/models")
+async def list_rotation_models():
+    """List all models across all rotations"""
+    logger.info("=== LIST ROTATION MODELS REQUEST ===")
+    all_models = []
+    for rotation_id, rotation_config in config.rotations.items():
+        for provider in rotation_config.providers:
+            for model in provider['models']:
+                all_models.append({
+                    "id": f"{rotation_id}/{model['name']}",
+                    "name": rotation_id,  # Use rotation name as the model name for selection
+                    "object": "model",
+                    "owned_by": provider['provider_id'],
+                    "rotation_id": rotation_id,
+                    "actual_model": model['name'],
+                    "provider_id": provider['provider_id'],
+                    "weight": model['weight'],
+                    "rate_limit": model.get('rate_limit')
+                })
+    logger.info(f"Total rotation models available: {len(all_models)}")
+    return {"data": all_models}
 
 @app.post("/api/{provider_id}/chat/completions")
 async def chat_completions(provider_id: str, request: Request, body: ChatCompletionRequest):
