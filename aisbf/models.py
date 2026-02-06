@@ -28,7 +28,8 @@ from typing import Dict, List, Optional, Union
 
 class Message(BaseModel):
     role: str
-    content: Union[str, List[Dict], List]
+    content: Union[str, List[Dict], List, None] = None
+    tool_calls: Optional[List[Dict]] = None
 
 class ChatCompletionRequest(BaseModel):
     model: str
