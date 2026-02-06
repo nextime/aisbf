@@ -28,11 +28,18 @@ PIDFILE="/tmp/aisbf.pid"
 if [ -d "/usr/share/aisbf" ]; then
     SHARE_DIR="/usr/share/aisbf"
     VENV_DIR="/usr/share/aisbf/venv"
+    # Running as root - use /var/log/aisbf
+    LOG_DIR="/var/log/aisbf"
 else
     # Fall back to user installation (~/.local/share/aisbf)
     SHARE_DIR="$HOME/.local/share/aisbf"
     VENV_DIR="$HOME/.local/share/aisbf/venv"
+    # Running as user - use ~/.local/var/log/aisbf
+    LOG_DIR="$HOME/.local/var/log/aisbf"
 fi
+
+# Create log directory if it doesn't exist
+mkdir -p "$LOG_DIR"
 
 # Function to create venv if it doesn't exist
 ensure_venv() {
@@ -59,8 +66,8 @@ start_server() {
     # Change to share directory where main.py is located
     cd $SHARE_DIR
     
-    # Start the proxy server
-    uvicorn main:app --host 0.0.0.0 --port 8000
+    # Start the proxy server with logging
+    uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
 }
 
 # Function to start as daemon
@@ -80,11 +87,12 @@ start_daemon() {
     # Ensure venv exists
     ensure_venv
     
-    # Start in background with nohup
-    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" > /dev/null 2>&1 &
+    # Start in background with nohup and logging
+    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     PID=$!
     echo $PID > "$PIDFILE"
     echo "AISBF started in background (PID: $PID)"
+    echo "Logs are being written to: $LOG_DIR"
 }
 
 # Function to check status

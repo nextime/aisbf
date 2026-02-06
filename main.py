@@ -30,12 +30,73 @@ from aisbf.handlers import RequestHandler, RotationHandler
 from aisbf.config import config
 import time
 import logging
+import sys
+import os
+from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
+from pathlib import Path
+
+def setup_logging():
+    """Setup logging with rotating file handlers"""
+    # Determine log directory based on user
+    if os.geteuid() == 0:
+        # Running as root - use /var/log/aisbf
+        log_dir = Path('/var/log/aisbf')
+    else:
+        # Running as user - use ~/.local/var/log/aisbf
+        log_dir = Path.home() / '.local' / 'var' / 'log' / 'aisbf'
+    
+    # Create log directory if it doesn't exist
+    log_dir.mkdir(parents=True, exist_ok=True)
+    
+    # Setup rotating file handler for general logs
+    log_file = log_dir / 'aisbf.log'
+    file_handler = RotatingFileHandler(
+        log_file,
+        maxBytes=50*1024*1024,  # 50 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    file_handler.setLevel(logging.DEBUG)
+    file_formatter = logging.Formatter(
+        '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    file_handler.setFormatter(file_formatter)
+    
+    # Setup rotating file handler for error logs
+    error_log_file = log_dir / 'aisbf_error.log'
+    error_handler = RotatingFileHandler(
+        error_log_file,
+        maxBytes=50*1024*1024,  # 50 MB
+        backupCount=5,
+        encoding='utf-8'
+    )
+    error_handler.setLevel(logging.ERROR)
+    error_handler.setFormatter(file_formatter)
+    
+    # Setup console handler
+    console_handler = logging.StreamHandler(sys.stdout)
+    console_handler.setLevel(logging.INFO)
+    console_formatter = logging.Formatter(
+        '%(asctime)s - %(levelname)s - %(message)s'
+    )
+    console_handler.setFormatter(console_formatter)
+    
+    # Configure root logger
+    root_logger = logging.getLogger()
+    root_logger.setLevel(logging.DEBUG)
+    root_logger.addHandler(file_handler)
+    root_logger.addHandler(error_handler)
+    root_logger.addHandler(console_handler)
+    
+    # Redirect stderr to error log
+    sys.stderr = open(log_dir / 'aisbf_stderr.log', 'a')
+    
+    return logging.getLogger(__name__)
 
 # Configure logging
-logging.basicConfig(level=logging.DEBUG)
-logger = logging.getLogger(__name__)
+logger = setup_logging()
 
 # Initialize handlers
 request_handler = RequestHandler()
