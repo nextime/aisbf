@@ -168,21 +168,52 @@ class RotationHandler:
         providers = rotation_config.providers
         logger.info(f"Number of providers in rotation: {len(providers)}")
         
-        weighted_models = []
+        # Collect all available models with their weights
+        available_models = []
 
         for provider in providers:
             logger.info(f"Processing provider: {provider['provider_id']}")
+            provider_id = provider['provider_id']
+            
+            # Check if provider is rate limited/deactivated
+            provider_handler = get_provider_handler(provider_id, provider.get('api_key'))
+            if provider_handler.is_rate_limited():
+                logger.info(f"  Provider {provider_id} is rate limited/deactivated, skipping")
+                continue
+            
             for model in provider['models']:
                 logger.info(f"  Model: {model['name']}, weight: {model['weight']}")
-                weighted_models.extend([model] * model['weight'])
+                # Add provider_id and api_key to model for later use
+                model_with_provider = model.copy()
+                model_with_provider['provider_id'] = provider_id
+                model_with_provider['api_key'] = provider.get('api_key')
+                available_models.append(model_with_provider)
 
-        logger.info(f"Total weighted models: {len(weighted_models)}")
-        if not weighted_models:
-            logger.error("No models available in rotation")
-            raise HTTPException(status_code=400, detail="No models available in rotation")
+        logger.info(f"Total available models: {len(available_models)}")
+        if not available_models:
+            logger.error("No models available in rotation (all providers may be rate limited)")
+            raise HTTPException(status_code=503, detail="No models available in rotation (all providers may be rate limited)")
 
+        # Sort models by weight in descending order (higher weight = higher priority)
+        available_models.sort(key=lambda m: m['weight'], reverse=True)
+        logger.info(f"Models sorted by weight (descending): {[m['name'] + ':' + str(m['weight']) for m in available_models]}")
+
+        # Find the highest weight
+        highest_weight = available_models[0]['weight']
+        logger.info(f"Highest weight: {highest_weight}")
+
+        # Filter models with the highest weight
+        highest_weight_models = [m for m in available_models if m['weight'] == highest_weight]
+        logger.info(f"Models with highest weight: {[m['name'] for m in highest_weight_models]}")
+
+        # If multiple models have the same highest weight, randomly select among them
         import random
-        selected_model = random.choice(weighted_models)
+        if len(highest_weight_models) > 1:
+            logger.info(f"Multiple models with highest weight, selecting randomly")
+            selected_model = random.choice(highest_weight_models)
+        else:
+            selected_model = highest_weight_models[0]
+        
         logger.info(f"Selected model: {selected_model}")
 
         provider_id = selected_model['provider_id']
