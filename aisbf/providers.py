@@ -361,23 +361,11 @@ class GoogleProviderHandler(BaseProviderHandler):
             logging.info(f"Response usage: {openai_response['usage']}")
             logging.info(f"=== END FINAL OPENAI RESPONSE STRUCTURE ===")
             
-            # Validate the response structure using Pydantic model
-            try:
-                from .models import ChatCompletionResponse
-                validated_response = ChatCompletionResponse(**openai_response)
-                logging.info(f"Response validated successfully against ChatCompletionResponse model")
-                logging.info(f"Validated response type: {type(validated_response)}")
-                # Return as dict for JSON serialization
-                response_dict = validated_response.model_dump()
-            except Exception as e:
-                logging.error(f"Response validation failed: {e}", exc_info=True)
-                logging.error(f"Returning unvalidated response")
-                response_dict = openai_response
-            
-            # Wrap in JSONResponse for proper serialization
-            from fastapi.responses import JSONResponse
-            logging.info(f"GoogleProviderHandler: Returning JSONResponse")
-            return JSONResponse(content=response_dict)
+            # Return the response dict directly without Pydantic validation
+            # Pydantic validation might be causing serialization issues
+            logging.info(f"GoogleProviderHandler: Returning response dict (no validation)")
+            logging.info(f"Response dict keys: {openai_response.keys()}")
+            return openai_response
         except Exception as e:
             import logging
             logging.error(f"GoogleProviderHandler: Error: {str(e)}", exc_info=True)
@@ -660,23 +648,11 @@ class AnthropicProviderHandler(BaseProviderHandler):
             logging.info(f"Response usage: {openai_response['usage']}")
             logging.info(f"=== END FINAL ANTHROPIC RESPONSE STRUCTURE ===")
             
-            # Validate the response structure using Pydantic model
-            try:
-                from .models import ChatCompletionResponse
-                validated_response = ChatCompletionResponse(**openai_response)
-                logging.info(f"Response validated successfully against ChatCompletionResponse model")
-                logging.info(f"Validated response type: {type(validated_response)}")
-                # Return as dict for JSON serialization
-                response_dict = validated_response.model_dump()
-            except Exception as e:
-                logging.error(f"Response validation failed: {e}", exc_info=True)
-                logging.error(f"Returning unvalidated response")
-                response_dict = openai_response
-            
-            # Wrap in JSONResponse for proper serialization
-            from fastapi.responses import JSONResponse
-            logging.info(f"AnthropicProviderHandler: Returning JSONResponse")
-            return JSONResponse(content=response_dict)
+            # Return the response dict directly without Pydantic validation
+            # Pydantic validation might be causing serialization issues
+            logging.info(f"AnthropicProviderHandler: Returning response dict (no validation)")
+            logging.info(f"Response dict keys: {openai_response.keys()}")
+            return openai_response
         except Exception as e:
             import logging
             logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)
