@@ -43,7 +43,7 @@ from .providers import (
 )
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 
-__version__ = "0.2.7"
+__version__ = "0.3.0"
 __all__ = [
     # Config
     "config",
