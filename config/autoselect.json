@@ -2,6 +2,7 @@
   "autoselect": {
     "model_name": "autoselect",
     "description": "Auto-selects the best rotating model based on user prompt analysis",
+    "selection_model": "general",
     "fallback": "general",
     "available_models": [
       {
