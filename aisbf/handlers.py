@@ -306,8 +306,8 @@ class RotationHandler:
         logger.info(f"Model rate limit: {selected_model.get('rate_limit', 'N/A')}")
         logger.info(f"=== MODEL SELECTION PROCESS END ===")
 
-        # Retry logic: Try up to 2 times with different models
-        max_retries = 2
+        # Retry logic: Try up to 5 times with different models (configurable)
+        max_retries = 5
         tried_models = []
         last_error = None
         successful_model = None
