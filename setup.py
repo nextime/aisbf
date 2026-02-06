@@ -83,7 +83,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.1.2",
+    version="0.2.0",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
