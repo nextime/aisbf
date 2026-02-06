@@ -387,6 +387,11 @@ class AutoselectHandler:
 
     async def _get_model_selection(self, prompt: str) -> str:
         """Send the autoselect prompt to a model and get the selection"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
+        logger.info(f"Using 'general' rotation for model selection")
+        
         # Use the first available provider/model for the selection
         # This is a simple implementation - could be enhanced to use a specific selection model
         rotation_handler = RotationHandler()
@@ -399,26 +404,63 @@ class AutoselectHandler:
             "stream": False
         }
         
+        logger.info(f"Selection request parameters:")
+        logger.info(f"  Temperature: 0.1 (low for deterministic selection)")
+        logger.info(f"  Max tokens: 100 (short response expected)")
+        logger.info(f"  Stream: False")
+        
         # Use the fallback rotation for the selection
         try:
+            logger.info(f"Sending selection request to rotation handler...")
             response = await rotation_handler.handle_rotation_request("general", selection_request)
+            logger.info(f"Selection response received")
+            
             content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+            logger.info(f"Raw response content: {content[:200]}..." if len(content) > 200 else f"Raw response content: {content}")
+            
             model_id = self._extract_model_selection(content)
+            
+            if model_id:
+                logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
+                logger.info(f"Selected model ID: {model_id}")
+            else:
+                logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
+                logger.warning(f"Could not extract model ID from response")
+                logger.warning(f"Response content: {content}")
+            
             return model_id
         except Exception as e:
+            logger.error(f"=== AUTOSELECT MODEL SELECTION ERROR ===")
+            logger.error(f"Error during model selection: {str(e)}")
+            logger.error(f"Will use fallback model")
             # If selection fails, we'll handle it in the main handler
             return None
 
     async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict) -> Dict:
         """Handle an autoselect request"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== AUTOSELECT REQUEST START ===")
+        logger.info(f"Autoselect ID: {autoselect_id}")
+        
         autoselect_config = self.config.get_autoselect(autoselect_id)
         if not autoselect_config:
+            logger.error(f"Autoselect {autoselect_id} not found")
             raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")
+
+        logger.info(f"Autoselect config loaded")
+        logger.info(f"Available models for selection: {len(autoselect_config.available_models)}")
+        for model_info in autoselect_config.available_models:
+            logger.info(f"  - {model_info.model_id}: {model_info.description}")
+        logger.info(f"Fallback model: {autoselect_config.fallback}")
 
         # Extract the user prompt from the request
         user_messages = request_data.get('messages', [])
         if not user_messages:
+            logger.error("No messages provided")
             raise HTTPException(status_code=400, detail="No messages provided")
+        
+        logger.info(f"User messages count: {len(user_messages)}")
         
         # Build a string representation of the user prompt
         user_prompt = ""
@@ -430,36 +472,72 @@ class AutoselectHandler:
                 content = str(content)
             user_prompt += f"{role}: {content}\n"
 
+        logger.info(f"User prompt length: {len(user_prompt)} characters")
+        logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
+
         # Build the autoselect prompt
+        logger.info(f"Building autoselect prompt...")
         autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
+        logger.info(f"Autoselect prompt built (length: {len(autoselect_prompt)} characters)")
 
         # Get the model selection
+        logger.info(f"Requesting model selection from AI...")
         selected_model_id = await self._get_model_selection(autoselect_prompt)
 
         # Validate the selected model
+        logger.info(f"=== MODEL VALIDATION ===")
         if not selected_model_id:
             # Fallback to the configured fallback model
+            logger.warning(f"No model ID returned from selection")
+            logger.warning(f"Using fallback model: {autoselect_config.fallback}")
             selected_model_id = autoselect_config.fallback
         else:
             # Check if the selected model is in the available models list
             available_ids = [m.model_id for m in autoselect_config.available_models]
             if selected_model_id not in available_ids:
+                logger.warning(f"Selected model '{selected_model_id}' not in available models list")
+                logger.warning(f"Available models: {available_ids}")
+                logger.warning(f"Using fallback model: {autoselect_config.fallback}")
                 selected_model_id = autoselect_config.fallback
+            else:
+                logger.info(f"Selected model '{selected_model_id}' is valid and available")
+
+        logger.info(f"=== FINAL MODEL CHOICE ===")
+        logger.info(f"Selected model ID: {selected_model_id}")
+        logger.info(f"Selection method: {'AI-selected' if selected_model_id != autoselect_config.fallback else 'Fallback'}")
 
         # Now proxy the actual request to the selected rotation
+        logger.info(f"Proxying request to rotation: {selected_model_id}")
         rotation_handler = RotationHandler()
-        return await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+        response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+        logger.info(f"=== AUTOSELECT REQUEST END ===")
+        return response
 
     async def handle_autoselect_streaming_request(self, autoselect_id: str, request_data: Dict):
         """Handle an autoselect streaming request"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== AUTOSELECT STREAMING REQUEST START ===")
+        logger.info(f"Autoselect ID: {autoselect_id}")
+        
         autoselect_config = self.config.get_autoselect(autoselect_id)
         if not autoselect_config:
+            logger.error(f"Autoselect {autoselect_id} not found")
             raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")
+
+        logger.info(f"Autoselect config loaded")
+        logger.info(f"Available models for selection: {len(autoselect_config.available_models)}")
+        for model_info in autoselect_config.available_models:
+            logger.info(f"  - {model_info.model_id}: {model_info.description}")
+        logger.info(f"Fallback model: {autoselect_config.fallback}")
 
         # Extract the user prompt from the request
         user_messages = request_data.get('messages', [])
         if not user_messages:
+            logger.error("No messages provided")
             raise HTTPException(status_code=400, detail="No messages provided")
+        
+        logger.info(f"User messages count: {len(user_messages)}")
         
         # Build a string representation of the user prompt
         user_prompt = ""
@@ -470,21 +548,41 @@ class AutoselectHandler:
                 content = str(content)
             user_prompt += f"{role}: {content}\n"
 
+        logger.info(f"User prompt length: {len(user_prompt)} characters")
+        logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
+
         # Build the autoselect prompt
+        logger.info(f"Building autoselect prompt...")
         autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
+        logger.info(f"Autoselect prompt built (length: {len(autoselect_prompt)} characters)")
 
         # Get the model selection
+        logger.info(f"Requesting model selection from AI...")
         selected_model_id = await self._get_model_selection(autoselect_prompt)
 
         # Validate the selected model
+        logger.info(f"=== MODEL VALIDATION ===")
         if not selected_model_id:
+            logger.warning(f"No model ID returned from selection")
+            logger.warning(f"Using fallback model: {autoselect_config.fallback}")
             selected_model_id = autoselect_config.fallback
         else:
             available_ids = [m.model_id for m in autoselect_config.available_models]
             if selected_model_id not in available_ids:
+                logger.warning(f"Selected model '{selected_model_id}' not in available models list")
+                logger.warning(f"Available models: {available_ids}")
+                logger.warning(f"Using fallback model: {autoselect_config.fallback}")
                 selected_model_id = autoselect_config.fallback
+            else:
+                logger.info(f"Selected model '{selected_model_id}' is valid and available")
+
+        logger.info(f"=== FINAL MODEL CHOICE ===")
+        logger.info(f"Selected model ID: {selected_model_id}")
+        logger.info(f"Selection method: {'AI-selected' if selected_model_id != autoselect_config.fallback else 'Fallback'}")
+        logger.info(f"Request mode: Streaming")
 
         # Now proxy the actual streaming request to the selected rotation
+        logger.info(f"Proxying streaming request to rotation: {selected_model_id}")
         rotation_handler = RotationHandler()
         
         async def stream_generator():
@@ -496,8 +594,10 @@ class AutoselectHandler:
                 for chunk in response:
                     yield f"data: {chunk}\n\n".encode('utf-8')
             except Exception as e:
+                logger.error(f"Error in streaming response: {str(e)}")
                 yield f"data: {str(e)}\n\n".encode('utf-8')
 
+        logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
         return StreamingResponse(stream_generator(), media_type="text/event-stream")
 
     async def handle_autoselect_model_list(self, autoselect_id: str) -> List[Dict]:

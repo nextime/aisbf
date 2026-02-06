@@ -62,14 +62,56 @@ class BaseProviderHandler:
             self.last_request_time = time.time()
 
     def record_failure(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        
         self.error_tracking['failures'] += 1
         self.error_tracking['last_failure'] = time.time()
+        
+        failure_count = self.error_tracking['failures']
+        logger.warning(f"=== PROVIDER FAILURE RECORDED ===")
+        logger.warning(f"Provider: {self.provider_id}")
+        logger.warning(f"Failure count: {failure_count}/3")
+        logger.warning(f"Last failure time: {self.error_tracking['last_failure']}")
+        
         if self.error_tracking['failures'] >= 3:
             self.error_tracking['disabled_until'] = time.time() + 300  # 5 minutes
+            disabled_until_time = self.error_tracking['disabled_until']
+            cooldown_remaining = int(disabled_until_time - time.time())
+            logger.error(f"!!! PROVIDER DISABLED !!!")
+            logger.error(f"Provider: {self.provider_id}")
+            logger.error(f"Reason: 3 consecutive failures reached")
+            logger.error(f"Disabled until: {disabled_until_time}")
+            logger.error(f"Cooldown period: {cooldown_remaining} seconds (5 minutes)")
+            logger.error(f"Provider will be automatically re-enabled after cooldown")
+        else:
+            remaining_failures = 3 - failure_count
+            logger.warning(f"Provider still active. {remaining_failures} more failure(s) will disable it")
+        logger.warning(f"=== END FAILURE RECORDING ===")
 
     def record_success(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        was_disabled = self.error_tracking['disabled_until'] is not None
+        previous_failures = self.error_tracking['failures']
+        
         self.error_tracking['failures'] = 0
         self.error_tracking['disabled_until'] = None
+        
+        logger.info(f"=== PROVIDER SUCCESS RECORDED ===")
+        logger.info(f"Provider: {self.provider_id}")
+        logger.info(f"Previous failure count: {previous_failures}")
+        logger.info(f"Failure count reset to: 0")
+        
+        if was_disabled:
+            logger.info(f"!!! PROVIDER RE-ENABLED !!!")
+            logger.info(f"Provider: {self.provider_id}")
+            logger.info(f"Reason: Successful request after cooldown period")
+            logger.info(f"Provider is now active and available for requests")
+        else:
+            logger.info(f"Provider remains active")
+        logger.info(f"=== END SUCCESS RECORDING ===")
 
 class GoogleProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: str):
