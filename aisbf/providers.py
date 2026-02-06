@@ -251,7 +251,9 @@ class AnthropicProviderHandler(BaseProviderHandler):
 class OllamaProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
         super().__init__(provider_id, api_key)
-        self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint)
+        # Increase timeout for Ollama requests (especially for cloud models)
+        timeout = httpx.Timeout(300.0, connect=60.0)  # 5 minutes total, 60 seconds to connect
+        self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint, timeout=timeout)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
