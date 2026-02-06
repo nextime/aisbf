@@ -153,7 +153,11 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Handle streaming request
             if stream:
                 logging.info(f"GoogleProviderHandler: Using streaming API")
-                response = self.client.models.generate_content_stream(
+                # Create a new client instance for each streaming request to ensure it remains open
+                # This prevents "Cannot send a request, as the client has been closed" errors
+                from google import genai
+                stream_client = genai.Client(api_key=self.api_key)
+                response = stream_client.models.generate_content_stream(
                     model=model,
                     contents=content,
                     config=config
