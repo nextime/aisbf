@@ -193,7 +193,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                                 except Exception as e:
                                     logging.error(f"Error extracting text from stream chunk: {e}")
                                 
-                                # Create OpenAI-compatible chunk
+                                # Create OpenAI-compatible chunk (complete object, not separate fields)
                                 openai_chunk = {
                                     "id": f"google-{model}-{int(time.time())}-chunk-{chunk_id}",
                                     "object": "chat.completion.chunk",
@@ -210,6 +210,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                                 
                                 chunk_id += 1
                                 logging.info(f"Yielding OpenAI chunk: {openai_chunk}")
+                                # Yield the complete chunk object as a single line
                                 yield openai_chunk
                                 
                         except Exception as e:
