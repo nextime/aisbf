@@ -159,9 +159,10 @@ class GoogleProviderHandler(BaseProviderHandler):
             logging.info(f"GoogleProviderHandler: Response received: {response}")
             self.record_success()
 
-            # Extract text from the nested response structure
-            # The response has candidates[0].content.parts[0].text
+            # Extract content from the nested response structure
+            # The response has candidates[0].content.parts
             response_text = ""
+            tool_calls = None
             finish_reason = "stop"
             
             logging.info(f"=== GOOGLE RESPONSE PARSING START ===")
@@ -217,54 +218,66 @@ class GoogleProviderHandler(BaseProviderHandler):
                                     logging.info(f"Parts length: {len(candidate.content.parts) if hasattr(candidate.content.parts, '__len__') else 'N/A'}")
                                     
                                     if candidate.content.parts:
-                                        logging.info(f"Parts is not empty, getting first part")
-                                        first_part = candidate.content.parts[0]
-                                        logging.info(f"First part type: {type(first_part)}")
-                                        logging.info(f"First part attributes: {dir(first_part)}")
+                                        logging.info(f"Parts is not empty, processing all parts")
                                         
-                                        if hasattr(first_part, 'text'):
-                                            logging.info(f"First part has 'text' attribute")
-                                            raw_text = first_part.text
-                                            logging.info(f"Raw text length: {len(raw_text) if raw_text else 0}")
-                                            logging.info(f"Raw text (first 200 chars): {raw_text[:200] if raw_text else 'None'}")
+                                        # Process all parts to extract text and tool calls
+                                        text_parts = []
+                                        openai_tool_calls = []
+                                        call_id = 0
+                                        
+                                        for idx, part in enumerate(candidate.content.parts):
+                                            logging.info(f"Processing part {idx}")
+                                            logging.info(f"Part type: {type(part)}")
+                                            logging.info(f"Part attributes: {dir(part)}")
                                             
-                                            # Clean up the response text
-                                            # Google sometimes returns formatted text like: "assistant: [{'type': 'text', 'text': '...'}]"
-                                            # We need to extract just the actual content
-                                            import json
-                                            import re
+                                            # Check for text content
+                                            if hasattr(part, 'text') and part.text:
+                                                logging.info(f"Part {idx} has 'text' attribute")
+                                                text_parts.append(part.text)
+                                                logging.info(f"Part {idx} text length: {len(part.text)}")
                                             
-                                            # Try to parse if it looks like a formatted response
-                                            if 'assistant:' in raw_text and '[' in raw_text:
-                                                logging.info(f"Detected formatted response, attempting to parse")
-                                                # Extract the JSON array part
-                                                match = re.search(r'assistant:\s*(\[.*\])', raw_text, re.DOTALL)
-                                                if match:
-                                                    logging.info(f"Found JSON array in response")
-                                                    try:
-                                                        # Parse the JSON array
-                                                        content_array = json.loads(match.group(1))
-                                                        logging.info(f"Parsed content array: {content_array}")
-                                                        # Extract text from the first text-type part
-                                                        for item in content_array:
-                                                            if isinstance(item, dict) and item.get('type') == 'text':
-                                                                response_text = item.get('text', '')
-                                                                logging.info(f"Extracted text from formatted response")
-                                                                break
-                                                    except json.JSONDecodeError as e:
-                                                        logging.warning(f"JSON parsing failed: {e}")
-                                                        # If JSON parsing fails, use the raw text
-                                                        response_text = raw_text
-                                                        logging.info(f"Using raw text as fallback")
-                                                else:
-                                                    logging.warning(f"Could not find JSON array in formatted response")
-                                                    response_text = raw_text
-                                            else:
-                                                # Use the raw text as-is
-                                                logging.info(f"Using raw text as-is")
-                                                response_text = raw_text
+                                            # Check for function calls (Google's format)
+                                            if hasattr(part, 'function_call') and part.function_call:
+                                                logging.info(f"Part {idx} has 'function_call' attribute")
+                                                logging.info(f"Function call: {part.function_call}")
+                                                
+                                                # Convert Google function call to OpenAI format
+                                                try:
+                                                    function_call = part.function_call
+                                                    openai_tool_call = {
+                                                        "id": f"call_{call_id}",
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": function_call.name,
+                                                            "arguments": function_call.args if hasattr(function_call, 'args') else {}
+                                                        }
+                                                    }
+                                                    openai_tool_calls.append(openai_tool_call)
+                                                    call_id += 1
+                                                    logging.info(f"Converted function call to OpenAI format: {openai_tool_call}")
+                                                except Exception as e:
+                                                    logging.error(f"Error converting function call: {e}", exc_info=True)
+                                            
+                                            # Check for function response (tool output)
+                                            if hasattr(part, 'function_response') and part.function_response:
+                                                logging.info(f"Part {idx} has 'function_response' attribute")
+                                                logging.info(f"Function response: {part.function_response}")
+                                                # Function responses are typically handled in the request, not response
+                                                # But we log them for debugging
+                                        
+                                        # Combine all text parts
+                                        response_text = "\n".join(text_parts)
+                                        logging.info(f"Combined text length: {len(response_text)}")
+                                        logging.info(f"Combined text (first 200 chars): {response_text[:200] if response_text else 'None'}")
+                                        
+                                        # Set tool_calls if we have any
+                                        if openai_tool_calls:
+                                            tool_calls = openai_tool_calls
+                                            logging.info(f"Total tool calls: {len(tool_calls)}")
+                                            for tc in tool_calls:
+                                                logging.info(f"  - {tc}")
                                         else:
-                                            logging.error(f"First part does NOT have 'text' attribute")
+                                            logging.info(f"No tool calls found")
                                     else:
                                         logging.error(f"Parts is empty")
                                 else:
@@ -280,6 +293,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                 
                 logging.info(f"Final response_text length: {len(response_text)}")
                 logging.info(f"Final response_text (first 200 chars): {response_text[:200] if response_text else 'None'}")
+                logging.info(f"Final tool_calls: {tool_calls}")
                 logging.info(f"Final finish_reason: {finish_reason}")
             except Exception as e:
                 logging.error(f"GoogleProviderHandler: Exception during response parsing: {e}", exc_info=True)
@@ -302,8 +316,8 @@ class GoogleProviderHandler(BaseProviderHandler):
             except Exception as e:
                 logging.warning(f"GoogleProviderHandler: Could not extract usage metadata: {e}")
 
-            # Return the response in OpenAI-style format
-            return {
+            # Build the OpenAI-style response
+            openai_response = {
                 "id": f"google-{model}-{int(time.time())}",
                 "object": "chat.completion",
                 "created": int(time.time()),
@@ -312,7 +326,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": response_text
+                        "content": response_text if response_text else None
                     },
                     "finish_reason": finish_reason
                 }],
@@ -322,6 +336,43 @@ class GoogleProviderHandler(BaseProviderHandler):
                     "total_tokens": total_tokens
                 }
             }
+            
+            # Add tool_calls to the message if present
+            if tool_calls:
+                openai_response["choices"][0]["message"]["tool_calls"] = tool_calls
+                # If there are tool calls, content should be None (OpenAI convention)
+                openai_response["choices"][0]["message"]["content"] = None
+                logging.info(f"Added tool_calls to response message")
+            
+            # Log the final response structure
+            logging.info(f"=== FINAL OPENAI RESPONSE STRUCTURE ===")
+            logging.info(f"Response type: {type(openai_response)}")
+            logging.info(f"Response keys: {openai_response.keys()}")
+            logging.info(f"Response id: {openai_response['id']}")
+            logging.info(f"Response object: {openai_response['object']}")
+            logging.info(f"Response created: {openai_response['created']}")
+            logging.info(f"Response model: {openai_response['model']}")
+            logging.info(f"Response choices count: {len(openai_response['choices'])}")
+            logging.info(f"Response choices[0] index: {openai_response['choices'][0]['index']}")
+            logging.info(f"Response choices[0] message role: {openai_response['choices'][0]['message']['role']}")
+            logging.info(f"Response choices[0] message content length: {len(openai_response['choices'][0]['message']['content'])}")
+            logging.info(f"Response choices[0] message content (first 200 chars): {openai_response['choices'][0]['message']['content'][:200]}")
+            logging.info(f"Response choices[0] finish_reason: {openai_response['choices'][0]['finish_reason']}")
+            logging.info(f"Response usage: {openai_response['usage']}")
+            logging.info(f"=== END FINAL OPENAI RESPONSE STRUCTURE ===")
+            
+            # Validate the response structure using Pydantic model
+            try:
+                from .models import ChatCompletionResponse
+                validated_response = ChatCompletionResponse(**openai_response)
+                logging.info(f"Response validated successfully against ChatCompletionResponse model")
+                logging.info(f"Validated response type: {type(validated_response)}")
+                # Return as dict for JSON serialization
+                return validated_response.model_dump()
+            except Exception as e:
+                logging.error(f"Response validation failed: {e}", exc_info=True)
+                logging.error(f"Returning unvalidated response")
+                return openai_response
         except Exception as e:
             import logging
             logging.error(f"GoogleProviderHandler: Error: {str(e)}", exc_info=True)
@@ -481,26 +532,94 @@ class AnthropicProviderHandler(BaseProviderHandler):
             logging.info(f"AnthropicProviderHandler: Response received: {response}")
             self.record_success()
             
+            logging.info(f"=== ANTHROPIC RESPONSE PARSING START ===")
+            logging.info(f"Response type: {type(response)}")
+            logging.info(f"Response attributes: {dir(response)}")
+            
             # Translate Anthropic response to OpenAI format
             # Anthropic returns content as an array of blocks
             content_text = ""
-            if hasattr(response, 'content') and response.content:
-                # Extract text from content blocks
-                for block in response.content:
-                    if hasattr(block, 'text'):
-                        content_text += block.text
+            tool_calls = None
             
-            # Map Anthropic stop_reason to OpenAI finish_reason
-            stop_reason_map = {
-                'end_turn': 'stop',
-                'max_tokens': 'length',
-                'stop_sequence': 'stop',
-                'tool_use': 'tool_calls'
-            }
-            finish_reason = stop_reason_map.get(getattr(response, 'stop_reason', 'stop'), 'stop')
+            try:
+                if hasattr(response, 'content') and response.content:
+                    logging.info(f"Response has 'content' attribute")
+                    logging.info(f"Content blocks: {response.content}")
+                    logging.info(f"Content blocks count: {len(response.content)}")
+                    
+                    text_parts = []
+                    openai_tool_calls = []
+                    call_id = 0
+                    
+                    # Process all content blocks
+                    for idx, block in enumerate(response.content):
+                        logging.info(f"Processing block {idx}")
+                        logging.info(f"Block type: {type(block)}")
+                        logging.info(f"Block attributes: {dir(block)}")
+                        
+                        # Check for text blocks
+                        if hasattr(block, 'text') and block.text:
+                            logging.info(f"Block {idx} has 'text' attribute")
+                            text_parts.append(block.text)
+                            logging.info(f"Block {idx} text length: {len(block.text)}")
+                        
+                        # Check for tool_use blocks (Anthropic's function calling format)
+                        if hasattr(block, 'type') and block.type == 'tool_use':
+                            logging.info(f"Block {idx} is a tool_use block")
+                            logging.info(f"Tool use block: {block}")
+                            
+                            try:
+                                # Convert Anthropic tool_use to OpenAI tool_calls format
+                                openai_tool_call = {
+                                    "id": f"call_{call_id}",
+                                    "type": "function",
+                                    "function": {
+                                        "name": block.name if hasattr(block, 'name') else "",
+                                        "arguments": block.input if hasattr(block, 'input') else {}
+                                    }
+                                }
+                                openai_tool_calls.append(openai_tool_call)
+                                call_id += 1
+                                logging.info(f"Converted tool_use to OpenAI format: {openai_tool_call}")
+                            except Exception as e:
+                                logging.error(f"Error converting tool_use: {e}", exc_info=True)
+                    
+                    # Combine all text parts
+                    content_text = "\n".join(text_parts)
+                    logging.info(f"Combined text length: {len(content_text)}")
+                    logging.info(f"Combined text (first 200 chars): {content_text[:200] if content_text else 'None'}")
+                    
+                    # Set tool_calls if we have any
+                    if openai_tool_calls:
+                        tool_calls = openai_tool_calls
+                        logging.info(f"Total tool calls: {len(tool_calls)}")
+                        for tc in tool_calls:
+                            logging.info(f"  - {tc}")
+                    else:
+                        logging.info(f"No tool calls found")
+                else:
+                    logging.warning(f"Response does NOT have 'content' attribute or content is empty")
+                
+                # Map Anthropic stop_reason to OpenAI finish_reason
+                stop_reason_map = {
+                    'end_turn': 'stop',
+                    'max_tokens': 'length',
+                    'stop_sequence': 'stop',
+                    'tool_use': 'tool_calls'
+                }
+                stop_reason = getattr(response, 'stop_reason', 'stop')
+                finish_reason = stop_reason_map.get(stop_reason, 'stop')
+                logging.info(f"Anthropic stop_reason: {stop_reason}")
+                logging.info(f"Mapped finish_reason: {finish_reason}")
+                
+            except Exception as e:
+                logging.error(f"AnthropicProviderHandler: Exception during response parsing: {e}", exc_info=True)
+                content_text = ""
+            
+            logging.info(f"=== ANTHROPIC RESPONSE PARSING END ===")
             
             # Build OpenAI-style response
-            return {
+            openai_response = {
                 "id": f"anthropic-{model}-{int(time.time())}",
                 "object": "chat.completion",
                 "created": int(time.time()),
@@ -509,7 +628,7 @@ class AnthropicProviderHandler(BaseProviderHandler):
                     "index": 0,
                     "message": {
                         "role": "assistant",
-                        "content": content_text
+                        "content": content_text if content_text else None
                     },
                     "finish_reason": finish_reason
                 }],
@@ -519,6 +638,35 @@ class AnthropicProviderHandler(BaseProviderHandler):
                     "total_tokens": getattr(response, "usage", {}).get("input_tokens", 0) + getattr(response, "usage", {}).get("output_tokens", 0)
                 }
             }
+            
+            # Add tool_calls to the message if present
+            if tool_calls:
+                openai_response["choices"][0]["message"]["tool_calls"] = tool_calls
+                # If there are tool calls, content should be None (OpenAI convention)
+                openai_response["choices"][0]["message"]["content"] = None
+                logging.info(f"Added tool_calls to response message")
+            
+            logging.info(f"=== FINAL ANTHROPIC RESPONSE STRUCTURE ===")
+            logging.info(f"Response id: {openai_response['id']}")
+            logging.info(f"Response model: {openai_response['model']}")
+            logging.info(f"Response choices[0] message content: {openai_response['choices'][0]['message']['content']}")
+            logging.info(f"Response choices[0] message tool_calls: {openai_response['choices'][0]['message'].get('tool_calls')}")
+            logging.info(f"Response choices[0] finish_reason: {openai_response['choices'][0]['finish_reason']}")
+            logging.info(f"Response usage: {openai_response['usage']}")
+            logging.info(f"=== END FINAL ANTHROPIC RESPONSE STRUCTURE ===")
+            
+            # Validate the response structure using Pydantic model
+            try:
+                from .models import ChatCompletionResponse
+                validated_response = ChatCompletionResponse(**openai_response)
+                logging.info(f"Response validated successfully against ChatCompletionResponse model")
+                logging.info(f"Validated response type: {type(validated_response)}")
+                # Return as dict for JSON serialization
+                return validated_response.model_dump()
+            except Exception as e:
+                logging.error(f"Response validation failed: {e}", exc_info=True)
+                logging.error(f"Returning unvalidated response")
+                return openai_response
         except Exception as e:
             import logging
             logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)
