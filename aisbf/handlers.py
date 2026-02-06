@@ -649,7 +649,7 @@ class AutoselectHandler:
 
         # Get the model selection
         logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(autoselect_prompt)
+        selected_model_id = await self._get_model_selection(autoselect_prompt, autoselect_config)
 
         # Validate the selected model
         logger.info(f"=== MODEL VALIDATION ===")
