@@ -19,22 +19,122 @@
 ########################################################
 
 # AISBF - AI Service Broker Framework || AI Should Be Free
-# This script starts the AISBF proxy server using the installed virtual environment
+# This script manages the AISBF server using the installed virtual environment
 
-# Get the directory where this script is located
-SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
+PIDFILE="/tmp/aisbf.pid"
 
-# Change to the script directory
-cd "$SCRIPT_DIR"
-
-# Check if venv exists
-if [ ! -d "venv" ]; then
-    echo "Error: Virtual environment not found. Please run: python setup.py install"
-    exit 1
+# Determine the correct share directory at runtime
+# Check for system installation first (/usr/share/aisbf)
+if [ -d "/usr/share/aisbf" ]; then
+    SHARE_DIR="/usr/share/aisbf"
+    VENV_DIR="/usr/share/aisbf/venv"
+else
+    # Fall back to user installation (~/.local/share/aisbf)
+    SHARE_DIR="$HOME/.local/share/aisbf"
+    VENV_DIR="$HOME/.local/share/aisbf/venv"
 fi
 
-# Activate virtual environment
-source venv/bin/activate
+# Function to create venv if it doesn't exist
+ensure_venv() {
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Creating virtual environment at $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+        
+        # Install requirements if requirements.txt exists
+        if [ -f "$SHARE_DIR/requirements.txt" ]; then
+            echo "Installing requirements from $SHARE_DIR/requirements.txt"
+            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+        fi
+    fi
+}
 
-# Start the proxy server
-uvicorn main:app --host 0.0.0.0 --port 8000 --reload
+# Function to start the server
+start_server() {
+    # Ensure venv exists
+    ensure_venv
+    
+    # Activate the virtual environment
+    source $VENV_DIR/bin/activate
+    
+    # Change to share directory where main.py is located
+    cd $SHARE_DIR
+    
+    # Start the proxy server
+    uvicorn main:app --host 0.0.0.0 --port 8000
+}
+
+# Function to start as daemon
+start_daemon() {
+    # Check if already running
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo "AISBF is already running (PID: $PID)"
+            exit 1
+        else
+            # Stale PID file, remove it
+            rm -f "$PIDFILE"
+        fi
+    fi
+    
+    # Ensure venv exists
+    ensure_venv
+    
+    # Start in background with nohup
+    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" > /dev/null 2>&1 &
+    PID=$!
+    echo $PID > "$PIDFILE"
+    echo "AISBF started in background (PID: $PID)"
+}
+
+# Function to check status
+check_status() {
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            echo "AISBF is running (PID: $PID)"
+            exit 0
+        else
+            echo "AISBF is not running (stale PID file)"
+            rm -f "$PIDFILE"
+            exit 1
+        fi
+    else
+        echo "AISBF is not running"
+        exit 1
+    fi
+}
+
+# Function to stop the daemon
+stop_daemon() {
+    if [ -f "$PIDFILE" ]; then
+        PID=$(cat "$PIDFILE")
+        if ps -p "$PID" > /dev/null 2>&1; then
+            kill "$PID"
+            rm -f "$PIDFILE"
+            echo "AISBF stopped (PID: $PID)"
+        else
+            echo "AISBF is not running (stale PID file)"
+            rm -f "$PIDFILE"
+        fi
+    else
+        echo "AISBF is not running"
+    fi
+}
+
+# Main command handling
+case "$1" in
+    daemon)
+        start_daemon
+        ;;
+    status)
+        check_status
+        ;;
+    stop)
+        stop_daemon
+        ;;
+    *)
+        # Default: start in foreground
+        start_server
+        ;;
+esac

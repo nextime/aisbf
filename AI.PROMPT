@@ -80,7 +80,7 @@ Exports all main components:
 
 ### aisbf/config.py
 Configuration management with smart file location detection:
-- Checks installed location first (`/usr/local/share/aisbf/` or `~/.local/share/aisbf/`)
+- Checks installed location first (`/usr/share/aisbf/` or `~/.local/share/aisbf/`)
 - Falls back to source tree `config/` directory for development
 - Creates `~/.aisbf/` directory on first run
 - Copies default configs to user directory
@@ -146,8 +146,8 @@ sudo python setup.py install
 
 Installs to:
 - `/usr/local/lib/python*/dist-packages/aisbf/` - Package
-- `/usr/local/aisbf-venv/` - Virtual environment
-- `/usr/local/share/aisbf/` - Config files and main.py
+- `/usr/share/aisbf/venv/` - Virtual environment
+- `/usr/share/aisbf/` - Config files and main.py
 - `/usr/local/bin/aisbf` - Executable script
 
 ## Configuration Management
@@ -156,7 +156,7 @@ Installs to:
 
 **Installed Configuration Files (read-only defaults):**
 - User: `~/.local/share/aisbf/providers.json`, `~/.local/share/aisbf/rotations.json`, `~/.local/share/aisbf/main.py`
-- System: `/usr/local/share/aisbf/providers.json`, `/usr/local/share/aisbf/rotations.json`, `/usr/local/share/aisbf/main.py`
+- System: `/usr/share/aisbf/providers.json`, `/usr/share/aisbf/rotations.json`, `/usr/share/aisbf/main.py`
 
 **User Configuration Files (writable):**
 - `~/.aisbf/providers.json` - Provider configurations

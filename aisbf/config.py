@@ -54,7 +54,7 @@ class Config:
         """Get the directory containing default config files"""
         # Try installed location first
         installed_dirs = [
-            Path('/usr/local/share/aisbf'),
+            Path('/usr/share/aisbf'),
             Path.home() / '.local' / 'share' / 'aisbf',
         ]
         

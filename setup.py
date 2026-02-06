@@ -60,23 +60,31 @@ class InstallCommand(_install):
         if '--user' in sys.argv or os.geteuid() != 0:
             # User installation - use ~/.local/bin
             bin_dir = Path.home() / '.local' / 'bin'
-            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
         else:
             # System installation - use /usr/local/bin
             bin_dir = Path('/usr/local/bin')
-            share_dir = Path('/usr/local/share/aisbf')
         
         # Create the bin directory if it doesn't exist
         bin_dir.mkdir(parents=True, exist_ok=True)
         
         # Create the aisbf script that uses the venv
-        script_content = f"""#!/bin/bash
+        # The script will dynamically determine the correct paths at runtime
+        script_content = """#!/bin/bash
 # AISBF - AI Service Broker Framework || AI Should Be Free
 # This script manages the AISBF server using the installed virtual environment
 
 PIDFILE="/tmp/aisbf.pid"
-SHARE_DIR="{share_dir}"
-VENV_DIR="$SHARE_DIR/venv"
+
+# Determine the correct share directory at runtime
+# Check for system installation first (/usr/share/aisbf)
+if [ -d "/usr/share/aisbf" ]; then
+    SHARE_DIR="/usr/share/aisbf"
+    VENV_DIR="/usr/share/aisbf/venv"
+else
+    # Fall back to user installation (~/.local/share/aisbf)
+    SHARE_DIR="$HOME/.local/share/aisbf"
+    VENV_DIR="$HOME/.local/share/aisbf/venv"
+fi
 
 # Function to create venv if it doesn't exist
 ensure_venv() {{
@@ -222,7 +230,7 @@ setup(
         "aisbf": ["*.json"],
     },
     data_files=[
-        # Install to /usr/local/share/aisbf (system-wide)
+        # Install to /usr/share/aisbf (system-wide)
         ('share/aisbf', [
             'main.py',
             'requirements.txt',
