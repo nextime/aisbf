@@ -120,7 +120,14 @@ async def root():
 
 @app.post("/api/{provider_id}/chat/completions")
 async def chat_completions(provider_id: str, request: Request, body: ChatCompletionRequest):
-    logger.debug(f"Received chat_completions request for provider: {provider_id}")
+    logger.info(f"=== CHAT COMPLETION REQUEST START ===")
+    logger.info(f"Request path: {request.url.path}")
+    logger.info(f"Provider ID: {provider_id}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Request body: {body}")
+    logger.info(f"Available providers: {list(config.providers.keys())}")
+    logger.info(f"Available rotations: {list(config.rotations.keys())}")
+    logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
     logger.debug(f"Request headers: {dict(request.headers)}")
     logger.debug(f"Request body: {body}")
 
@@ -144,13 +151,19 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 
     # Check if it's a rotation
     if provider_id in config.rotations:
+        logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation request")
         return await rotation_handler.handle_rotation_request(provider_id, body_dict)
 
     # Check if it's a provider
     if provider_id not in config.providers:
-        logger.error(f"Provider {provider_id} not found")
+        logger.error(f"Provider ID '{provider_id}' not found in providers")
+        logger.error(f"Available providers: {list(config.providers.keys())}")
+        logger.error(f"Available rotations: {list(config.rotations.keys())}")
+        logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
         raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
+    
+    logger.info(f"Provider ID '{provider_id}' found in providers")
 
     provider_config = config.get_provider(provider_id)
     logger.debug(f"Provider config: {provider_config}")
@@ -185,13 +198,19 @@ async def list_models(request: Request, provider_id: str):
 
     # Check if it's a rotation
     if provider_id in config.rotations:
+        logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation model list request")
         return await rotation_handler.handle_rotation_model_list(provider_id)
 
     # Check if it's a provider
     if provider_id not in config.providers:
-        logger.error(f"Provider {provider_id} not found")
+        logger.error(f"Provider ID '{provider_id}' not found in providers")
+        logger.error(f"Available providers: {list(config.providers.keys())}")
+        logger.error(f"Available rotations: {list(config.rotations.keys())}")
+        logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
         raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
+    
+    logger.info(f"Provider ID '{provider_id}' found in providers")
 
     provider_config = config.get_provider(provider_id)
 
@@ -203,6 +222,31 @@ async def list_models(request: Request, provider_id: str):
     except Exception as e:
         logger.error(f"Error handling list_models: {str(e)}", exc_info=True)
         raise
+
+@app.post("/api/{provider_id}")
+async def catch_all_post(provider_id: str, request: Request):
+    """Catch-all for POST requests to help debug routing issues"""
+    logger.info(f"=== CATCH-ALL POST REQUEST ===")
+    logger.info(f"Request path: {request.url.path}")
+    logger.info(f"Provider ID: {provider_id}")
+    logger.info(f"Request headers: {dict(request.headers)}")
+    logger.info(f"Available providers: {list(config.providers.keys())}")
+    logger.info(f"Available rotations: {list(config.rotations.keys())}")
+    logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
+    
+    error_msg = f"""
+    Invalid endpoint: {request.url.path}
+    
+    The correct endpoint format is: /api/{{provider_id}}/chat/completions
+    
+    Available providers: {list(config.providers.keys())}
+    Available rotations: {list(config.rotations.keys())}
+    Available autoselect: {list(config.autoselect.keys())}
+    
+    Example: POST /api/ollama/chat/completions
+    """
+    logger.error(error_msg)
+    raise HTTPException(status_code=404, detail=error_msg.strip())
 
 def main():
     """Main entry point for the AISBF server"""

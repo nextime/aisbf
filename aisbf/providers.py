@@ -249,30 +249,65 @@ class AnthropicProviderHandler(BaseProviderHandler):
         ]
 
 class OllamaProviderHandler(BaseProviderHandler):
-    def __init__(self, provider_id: str):
-        super().__init__(provider_id)
+    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+        super().__init__(provider_id, api_key)
         self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== OllamaProviderHandler.handle_request START ===")
+        logger.info(f"Provider ID: {self.provider_id}")
+        logger.info(f"Endpoint: {self.client.base_url}")
+        logger.info(f"Model: {model}")
+        logger.info(f"Messages count: {len(messages)}")
+        logger.info(f"Max tokens: {max_tokens}")
+        logger.info(f"Temperature: {temperature}")
+        logger.info(f"Stream: {stream}")
+        logger.info(f"API key provided: {bool(self.api_key)}")
+        
         if self.is_rate_limited():
+            logger.error("Provider is rate limited")
             raise Exception("Provider rate limited")
 
         try:
             # Apply rate limiting
+            logger.info("Applying rate limiting...")
             await self.apply_rate_limit()
+            logger.info("Rate limiting applied")
 
-            response = await self.client.post("/api/generate", json={
+            prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+            logger.info(f"Prompt length: {len(prompt)} characters")
+            
+            request_data = {
                 "model": model,
-                "prompt": "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages]),
+                "prompt": prompt,
                 "options": {
                     "temperature": temperature,
                     "num_predict": max_tokens
                 }
-            })
+            }
+            
+            # Add API key to headers if provided (for Ollama cloud models)
+            headers = {}
+            if self.api_key:
+                headers["Authorization"] = f"Bearer {self.api_key}"
+                logger.info("API key added to request headers for Ollama cloud")
+            
+            logger.info(f"Sending POST request to {self.client.base_url}/api/generate")
+            logger.info(f"Request data: {request_data}")
+            logger.info(f"Request headers: {headers}")
+            
+            response = await self.client.post("/api/generate", json=request_data, headers=headers)
+            logger.info(f"Response status code: {response.status_code}")
             response.raise_for_status()
+            
+            response_json = response.json()
+            logger.info(f"Response received: {response_json}")
             self.record_success()
-            return response.json()
+            logger.info(f"=== OllamaProviderHandler.handle_request END ===")
+            return response_json
         except Exception as e:
             self.record_failure()
             raise e
@@ -294,8 +329,29 @@ PROVIDER_HANDLERS = {
 }
 
 def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:
+    import logging
+    logger = logging.getLogger(__name__)
+    logger.info(f"=== get_provider_handler START ===")
+    logger.info(f"Provider ID: {provider_id}")
+    logger.info(f"API key provided: {bool(api_key)}")
+    
     provider_config = config.get_provider(provider_id)
+    logger.info(f"Provider config: {provider_config}")
+    logger.info(f"Provider type: {provider_config.type}")
+    logger.info(f"Provider endpoint: {provider_config.endpoint}")
+    
     handler_class = PROVIDER_HANDLERS.get(provider_config.type)
+    logger.info(f"Handler class: {handler_class.__name__ if handler_class else 'None'}")
+    logger.info(f"Available handler types: {list(PROVIDER_HANDLERS.keys())}")
+    
     if not handler_class:
+        logger.error(f"Unsupported provider type: {provider_config.type}")
         raise ValueError(f"Unsupported provider type: {provider_config.type}")
-    return handler_class(provider_id, api_key)
+    
+    # All handlers now accept api_key as optional parameter
+    logger.info(f"Creating handler with provider_id and optional api_key")
+    handler = handler_class(provider_id, api_key)
+    
+    logger.info(f"Handler created: {handler.__class__.__name__}")
+    logger.info(f"=== get_provider_handler END ===")
+    return handler

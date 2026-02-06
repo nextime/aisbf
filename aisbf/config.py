@@ -111,32 +111,58 @@ class Config:
                 print(f"Created default config file: {dst}")
 
     def _load_providers(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_providers START ===")
+        
         providers_path = Path.home() / '.aisbf' / 'providers.json'
+        logger.info(f"Looking for providers at: {providers_path}")
+        
         if not providers_path.exists():
+            logger.info(f"User config not found, falling back to source config")
             # Fallback to source config if user config doesn't exist
             try:
                 source_dir = self._get_config_source_dir()
                 providers_path = source_dir / 'providers.json'
+                logger.info(f"Using source config at: {providers_path}")
             except FileNotFoundError:
+                logger.error("Could not find providers.json configuration file")
                 raise FileNotFoundError("Could not find providers.json configuration file")
         
+        logger.info(f"Loading providers from: {providers_path}")
         with open(providers_path) as f:
             data = json.load(f)
             self.providers = {k: ProviderConfig(**v) for k, v in data['providers'].items()}
+            logger.info(f"Loaded {len(self.providers)} providers: {list(self.providers.keys())}")
+            for provider_id, provider_config in self.providers.items():
+                logger.info(f"  - {provider_id}: type={provider_config.type}, endpoint={provider_config.endpoint}")
+            logger.info(f"=== Config._load_providers END ===")
 
     def _load_rotations(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_rotations START ===")
+        
         rotations_path = Path.home() / '.aisbf' / 'rotations.json'
+        logger.info(f"Looking for rotations at: {rotations_path}")
+        
         if not rotations_path.exists():
+            logger.info(f"User config not found, falling back to source config")
             # Fallback to source config if user config doesn't exist
             try:
                 source_dir = self._get_config_source_dir()
                 rotations_path = source_dir / 'rotations.json'
+                logger.info(f"Using source config at: {rotations_path}")
             except FileNotFoundError:
+                logger.error("Could not find rotations.json configuration file")
                 raise FileNotFoundError("Could not find rotations.json configuration file")
         
+        logger.info(f"Loading rotations from: {rotations_path}")
         with open(rotations_path) as f:
             data = json.load(f)
             self.rotations = {k: RotationConfig(**v) for k, v in data['rotations'].items()}
+            logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
+            logger.info(f"=== Config._load_rotations END ===")
 
     def _load_autoselect(self):
         autoselect_path = Path.home() / '.aisbf' / 'autoselect.json'
@@ -162,7 +188,16 @@ class Config:
             }
 
     def get_provider(self, provider_id: str) -> ProviderConfig:
-        return self.providers.get(provider_id)
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Config.get_provider called with provider_id: {provider_id}")
+        logger.info(f"Available providers: {list(self.providers.keys())}")
+        result = self.providers.get(provider_id)
+        if result:
+            logger.info(f"Found provider: {result}")
+        else:
+            logger.warning(f"Provider {provider_id} not found!")
+        return result
 
     def get_rotation(self, rotation_id: str) -> RotationConfig:
         return self.rotations.get(rotation_id)
