@@ -475,12 +475,12 @@ class AutoselectHandler:
             return match.group(1).strip()
         return None
 
-    async def _get_model_selection(self, prompt: str) -> str:
+    async def _get_model_selection(self, prompt: str, autoselect_config) -> str:
         """Send the autoselect prompt to a model and get the selection"""
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
-        logger.info(f"Using 'general' rotation for model selection")
+        logger.info(f"Using '{autoselect_config.selection_model}' rotation for model selection")
         
         # Use the first available provider/model for the selection
         # This is a simple implementation - could be enhanced to use a specific selection model
@@ -499,10 +499,10 @@ class AutoselectHandler:
         logger.info(f"  Max tokens: 100 (short response expected)")
         logger.info(f"  Stream: False")
         
-        # Use the fallback rotation for the selection
+        # Use the configured selection rotation for the selection
         try:
             logger.info(f"Sending selection request to rotation handler...")
-            response = await rotation_handler.handle_rotation_request("general", selection_request)
+            response = await rotation_handler.handle_rotation_request(autoselect_config.selection_model, selection_request)
             logger.info(f"Selection response received")
             
             content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
@@ -542,6 +542,7 @@ class AutoselectHandler:
         logger.info(f"Available models for selection: {len(autoselect_config.available_models)}")
         for model_info in autoselect_config.available_models:
             logger.info(f"  - {model_info.model_id}: {model_info.description}")
+        logger.info(f"Selection model: {autoselect_config.selection_model}")
         logger.info(f"Fallback model: {autoselect_config.fallback}")
 
         # Extract the user prompt from the request
@@ -572,7 +573,7 @@ class AutoselectHandler:
 
         # Get the model selection
         logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(autoselect_prompt)
+        selected_model_id = await self._get_model_selection(autoselect_prompt, autoselect_config)
 
         # Validate the selected model
         logger.info(f"=== MODEL VALIDATION ===")

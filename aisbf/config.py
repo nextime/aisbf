@@ -46,6 +46,7 @@ class AutoselectModelInfo(BaseModel):
 class AutoselectConfig(BaseModel):
     model_name: str
     description: str
+    selection_model: str
     fallback: str
     available_models: List[AutoselectModelInfo]
 
