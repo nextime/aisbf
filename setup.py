@@ -194,7 +194,7 @@ esac
 
 setup(
     name="aisbf",
-    version="0.1.0",
+    version="0.1.1",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
