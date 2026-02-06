@@ -163,6 +163,26 @@ class Config:
             data = json.load(f)
             self.rotations = {k: RotationConfig(**v) for k, v in data['rotations'].items()}
             logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
+            
+            # Validate that all providers referenced in rotations exist
+            logger.info(f"=== VALIDATING ROTATION PROVIDERS ===")
+            available_providers = list(self.providers.keys())
+            logger.info(f"Available providers: {available_providers}")
+            
+            for rotation_id, rotation_config in self.rotations.items():
+                logger.info(f"Validating rotation: {rotation_id}")
+                for provider in rotation_config.providers:
+                    provider_id = provider['provider_id']
+                    if provider_id not in self.providers:
+                        logger.warning(f"!!! CONFIGURATION WARNING !!!")
+                        logger.warning(f"Rotation '{rotation_id}' references provider '{provider_id}' which is NOT defined in providers.json")
+                        logger.warning(f"Available providers: {available_providers}")
+                        logger.warning(f"This provider will be SKIPPED during rotation requests")
+                        logger.warning(f"Please add the provider to providers.json or remove it from the rotation configuration")
+                        logger.warning(f"!!! END WARNING !!!")
+                    else:
+                        logger.info(f"  ✓ Provider '{provider_id}' is available")
+            
             logger.info(f"=== Config._load_rotations END ===")
 
     def _load_autoselect(self):
