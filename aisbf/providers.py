@@ -163,57 +163,129 @@ class GoogleProviderHandler(BaseProviderHandler):
             # The response has candidates[0].content.parts[0].text
             response_text = ""
             finish_reason = "stop"
+            
+            logging.info(f"=== GOOGLE RESPONSE PARSING START ===")
+            logging.info(f"Response type: {type(response)}")
+            logging.info(f"Response attributes: {dir(response)}")
+            
             try:
-                if hasattr(response, 'candidates') and response.candidates:
-                    candidate = response.candidates[0]
+                # Check if response has candidates
+                if hasattr(response, 'candidates'):
+                    logging.info(f"Response has 'candidates' attribute")
+                    logging.info(f"Candidates: {response.candidates}")
+                    logging.info(f"Candidates type: {type(response.candidates)}")
+                    logging.info(f"Candidates length: {len(response.candidates) if hasattr(response.candidates, '__len__') else 'N/A'}")
                     
-                    # Extract finish reason
-                    if hasattr(candidate, 'finish_reason'):
-                        # Map Google finish reasons to OpenAI format
-                        finish_reason_map = {
-                            'STOP': 'stop',
-                            'MAX_TOKENS': 'length',
-                            'SAFETY': 'content_filter',
-                            'RECITATION': 'content_filter',
-                            'OTHER': 'stop'
-                        }
-                        google_finish_reason = str(candidate.finish_reason)
-                        finish_reason = finish_reason_map.get(google_finish_reason, 'stop')
-                    
-                    if hasattr(candidate, 'content') and candidate.content:
-                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                            raw_text = candidate.content.parts[0].text
+                    if response.candidates:
+                        logging.info(f"Candidates is not empty, getting first candidate")
+                        candidate = response.candidates[0]
+                        logging.info(f"Candidate type: {type(candidate)}")
+                        logging.info(f"Candidate attributes: {dir(candidate)}")
+                        
+                        # Extract finish reason
+                        if hasattr(candidate, 'finish_reason'):
+                            logging.info(f"Candidate has 'finish_reason' attribute")
+                            logging.info(f"Finish reason: {candidate.finish_reason}")
+                            # Map Google finish reasons to OpenAI format
+                            finish_reason_map = {
+                                'STOP': 'stop',
+                                'MAX_TOKENS': 'length',
+                                'SAFETY': 'content_filter',
+                                'RECITATION': 'content_filter',
+                                'OTHER': 'stop'
+                            }
+                            google_finish_reason = str(candidate.finish_reason)
+                            finish_reason = finish_reason_map.get(google_finish_reason, 'stop')
+                            logging.info(f"Mapped finish reason: {finish_reason}")
+                        else:
+                            logging.warning(f"Candidate does NOT have 'finish_reason' attribute")
+                        
+                        # Extract content
+                        if hasattr(candidate, 'content'):
+                            logging.info(f"Candidate has 'content' attribute")
+                            logging.info(f"Content: {candidate.content}")
+                            logging.info(f"Content type: {type(candidate.content)}")
+                            logging.info(f"Content attributes: {dir(candidate.content)}")
                             
-                            # Clean up the response text
-                            # Google sometimes returns formatted text like: "assistant: [{'type': 'text', 'text': '...'}]"
-                            # We need to extract just the actual content
-                            import json
-                            import re
-                            
-                            # Try to parse if it looks like a formatted response
-                            if 'assistant:' in raw_text and '[' in raw_text:
-                                # Extract the JSON array part
-                                match = re.search(r'assistant:\s*(\[.*\])', raw_text, re.DOTALL)
-                                if match:
-                                    try:
-                                        # Parse the JSON array
-                                        content_array = json.loads(match.group(1))
-                                        # Extract text from the first text-type part
-                                        for item in content_array:
-                                            if isinstance(item, dict) and item.get('type') == 'text':
-                                                response_text = item.get('text', '')
-                                                break
-                                    except json.JSONDecodeError:
-                                        # If JSON parsing fails, use the raw text
-                                        response_text = raw_text
+                            if candidate.content:
+                                logging.info(f"Content is not empty")
+                                
+                                if hasattr(candidate.content, 'parts'):
+                                    logging.info(f"Content has 'parts' attribute")
+                                    logging.info(f"Parts: {candidate.content.parts}")
+                                    logging.info(f"Parts type: {type(candidate.content.parts)}")
+                                    logging.info(f"Parts length: {len(candidate.content.parts) if hasattr(candidate.content.parts, '__len__') else 'N/A'}")
+                                    
+                                    if candidate.content.parts:
+                                        logging.info(f"Parts is not empty, getting first part")
+                                        first_part = candidate.content.parts[0]
+                                        logging.info(f"First part type: {type(first_part)}")
+                                        logging.info(f"First part attributes: {dir(first_part)}")
+                                        
+                                        if hasattr(first_part, 'text'):
+                                            logging.info(f"First part has 'text' attribute")
+                                            raw_text = first_part.text
+                                            logging.info(f"Raw text length: {len(raw_text) if raw_text else 0}")
+                                            logging.info(f"Raw text (first 200 chars): {raw_text[:200] if raw_text else 'None'}")
+                                            
+                                            # Clean up the response text
+                                            # Google sometimes returns formatted text like: "assistant: [{'type': 'text', 'text': '...'}]"
+                                            # We need to extract just the actual content
+                                            import json
+                                            import re
+                                            
+                                            # Try to parse if it looks like a formatted response
+                                            if 'assistant:' in raw_text and '[' in raw_text:
+                                                logging.info(f"Detected formatted response, attempting to parse")
+                                                # Extract the JSON array part
+                                                match = re.search(r'assistant:\s*(\[.*\])', raw_text, re.DOTALL)
+                                                if match:
+                                                    logging.info(f"Found JSON array in response")
+                                                    try:
+                                                        # Parse the JSON array
+                                                        content_array = json.loads(match.group(1))
+                                                        logging.info(f"Parsed content array: {content_array}")
+                                                        # Extract text from the first text-type part
+                                                        for item in content_array:
+                                                            if isinstance(item, dict) and item.get('type') == 'text':
+                                                                response_text = item.get('text', '')
+                                                                logging.info(f"Extracted text from formatted response")
+                                                                break
+                                                    except json.JSONDecodeError as e:
+                                                        logging.warning(f"JSON parsing failed: {e}")
+                                                        # If JSON parsing fails, use the raw text
+                                                        response_text = raw_text
+                                                        logging.info(f"Using raw text as fallback")
+                                                else:
+                                                    logging.warning(f"Could not find JSON array in formatted response")
+                                                    response_text = raw_text
+                                            else:
+                                                # Use the raw text as-is
+                                                logging.info(f"Using raw text as-is")
+                                                response_text = raw_text
+                                        else:
+                                            logging.error(f"First part does NOT have 'text' attribute")
+                                    else:
+                                        logging.error(f"Parts is empty")
                                 else:
-                                    response_text = raw_text
+                                    logging.error(f"Content does NOT have 'parts' attribute")
                             else:
-                                # Use the raw text as-is
-                                response_text = raw_text
+                                logging.error(f"Content is empty")
+                        else:
+                            logging.error(f"Candidate does NOT have 'content' attribute")
+                    else:
+                        logging.error(f"Candidates is empty")
+                else:
+                    logging.error(f"Response does NOT have 'candidates' attribute")
+                
+                logging.info(f"Final response_text length: {len(response_text)}")
+                logging.info(f"Final response_text (first 200 chars): {response_text[:200] if response_text else 'None'}")
+                logging.info(f"Final finish_reason: {finish_reason}")
             except Exception as e:
-                logging.warning(f"GoogleProviderHandler: Could not extract text from response: {e}")
+                logging.error(f"GoogleProviderHandler: Exception during response parsing: {e}", exc_info=True)
                 response_text = ""
+            
+            logging.info(f"=== GOOGLE RESPONSE PARSING END ===")
 
             # Extract usage metadata from the response
             prompt_tokens = 0
