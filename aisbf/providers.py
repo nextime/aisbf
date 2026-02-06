@@ -204,7 +204,7 @@ class OpenAIProviderHandler(BaseProviderHandler):
         self.client = OpenAI(base_url=config.providers[provider_id].endpoint, api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Dict:
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False) -> Union[Dict, object]:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -225,6 +225,10 @@ class OpenAIProviderHandler(BaseProviderHandler):
             )
             logging.info(f"OpenAIProviderHandler: Response received: {response}")
             self.record_success()
+            
+            # Return Stream object directly for streaming, otherwise dump to dict
+            if stream:
+                return response
             return response.model_dump()
         except Exception as e:
             import logging
