@@ -167,7 +167,35 @@ class GoogleProviderHandler(BaseProviderHandler):
                     candidate = response.candidates[0]
                     if hasattr(candidate, 'content') and candidate.content:
                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                            response_text = candidate.content.parts[0].text
+                            raw_text = candidate.content.parts[0].text
+                            
+                            # Clean up the response text
+                            # Google sometimes returns formatted text like: "assistant: [{'type': 'text', 'text': '...'}]"
+                            # We need to extract just the actual content
+                            import json
+                            import re
+                            
+                            # Try to parse if it looks like a formatted response
+                            if 'assistant:' in raw_text and '[' in raw_text:
+                                # Extract the JSON array part
+                                match = re.search(r'assistant:\s*(\[.*\])', raw_text, re.DOTALL)
+                                if match:
+                                    try:
+                                        # Parse the JSON array
+                                        content_array = json.loads(match.group(1))
+                                        # Extract text from the first text-type part
+                                        for item in content_array:
+                                            if isinstance(item, dict) and item.get('type') == 'text':
+                                                response_text = item.get('text', '')
+                                                break
+                                    except json.JSONDecodeError:
+                                        # If JSON parsing fails, use the raw text
+                                        response_text = raw_text
+                                else:
+                                    response_text = raw_text
+                            else:
+                                # Use the raw text as-is
+                                response_text = raw_text
             except Exception as e:
                 logging.warning(f"GoogleProviderHandler: Could not extract text from response: {e}")
                 response_text = ""
@@ -350,7 +378,45 @@ class AnthropicProviderHandler(BaseProviderHandler):
             )
             logging.info(f"AnthropicProviderHandler: Response received: {response}")
             self.record_success()
-            return response.model_dump()
+            
+            # Translate Anthropic response to OpenAI format
+            # Anthropic returns content as an array of blocks
+            content_text = ""
+            if hasattr(response, 'content') and response.content:
+                # Extract text from content blocks
+                for block in response.content:
+                    if hasattr(block, 'text'):
+                        content_text += block.text
+            
+            # Map Anthropic stop_reason to OpenAI finish_reason
+            stop_reason_map = {
+                'end_turn': 'stop',
+                'max_tokens': 'length',
+                'stop_sequence': 'stop',
+                'tool_use': 'tool_calls'
+            }
+            finish_reason = stop_reason_map.get(getattr(response, 'stop_reason', 'stop'), 'stop')
+            
+            # Build OpenAI-style response
+            return {
+                "id": f"anthropic-{model}-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": content_text
+                    },
+                    "finish_reason": finish_reason
+                }],
+                "usage": {
+                    "prompt_tokens": getattr(response, "usage", {}).get("input_tokens", 0),
+                    "completion_tokens": getattr(response, "usage", {}).get("output_tokens", 0),
+                    "total_tokens": getattr(response, "usage", {}).get("input_tokens", 0) + getattr(response, "usage", {}).get("output_tokens", 0)
+                }
+            }
         except Exception as e:
             import logging
             logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)
