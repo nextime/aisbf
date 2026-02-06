@@ -137,33 +137,39 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Build content from messages
             content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
 
+            # Build config with only non-None values
+            config = {"temperature": temperature}
+            if max_tokens is not None:
+                config["max_output_tokens"] = max_tokens
+
             # Generate content using the google-genai client
             response = self.client.models.generate_content(
                 model=model,
                 contents=content,
-                config={
-                    "temperature": temperature,
-                    "max_output_tokens": max_tokens
-                }
+                config=config
             )
 
             logging.info(f"GoogleProviderHandler: Response received: {response}")
             self.record_success()
 
-            # Return the response as a dictionary
+            # Return the response in OpenAI-style format
             return {
-                "candidates": [{
-                    "content": {
-                        "parts": [{"text": response.text}],
-                        "role": "model"
+                "id": f"google-{model}-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response.text
                     },
-                    "finishReason": "STOP",
-                    "index": 0
+                    "finish_reason": "stop"
                 }],
-                "usageMetadata": {
-                    "promptTokenCount": getattr(response, "prompt_token_count", 0),
-                    "candidatesTokenCount": getattr(response, "candidates_token_count", 0),
-                    "totalTokenCount": getattr(response, "total_token_count", 0)
+                "usage": {
+                    "prompt_tokens": getattr(response, "prompt_token_count", 0),
+                    "completion_tokens": getattr(response, "candidates_token_count", 0),
+                    "total_tokens": getattr(response, "total_token_count", 0)
                 }
             }
         except Exception as e:
@@ -224,20 +230,31 @@ class OpenAIProviderHandler(BaseProviderHandler):
             request_params = {
                 "model": model,
                 "messages": [],
-                "max_tokens": max_tokens,
                 "temperature": temperature,
                 "stream": stream
             }
             
+            # Only add max_tokens if it's not None
+            if max_tokens is not None:
+                request_params["max_tokens"] = max_tokens
+            
             # Build messages with all fields (including tool_calls and tool_call_id)
             for msg in messages:
                 message = {"role": msg["role"]}
+                
+                # For tool role, tool_call_id is required
+                if msg["role"] == "tool":
+                    if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                        message["tool_call_id"] = msg["tool_call_id"]
+                    else:
+                        # Skip tool messages without tool_call_id
+                        logger.warning(f"Skipping tool message without tool_call_id: {msg}")
+                        continue
+                
                 if "content" in msg and msg["content"] is not None:
                     message["content"] = msg["content"]
                 if "tool_calls" in msg and msg["tool_calls"] is not None:
                     message["tool_calls"] = msg["tool_calls"]
-                if "tool_call_id" in msg and msg["tool_call_id"] is not None:
-                    message["tool_call_id"] = msg["tool_call_id"]
                 if "name" in msg and msg["name"] is not None:
                     message["name"] = msg["name"]
                 request_params["messages"].append(message)
@@ -337,6 +354,10 @@ class OllamaProviderHandler(BaseProviderHandler):
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                            tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
+        """
+        Handle request for Ollama provider.
+        Note: Ollama doesn't support tools/tool_choice, so these parameters are accepted but ignored.
+        """
         import logging
         import json
         logger = logging.getLogger(__name__)
@@ -375,13 +396,15 @@ class OllamaProviderHandler(BaseProviderHandler):
             prompt = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
             logger.info(f"Prompt length: {len(prompt)} characters")
             
+            # Build options with only non-None values
+            options = {"temperature": temperature}
+            if max_tokens is not None:
+                options["num_predict"] = max_tokens
+            
             request_data = {
                 "model": model,
                 "prompt": prompt,
-                "options": {
-                    "temperature": temperature,
-                    "num_predict": max_tokens
-                },
+                "options": options,
                 "stream": False  # Explicitly disable streaming for non-streaming requests
             }
             
@@ -438,7 +461,27 @@ class OllamaProviderHandler(BaseProviderHandler):
             logger.info(f"Final response: {response_json}")
             self.record_success()
             logger.info(f"=== OllamaProviderHandler.handle_request END ===")
-            return response_json
+            
+            # Convert Ollama response to OpenAI-style format
+            return {
+                "id": f"ollama-{model}-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": response_json.get("response", "")
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": response_json.get("prompt_eval_count", 0),
+                    "completion_tokens": response_json.get("eval_count", 0),
+                    "total_tokens": response_json.get("prompt_eval_count", 0) + response_json.get("eval_count", 0)
+                }
+            }
         except Exception as e:
             self.record_failure()
             raise e
