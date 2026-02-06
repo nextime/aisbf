@@ -230,8 +230,16 @@ async def autoselect_chat_completions(request: Request, body: ChatCompletionRequ
     """Handle chat completions for autoselect using model name to select autoselect configuration"""
     logger.info(f"=== AUTOSELECT CHAT COMPLETION REQUEST START ===")
     logger.info(f"Request path: {request.url.path}")
-    logger.info(f"Model requested: {body.model}")
     logger.info(f"Request headers: {dict(request.headers)}")
+    
+    # Log raw request body for debugging
+    try:
+        raw_body = await request.body()
+        logger.info(f"Raw request body: {raw_body.decode('utf-8')}")
+    except Exception as e:
+        logger.error(f"Error reading raw body: {str(e)}")
+    
+    logger.info(f"Model requested: {body.model}")
     logger.info(f"Request body: {body}")
     logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
 
