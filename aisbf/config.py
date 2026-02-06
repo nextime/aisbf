@@ -34,6 +34,7 @@ class ProviderConfig(BaseModel):
     endpoint: str
     type: str
     api_key_required: bool
+    rate_limit: float = 0.0
 
 class RotationConfig(BaseModel):
     providers: List[Dict]
