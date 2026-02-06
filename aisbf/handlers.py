@@ -271,50 +271,88 @@ class RotationHandler:
         logger.info(f"Model rate limit: {selected_model.get('rate_limit', 'N/A')}")
         logger.info(f"=== MODEL SELECTION PROCESS END ===")
 
-        provider_id = selected_model['provider_id']
-        api_key = selected_model.get('api_key')
-        model_name = selected_model['name']
+        # Retry logic: Try up to 2 times with different models
+        max_retries = 2
+        tried_models = []
+        last_error = None
         
-        logger.info(f"Selected provider_id: {provider_id}")
-        logger.info(f"Selected model_name: {model_name}")
-        logger.info(f"API key present: {bool(api_key)}")
-
-        logger.info(f"Getting provider handler for {provider_id}")
-        handler = get_provider_handler(provider_id, api_key)
-        logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
-
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="All providers temporarily unavailable")
-
-        try:
-            logger.info(f"Model requested: {model_name}")
-            logger.info(f"Messages count: {len(request_data.get('messages', []))}")
-            logger.info(f"Max tokens: {request_data.get('max_tokens')}")
-            logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
-            logger.info(f"Stream: {request_data.get('stream', False)}")
+        for attempt in range(max_retries):
+            logger.info(f"")
+            logger.info(f"=== ATTEMPT {attempt + 1}/{max_retries} ===")
             
-            # Apply rate limiting with model-specific rate limit if available
-            rate_limit = selected_model.get('rate_limit')
-            logger.info(f"Model-specific rate limit: {rate_limit}")
-            logger.info("Applying rate limiting...")
-            await handler.apply_rate_limit(rate_limit)
-            logger.info("Rate limiting applied")
+            # Select a model that hasn't been tried yet
+            remaining_models = [m for m in available_models if m not in tried_models]
+            
+            if not remaining_models:
+                logger.error(f"No more models available to try")
+                logger.error(f"All {len(available_models)} models have been attempted")
+                break
+            
+            # Sort remaining models by weight and select the best one
+            remaining_models.sort(key=lambda m: m['weight'], reverse=True)
+            current_model = remaining_models[0]
+            tried_models.append(current_model)
+            
+            logger.info(f"Trying model: {current_model['name']} (provider: {current_model['provider_id']})")
+            logger.info(f"Attempt {attempt + 1} of {max_retries}")
+            
+            provider_id = current_model['provider_id']
+            api_key = current_model.get('api_key')
+            model_name = current_model['name']
+            
+            logger.info(f"Getting provider handler for {provider_id}")
+            handler = get_provider_handler(provider_id, api_key)
+            logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
-            logger.info(f"Sending request to provider handler...")
-            response = await handler.handle_request(
-                model=model_name,
-                messages=request_data['messages'],
-                max_tokens=request_data.get('max_tokens'),
-                temperature=request_data.get('temperature', 1.0),
-                stream=request_data.get('stream', False)
-            )
-            logger.info(f"Response received from provider")
-            handler.record_success()
-            logger.info(f"=== RotationHandler.handle_rotation_request END ===")
-            return response
-        except Exception as e:
-            handler.record_failure()
-            raise HTTPException(status_code=500, detail=str(e))
+            if handler.is_rate_limited():
+                logger.warning(f"Provider {provider_id} is rate limited, skipping to next model")
+                continue
+            
+            try:
+                logger.info(f"Model requested: {model_name}")
+                logger.info(f"Messages count: {len(request_data.get('messages', []))}")
+                logger.info(f"Max tokens: {request_data.get('max_tokens')}")
+                logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
+                logger.info(f"Stream: {request_data.get('stream', False)}")
+                
+                # Apply rate limiting with model-specific rate limit if available
+                rate_limit = current_model.get('rate_limit')
+                logger.info(f"Model-specific rate limit: {rate_limit}")
+                logger.info("Applying rate limiting...")
+                await handler.apply_rate_limit(rate_limit)
+                logger.info("Rate limiting applied")
+
+                logger.info(f"Sending request to provider handler...")
+                response = await handler.handle_request(
+                    model=model_name,
+                    messages=request_data['messages'],
+                    max_tokens=request_data.get('max_tokens'),
+                    temperature=request_data.get('temperature', 1.0),
+                    stream=request_data.get('stream', False)
+                )
+                logger.info(f"Response received from provider")
+                handler.record_success()
+                logger.info(f"=== RotationHandler.handle_rotation_request END ===")
+                logger.info(f"Request succeeded on attempt {attempt + 1}")
+                return response
+            except Exception as e:
+                last_error = str(e)
+                handler.record_failure()
+                logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
+                logger.error(f"Error type: {type(e).__name__}")
+                logger.error(f"Will try next model...")
+                continue
+        
+        # All retries exhausted
+        logger.error(f"")
+        logger.error(f"=== ALL RETRIES EXHAUSTED ===")
+        logger.error(f"Attempted {len(tried_models)} different model(s): {[m['name'] for m in tried_models]}")
+        logger.error(f"Last error: {last_error}")
+        logger.error(f"Max retries ({max_retries}) reached without success")
+        raise HTTPException(
+            status_code=503,
+            detail=f"All providers in rotation failed after {max_retries} attempts. Last error: {last_error}"
+        )
 
     async def handle_rotation_model_list(self, rotation_id: str) -> List[Dict]:
         rotation_config = self.config.get_rotation(rotation_id)
