@@ -2,5 +2,6 @@ include README.md
 include LICENSE.txt
 include requirements.txt
 include main.py
+include pyproject.toml
 recursive-include config *.json
 recursive-include aisbf *.py

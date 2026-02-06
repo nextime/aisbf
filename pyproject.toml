@@ -7,7 +7,7 @@ name = "aisbf"
 version = "0.1.0"
 description = "AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations"
 readme = "README.md"
-license = {text = "GPL-3.0-or-later"}
+license = "GPL-3.0-or-later"
 requires-python = ">=3.8"
 authors = [
     {name = "AISBF Contributors"},
@@ -31,7 +31,6 @@ classifiers = [
     "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "Topic :: Software Development :: Libraries :: Python Modules",
-    "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
@@ -40,6 +39,7 @@ classifiers = [
     "Programming Language :: Python :: 3.12",
     "Operating System :: OS Independent",
 ]
+dynamic = ["dependencies", "scripts"]
 
 [project.urls]
 Homepage = "https://git.nexlab.net/nexlab/aisbf.git"

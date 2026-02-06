@@ -25,9 +25,7 @@ from setuptools import setup, find_packages, Command
 from setuptools.command.install import install as _install
 from pathlib import Path
 import os
-import shutil
 import sys
-import subprocess
 
 # Read the contents of README file
 this_directory = Path(__file__).parent
@@ -50,94 +48,11 @@ class InstallCommand(_install):
             self.user = True
     
     def run(self):
-        # Run the standard install
+        # Run the standard install (this will install data_files to share directory)
         _install.run(self)
-        
-        # Install config files
-        self._install_config_files()
-        
-        # Install main.py to share directory
-        self._install_main_file()
-        
-        # Create venv and install requirements
-        self._create_venv_and_install_requirements()
         
         # Install the aisbf script
         self._install_aisbf_script()
-    
-    def _create_venv_and_install_requirements(self):
-        """Create a virtual environment and install requirements"""
-        # Determine installation directory
-        if '--user' in sys.argv or os.geteuid() != 0:
-            # User installation - use ~/.local
-            install_dir = Path.home() / '.local'
-        else:
-            # System installation - use /usr/local
-            install_dir = Path('/usr/local')
-        
-        venv_dir = install_dir / 'aisbf-venv'
-        
-        # Create venv if it doesn't exist
-        if not venv_dir.exists():
-            print(f"Creating virtual environment at {venv_dir}")
-            subprocess.run([sys.executable, '-m', 'venv', str(venv_dir)], check=True)
-        else:
-            print(f"Virtual environment already exists at {venv_dir}")
-        
-        # Install requirements in the venv
-        pip_path = venv_dir / 'bin' / 'pip'
-        requirements_path = this_directory / 'requirements.txt'
-        
-        if requirements_path.exists():
-            print(f"Installing requirements from {requirements_path}")
-            subprocess.run([str(pip_path), 'install', '-r', str(requirements_path)], check=True)
-        else:
-            print("No requirements.txt found, skipping dependency installation")
-    
-    def _install_config_files(self):
-        """Install config files to the appropriate share directory"""
-        # Determine the share directory
-        if '--user' in sys.argv or os.geteuid() != 0:
-            # User installation - use ~/.local/share
-            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
-        else:
-            # System installation - use /usr/local/share
-            share_dir = Path('/usr/local/share/aisbf')
-        
-        # Create the share directory if it doesn't exist
-        share_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy config files
-        config_dir = this_directory / 'config'
-        if config_dir.exists():
-            for config_file in config_dir.glob('*.json'):
-                dst = share_dir / config_file.name
-                shutil.copy2(config_file, dst)
-                print(f"Installed config file {config_file.name} to {dst}")
-        else:
-            print(f"Warning: Config directory {config_dir} not found")
-    
-    def _install_main_file(self):
-        """Install main.py to the appropriate share directory"""
-        # Determine the share directory
-        if '--user' in sys.argv or os.geteuid() != 0:
-            # User installation - use ~/.local/share
-            share_dir = Path.home() / '.local' / 'share' / 'aisbf'
-        else:
-            # System installation - use /usr/local/share
-            share_dir = Path('/usr/local/share/aisbf')
-        
-        # Create the share directory if it doesn't exist
-        share_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Copy main.py
-        main_file = this_directory / 'main.py'
-        if main_file.exists():
-            dst = share_dir / 'main.py'
-            shutil.copy2(main_file, dst)
-            print(f"Installed main.py to {dst}")
-        else:
-            print(f"Warning: main.py not found")
     
     def _install_aisbf_script(self):
         """Install the aisbf script that uses the venv"""
@@ -145,12 +60,10 @@ class InstallCommand(_install):
         if '--user' in sys.argv or os.geteuid() != 0:
             # User installation - use ~/.local/bin
             bin_dir = Path.home() / '.local' / 'bin'
-            venv_dir = Path.home() / '.local' / 'aisbf-venv'
             share_dir = Path.home() / '.local' / 'share' / 'aisbf'
         else:
             # System installation - use /usr/local/bin
             bin_dir = Path('/usr/local/bin')
-            venv_dir = Path('/usr/local') / 'aisbf-venv'
             share_dir = Path('/usr/local/share/aisbf')
         
         # Create the bin directory if it doesn't exist
@@ -162,11 +75,28 @@ class InstallCommand(_install):
 # This script manages the AISBF server using the installed virtual environment
 
 PIDFILE="/tmp/aisbf.pid"
-VENV_DIR="{venv_dir}"
 SHARE_DIR="{share_dir}"
+VENV_DIR="$SHARE_DIR/venv"
+
+# Function to create venv if it doesn't exist
+ensure_venv() {{
+    if [ ! -d "$VENV_DIR" ]; then
+        echo "Creating virtual environment at $VENV_DIR"
+        python3 -m venv "$VENV_DIR"
+        
+        # Install requirements if requirements.txt exists
+        if [ -f "$SHARE_DIR/requirements.txt" ]; then
+            echo "Installing requirements from $SHARE_DIR/requirements.txt"
+            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+        fi
+    fi
+}}
 
 # Function to start the server
 start_server() {{
+    # Ensure venv exists
+    ensure_venv
+    
     # Activate the virtual environment
     source $VENV_DIR/bin/activate
     
@@ -190,6 +120,9 @@ start_daemon() {{
             rm -f "$PIDFILE"
         fi
     fi
+    
+    # Ensure venv exists
+    ensure_venv
     
     # Start in background with nohup
     nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" > /dev/null 2>&1 &
@@ -288,6 +221,15 @@ setup(
     package_data={
         "aisbf": ["*.json"],
     },
+    data_files=[
+        # Install to /usr/local/share/aisbf (system-wide)
+        ('share/aisbf', [
+            'main.py',
+            'requirements.txt',
+            'config/providers.json',
+            'config/rotations.json',
+        ]),
+    ],
     entry_points={
         "console_scripts": [
             "aisbf=main:main",
