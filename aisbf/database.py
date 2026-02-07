@@ -60,8 +60,16 @@ class DatabaseManager:
     
     def _initialize_database(self):
         """Create database tables if they don't exist."""
+        # Enable WAL mode for better concurrent access
+        # WAL allows multiple readers and one writer simultaneously
         with sqlite3.connect(self.db_path) as conn:
             cursor = conn.cursor()
+            
+            # Enable WAL mode for concurrent access
+            cursor.execute('PRAGMA journal_mode=WAL')
+            
+            # Set busy timeout to 5 seconds for concurrent access
+            cursor.execute('PRAGMA busy_timeout=5000')
             
             # Create context_dimensions table for tracking context usage
             cursor.execute('''
