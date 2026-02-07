@@ -39,6 +39,54 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 
+class BrokenPipeFilter(logging.Filter):
+    """Filter to suppress BrokenPipeError logging errors"""
+    def filter(self, record):
+        # Filter out BrokenPipeError and related logging errors
+        if record.getMessage().startswith('--- Logging error ---'):
+            return False
+        if 'BrokenPipeError' in record.getMessage():
+            return False
+        return True
+
+class SafeStderr:
+    """Safe stderr wrapper that handles BrokenPipeError gracefully"""
+    def __init__(self, original_stderr, log_file_path):
+        self.original_stderr = original_stderr
+        self.log_file = None
+        try:
+            self.log_file = open(log_file_path, 'a')
+        except Exception:
+            pass
+    
+    def write(self, data):
+        # Filter out BrokenPipeError and related logging errors
+        if '--- Logging error ---' in data or 'BrokenPipeError' in data:
+            return
+        if self.log_file:
+            try:
+                self.log_file.write(data)
+                self.log_file.flush()
+            except (BrokenPipeError, OSError):
+                pass
+        else:
+            try:
+                self.original_stderr.write(data)
+            except (BrokenPipeError, OSError):
+                pass
+    
+    def flush(self):
+        if self.log_file:
+            try:
+                self.log_file.flush()
+            except (BrokenPipeError, OSError):
+                pass
+        else:
+            try:
+                self.original_stderr.flush()
+            except (BrokenPipeError, OSError):
+                pass
+
 def setup_logging():
     """Setup logging with rotating file handlers"""
     # Determine log directory based on user
@@ -102,8 +150,18 @@ def setup_logging():
     root_logger.addHandler(error_handler)
     root_logger.addHandler(console_handler)
     
-    # Redirect stderr to error log
-    sys.stderr = open(log_dir / 'aisbf_stderr.log', 'a')
+    # Add BrokenPipeError filter to all handlers
+    broken_pipe_filter = BrokenPipeFilter()
+    file_handler.addFilter(broken_pipe_filter)
+    error_handler.addFilter(broken_pipe_filter)
+    console_handler.addFilter(broken_pipe_filter)
+    
+    # Redirect stderr to error log with error handling and BrokenPipeError filtering
+    try:
+        sys.stderr = SafeStderr(sys.stderr, log_dir / 'aisbf_stderr.log')
+    except Exception as e:
+        logger = logging.getLogger(__name__)
+        logger.warning(f"Could not redirect stderr: {e}")
     
     return logging.getLogger(__name__)
 

@@ -60,10 +60,24 @@ ensure_venv() {
     fi
 }
 
+# Function to update venv packages silently
+update_venv() {
+    # Update requirements if requirements.txt exists
+    if [ -f "$SHARE_DIR/requirements.txt" ]; then
+        "$VENV_DIR/bin/pip" install --upgrade -r "$SHARE_DIR/requirements.txt" -q 2>/dev/null
+    fi
+    
+    # Update aisbf package silently
+    "$VENV_DIR/bin/pip" install --upgrade aisbf -q 2>/dev/null
+}
+
 # Function to start the server
 start_server() {
     # Ensure venv exists
     ensure_venv
+    
+    # Update venv packages silently
+    update_venv
     
     # Activate the virtual environment
     source $VENV_DIR/bin/activate
@@ -72,7 +86,13 @@ start_server() {
     cd $SHARE_DIR
     
     # Start the proxy server with logging
-    uvicorn main:app --host 0.0.0.0 --port 8000 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
+    # Redirect stderr to suppress BrokenPipeError during shutdown
+    uvicorn main:app --host 127.0.0.1 --port 17765 2>&1 | while IFS= read -r line; do
+        # Filter out BrokenPipeError logging errors
+        if [[ "$line" != *"--- Logging error ---"* ]] && [[ "$line" != *"BrokenPipeError"* ]] && [[ "$line" != *"Call stack:"* ]] && [[ "$line" != *"File "*"/python"* ]] && [[ "$line" != *"Message:"* ]] && [[ "$line" != *"Arguments:"* ]]; then
+            echo "$line" | tee -a "$LOG_DIR/aisbf_stdout.log"
+        fi
+    done
 }
 
 # Function to start as daemon
@@ -92,8 +112,12 @@ start_daemon() {
     # Ensure venv exists
     ensure_venv
     
+    # Update venv packages silently
+    update_venv
+    
     # Start in background with nohup and logging
-    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 0.0.0.0 --port 8000" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+    # Filter out BrokenPipeError logging errors
+    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port 17765 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     PID=$!
     echo $PID > "$PIDFILE"
     echo "AISBF started in background (PID: $PID)"

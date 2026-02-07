@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash 
 # Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
 #
 # Test script for AISBF proxy
