@@ -11,13 +11,13 @@ echo "AISBF Proxy Test Script"
 echo "=========================================="
 echo ""
 
-# Test 1: Non-streaming request to autoselect endpoint
-echo "Test 1: Non-streaming request to autoselect endpoint"
+# Test 1: Non-streaming request to rotations endpoint with googletest model
+echo "Test 1: Non-streaming request to rotations endpoint with googletest model"
 echo "----------------------------------------"
-curl -X POST "${PROXY_URL}/api/autoselect/chat/completions" \
+curl -X POST "${PROXY_URL}/api/rotations/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "autoselect",
+    "model": "googletest",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ],
@@ -27,15 +27,15 @@ curl -X POST "${PROXY_URL}/api/autoselect/chat/completions" \
 echo ""
 echo ""
 
-# Test 2: Streaming request to autoselect endpoint
-echo "Test 2: Streaming request to autoselect endpoint"
+# Test 2: Streaming request to rotations endpoint with googletest model
+echo "Test 2: Streaming request to rotations endpoint with googletest model"
 echo "----------------------------------------"
 echo "Note: Streaming responses will appear as data: lines"
 echo ""
-curl -X POST "${PROXY_URL}/api/autoselect/chat/completions" \
+curl -X POST "${PROXY_URL}/api/rotations/chat/completions" \
   -H "Content-Type: application/json" \
   -d '{
-    "model": "autoselect",
+    "model": "googletest",
     "messages": [
       {"role": "user", "content": "Hello, how are you?"}
     ],
@@ -52,10 +52,10 @@ curl -X GET "${PROXY_URL}/" 2>/dev/null | jq '.' || echo "Response received (jq 
 echo ""
 echo ""
 
-# Test 4: List models for autoselect endpoint
-echo "Test 4: List models for autoselect endpoint"
+# Test 4: List models for rotations endpoint
+echo "Test 4: List models for rotations endpoint"
 echo "----------------------------------------"
-curl -X GET "${PROXY_URL}/api/autoselect/models" 2>/dev/null | jq '.' || echo "Response received (jq not available)"
+curl -X GET "${PROXY_URL}/api/rotations/models" 2>/dev/null | jq '.' || echo "Response received (jq not available)"
 echo ""
 echo ""
 
