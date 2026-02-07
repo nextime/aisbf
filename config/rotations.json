@@ -89,6 +89,27 @@
           ]
         }
       ]
+    },
+    "googletest": {
+      "model_name": "googletest",
+      "providers": [
+        {
+          "provider_id": "gemini",
+          "api_key": "YOUR_GEMINI_API_KEY",
+          "models": [
+            {
+              "name": "gemini-2.0-flash",
+              "weight": 1,
+              "rate_limit": 0
+            },
+            {
+              "name": "gemini-1.5-pro",
+              "weight": 1,
+              "rate_limit": 0
+            }
+          ]
+        }
+      ]
     }
   }
 }
