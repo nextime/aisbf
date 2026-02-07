@@ -29,6 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.config import config
+from aisbf.database import initialize_database
 import time
 import logging
 import sys
