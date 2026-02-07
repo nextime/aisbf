@@ -51,6 +51,9 @@ def setup_logging():
     # Create log directory if it doesn't exist
     log_dir.mkdir(parents=True, exist_ok=True)
     
+    # Check if debug mode is enabled
+    AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
+    
     # Setup rotating file handler for general logs
     log_file = log_dir / 'aisbf.log'
     file_handler = RotatingFileHandler(
@@ -76,9 +79,16 @@ def setup_logging():
     error_handler.setLevel(logging.ERROR)
     error_handler.setFormatter(file_formatter)
     
-    # Setup console handler
+    # Setup console handler - use DEBUG level if AISBF_DEBUG is enabled
     console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
+    if AISBF_DEBUG:
+        console_handler.setLevel(logging.DEBUG)
+        print("=== AISBF DEBUG MODE ENABLED ===")
+        print("All debug messages will be shown in console")
+        print("Raw responses from providers will be logged")
+        print("=== END AISBF DEBUG MODE ===")
+    else:
+        console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter(
         '%(asctime)s - %(levelname)s - %(message)s'
     )
@@ -115,7 +125,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     print(f"Request method: {request.method}")
     print(f"Request headers: {dict(request.headers)}")
     
-    # Try to get the raw body
+    # Try to get raw body
     try:
         raw_body = await request.body()
         print(f"Raw request body: {raw_body.decode('utf-8')}")
@@ -130,7 +140,7 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     logger.error(f"Request method: {request.method}")
     logger.error(f"Request headers: {dict(request.headers)}")
     
-    # Try to get the raw body
+    # Try to get raw body
     try:
         raw_body = await request.body()
         logger.error(f"Raw request body: {raw_body.decode('utf-8')}")
@@ -187,7 +197,12 @@ async def list_rotations():
 
 @app.post("/api/rotations/chat/completions")
 async def rotation_chat_completions(request: Request, body: ChatCompletionRequest):
-    """Handle chat completions for rotations using model name to select rotation"""
+    """
+    Handle chat completions for rotations using model name to select rotation.
+    
+    The RotationHandler handles streaming internally based on the selected
+    provider's type (google vs others), so we just pass through the response.
+    """
     logger.info(f"=== ROTATION CHAT COMPLETION REQUEST START ===")
     logger.info(f"Request path: {request.url.path}")
     logger.info(f"Model requested: {body.model}")
@@ -210,118 +225,11 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     logger.debug("Handling rotation request")
 
     try:
-        if body.stream:
-            logger.debug("Handling streaming rotation request")
-            rotation_config = config.get_rotation(body.model)
-            if not rotation_config:
-                raise HTTPException(status_code=400, detail=f"Rotation {body.model} not found")
-            
-            # Check if this is a Google streaming response
-            async def stream_generator():
-                import time  # Import time module
-                try:
-                    response = await rotation_handler.handle_rotation_request(body.model, body_dict)
-                    
-                    # Check if this is a generator (sync iterator) response
-                    if hasattr(response, '__iter__') and not hasattr(response, '__aiter__'):
-                        logger.debug("Handling synchronous generator stream response")
-                        # This is likely a Google streaming response
-                        chunk_id = 0
-                        for chunk in response:
-                            try:
-                                logger.debug(f"Chunk type: {type(chunk)}")
-                                logger.debug(f"Chunk: {chunk}")
-                                
-                                # Extract text from Google chunk
-                                chunk_text = ""
-                                try:
-                                    if hasattr(chunk, 'candidates') and chunk.candidates:
-                                        candidate = chunk.candidates[0] if chunk.candidates else None
-                                        if candidate and hasattr(candidate, 'content') and candidate.content:
-                                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                                                for part in candidate.content.parts:
-                                                    if hasattr(part, 'text') and part.text:
-                                                        chunk_text += part.text
-                                except Exception as e:
-                                    logger.error(f"Error extracting text from chunk: {e}")
-                                
-                                # Create OpenAI-compatible chunk
-                                openai_chunk = {
-                                    "id": f"google-{body.model}-{int(time.time())}-chunk-{chunk_id}",
-                                    "object": "chat.completion.chunk",
-                                    "created": int(time.time()),
-                                    "model": body.model,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {
-                                            "content": chunk_text
-                                        },
-                                        "finish_reason": None
-                                    }]
-                                }
-                                
-                                chunk_id += 1
-                                logger.debug(f"OpenAI chunk: {openai_chunk}")
-                                
-                                import json
-                                yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
-                            except Exception as chunk_error:
-                                logger.error(f"Error processing chunk: {str(chunk_error)}")
-                                continue
-                    elif hasattr(response, '__aiter__'):
-                       # Handle OpenAI/Anthropic streaming responses (async iterators)
-                       chunk_id = 0
-                       async for chunk in response:
-                           try:
-                               # Extract text from Google chunk
-                               chunk_text = ""
-                               try:
-                                   if hasattr(chunk, 'candidates') and chunk.candidates:
-                                       candidate = chunk.candidates[0] if chunk.candidates else None
-                                       if candidate and hasattr(candidate, 'content') and candidate.content:
-                                           if hasattr(candidate.content, 'parts') and candidate.content.parts:
-                                               for part in candidate.content.parts:
-                                                   if hasattr(part, 'text') and part.text:
-                                                       chunk_text += part.text
-                               except Exception as e:
-                                   logger.error(f"Error extracting text from chunk: {e}")
-                               
-                               # Create OpenAI-compatible chunk
-                               chunk_dict = {
-                                   "id": f"google-{body.model}-{int(time.time())}-chunk-{chunk_id}",
-                                   "object": "chat.completion.chunk",
-                                   "created": int(time.time()),
-                                   "model": body.model,
-                                   "choices": [{
-                                       "index": 0,
-                                       "delta": {
-                                           "content": chunk_text
-                                       },
-                                       "finish_reason": None
-                                   }]
-                               }
-                               chunk_id += 1
-                               import json
-                               yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                           except Exception as chunk_error:
-                               logger.warning(f"Error serializing chunk: {str(chunk_error)}")
-                               continue
-                    else:
-                        # Handle other types of responses
-                        logger.warning(f"Unknown response type: {type(response)}")
-                        import json
-                        yield f"data: {json.dumps({'error': 'Unknown response type'})}\n\n".encode('utf-8')
-                except Exception as e:
-                    logger.error(f"Error in streaming response: {str(e)}")
-                    import json
-                    yield f"data: {json.dumps({'error': str(e)})}\n\n".encode('utf-8')
-            
-            return StreamingResponse(stream_generator(), media_type="text/event-stream")
-        else:
-            logger.debug("Handling non-streaming rotation request")
-            result = await rotation_handler.handle_rotation_request(body.model, body_dict)
-            logger.debug(f"Rotation response result: {result}")
-            return result
+        # The rotation handler handles streaming internally and returns
+        # a StreamingResponse for streaming requests or a dict for non-streaming
+        result = await rotation_handler.handle_rotation_request(body.model, body_dict)
+        logger.debug(f"Rotation response result type: {type(result)}")
+        return result
     except Exception as e:
         logger.error(f"Error handling rotation chat_completions: {str(e)}", exc_info=True)
         raise
@@ -477,7 +385,7 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
         logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
         raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
-    
+
     logger.info(f"Provider ID '{provider_id}' found in providers")
 
     provider_config = config.get_provider(provider_id)
@@ -524,7 +432,7 @@ async def list_models(request: Request, provider_id: str):
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
         logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
         raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
-    
+
     logger.info(f"Provider ID '{provider_id}' found in providers")
 
     provider_config = config.get_provider(provider_id)
@@ -548,16 +456,16 @@ async def catch_all_post(provider_id: str, request: Request):
     logger.info(f"Available providers: {list(config.providers.keys())}")
     logger.info(f"Available rotations: {list(config.rotations.keys())}")
     logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
-    
+
     error_msg = f"""
     Invalid endpoint: {request.url.path}
-    
+
     The correct endpoint format is: /api/{{provider_id}}/chat/completions
-    
+
     Available providers: {list(config.providers.keys())}
     Available rotations: {list(config.rotations.keys())}
     Available autoselect: {list(config.autoselect.keys())}
-    
+
     Example: POST /api/ollama/chat/completions
     """
     logger.error(error_msg)

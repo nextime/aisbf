@@ -44,6 +44,8 @@ class BaseProviderHandler:
         self.error_tracking = config.error_tracking[provider_id]
         self.last_request_time = 0
         self.rate_limit = config.providers[provider_id].rate_limit
+        # Add model-level rate limit tracking
+        self.model_last_request_time = {}  # {model_name: timestamp}
 
     def is_rate_limited(self) -> bool:
         if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
@@ -64,6 +66,25 @@ class BaseProviderHandler:
                 await asyncio.sleep(required_wait)
 
             self.last_request_time = time.time()
+
+    async def apply_model_rate_limit(self, model: str, rate_limit: Optional[float] = None):
+        """Apply rate limiting for a specific model"""
+        if rate_limit is None:
+            rate_limit = self.rate_limit
+
+        if rate_limit and rate_limit > 0:
+            current_time = time.time()
+            last_time = self.model_last_request_time.get(model, 0)
+            time_since_last_request = current_time - last_time
+            required_wait = rate_limit - time_since_last_request
+
+            if required_wait > 0:
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Model-level rate limiting: waiting {required_wait:.2f}s for model {model}")
+                await asyncio.sleep(required_wait)
+
+            self.model_last_request_time[model] = time.time()
 
     def record_failure(self):
         import logging
@@ -187,6 +208,14 @@ class GoogleProviderHandler(BaseProviderHandler):
 
                 logging.info(f"GoogleProviderHandler: Response received: {response}")
                 self.record_success()
+
+                # Dump raw response if AISBF_DEBUG is enabled
+                if AISBF_DEBUG:
+                    logging.info(f"=== RAW GOOGLE RESPONSE ===")
+                    logging.info(f"Raw response type: {type(response)}")
+                    logging.info(f"Raw response: {response}")
+                    logging.info(f"Raw response dir: {dir(response)}")
+                    logging.info(f"=== END RAW GOOGLE RESPONSE ===")
 
                 # Extract content from the nested response structure
                 # The response has candidates[0].content.parts
@@ -394,6 +423,13 @@ class GoogleProviderHandler(BaseProviderHandler):
                 # Pydantic validation might be causing serialization issues
                 logging.info(f"GoogleProviderHandler: Returning response dict (no validation)")
                 logging.info(f"Response dict keys: {openai_response.keys()}")
+                
+                # Dump final response if AISBF_DEBUG is enabled
+                if AISBF_DEBUG:
+                    logging.info(f"=== FINAL GOOGLE RESPONSE DICT ===")
+                    logging.info(f"Final response: {openai_response}")
+                    logging.info(f"=== END FINAL GOOGLE RESPONSE DICT ===")
+                
                 return openai_response
         except Exception as e:
             import logging
@@ -496,10 +532,18 @@ class OpenAIProviderHandler(BaseProviderHandler):
             logging.info(f"OpenAIProviderHandler: Response received: {response}")
             self.record_success()
             
-            # Return Stream object directly for streaming, otherwise dump to dict
-            if stream:
-                return response
-            return response.model_dump()
+            # Dump raw response if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== RAW OPENAI RESPONSE ===")
+                logging.info(f"Raw response type: {type(response)}")
+                logging.info(f"Raw response: {response}")
+                logging.info(f"=== END RAW OPENAI RESPONSE ===")
+            
+            # Return raw response without any parsing or modification
+            # For streaming: return the Stream object as-is
+            # For non-streaming: return the response object as-is
+            logging.info(f"OpenAIProviderHandler: Returning raw response without parsing")
+            return response
         except Exception as e:
             import logging
             logging.error(f"OpenAIProviderHandler: Error: {str(e)}", exc_info=True)
@@ -553,6 +597,14 @@ class AnthropicProviderHandler(BaseProviderHandler):
             )
             logging.info(f"AnthropicProviderHandler: Response received: {response}")
             self.record_success()
+            
+            # Dump raw response if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== RAW ANTHROPIC RESPONSE ===")
+                logging.info(f"Raw response type: {type(response)}")
+                logging.info(f"Raw response: {response}")
+                logging.info(f"Raw response dir: {dir(response)}")
+                logging.info(f"=== END RAW ANTHROPIC RESPONSE ===")
             
             logging.info(f"=== ANTHROPIC RESPONSE PARSING START ===")
             logging.info(f"Response type: {type(response)}")
@@ -681,6 +733,13 @@ class AnthropicProviderHandler(BaseProviderHandler):
             # Pydantic validation might be causing serialization issues
             logging.info(f"AnthropicProviderHandler: Returning response dict (no validation)")
             logging.info(f"Response dict keys: {openai_response.keys()}")
+            
+            # Dump final response dict if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== FINAL ANTHROPIC RESPONSE DICT ===")
+                logging.info(f"Final response: {openai_response}")
+                logging.info(f"=== END FINAL ANTHROPIC RESPONSE DICT ===")
+            
             return openai_response
         except Exception as e:
             import logging
@@ -818,10 +877,17 @@ class OllamaProviderHandler(BaseProviderHandler):
             
             logger.info(f"Final response: {response_json}")
             self.record_success()
+            
+            # Dump raw response if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== RAW OLLAMA RESPONSE ===")
+                logging.info(f"Raw response JSON: {response_json}")
+                logging.info(f"=== END RAW OLLAMA RESPONSE ===")
+            
             logger.info(f"=== OllamaProviderHandler.handle_request END ===")
             
             # Convert Ollama response to OpenAI-style format
-            return {
+            openai_response = {
                 "id": f"ollama-{model}-{int(time.time())}",
                 "object": "chat.completion",
                 "created": int(time.time()),
@@ -840,6 +906,14 @@ class OllamaProviderHandler(BaseProviderHandler):
                     "total_tokens": response_json.get("prompt_eval_count", 0) + response_json.get("eval_count", 0)
                 }
             }
+            
+            # Dump final response dict if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== FINAL OLLAMA RESPONSE DICT ===")
+                logging.info(f"Final response: {openai_response}")
+                logging.info(f"=== END FINAL OLLAMA RESPONSE DICT ===")
+            
+            return openai_response
         except Exception as e:
             self.record_failure()
             raise e

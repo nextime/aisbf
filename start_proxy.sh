@@ -21,6 +21,8 @@
 # AISBF - AI Service Broker Framework || AI Should Be Free
 # DEVELOPMENT START SCRIPT - For development use only
 # For production use, install with: python setup.py install
+export AISBF_DEBUG=true
+
 
 # Get the directory where this script is located
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
