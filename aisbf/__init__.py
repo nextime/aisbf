@@ -25,6 +25,7 @@ A modular proxy server for managing multiple AI provider integrations.
 
 from .config import config, Config, ProviderConfig, RotationConfig, AppConfig, AutoselectConfig, AutoselectModelInfo
 from .context import ContextManager, get_context_config_for_model
+from .database import DatabaseManager, get_database, initialize_database
 from .models import (
     Message,
     ChatCompletionRequest,

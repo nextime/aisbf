@@ -96,6 +96,7 @@ setup(
             'aisbf/handlers.py',
             'aisbf/context.py',
             'aisbf/utils.py',
+            'aisbf/database.py',
         ]),
     ],
     entry_points={
