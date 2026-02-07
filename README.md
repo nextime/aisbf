@@ -10,6 +10,9 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 - **Streaming Support**: Full support for streaming responses from all providers
 - **Error Tracking**: Automatic provider disabling after consecutive failures with cooldown periods
 - **Rate Limiting**: Built-in rate limiting and graceful error handling
+- **Request Splitting**: Automatic splitting of large requests when exceeding `max_request_tokens` limit
+- **Token Rate Limiting**: Per-model token usage tracking with TPM (tokens per minute), TPH (tokens per hour), and TPD (tokens per day) limits
+- **Automatic Provider Disabling**: Providers automatically disabled when token rate limits are exceeded
 
 ## Author
 
@@ -69,8 +72,22 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - OpenAI and openai-compatible endpoints (openai)
 - Anthropic (anthropic)
 - Ollama (direct HTTP)
-
 ## Configuration
+
+### Model Configuration
+
+Models can be configured with the following optional fields:
+
+- **`max_request_tokens`**: Maximum tokens allowed per request. Requests exceeding this limit are automatically split into multiple smaller requests.
+- **`rate_limit_TPM`**: Maximum tokens allowed per minute (Tokens Per Minute)
+- **`rate_limit_TPH`**: Maximum tokens allowed per hour (Tokens Per Hour)
+- **`rate_limit_TPD`**: Maximum tokens allowed per day (Tokens Per Day)
+
+When token rate limits are exceeded, providers are automatically disabled:
+- TPM limit exceeded: Provider disabled for 1 minute
+- TPH limit exceeded: Provider disabled for 1 hour
+- TPD limit exceeded: Provider disabled for 1 day
+
 See `config/providers.json` and `config/rotations.json` for configuration examples.
 
 ## API Endpoints

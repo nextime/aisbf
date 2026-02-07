@@ -59,6 +59,10 @@ class Model(BaseModel):
     provider_id: str
     weight: int = 1
     rate_limit: Optional[float] = None
+    max_request_tokens: Optional[int] = None
+    rate_limit_TPM: Optional[int] = None  # Max tokens per minute
+    rate_limit_TPH: Optional[int] = None  # Max tokens per hour
+    rate_limit_TPD: Optional[int] = None  # Max tokens per day
 
 class Provider(BaseModel):
     id: str

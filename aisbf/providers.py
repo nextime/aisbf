@@ -46,11 +46,128 @@ class BaseProviderHandler:
         self.rate_limit = config.providers[provider_id].rate_limit
         # Add model-level rate limit tracking
         self.model_last_request_time = {}  # {model_name: timestamp}
+        # Token usage tracking for rate limits
+        self.token_usage = {}  # {model_name: {"TPM": [], "TPH": [], "TPD": []}}
 
     def is_rate_limited(self) -> bool:
         if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
             return True
         return False
+    
+    def _get_model_config(self, model: str) -> Optional[Dict]:
+        """Get model configuration from provider config"""
+        provider_config = config.providers.get(self.provider_id)
+        if provider_config and hasattr(provider_config, 'models') and provider_config.models:
+            for model_config in provider_config.models:
+                if model_config.get('name') == model:
+                    return model_config
+        return None
+    
+    def _check_token_rate_limit(self, model: str, token_count: int) -> bool:
+        """
+        Check if a request would exceed token rate limits.
+        
+        Returns True if any rate limit would be exceeded, False otherwise.
+        """
+        model_config = self._get_model_config(model)
+        if not model_config:
+            return False
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        current_time = time.time()
+        
+        # Check TPM (tokens per minute)
+        if model_config.get('rate_limit_TPM'):
+            tpm = model_config['rate_limit_TPM']
+            # Get tokens used in the last minute
+            tokens_used_tpm = self.token_usage.get(model, {}).get('TPM', [])
+            # Filter to only include requests from the last 60 seconds
+            one_minute_ago = current_time - 60
+            recent_tokens_tpm = [t for t in tokens_used_tpm if t > one_minute_ago]
+            total_tpm = sum(recent_tokens_tpm)
+            
+            if total_tpm + token_count > tpm:
+                logger.warning(f"TPM limit would be exceeded: {total_tpm + token_count}/{tpm}")
+                return True
+        
+        # Check TPH (tokens per hour)
+        if model_config.get('rate_limit_TPH'):
+            tph = model_config['rate_limit_TPH']
+            # Get tokens used in the last hour
+            tokens_used_tph = self.token_usage.get(model, {}).get('TPH', [])
+            # Filter to only include requests from the last 3600 seconds
+            one_hour_ago = current_time - 3600
+            recent_tokens_tph = [t for t in tokens_used_tph if t > one_hour_ago]
+            total_tph = sum(recent_tokens_tph)
+            
+            if total_tph + token_count > tph:
+                logger.warning(f"TPH limit would be exceeded: {total_tph + token_count}/{tph}")
+                return True
+        
+        # Check TPD (tokens per day)
+        if model_config.get('rate_limit_TPD'):
+            tpd = model_config['rate_limit_TPD']
+            # Get tokens used in the last day
+            tokens_used_tpd = self.token_usage.get(model, {}).get('TPD', [])
+            # Filter to only include requests from the last 86400 seconds
+            one_day_ago = current_time - 86400
+            recent_tokens_tpd = [t for t in tokens_used_tpd if t > one_day_ago]
+            total_tpd = sum(recent_tokens_tpd)
+            
+            if total_tpd + token_count > tpd:
+                logger.warning(f"TPD limit would be exceeded: {total_tpd + token_count}/{tpd}")
+                return True
+        
+        return False
+    
+    def _record_token_usage(self, model: str, token_count: int):
+        """Record token usage for rate limit tracking"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if model not in self.token_usage:
+            self.token_usage[model] = {"TPM": [], "TPH": [], "TPD": []}
+        
+        current_time = time.time()
+        
+        # Record for all three time windows
+        self.token_usage[model]["TPM"].append((current_time, token_count))
+        self.token_usage[model]["TPH"].append((current_time, token_count))
+        self.token_usage[model]["TPD"].append((current_time, token_count))
+        
+        logger.debug(f"Recorded token usage for model {model}: {token_count} tokens")
+    
+    def _disable_provider_for_duration(self, duration: str):
+        """
+        Disable provider for a specific duration.
+        
+        Args:
+            duration: "1m" (1 minute), "1h" (1 hour), or "1d" (1 day)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        duration_map = {
+            "1m": 60,
+            "1h": 3600,
+            "1d": 86400
+        }
+        
+        if duration not in duration_map:
+            logger.error(f"Invalid duration: {duration}")
+            return
+        
+        disable_seconds = duration_map[duration]
+        self.error_tracking['disabled_until'] = time.time() + disable_seconds
+        
+        logger.error(f"!!! PROVIDER DISABLED !!!")
+        logger.error(f"Provider: {self.provider_id}")
+        logger.error(f"Reason: Token rate limit exceeded")
+        logger.error(f"Disabled for: {duration}")
+        logger.error(f"Disabled until: {self.error_tracking['disabled_until']}")
+        logger.error(f"Provider will be automatically re-enabled after cooldown")
 
     async def apply_rate_limit(self, rate_limit: Optional[float] = None):
         """Apply rate limiting by waiting if necessary"""

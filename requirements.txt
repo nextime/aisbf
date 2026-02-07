@@ -9,3 +9,5 @@ python-dotenv
 google-genai
 openai
 anthropic
+langchain-text-splitters
+tiktoken

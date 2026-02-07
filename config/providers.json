@@ -6,7 +6,25 @@
       "endpoint": "https://generativelanguage.googleapis.com/v1beta",
       "type": "google",
       "api_key_required": true,
-      "rate_limit": 0
+      "rate_limit": 0,
+      "models": [
+        {
+          "name": "gemini-2.0-flash",
+          "rate_limit": 0,
+          "max_request_tokens": 1000000,
+          "rate_limit_TPM": 15000,
+          "rate_limit_TPH": 100000,
+          "rate_limit_TPD": 1000000
+        },
+        {
+          "name": "gemini-1.5-pro",
+          "rate_limit": 0,
+          "max_request_tokens": 2000000,
+          "rate_limit_TPM": 15000,
+          "rate_limit_TPH": 100000,
+          "rate_limit_TPD": 1000000
+        }
+      ]
     },
     "openai": {
       "id": "openai",

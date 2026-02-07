@@ -10,12 +10,20 @@
             {
               "name": "gemini-2.0-flash",
               "weight": 3,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 100000,
+              "rate_limit_TPM": 15000,
+              "rate_limit_TPH": 100000,
+              "rate_limit_TPD": 1000000
             },
             {
               "name": "gemini-1.5-pro",
               "weight": 1,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 100000,
+              "rate_limit_TPM": 15000,
+              "rate_limit_TPH": 100000,
+              "rate_limit_TPD": 1000000
             }
           ]
         },
@@ -26,12 +34,14 @@
             {
               "name": "gpt-4",
               "weight": 2,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 128000
             },
             {
               "name": "gpt-3.5-turbo",
               "weight": 1,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 4000
             }
           ]
         },
@@ -42,12 +52,14 @@
             {
               "name": "claude-3-5-sonnet-20241022",
               "weight": 2,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 200000
             },
             {
               "name": "claude-3-haiku-20240307",
               "weight": 1,
-              "rate_limit": 0
+              "rate_limit": 0,
+              "max_request_tokens": 200000
             }
           ]
         }

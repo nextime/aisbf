@@ -28,6 +28,13 @@ import json
 import shutil
 from pathlib import Path
 
+class ProviderModelConfig(BaseModel):
+    """Model configuration within a provider"""
+    name: str
+    rate_limit: Optional[float] = None
+    max_request_tokens: Optional[int] = None
+
+
 class ProviderConfig(BaseModel):
     id: str
     name: str
@@ -35,6 +42,8 @@ class ProviderConfig(BaseModel):
     type: str
     api_key_required: bool
     rate_limit: float = 0.0
+    api_key: Optional[str] = None  # Optional API key in provider config
+    models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
 
 class RotationConfig(BaseModel):
     providers: List[Dict]

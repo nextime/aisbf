@@ -26,13 +26,19 @@ import asyncio
 import re
 import uuid
 import hashlib
-from typing import Dict, List, Optional
+import time as time_module
+from typing import Dict, List, Optional, Union
 from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler
 from .config import config
+from .utils import (
+    count_messages_tokens,
+    split_messages_into_chunks,
+    get_max_request_tokens_for_model
+)
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -68,6 +74,134 @@ class RequestHandler:
     def __init__(self):
         self.config = config
 
+    async def _handle_chunked_request(
+        self,
+        handler,
+        model: str,
+        messages: List[Dict],
+        max_tokens: Optional[int],
+        temperature: float,
+        stream: bool,
+        tools: Optional[List[Dict]],
+        tool_choice: Optional[Union[str, Dict]],
+        max_request_tokens: int,
+        provider_id: str,
+        logger
+    ) -> Dict:
+        """
+        Handle a request that needs to be split into multiple chunks due to token limits.
+        
+        This method splits the request into chunks, sends each chunk sequentially,
+        and combines the responses into a single response.
+        
+        Args:
+            handler: The provider handler
+            model: The model name
+            messages: The messages to send
+            max_tokens: Max output tokens
+            temperature: Temperature setting
+            stream: Whether to stream (not supported for chunked requests)
+            tools: Tool definitions
+            tool_choice: Tool choice setting
+            max_request_tokens: Maximum tokens per request
+            provider_id: Provider identifier
+            logger: Logger instance
+        
+        Returns:
+            Combined response from all chunks
+        """
+        import time
+        
+        logger.info(f"=== CHUNKED REQUEST HANDLING START ===")
+        logger.info(f"Max request tokens per chunk: {max_request_tokens}")
+        
+        # Split messages into chunks
+        message_chunks = split_messages_into_chunks(messages, max_request_tokens, model)
+        logger.info(f"Split into {len(message_chunks)} message chunks")
+        
+        if stream:
+            logger.warning("Streaming is not supported for chunked requests, falling back to non-streaming")
+        
+        # Process each chunk and collect responses
+        all_responses = []
+        combined_content = ""
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        created_time = int(time_module.time())
+        response_id = f"chunked-{provider_id}-{model}-{created_time}"
+        
+        for chunk_idx, chunk_messages in enumerate(message_chunks):
+            logger.info(f"Processing chunk {chunk_idx + 1}/{len(message_chunks)}")
+            logger.info(f"Chunk messages count: {len(chunk_messages)}")
+            
+            # Apply rate limiting between chunks
+            if chunk_idx > 0:
+                await handler.apply_rate_limit()
+            
+            try:
+                chunk_response = await handler.handle_request(
+                    model=model,
+                    messages=chunk_messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=False,  # Always non-streaming for chunked requests
+                    tools=tools if chunk_idx == 0 else None,  # Only first chunk uses tools
+                    tool_choice=tool_choice if chunk_idx == 0 else None
+                )
+                
+                # Extract content from response
+                if isinstance(chunk_response, dict):
+                    choices = chunk_response.get('choices', [])
+                    if choices:
+                        content = choices[0].get('message', {}).get('content', '')
+                        combined_content += content
+                        
+                        # Accumulate token usage
+                        usage = chunk_response.get('usage', {})
+                        total_prompt_tokens += usage.get('prompt_tokens', 0)
+                        total_completion_tokens += usage.get('completion_tokens', 0)
+                
+                all_responses.append(chunk_response)
+                logger.info(f"Chunk {chunk_idx + 1} processed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error processing chunk {chunk_idx + 1}: {e}")
+                # If a chunk fails, we still try to return what we have
+                if all_responses:
+                    logger.warning("Returning partial results from successful chunks")
+                    break
+                else:
+                    raise e
+        
+        # Build combined response
+        combined_response = {
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created_time,
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": combined_content
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens
+            },
+            "aisbf_chunked": True,
+            "aisbf_total_chunks": len(message_chunks)
+        }
+        
+        logger.info(f"=== CHUNKED REQUEST HANDLING END ===")
+        logger.info(f"Combined content length: {len(combined_content)} characters")
+        logger.info(f"Total chunks processed: {len(all_responses)}")
+        
+        return combined_response
+
     async def handle_chat_completion(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
         import logging
         logger = logging.getLogger(__name__)
@@ -98,11 +232,53 @@ class RequestHandler:
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
 
         try:
-            logger.info(f"Model requested: {request_data.get('model')}")
-            logger.info(f"Messages count: {len(request_data.get('messages', []))}")
+            model = request_data.get('model')
+            messages = request_data.get('messages', [])
+            
+            logger.info(f"Model requested: {model}")
+            logger.info(f"Messages count: {len(messages)}")
             logger.info(f"Max tokens: {request_data.get('max_tokens')}")
             logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
             logger.info(f"Stream: {request_data.get('stream', False)}")
+            
+            # Check for max_request_tokens in provider config
+            max_request_tokens = get_max_request_tokens_for_model(
+                model_name=model,
+                provider_config=provider_config,
+                rotation_model_config=None
+            )
+            
+            if max_request_tokens:
+                # Count tokens in the request
+                request_tokens = count_messages_tokens(messages, model)
+                logger.info(f"Request tokens: {request_tokens}, max_request_tokens: {max_request_tokens}")
+                
+                if request_tokens > max_request_tokens:
+                    logger.info(f"Request exceeds max_request_tokens, will split into chunks")
+                    
+                    # Apply rate limiting
+                    logger.info("Applying rate limiting...")
+                    await handler.apply_rate_limit()
+                    logger.info("Rate limiting applied")
+                    
+                    # Handle as chunked request
+                    response = await self._handle_chunked_request(
+                        handler=handler,
+                        model=model,
+                        messages=messages,
+                        max_tokens=request_data.get('max_tokens'),
+                        temperature=request_data.get('temperature', 1.0),
+                        stream=request_data.get('stream', False),
+                        tools=request_data.get('tools'),
+                        tool_choice=request_data.get('tool_choice'),
+                        max_request_tokens=max_request_tokens,
+                        provider_id=provider_id,
+                        logger=logger
+                    )
+                    
+                    handler.record_success()
+                    logger.info(f"=== RequestHandler.handle_chat_completion END ===")
+                    return response
             
             # Apply rate limiting
             logger.info("Applying rate limiting...")
@@ -111,8 +287,8 @@ class RequestHandler:
 
             logger.info(f"Sending request to provider handler...")
             response = await handler.handle_request(
-                model=request_data['model'],
-                messages=request_data['messages'],
+                model=model,
+                messages=messages,
                 max_tokens=request_data.get('max_tokens'),
                 temperature=request_data.get('temperature', 1.0),
                 stream=request_data.get('stream', False),
@@ -360,6 +536,170 @@ class RotationHandler:
             return provider_config.type
         return None
 
+    async def _handle_chunked_rotation_request(
+        self,
+        handler,
+        model_name: str,
+        messages: List[Dict],
+        max_tokens: Optional[int],
+        temperature: float,
+        stream: bool,
+        tools: Optional[List[Dict]],
+        tool_choice: Optional[Union[str, Dict]],
+        max_request_tokens: int,
+        provider_id: str,
+        logger
+    ) -> Dict:
+        """
+        Handle a rotation request that needs to be split into multiple chunks due to token limits.
+        
+        This method splits the request into chunks, sends each chunk sequentially,
+        and combines the responses into a single response.
+        
+        Args:
+            handler: The provider handler
+            model_name: The model name
+            messages: The messages to send
+            max_tokens: Max output tokens
+            temperature: Temperature setting
+            stream: Whether to stream (not supported for chunked requests)
+            tools: Tool definitions
+            tool_choice: Tool choice setting
+            max_request_tokens: Maximum tokens per request
+            provider_id: Provider identifier
+            logger: Logger instance
+        
+        Returns:
+            Combined response from all chunks
+        """
+        logger.info(f"=== ROTATION CHUNKED REQUEST HANDLING START ===")
+        logger.info(f"Max request tokens per chunk: {max_request_tokens}")
+        
+        # Split messages into chunks
+        message_chunks = split_messages_into_chunks(messages, max_request_tokens, model_name)
+        logger.info(f"Split into {len(message_chunks)} message chunks")
+        
+        if stream:
+            logger.warning("Streaming is not supported for chunked rotation requests, falling back to non-streaming")
+        
+        # Process each chunk and collect responses
+        all_responses = []
+        combined_content = ""
+        total_prompt_tokens = 0
+        total_completion_tokens = 0
+        created_time = int(time_module.time())
+        response_id = f"chunked-rotation-{provider_id}-{model_name}-{created_time}"
+        
+        for chunk_idx, chunk_messages in enumerate(message_chunks):
+            logger.info(f"Processing chunk {chunk_idx + 1}/{len(message_chunks)}")
+            logger.info(f"Chunk messages count: {len(chunk_messages)}")
+            
+            # Apply rate limiting between chunks
+            if chunk_idx > 0:
+                await handler.apply_rate_limit()
+            
+            try:
+                chunk_response = await handler.handle_request(
+                    model=model_name,
+                    messages=chunk_messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=False,  # Always non-streaming for chunked requests
+                    tools=tools if chunk_idx == 0 else None,  # Only first chunk uses tools
+                    tool_choice=tool_choice if chunk_idx == 0 else None
+                )
+                
+                # Extract content from response
+                if isinstance(chunk_response, dict):
+                    choices = chunk_response.get('choices', [])
+                    if choices:
+                        content = choices[0].get('message', {}).get('content', '')
+                        combined_content += content
+                        
+                        # Accumulate token usage
+                        usage = chunk_response.get('usage', {})
+                        chunk_total_tokens = usage.get('total_tokens', 0)
+                        total_prompt_tokens += usage.get('prompt_tokens', 0)
+                        total_completion_tokens += usage.get('completion_tokens', 0)
+                        
+                        # Record token usage for rate limit tracking
+                        if chunk_total_tokens > 0:
+                            handler._record_token_usage(model_name, chunk_total_tokens)
+                            logger.info(f"Recorded {chunk_total_tokens} tokens for chunk {chunk_idx + 1}")
+                
+                all_responses.append(chunk_response)
+                logger.info(f"Chunk {chunk_idx + 1} processed successfully")
+                
+            except Exception as e:
+                logger.error(f"Error processing chunk {chunk_idx + 1}: {e}")
+                # If a chunk fails, we still try to return what we have
+                if all_responses:
+                    logger.warning("Returning partial results from successful chunks")
+                    break
+                else:
+                    raise e
+        
+        # Build combined response
+        combined_response = {
+            "id": response_id,
+            "object": "chat.completion",
+            "created": created_time,
+            "model": model_name,
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": combined_content
+                },
+                "finish_reason": "stop"
+            }],
+            "usage": {
+                "prompt_tokens": total_prompt_tokens,
+                "completion_tokens": total_completion_tokens,
+                "total_tokens": total_prompt_tokens + total_completion_tokens
+            },
+            "aisbf_chunked": True,
+            "aisbf_total_chunks": len(message_chunks)
+        }
+        
+        logger.info(f"=== ROTATION CHUNKED REQUEST HANDLING END ===")
+        logger.info(f"Combined content length: {len(combined_content)} characters")
+        logger.info(f"Total chunks processed: {len(all_responses)}")
+        
+        return combined_response
+
+    def _get_api_key(self, provider_id: str, rotation_api_key: Optional[str] = None) -> Optional[str]:
+        """
+        Get the API key for a provider.
+        
+        Priority order:
+        1. API key from provider config (providers.json)
+        2. API key from rotation config (rotations.json)
+        
+        Args:
+            provider_id: The provider identifier
+            rotation_api_key: Optional API key from rotation configuration
+            
+        Returns:
+            The API key to use, or None if not found
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # First check provider config for api_key
+        provider_config = self.config.get_provider(provider_id)
+        if provider_config and hasattr(provider_config, 'api_key') and provider_config.api_key:
+            logger.info(f"Using API key from provider config for {provider_id}")
+            return provider_config.api_key
+        
+        # Fall back to rotation api_key
+        if rotation_api_key:
+            logger.info(f"Using API key from rotation config for {provider_id}")
+            return rotation_api_key
+        
+        logger.info(f"No API key found for {provider_id}")
+        return None
+
     async def handle_rotation_request(self, rotation_id: str, request_data: Dict):
         """
         Handle a rotation request.
@@ -405,8 +745,11 @@ class RotationHandler:
                 skipped_providers.append(provider_id)
                 continue
             
+            # Get API key: first from provider config, then from rotation config
+            api_key = self._get_api_key(provider_id, provider.get('api_key'))
+            
             # Check if provider is rate limited/deactivated
-            provider_handler = get_provider_handler(provider_id, provider.get('api_key'))
+            provider_handler = get_provider_handler(provider_id, api_key)
             if provider_handler.is_rate_limited():
                 logger.warning(f"  [SKIPPED] Provider {provider_id} is rate limited/deactivated")
                 logger.warning(f"  Reason: Provider has exceeded failure threshold or is in cooldown period")
@@ -429,9 +772,10 @@ class RotationHandler:
                 logger.info(f"      Rate Limit: {model_rate_limit}")
                 
                 # Add provider_id and api_key to model for later use
+                # Use resolved api_key (from provider config or rotation config)
                 model_with_provider = model.copy()
                 model_with_provider['provider_id'] = provider_id
-                model_with_provider['api_key'] = provider.get('api_key')
+                model_with_provider['api_key'] = api_key
                 available_models.append(model_with_provider)
 
         logger.info(f"")
@@ -536,12 +880,82 @@ class RotationHandler:
                 logger.warning(f"Provider {provider_id} is rate limited, skipping to next model")
                 continue
             
+            # Check token rate limits for this model
+            request_tokens = count_messages_tokens(request_data['messages'], model_name)
+            if handler._check_token_rate_limit(model_name, request_tokens):
+                logger.warning(f"Model {model_name} would exceed token rate limit, skipping to next model")
+                # Determine which limit was exceeded and disable provider accordingly
+                model_config = current_model
+                if model_config.get('rate_limit_TPM'):
+                    handler._disable_provider_for_duration("1m")
+                    logger.warning(f"Provider {provider_id} disabled for 1 minute due to TPM limit")
+                elif model_config.get('rate_limit_TPH'):
+                    handler._disable_provider_for_duration("1h")
+                    logger.warning(f"Provider {provider_id} disabled for 1 hour due to TPH limit")
+                elif model_config.get('rate_limit_TPD'):
+                    handler._disable_provider_for_duration("1d")
+                    logger.warning(f"Provider {provider_id} disabled for 1 day due to TPD limit")
+                continue
+            
             try:
                 logger.info(f"Model requested: {model_name}")
                 logger.info(f"Messages count: {len(request_data.get('messages', []))}")
                 logger.info(f"Max tokens: {request_data.get('max_tokens')}")
                 logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
                 logger.info(f"Stream: {request_data.get('stream', False)}")
+                
+                # Check for max_request_tokens in rotation model config
+                max_request_tokens = current_model.get('max_request_tokens')
+                if max_request_tokens:
+                    # Count tokens in the request
+                    request_tokens = count_messages_tokens(request_data['messages'], model_name)
+                    logger.info(f"Request tokens: {request_tokens}, max_request_tokens: {max_request_tokens}")
+                    
+                    if request_tokens > max_request_tokens:
+                        logger.info(f"Request exceeds max_request_tokens, will split into chunks")
+                        
+                        # Apply rate limiting
+                        logger.info("Applying rate limiting...")
+                        await handler.apply_rate_limit()
+                        logger.info("Rate limiting applied")
+                        
+                        # Handle as chunked request
+                        response = await self._handle_chunked_rotation_request(
+                            handler=handler,
+                            model_name=model_name,
+                            messages=request_data['messages'],
+                            max_tokens=request_data.get('max_tokens'),
+                            temperature=request_data.get('temperature', 1.0),
+                            stream=request_data.get('stream', False),
+                            tools=request_data.get('tools'),
+                            tool_choice=request_data.get('tool_choice'),
+                            max_request_tokens=max_request_tokens,
+                            provider_id=provider_id,
+                            logger=logger
+                        )
+                        
+                        handler.record_success()
+                        logger.info(f"=== RotationHandler.handle_rotation_request END ===")
+                        logger.info(f"Request succeeded on attempt {attempt + 1}")
+                        logger.info(f"Successfully used model: {model_name} (provider: {provider_id})")
+                        
+                        # Check if response is a streaming request
+                        is_streaming = request_data.get('stream', False)
+                        if is_streaming:
+                            # Get provider type from configuration for proper streaming handling
+                            provider_type = self._get_provider_type(provider_id)
+                            logger.info(f"Returning streaming response for provider type: {provider_type}")
+                            return self._create_streaming_response(
+                                response=response,
+                                provider_type=provider_type,
+                                provider_id=provider_id,
+                                model_name=model_name,
+                                handler=handler,
+                                request_data=request_data
+                            )
+                        else:
+                            logger.info("Returning non-streaming response")
+                            return response
                 
                 # Apply model-specific rate limiting
                 rate_limit = current_model.get('rate_limit')
@@ -562,6 +976,15 @@ class RotationHandler:
                 )
                 logger.info(f"Response received from provider")
                 logger.info(f"Response type: {type(response)}")
+                
+                # Record token usage for rate limit tracking
+                if isinstance(response, dict):
+                    usage = response.get('usage', {})
+                    total_tokens = usage.get('total_tokens', 0)
+                    if total_tokens > 0:
+                        handler._record_token_usage(model_name, total_tokens)
+                        logger.info(f"Recorded {total_tokens} tokens for model {model_name}")
+                
                 handler.record_success()
                 
                 # Update successful variables to the ones that worked
