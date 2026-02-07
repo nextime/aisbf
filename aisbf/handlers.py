@@ -39,6 +39,7 @@ from .utils import (
     split_messages_into_chunks,
     get_max_request_tokens_for_model
 )
+from .context import ContextManager, get_context_config_for_model
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -241,12 +242,33 @@ class RequestHandler:
             logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
             logger.info(f"Stream: {request_data.get('stream', False)}")
             
+            # Get context configuration
+            context_config = get_context_config_for_model(
+                model_name=model,
+                provider_config=provider_config,
+                rotation_model_config=None
+            )
+            logger.info(f"Context config: {context_config}")
+            
             # Check for max_request_tokens in provider config
             max_request_tokens = get_max_request_tokens_for_model(
                 model_name=model,
                 provider_config=provider_config,
                 rotation_model_config=None
             )
+            
+            # Calculate effective context (total tokens used)
+            effective_context = count_messages_tokens(messages, model)
+            logger.info(f"Effective context: {effective_context} tokens")
+            
+            # Apply context condensation if needed
+            if context_config.get('condense_context', 0) > 0:
+                context_manager = ContextManager(context_config, handler)
+                if context_manager.should_condense(messages, model):
+                    logger.info("Context condensation triggered")
+                    messages = await context_manager.condense_context(messages, model)
+                    effective_context = count_messages_tokens(messages, model)
+                    logger.info(f"Condensed effective context: {effective_context} tokens")
             
             if max_request_tokens:
                 # Count tokens in the request
@@ -299,6 +321,11 @@ class RequestHandler:
             logger.info(f"Response type: {type(response)}")
             logger.info(f"Response: {response}")
             
+            # Add effective context to response for non-streaming
+            if isinstance(response, dict) and 'usage' in response:
+                response['usage']['effective_context'] = effective_context
+                logger.info(f"Added effective_context to response: {effective_context}")
+            
             # For OpenAI-compatible providers, the response is already a response object
             # Just return it as-is without any parsing or modification
             handler.record_success()
@@ -327,6 +354,32 @@ class RequestHandler:
         # If seed is present in request, generate unique fingerprint per request
         seed = request_data.get('seed')
         system_fingerprint = generate_system_fingerprint(provider_id, seed)
+        
+        # Get context configuration and calculate effective context
+        model = request_data.get('model')
+        messages = request_data.get('messages', [])
+        
+        context_config = get_context_config_for_model(
+            model_name=model,
+            provider_config=provider_config,
+            rotation_model_config=None
+        )
+        
+        effective_context = count_messages_tokens(messages, model)
+        
+        # Apply context condensation if needed
+        if context_config.get('condense_context', 0) > 0:
+            context_manager = ContextManager(context_config, handler)
+            if context_manager.should_condense(messages, model):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info("Context condensation triggered for streaming request")
+                messages = await context_manager.condense_context(messages, model)
+                effective_context = count_messages_tokens(messages, model)
+                logger.info(f"Condensed effective context: {effective_context} tokens")
+        
+        # Update request_data with condensed messages
+        request_data['messages'] = messages
 
         async def stream_generator():
             import logging
@@ -457,7 +510,8 @@ class RequestHandler:
                         "usage": {
                             "prompt_tokens": None,
                             "completion_tokens": None,
-                            "total_tokens": None
+                            "total_tokens": None,
+                            "effective_context": effective_context
                         },
                         "provider": provider_id,
                         "choices": [{
@@ -488,6 +542,16 @@ class RequestHandler:
                             # For OpenAI-compatible providers, just pass through the raw chunk
                             # Convert chunk to dict and serialize as JSON
                             chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                            
+                            # Add effective_context to the last chunk (when finish_reason is present)
+                            if isinstance(chunk_dict, dict):
+                                choices = chunk_dict.get('choices', [])
+                                if choices and choices[0].get('finish_reason') is not None:
+                                    # This is the last chunk, add effective_context
+                                    if 'usage' not in chunk_dict:
+                                        chunk_dict['usage'] = {}
+                                    chunk_dict['usage']['effective_context'] = effective_context
+                            
                             yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                         except Exception as chunk_error:
                             # Handle errors during chunk serialization
@@ -904,6 +968,30 @@ class RotationHandler:
                 logger.info(f"Temperature: {request_data.get('temperature', 1.0)}")
                 logger.info(f"Stream: {request_data.get('stream', False)}")
                 
+                # Get context configuration
+                context_config = get_context_config_for_model(
+                    model_name=model_name,
+                    provider_config=None,
+                    rotation_model_config=current_model
+                )
+                logger.info(f"Context config: {context_config}")
+                
+                # Calculate effective context
+                messages = request_data['messages']
+                effective_context = count_messages_tokens(messages, model_name)
+                logger.info(f"Effective context: {effective_context} tokens")
+                
+                # Apply context condensation if needed
+                if context_config.get('condense_context', 0) > 0:
+                    context_manager = ContextManager(context_config, handler)
+                    if context_manager.should_condense(messages, model_name):
+                        logger.info("Context condensation triggered")
+                        messages = await context_manager.condense_context(messages, model_name)
+                        effective_context = count_messages_tokens(messages, model_name)
+                        logger.info(f"Condensed effective context: {effective_context} tokens")
+                    # Update request_data with condensed messages
+                    request_data['messages'] = messages
+                
                 # Check for max_request_tokens in rotation model config
                 max_request_tokens = current_model.get('max_request_tokens')
                 if max_request_tokens:
@@ -984,6 +1072,10 @@ class RotationHandler:
                     if total_tokens > 0:
                         handler._record_token_usage(model_name, total_tokens)
                         logger.info(f"Recorded {total_tokens} tokens for model {model_name}")
+                    
+                    # Add effective context to response for non-streaming
+                    usage['effective_context'] = effective_context
+                    logger.info(f"Added effective_context to response: {effective_context}")
                 
                 handler.record_success()
                 
@@ -1177,7 +1269,8 @@ class RotationHandler:
                         "usage": {
                             "prompt_tokens": None,
                             "completion_tokens": None,
-                            "total_tokens": None
+                            "total_tokens": None,
+                            "effective_context": effective_context
                         },
                         "provider": provider_id,
                         "choices": [{
@@ -1206,6 +1299,16 @@ class RotationHandler:
                             
                             # For OpenAI-compatible providers, just pass through the raw chunk
                             chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                            
+                            # Add effective_context to the last chunk (when finish_reason is present)
+                            if isinstance(chunk_dict, dict):
+                                choices = chunk_dict.get('choices', [])
+                                if choices and choices[0].get('finish_reason') is not None:
+                                    # This is the last chunk, add effective_context
+                                    if 'usage' not in chunk_dict:
+                                        chunk_dict['usage'] = {}
+                                    chunk_dict['usage']['effective_context'] = effective_context
+                            
                             yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                         except Exception as chunk_error:
                             error_msg = str(chunk_error)
@@ -1284,7 +1387,7 @@ class AutoselectHandler:
         
         # Build the complete prompt
         prompt = f"""{skill_content}
-
+ 
 <aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
 <aisbf_autoselect_list>
 {models_list}
@@ -1519,7 +1622,7 @@ class AutoselectHandler:
         return response
 
     async def handle_autoselect_model_list(self, autoselect_id: str) -> List[Dict]:
-        """List available models for an autoselect endpoint"""
+        """List the available models for an autoselect endpoint"""
         autoselect_config = self.config.get_autoselect(autoselect_id)
         if not autoselect_config:
             raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")

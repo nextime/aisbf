@@ -264,6 +264,104 @@ When using autoselect models:
 - **User Experience**: Provide optimal responses without manual model selection
 - **Adaptive Selection**: Dynamically adjust model selection based on request characteristics
 
+## Context Management
+
+AISBF provides intelligent context management to handle large conversation histories and prevent exceeding model context limits:
+
+### How Context Management Works
+
+Context management automatically monitors and condenses conversation context:
+
+1. **Effective Context Tracking**: Calculates and reports total tokens used (effective_context) for every request
+2. **Automatic Condensation**: When context exceeds configured percentage of model's context_size, triggers condensation
+3. **Multiple Condensation Methods**: Supports hierarchical, conversational, semantic, and algoritmic condensation
+4. **Method Chaining**: Multiple condensation methods can be applied in sequence for optimal results
+
+### Context Configuration
+
+Models can be configured with context management fields:
+
+```json
+{
+  "models": [
+    {
+      "name": "gemini-2.0-flash",
+      "context_size": 1000000,
+      "condense_context": 80,
+      "condense_method": ["hierarchical", "semantic"]
+    }
+  ]
+}
+```
+
+**Configuration Fields:**
+- **`context_size`**: Maximum context size in tokens for the model
+- **`condense_context`**: Percentage (0-100) at which to trigger condensation. 0 means disabled
+- **`condense_method`**: String or list of strings specifying condensation method(s)
+
+### Condensation Methods
+
+#### 1. Hierarchical Context Engineering
+Separates context into persistent (long-term facts) and transient (immediate task) layers:
+- **Persistent State**: Architecture, project state, core principles
+- **Recent History**: Summarized conversation history
+- **Active Code**: High-fidelity current code
+- **Instruction**: Current task/goal
+
+#### 2. Conversational Summarization (Memory Buffering)
+Replaces old messages with high-density summaries:
+- Uses a smaller model to summarize conversation progress
+- Maintains continuity without hitting token caps
+- Preserves key facts, decisions, and current goals
+
+#### 3. Semantic Context Pruning (Observation Masking)
+Removes irrelevant details based on current query:
+- Uses a smaller "janitor" model to extract relevant facts
+- Can reduce history by 50-80% without losing critical information
+- Focuses on information relevant to the specific current request
+
+#### 4. Algoritmic Token Compression
+Mathematical compression for technical data and logs:
+- Similar to LLMLingua compression
+- Achieves up to 20x compression for technical data
+- Removes low-information tokens systematically
+
+### Effective Context Reporting
+
+All responses include `effective_context` in the usage field:
+
+**Non-streaming responses:**
+```json
+{
+  "usage": {
+    "prompt_tokens": 1000,
+    "completion_tokens": 500,
+    "total_tokens": 1500,
+    "effective_context": 1000
+  }
+}
+```
+
+**Streaming responses:**
+The final chunk includes effective_context:
+```json
+{
+  "usage": {
+    "prompt_tokens": null,
+    "completion_tokens": null,
+    "total_tokens": null,
+    "effective_context": 1000
+  }
+}
+```
+
+### Example Use Cases
+
+- **Long Conversations**: Maintain context across extended conversations without hitting limits
+- **Code Analysis**: Handle large codebases with intelligent context pruning
+- **Document Processing**: Process large documents with automatic summarization
+- **Multi-turn Tasks**: Maintain task context across multiple interactions
+
 ## Error Tracking and Rate Limiting
 
 ### Error Tracking
@@ -399,7 +497,7 @@ Stops running daemon and removes PID file.
 - `Message` - Chat message structure
 - `ChatCompletionRequest` - Request model
 - `ChatCompletionResponse` - Response model
-- `Model` - Model information
+- `Model` - Model information (includes context_size, condense_context, condense_method fields)
 - `Provider` - Provider information
 - `ErrorTracking` - Error tracking data
 
@@ -411,9 +509,13 @@ Stops running daemon and removes PID file.
 - `OllamaProviderHandler` - Ollama provider implementation
 - `get_provider_handler()` - Factory function for provider handlers
 
+### aisbf/context.py
+- `ContextManager` - Context management class for automatic condensation
+- `get_context_config_for_model()` - Retrieves context configuration from provider or rotation model config
+
 ### aisbf/handlers.py
-- `RequestHandler` - Request handling logic with streaming support
-- `RotationHandler` - Rotation handling logic with streaming support
+- `RequestHandler` - Request handling logic with streaming support and context management
+- `RotationHandler` - Rotation handling logic with streaming support and context management
 - `AutoselectHandler` - AI-assisted model selection with streaming support
 
 ## Dependencies
@@ -426,6 +528,8 @@ Key dependencies from requirements.txt:
 - google-genai - Google AI SDK
 - openai - OpenAI SDK
 - anthropic - Anthropic SDK
+- langchain-text-splitters - Intelligent text splitting for request chunking
+- tiktoken - Accurate token counting for context management
 
 ## Adding New Providers
 

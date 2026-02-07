@@ -24,6 +24,7 @@ A modular proxy server for managing multiple AI provider integrations.
 """
 
 from .config import config, Config, ProviderConfig, RotationConfig, AppConfig, AutoselectConfig, AutoselectModelInfo
+from .context import ContextManager, get_context_config_for_model
 from .models import (
     Message,
     ChatCompletionRequest,
@@ -42,6 +43,7 @@ from .providers import (
     PROVIDER_HANDLERS
 )
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
+from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
 __version__ = "0.3.0"
 __all__ = [
@@ -74,4 +76,11 @@ __all__ = [
     "RequestHandler",
     "RotationHandler",
     "AutoselectHandler",
+    # Context
+    "ContextManager",
+    "get_context_config_for_model",
+    # Utils
+    "count_messages_tokens",
+    "split_messages_into_chunks",
+    "get_max_request_tokens_for_model",
 ]

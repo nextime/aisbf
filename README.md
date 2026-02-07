@@ -13,6 +13,8 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 - **Request Splitting**: Automatic splitting of large requests when exceeding `max_request_tokens` limit
 - **Token Rate Limiting**: Per-model token usage tracking with TPM (tokens per minute), TPH (tokens per hour), and TPD (tokens per day) limits
 - **Automatic Provider Disabling**: Providers automatically disabled when token rate limits are exceeded
+- **Context Management**: Automatic context condensation when approaching model limits with multiple condensation methods
+- **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
 
 ## Author
 
@@ -82,11 +84,23 @@ Models can be configured with the following optional fields:
 - **`rate_limit_TPM`**: Maximum tokens allowed per minute (Tokens Per Minute)
 - **`rate_limit_TPH`**: Maximum tokens allowed per hour (Tokens Per Hour)
 - **`rate_limit_TPD`**: Maximum tokens allowed per day (Tokens Per Day)
+- **`context_size`**: Maximum context size in tokens for the model. Used to determine when to trigger context condensation.
+- **`condense_context`**: Percentage (0-100) at which to trigger context condensation. 0 means disabled, any other value triggers condensation when context reaches this percentage of context_size.
+- **`condense_method`**: String or list of strings specifying condensation method(s). Supported values: "hierarchical", "conversational", "semantic", "algoritmic". Multiple methods can be chained together.
 
 When token rate limits are exceeded, providers are automatically disabled:
 - TPM limit exceeded: Provider disabled for 1 minute
 - TPH limit exceeded: Provider disabled for 1 hour
 - TPD limit exceeded: Provider disabled for 1 day
+
+### Context Condensation Methods
+
+When context exceeds the configured percentage of `context_size`, the system automatically condenses the prompt using one or more methods:
+
+1. **Hierarchical**: Separates context into persistent (long-term facts) and transient (immediate task) layers
+2. **Conversational**: Summarizes old messages using a smaller model to maintain conversation continuity
+3. **Semantic**: Prunes irrelevant context based on current query using a smaller "janitor" model
+4. **Algoritmic**: Uses mathematical compression for technical data and logs (similar to LLMLingua)
 
 See `config/providers.json` and `config/rotations.json` for configuration examples.
 

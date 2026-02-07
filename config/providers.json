@@ -14,7 +14,10 @@
           "max_request_tokens": 1000000,
           "rate_limit_TPM": 15000,
           "rate_limit_TPH": 100000,
-          "rate_limit_TPD": 1000000
+          "rate_limit_TPD": 1000000,
+          "context_size": 1000000,
+          "condense_context": 80,
+          "condense_method": ["hierarchical", "semantic"]
         },
         {
           "name": "gemini-1.5-pro",
@@ -22,7 +25,10 @@
           "max_request_tokens": 2000000,
           "rate_limit_TPM": 15000,
           "rate_limit_TPH": 100000,
-          "rate_limit_TPD": 1000000
+          "rate_limit_TPD": 1000000,
+          "context_size": 2000000,
+          "condense_context": 85,
+          "condense_method": "conversational"
         }
       ]
     },
