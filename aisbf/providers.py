@@ -153,21 +153,29 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Handle streaming request
             if stream:
                 logging.info(f"GoogleProviderHandler: Using streaming API")
-                # Create a new client instance for each streaming request to ensure it remains open
-                # This prevents "Cannot send a request, as the client has been closed" errors
+                # Create a new client instance for streaming to ensure it stays open
                 from google import genai
                 stream_client = genai.Client(api_key=self.api_key)
-                response = stream_client.models.generate_content_stream(
+                
+                # We need to iterate over the streaming response immediately without yielding control
+                # to ensure the client stays alive
+                chunks = []
+                for chunk in stream_client.models.generate_content_stream(
                     model=model,
                     contents=content,
                     config=config
-                )
-                logging.info(f"GoogleProviderHandler: Streaming response received")
+                ):
+                    chunks.append(chunk)
+                
+                logging.info(f"GoogleProviderHandler: Streaming response received (total chunks: {len(chunks)})")
                 self.record_success()
                 
-                # Return the synchronous iterator directly
-                # The handler will iterate over it and convert to OpenAI format
-                return response
+                # Now yield chunks asynchronously
+                async def async_generator():
+                    for chunk in chunks:
+                        yield chunk
+                
+                return async_generator()
             else:
                 # Non-streaming request
                 # Generate content using the google-genai client
