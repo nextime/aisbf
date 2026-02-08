@@ -453,16 +453,83 @@ class GoogleProviderHandler(BaseProviderHandler):
                                                 import json
                                                 import re
                                                 
-                                                # Pattern 1: "tool: {...}" format
-                                                tool_pattern = r'tool:\s*(\{[^}]*\})'
-                                                tool_match = re.search(tool_pattern, response_text, re.DOTALL)
+                                                # Pattern 0: "assistant: [...]" wrapping everything (nested format)
+                                                # The entire response is wrapped in assistant: [{'type': 'text', 'text': 'tool: {...}...'}]
+                                                outer_assistant_pattern = r"^assistant:\s*(\[.*\])\s*$"
+                                                outer_assistant_match = re.match(outer_assistant_pattern, response_text.strip(), re.DOTALL)
                                                 
-                                                # Pattern 2: "content" field followed by "assistant:" format
-                                                # This handles: "content": "..." } assistant: [...]
-                                                content_assistant_pattern = r'"content":\s*"(.*?)"\s*\}\s*assistant:\s*(\[.*?\])\s*$'
-                                                content_assistant_match = re.search(content_assistant_pattern, response_text, re.DOTALL | re.IGNORECASE)
+                                                if outer_assistant_match:
+                                                    try:
+                                                        outer_content = json.loads(outer_assistant_match.group(1))
+                                                        if isinstance(outer_content, list) and len(outer_content) > 0:
+                                                            for item in outer_content:
+                                                                if isinstance(item, dict) and item.get('type') == 'text':
+                                                                    inner_text = item.get('text', '')
+                                                                    # Now parse the inner text for tool calls
+                                                                    inner_tool_pattern = r'tool:\s*(\{.*?\})\s*(?:assistant:\s*(\[.*\]))?\s*$'
+                                                                    inner_tool_match = re.search(inner_tool_pattern, inner_text, re.DOTALL)
+                                                                    
+                                                                    if inner_tool_match:
+                                                                        tool_json_str = inner_tool_match.group(1)
+                                                                        # Parse the tool JSON - handle multi-line content
+                                                                        try:
+                                                                            # Extract JSON using a more robust method
+                                                                            tool_start = inner_text.find('tool:')
+                                                                            if tool_start != -1:
+                                                                                json_start = inner_text.find('{', tool_start)
+                                                                                brace_count = 0
+                                                                                json_end = json_start
+                                                                                for i, c in enumerate(inner_text[json_start:], json_start):
+                                                                                    if c == '{':
+                                                                                        brace_count += 1
+                                                                                    elif c == '}':
+                                                                                        brace_count -= 1
+                                                                                        if brace_count == 0:
+                                                                                            json_end = i + 1
+                                                                                            break
+                                                                                tool_json_str = inner_text[json_start:json_end]
+                                                                                parsed_tool = json.loads(tool_json_str)
+                                                                                
+                                                                                # Convert to OpenAI tool_calls format
+                                                                                openai_tool_call = {
+                                                                                    "id": f"call_{call_id}",
+                                                                                    "type": "function",
+                                                                                    "function": {
+                                                                                        "name": parsed_tool.get('action', parsed_tool.get('name', 'unknown')),
+                                                                                        "arguments": json.dumps({k: v for k, v in parsed_tool.items() if k not in ['action', 'name']})
+                                                                                    }
+                                                                                }
+                                                                                openai_tool_calls.append(openai_tool_call)
+                                                                                call_id += 1
+                                                                                logging.info(f"Converted nested 'tool:' format to OpenAI tool_calls: {openai_tool_call}")
+                                                                                
+                                                                                # Extract the final assistant text if present
+                                                                                if inner_tool_match.group(2):
+                                                                                    try:
+                                                                                        final_assistant = json.loads(inner_tool_match.group(2))
+                                                                                        if isinstance(final_assistant, list) and len(final_assistant) > 0:
+                                                                                            for final_item in final_assistant:
+                                                                                                if isinstance(final_item, dict) and final_item.get('type') == 'text':
+                                                                                                    response_text = final_item.get('text', '')
+                                                                                                    break
+                                                                                            else:
+                                                                                                response_text = ""
+                                                                                        else:
+                                                                                            response_text = ""
+                                                                                    except json.JSONDecodeError:
+                                                                                        response_text = ""
+                                                                                else:
+                                                                                    response_text = ""
+                                                                        except (json.JSONDecodeError, Exception) as e:
+                                                                            logging.debug(f"Failed to parse nested tool JSON: {e}")
+                                                                    break
+                                                    except (json.JSONDecodeError, Exception) as e:
+                                                        logging.debug(f"Failed to parse outer assistant format: {e}")
                                                 
-                                                if tool_match:
+                                                # Pattern 1: "tool: {...}" format (not nested)
+                                                elif not openai_tool_calls:
+                                                    tool_pattern = r'tool:\s*(\{[^}]*\})'
+                                                    tool_match = re.search(tool_pattern, response_text, re.DOTALL)
                                                     try:
                                                         tool_json_str = tool_match.group(1)
                                                         parsed_json = json.loads(tool_json_str)
