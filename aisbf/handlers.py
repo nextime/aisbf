@@ -900,11 +900,13 @@ class RotationHandler:
             
             # Build detailed error message with provider status information
             error_details = []
-            error_details.append(f"**No models available in rotation '{rotation_id}'**")
+            error_details.append(f"No models available in rotation '{rotation_id}'. Details:")
+            error_details.append("")
             error_details.append(f"**Total providers in rotation:** {len(providers)}")
             error_details.append(f"**Providers skipped (rate limited):** {len(skipped_providers)}")
             
             if skipped_providers:
+                error_details.append("")
                 error_details.append("**Skipped providers:**")
                 for provider_id in skipped_providers:
                     provider_config = self.config.get_provider(provider_id)
@@ -1251,8 +1253,11 @@ class RotationHandler:
         
         # Build detailed error message
         error_details = []
-        error_details.append(f"**All providers in rotation '{rotation_id}' failed after {max_retries} attempts**")
-        error_details.append(f"**Attempted models:** {[m['name'] for m in tried_models]}")
+        error_details.append(f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts. Details:")
+        error_details.append("")
+        error_details.append(f"**Attempted models:**")
+        error_details.append(f"{[m['name'] for m in tried_models]}")
+        error_details.append("")
         
         # Format last error with JSON indentation if it contains JSON
         try:
@@ -1271,17 +1276,22 @@ class RotationHandler:
                         formatted_json = json.dumps(parsed_json, indent=2)
                         # Replace JSON part with formatted version
                         error_part = last_error[:json_start]
-                        error_details.append(f"**Last error:** {error_part}\n```json\n{formatted_json}\n```")
+                        error_details.append(f"**Last error:** {error_part}")
+                        error_details.append(f"```json\n{formatted_json}\n```")
                     except:
-                        error_details.append(f"**Last error:** {last_error}")
+                        error_details.append(f"**Last error:**")
+                        error_details.append(f"{last_error}")
                 else:
-                    error_details.append(f"**Last error:** {last_error}")
+                    error_details.append(f"**Last error:**")
+                    error_details.append(f"{last_error}")
             else:
-                error_details.append(f"**Last error:** {last_error}")
+                error_details.append(f"**Last error:**")
+                error_details.append(f"{last_error}")
         except:
-            error_details.append(f"**Last error:** {last_error}")
+            error_details.append(f"**Last error:**")
+            error_details.append(f"{last_error}")
         
-        # Add provider status information
+        error_details.append("")
         error_details.append("**Provider status:**")
         for provider in providers:
             provider_id = provider['provider_id']
