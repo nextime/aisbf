@@ -411,7 +411,7 @@ class RequestHandler:
                     # Note: Google returns accumulated text, so we need to track and send only deltas
                     chunk_id = 0
                     accumulated_text = ""  # Track text we've already sent
-                    accumulated_tool_calls = []  # Track tool calls we've already sent
+                    seen_tool_call_ids = set()  # Track which tool call IDs we've already sent
                     last_chunk_id = None  # Track the last chunk for finish_reason
                     created_time = int(time.time())
                     response_id = f"google-{request_data['model']}-{created_time}"
@@ -475,9 +475,12 @@ class RequestHandler:
                             delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
                             accumulated_text = chunk_text  # Update accumulated text for next iteration
                             
-                            # Calculate delta tool calls (only new tool calls since last chunk)
-                            delta_tool_calls = chunk_tool_calls[len(accumulated_tool_calls):] if chunk_tool_calls else []
-                            accumulated_tool_calls = chunk_tool_calls  # Update accumulated tool calls for next iteration
+                            # Calculate delta tool calls (only tool calls we haven't seen before)
+                            delta_tool_calls = []
+                            for tool_call in chunk_tool_calls:
+                                if tool_call["id"] not in seen_tool_call_ids:
+                                    delta_tool_calls.append(tool_call)
+                                    seen_tool_call_ids.add(tool_call["id"])
                             
                             # Check if this is the last chunk
                             is_last_chunk = (chunk_idx == total_chunks - 1)
