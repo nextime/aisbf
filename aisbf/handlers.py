@@ -818,7 +818,7 @@ class RotationHandler:
             raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found")
         
         # Check if notifyerrors is enabled for this rotation
-        notify_errors = rotation_config.get('notifyerrors', False)
+        notify_errors = getattr(rotation_config, 'notifyerrors', False)
 
         logger.info(f"Rotation config loaded successfully")
         providers = rotation_config.providers
