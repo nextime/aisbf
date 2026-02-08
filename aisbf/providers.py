@@ -33,6 +33,7 @@ from anthropic import Anthropic
 from pydantic import BaseModel
 from .models import Provider, Model, ErrorTracking
 from .config import config
+from .utils import count_messages_tokens
 
 # Check if debug mode is enabled
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
