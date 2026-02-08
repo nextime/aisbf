@@ -479,6 +479,90 @@ class GoogleProviderHandler(BaseProviderHandler):
                                             if response_text and not openai_tool_calls:
                                                 import json
                                                 import re
+
+                                                # Pattern for Google model tool intent text
+                                                # Examples: "Let's execite the read", "I need to use the read tool", "Using the read tool"
+                                                google_tool_intent_patterns = [
+                                                    r"(?:^|\n)\s*(?:Let(?:'s|s us)?)\s*(?:execite|execute|use|call)\s*(?:the\s+)?(\w+)\s*(?:tool)?",
+                                                    r"(?:^|\n)\s*(?:I(?:'m| am)?|We(?:'re| are)?)\s*(?:going to |just )?(?:execite|execut(?:e|ed)?|use|call)\s*(?:the\s+)?(\w+)\s*(?:tool)?",
+                                                    r"(?:^|\n)\s*(?:I(?:'m| am)?|We(?:'re| are)?)\s*(?:going to |just )?read\s+(?:the\s+)?file[s]?",
+                                                    r"(?:^|\n)\s*Using\s+(?:the\s+)?(\w+)\s*(?:tool)?",
+                                                ]
+                                                for pattern in google_tool_intent_patterns:
+                                                    tool_intent_match = re.search(pattern, response_text, re.IGNORECASE)
+                                                    if tool_intent_match:
+                                                        tool_name = tool_intent_match.group(1).lower() if tool_intent_match.lastindex else ''
+                                                        # Map common verbs/nouns to tool names
+                                                        if tool_name in ['read', 'file', 'files', 'execite', '']:
+                                                            tool_name = 'read'
+                                                        elif tool_name in ['write', 'create']:
+                                                            tool_name = 'write'
+                                                        elif tool_name in ['exec', 'command', 'shell', 'run']:
+                                                            tool_name = 'exec'
+                                                        elif tool_name in ['edit', 'modify']:
+                                                            tool_name = 'edit'
+                                                        elif tool_name in ['search', 'find']:
+                                                            tool_name = 'web_search'
+                                                        elif tool_name in ['browser', 'browse', 'navigate']:
+                                                            tool_name = 'browser'
+
+                                                        logging.warning(f"Google model indicated intent to use '{tool_name}' tool (matched pattern: {pattern})")
+
+                                                        # Try to extract parameters from the response
+                                                        params = {}
+
+                                                        # Look for file path patterns
+                                                        path_patterns = [
+                                                            r"['\"]([^'\"]+\.md)['\"]",
+                                                            r"(?:file|path)s?\s*[:=]\s*['\"]([^'\"]+)['\"]",
+                                                            r"(?:path|file)\s*[:=]\s*['\"]([^'\"]+)['\"]",
+                                                            r"(?:open|read)\s+['\"]([^'\"]+)['\"]",
+                                                        ]
+                                                        for pp in path_patterns:
+                                                            path_match = re.search(pp, response_text, re.IGNORECASE)
+                                                            if path_match:
+                                                                params['path'] = path_match.group(1)
+                                                                break
+
+                                                        # Look for line range patterns
+                                                        offset_match = re.search(r'(?:offset|start|line\s*#?)\s*[:=]?\s*(\d+)', response_text, re.IGNORECASE)
+                                                        if offset_match:
+                                                            params['offset'] = int(offset_match.group(1))
+
+                                                        limit_match = re.search(r'(?:limit|lines?|count)\s*[:=]?\s*(\d+)', response_text, re.IGNORECASE)
+                                                        if limit_match:
+                                                            params['limit'] = int(limit_match.group(1))
+
+                                                        # Look for command patterns (for exec tool)
+                                                        if tool_name == 'exec':
+                                                            cmd_patterns = [
+                                                                r"(?:command|cmd|run)\s*[:=]?\s*['\"]([^'\"]+)['\"]",
+                                                                r"(?:run|execute)\s+(?:command\s+)?(['\"]([^'\"]+)['\"]|\S+)",
+                                                            ]
+                                                            for cp in cmd_patterns:
+                                                                cmd_match = re.search(cp, response_text, re.IGNORECASE)
+                                                                if cmd_match:
+                                                                    params['command'] = cmd_match.group(1) or cmd_match.group(2)
+                                                                    break
+
+                                                        if params:
+                                                            openai_tool_calls.append({
+                                                                "id": f"call_{call_id}",
+                                                                "type": "function",
+                                                                "function": {
+                                                                    "name": tool_name,
+                                                                    "arguments": json.dumps(params)
+                                                                }
+                                                            })
+                                                            call_id += 1
+                                                            logging.info(f"Converted Google tool intent to OpenAI format: {openai_tool_calls[-1]}")
+                                                            # Don't clear response_text - let the text be returned alongside
+                                                        break
+                                            # Check if response_text contains JSON that looks like a tool call
+                                            # Some models return tool calls as text content instead of using function_call attribute
+                                            if response_text and not openai_tool_calls:
+                                                import json
+                                                import re
                                                 
                                                 # Pattern 0: "assistant: [...]" wrapping everything (nested format)
                                                 # The entire response is wrapped in assistant: [{'type': 'text', 'text': 'tool: {...}...'}]
@@ -808,7 +892,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     id=model.name,
                     name=model.display_name or model.name,
                     provider_id=self.provider_id
-                )
+                ))
 
             return result
         except Exception as e:
