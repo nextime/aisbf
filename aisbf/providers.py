@@ -277,6 +277,13 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"GoogleProviderHandler: Messages: {messages}")
             else:
                 logging.info(f"GoogleProviderHandler: Messages count: {len(messages)}")
+            
+            if tools:
+                logging.info(f"GoogleProviderHandler: Tools provided: {len(tools)} tools")
+                if AISBF_DEBUG:
+                    logging.info(f"GoogleProviderHandler: Tools: {tools}")
+            if tool_choice:
+                logging.info(f"GoogleProviderHandler: Tool choice: {tool_choice}")
 
             # Apply rate limiting
             await self.apply_rate_limit()
@@ -288,6 +295,26 @@ class GoogleProviderHandler(BaseProviderHandler):
             config = {"temperature": temperature}
             if max_tokens is not None:
                 config["max_output_tokens"] = max_tokens
+
+            # Convert OpenAI tools to Google's function calling format
+            google_tools = None
+            if tools:
+                function_declarations = []
+                for tool in tools:
+                    if tool.get("type") == "function":
+                        function = tool.get("function", {})
+                        function_declaration = {
+                            "name": function.get("name"),
+                            "description": function.get("description", ""),
+                            "parameters": function.get("parameters", {})
+                        }
+                        function_declarations.append(function_declaration)
+                        logging.info(f"GoogleProviderHandler: Converted tool to Google format: {function_declaration}")
+                
+                if function_declarations:
+                    google_tools = {"function_declarations": function_declarations}
+                    config["tools"] = google_tools
+                    logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to config")
 
             # Handle streaming request
             if stream:
@@ -781,7 +808,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     id=model.name,
                     name=model.display_name or model.name,
                     provider_id=self.provider_id
-                ))
+                )
 
             return result
         except Exception as e:
