@@ -411,6 +411,7 @@ class RequestHandler:
                     # Note: Google returns accumulated text, so we need to track and send only deltas
                     chunk_id = 0
                     accumulated_text = ""  # Track text we've already sent
+                    accumulated_tool_calls = []  # Track tool calls we've already sent
                     last_chunk_id = None  # Track the last chunk for finish_reason
                     created_time = int(time.time())
                     response_id = f"google-{request_data['model']}-{created_time}"
@@ -432,8 +433,9 @@ class RequestHandler:
                             logger.debug(f"Google chunk type: {type(chunk)}")
                             logger.debug(f"Google chunk: {chunk}")
                             
-                            # Extract text from Google chunk (this is accumulated text)
+                            # Extract text and tool calls from Google chunk (this is accumulated text)
                             chunk_text = ""
+                            chunk_tool_calls = []
                             finish_reason = None
                             try:
                                 if hasattr(chunk, 'candidates') and chunk.candidates:
@@ -441,8 +443,24 @@ class RequestHandler:
                                     if candidate and hasattr(candidate, 'content') and candidate.content:
                                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
                                             for part in candidate.content.parts:
+                                                # Extract text content
                                                 if hasattr(part, 'text') and part.text:
                                                     chunk_text += part.text
+                                                # Extract function calls (Google's format)
+                                                if hasattr(part, 'function_call') and part.function_call:
+                                                    function_call = part.function_call
+                                                    # Convert Google function call to OpenAI format
+                                                    import json
+                                                    openai_tool_call = {
+                                                        "id": f"call_{len(chunk_tool_calls)}",
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": function_call.name,
+                                                            "arguments": json.dumps(function_call.args) if hasattr(function_call, 'args') else "{}"
+                                                        }
+                                                    }
+                                                    chunk_tool_calls.append(openai_tool_call)
+                                                    logger.info(f"Extracted tool call from Google chunk: {openai_tool_call}")
                                     # Check for finish reason in candidate
                                     if hasattr(candidate, 'finish_reason'):
                                         google_finish = str(candidate.finish_reason)
@@ -457,12 +475,16 @@ class RequestHandler:
                             delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
                             accumulated_text = chunk_text  # Update accumulated text for next iteration
                             
+                            # Calculate delta tool calls (only new tool calls since last chunk)
+                            delta_tool_calls = chunk_tool_calls[len(accumulated_tool_calls):] if chunk_tool_calls else []
+                            accumulated_tool_calls = chunk_tool_calls  # Update accumulated tool calls for next iteration
+                            
                             # Check if this is the last chunk
                             is_last_chunk = (chunk_idx == total_chunks - 1)
                             chunk_finish_reason = finish_reason if is_last_chunk else None
                             
-                            # Only send if there's new content or it's the last chunk with finish_reason
-                            if delta_text or is_last_chunk:
+                            # Only send if there's new content, new tool calls, or it's the last chunk with finish_reason
+                            if delta_text or delta_tool_calls or is_last_chunk:
                                 # Create OpenAI-compatible chunk with additional fields
                                 openai_chunk = {
                                     "id": response_id,
@@ -479,7 +501,7 @@ class RequestHandler:
                                             "content": delta_text if delta_text else "",
                                             "refusal": None,
                                             "role": "assistant",
-                                            "tool_calls": None
+                                            "tool_calls": delta_tool_calls if delta_tool_calls else None
                                         },
                                         "finish_reason": chunk_finish_reason,
                                         "logprobs": None,
@@ -1511,6 +1533,7 @@ class RotationHandler:
                     # Note: Google returns accumulated text, so we need to track and send only deltas
                     chunk_id = 0
                     accumulated_text = ""  # Track text we've already sent
+                    accumulated_tool_calls = []  # Track tool calls we've already sent
                     created_time = int(time.time())
                     response_id = f"google-{model_name}-{created_time}"
                     
@@ -1531,8 +1554,9 @@ class RotationHandler:
                             logger.debug(f"Google chunk type: {type(chunk)}")
                             logger.debug(f"Google chunk: {chunk}")
                             
-                            # Extract text from Google chunk (this is accumulated text)
+                            # Extract text and tool calls from Google chunk (this is accumulated text)
                             chunk_text = ""
+                            chunk_tool_calls = []
                             finish_reason = None
                             try:
                                 if hasattr(chunk, 'candidates') and chunk.candidates:
@@ -1540,8 +1564,24 @@ class RotationHandler:
                                     if candidate and hasattr(candidate, 'content') and candidate.content:
                                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
                                             for part in candidate.content.parts:
+                                                # Extract text content
                                                 if hasattr(part, 'text') and part.text:
                                                     chunk_text += part.text
+                                                # Extract function calls (Google's format)
+                                                if hasattr(part, 'function_call') and part.function_call:
+                                                    function_call = part.function_call
+                                                    # Convert Google function call to OpenAI format
+                                                    import json
+                                                    openai_tool_call = {
+                                                        "id": f"call_{len(chunk_tool_calls)}",
+                                                        "type": "function",
+                                                        "function": {
+                                                            "name": function_call.name,
+                                                            "arguments": json.dumps(function_call.args) if hasattr(function_call, 'args') else "{}"
+                                                        }
+                                                    }
+                                                    chunk_tool_calls.append(openai_tool_call)
+                                                    logger.info(f"Extracted tool call from Google chunk: {openai_tool_call}")
                                     # Check for finish reason in candidate
                                     if hasattr(candidate, 'finish_reason'):
                                         google_finish = str(candidate.finish_reason)
