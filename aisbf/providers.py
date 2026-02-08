@@ -308,130 +308,120 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"GoogleProviderHandler: Streaming response received (total chunks: {len(chunks)})")
                 self.record_success()
                 
-                # Parse the complete streaming response for tool calls
-                # Accumulate all chunks and parse the complete response
-                response_text = ""
-                tool_calls = None
-                finish_reason = "stop"
-                
-                for chunk in chunks:
-                    if hasattr(chunk, 'candidates') and chunk.candidates:
-                        candidate = chunk.candidates[0]
-                        if hasattr(candidate, 'content') and candidate.content:
-                            if hasattr(candidate.content, 'parts'):
-                                for part in candidate.content.parts:
-                                    if hasattr(part, 'text') and part.text:
-                                        response_text += part.text
-                
-                # Check if the accumulated response contains tool calls
-                if response_text and not tool_calls:
+                # Now yield chunks asynchronously with proper OpenAI-compatible parsing
+                async def async_generator():
                     import json
-                    try:
-                        # Try to parse as JSON
-                        parsed_json = json.loads(response_text.strip())
-                        if isinstance(parsed_json, dict):
-                            # Check if it looks like a tool call
-                            if 'action' in parsed_json or 'function' in parsed_json or 'name' in parsed_json:
-                                # This appears to be a tool call in JSON format
-                                # Convert to OpenAI tool_calls format
-                                call_id = 0
-                                openai_tool_calls = []
-                                if 'action' in parsed_json:
-                                    # Google-style tool call
-                                    openai_tool_call = {
-                                        "id": f"call_{call_id}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": parsed_json.get('action', 'unknown'),
-                                            "arguments": {k: v for k, v in parsed_json.items() if k != 'action'}
-                                        }
-                                    }
-                                    openai_tool_calls.append(openai_tool_call)
-                                    call_id += 1
-                                    logging.info(f"Detected tool call in streaming response: {parsed_json}")
-                                    # Clear response_text since we're using tool_calls instead
-                                    response_text = ""
-                                elif 'function' in parsed_json or 'name' in parsed_json:
-                                    # OpenAI-style tool call
-                                    openai_tool_call = {
-                                        "id": f"call_{call_id}",
-                                        "type": "function",
-                                        "function": {
-                                            "name": parsed_json.get('name', parsed_json.get('function', 'unknown')),
-                                            "arguments": parsed_json.get('arguments', parsed_json.get('parameters', {}))
-                                        }
-                                    }
-                                    openai_tool_calls.append(openai_tool_call)
-                                    call_id += 1
-                                    logging.info(f"Detected tool call in streaming response: {parsed_json}")
-                                    # Clear response_text since we're using tool_calls instead
-                                    response_text = ""
-                                tool_calls = openai_tool_calls
-                    except (json.JSONDecodeError, Exception) as e:
-                        logging.debug(f"Streaming response text is not valid JSON: {e}")
-                
-                # Extract usage metadata from the last chunk
-                prompt_tokens = 0
-                completion_tokens = 0
-                total_tokens = 0
-                
-                if chunks:
-                    last_chunk = chunks[-1]
-                    if hasattr(last_chunk, 'usage_metadata') and last_chunk.usage_metadata:
-                        usage_metadata = last_chunk.usage_metadata
-                        prompt_tokens = getattr(usage_metadata, 'prompt_token_count', 0)
-                        completion_tokens = getattr(usage_metadata, 'candidates_token_count', 0)
-                        total_tokens = getattr(usage_metadata, 'total_token_count', 0)
-                        logging.info(f"GoogleProviderHandler: Usage metadata - prompt: {prompt_tokens}, completion: {completion_tokens}, total: {total_tokens}")
-                
-                # Build the OpenAI-style response
-                openai_response = {
-                    "id": f"google-{model}-{int(time.time())}",
-                    "object": "chat.completion",
-                    "created": int(time.time()),
-                    "model": model,
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": response_text if response_text else None
-                        },
-                        "finish_reason": finish_reason
-                    }],
-                    "usage": {
-                        "prompt_tokens": prompt_tokens,
-                        "completion_tokens": completion_tokens,
-                        "total_tokens": total_tokens
+                    chunk_id = 0
+                    accumulated_text = ""
+                    created_time = int(time.time())
+                    response_id = f"google-{model}-{created_time}"
+                    
+                    # Track completion tokens for Google responses
+                    completion_tokens = 0
+                    accumulated_response_text = ""
+                    
+                    total_chunks = len(chunks)
+                    chunk_idx = 0
+                    
+                    for chunk in chunks:
+                        try:
+                            # Extract text from Google chunk
+                            chunk_text = ""
+                            finish_reason = None
+                            try:
+                                if hasattr(chunk, 'candidates') and chunk.candidates:
+                                    candidate = chunk.candidates[0] if chunk.candidates else None
+                                    if candidate and hasattr(candidate, 'content') and candidate.content:
+                                        if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                            for part in candidate.content.parts:
+                                                if hasattr(part, 'text') and part.text:
+                                                    chunk_text += part.text
+                                # Check for finish reason in candidate
+                                if hasattr(candidate, 'finish_reason'):
+                                    google_finish = str(candidate.finish_reason)
+                                    if google_finish in ('STOP', 'END_TURN', 'FINISH_REASON_UNSPECIFIED'):
+                                        finish_reason = "stop"
+                                    elif google_finish == 'MAX_TOKENS':
+                                        finish_reason = "length"
+                            except Exception as e:
+                                logging.error(f"Error extracting text from Google chunk: {e}")
+                            
+                            # Calculate delta (only new text since last chunk)
+                            delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
+                            accumulated_text = chunk_text
+                            
+                            # Check if this is the last chunk
+                            is_last_chunk = (chunk_idx == total_chunks - 1)
+                            chunk_finish_reason = finish_reason if is_last_chunk else None
+                            
+                            # Only send if there's new content or it's the last chunk with finish_reason
+                            if delta_text or is_last_chunk:
+                                # Create OpenAI-compatible chunk
+                                openai_chunk = {
+                                    "id": response_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {
+                                            "content": delta_text if delta_text else "",
+                                            "refusal": None,
+                                            "role": "assistant",
+                                            "tool_calls": None
+                                        },
+                                        "finish_reason": chunk_finish_reason,
+                                        "logprobs": None,
+                                        "native_finish_reason": chunk_finish_reason
+                                    }]
+                                }
+                                
+                                chunk_id += 1
+                                
+                                # Track completion tokens for Google responses
+                                if delta_text:
+                                    accumulated_response_text += delta_text
+                                
+                                # Yield as JSON string
+                                yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                            
+                            chunk_idx += 1
+                        except Exception as chunk_error:
+                            logging.error(f"Error processing Google chunk: {str(chunk_error)}")
+                            chunk_idx += 1
+                            continue
+                    
+                    # Send final chunk with usage statistics
+                    if accumulated_response_text:
+                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model)
+                    total_tokens = completion_tokens  # Google doesn't provide prompt tokens in streaming
+                    
+                    final_chunk = {
+                        "id": response_id,
+                        "object": "chat.completion.chunk",
+                        "created": created_time,
+                        "model": model,
+                        "choices": [{
+                            "index": 0,
+                            "delta": {
+                                "content": "",
+                                "refusal": None,
+                                "role": "assistant",
+                                "tool_calls": None
+                            },
+                            "finish_reason": None,
+                            "logprobs": None,
+                            "native_finish_reason": None
+                        }],
+                        "usage": {
+                            "prompt_tokens": None,
+                            "completion_tokens": completion_tokens,
+                            "total_tokens": total_tokens
+                        }
                     }
-                }
+                    yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
                 
-                # Add tool_calls to the message if present
-                if tool_calls:
-                    openai_response["choices"][0]["message"]["tool_calls"] = tool_calls
-                    # If there are tool calls, content should be None (OpenAI convention)
-                    openai_response["choices"][0]["message"]["content"] = None
-                    logging.info(f"Added tool_calls to streaming response message")
-                
-                # Log the final response structure
-                logging.info(f"=== FINAL OPENAI STREAMING RESPONSE STRUCTURE ===")
-                logging.info(f"Response type: {type(openai_response)}")
-                logging.info(f"Response keys: {openai_response.keys()}")
-                logging.info(f"Response id: {openai_response['id']}")
-                logging.info(f"Response object: {openai_response['object']}")
-                logging.info(f"Response created: {openai_response['created']}")
-                logging.info(f"Response model: {openai_response['model']}")
-                logging.info(f"Response choices count: {len(openai_response['choices'])}")
-                logging.info(f"Response choices[0] index: {openai_response['choices'][0]['index']}")
-                logging.info(f"Response choices[0] message role: {openai_response['choices'][0]['message']['role']}")
-                logging.info(f"Response choices[0] message content length: {len(openai_response['choices'][0]['message']['content'])}")
-                logging.info(f"Response choices[0] message content (first 200 chars): {openai_response['choices'][0]['message']['content'][:200]}")
-                logging.info(f"Response choices[0] finish_reason: {openai_response['choices'][0]['finish_reason']}")
-                logging.info(f"Response usage: {openai_response['usage']}")
-                logging.info(f"=== END FINAL OPENAI STREAMING RESPONSE STRUCTURE ===")
-                
-                # Return the response dict directly
-                logging.info(f"GoogleProviderHandler: Returning streaming response dict")
-                return openai_response
+                return async_generator()
             else:
                 # Non-streaming request
                 # Generate content using the google-genai client
