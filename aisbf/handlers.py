@@ -1431,6 +1431,7 @@ class RotationHandler:
                     # Check for tool call patterns in the accumulated text
                     if accumulated_response_text:
                         import re as re_module
+                        import ast as ast_module  # For parsing Python-style literals with single quotes
                         
                         # Pattern 0: "assistant: [...]" wrapping everything (nested format)
                         outer_assistant_pattern = r"^assistant:\s*(\[.*\])\s*$"
@@ -1438,7 +1439,12 @@ class RotationHandler:
                         
                         if outer_assistant_match:
                             try:
-                                outer_content = json.loads(outer_assistant_match.group(1))
+                                # Try JSON first, then fall back to ast.literal_eval for Python-style single quotes
+                                try:
+                                    outer_content = json.loads(outer_assistant_match.group(1))
+                                except json.JSONDecodeError:
+                                    # Model may have used single quotes instead of double quotes
+                                    outer_content = ast_module.literal_eval(outer_assistant_match.group(1))
                                 if isinstance(outer_content, list) and len(outer_content) > 0:
                                     for item in outer_content:
                                         if isinstance(item, dict) and item.get('type') == 'text':
@@ -1482,7 +1488,11 @@ class RotationHandler:
                                                         # Extract the final assistant text if present
                                                         if inner_tool_match.group(2):
                                                             try:
-                                                                final_assistant = json.loads(inner_tool_match.group(2))
+                                                                # Try JSON first, then fall back to ast.literal_eval
+                                                                try:
+                                                                    final_assistant = json.loads(inner_tool_match.group(2))
+                                                                except json.JSONDecodeError:
+                                                                    final_assistant = ast_module.literal_eval(inner_tool_match.group(2))
                                                                 if isinstance(final_assistant, list) and len(final_assistant) > 0:
                                                                     for final_item in final_assistant:
                                                                         if isinstance(final_item, dict) and final_item.get('type') == 'text':
@@ -1492,14 +1502,14 @@ class RotationHandler:
                                                                         final_text = ""
                                                                 else:
                                                                     final_text = ""
-                                                            except json.JSONDecodeError:
+                                                            except (json.JSONDecodeError, ValueError, SyntaxError):
                                                                 final_text = ""
                                                         else:
                                                             final_text = ""
-                                                except (json.JSONDecodeError, Exception) as e:
+                                                except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
                                                     logger.debug(f"Failed to parse streaming tool JSON: {e}")
                                             break
-                            except (json.JSONDecodeError, Exception) as e:
+                            except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
                                 logger.debug(f"Failed to parse outer assistant format in streaming: {e}")
                         
                         # Pattern 1: Simple "tool: {...}" format (not nested)
@@ -1540,7 +1550,11 @@ class RotationHandler:
                                         # Extract the final assistant text if present
                                         if tool_match.group(2):
                                             try:
-                                                final_assistant = json.loads(tool_match.group(2))
+                                                # Try JSON first, then fall back to ast.literal_eval
+                                                try:
+                                                    final_assistant = json.loads(tool_match.group(2))
+                                                except json.JSONDecodeError:
+                                                    final_assistant = ast_module.literal_eval(tool_match.group(2))
                                                 if isinstance(final_assistant, list) and len(final_assistant) > 0:
                                                     for final_item in final_assistant:
                                                         if isinstance(final_item, dict) and final_item.get('type') == 'text':
@@ -1550,11 +1564,11 @@ class RotationHandler:
                                                         final_text = ""
                                                 else:
                                                     final_text = ""
-                                            except json.JSONDecodeError:
+                                            except (json.JSONDecodeError, ValueError, SyntaxError):
                                                 final_text = ""
                                         else:
                                             final_text = ""
-                                except (json.JSONDecodeError, Exception) as e:
+                                except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
                                     logger.debug(f"Failed to parse simple streaming tool JSON: {e}")
                     
                     # Now send the response chunks
