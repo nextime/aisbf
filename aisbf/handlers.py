@@ -1504,6 +1504,16 @@ class RotationHandler:
                                                 except json.JSONDecodeError as e3:
                                                     logger.debug(f"Fixed JSON also failed: {e3}")
                                                     raise e  # Re-raise original error
+                                    else:
+                                        # No tool call found, but check if the response is wrapped in assistant: [...] format
+                                        # and extract just the text content
+                                        assistant_text_pattern = r"^assistant:\s*\[.*'type':\s*'text',\s*'text':\s*['\"](.+?)['\"].*\]\s*$"
+                                        assistant_text_match = re_module.match(assistant_text_pattern, accumulated_response_text.strip(), re_module.DOTALL)
+                                        if assistant_text_match:
+                                            final_text = assistant_text_match.group(1)
+                                            # Unescape common escape sequences
+                                            final_text = final_text.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
+                                            logger.debug(f"Extracted text from assistant wrapper: {final_text[:100]}...")
                                         
                                         # Convert to OpenAI tool_calls format
                                         tool_calls = [{
