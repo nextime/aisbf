@@ -1428,39 +1428,14 @@ class RotationHandler:
                     tool_calls = None
                     final_text = accumulated_response_text
                     
-                    logger.debug(f"=== ACCUMULATED RESPONSE TEXT ===")
-                    logger.debug(f"Total length: {len(accumulated_response_text)}")
-                    logger.debug(f"First 500 chars: {accumulated_response_text[:500]}")
-                    logger.debug(f"Last 200 chars: {accumulated_response_text[-200:]}")
-                    
                     # Check for tool call patterns in the accumulated text
                     if accumulated_response_text:
                         import re as re_module
                         
-                        # Initialize tool_match to None
-                        tool_match = None
-                        
-                        # First, check if the response is wrapped in "assistant: [{'type': 'text', 'text': '...'}]"
-                        # This is a common pattern where the model wraps its response instead of returning plain text
-                        assistant_wrapper_pattern = r"^assistant:\s*\[\s*\{\s*'type':\s*'text',\s*'text':\s*['\"](.+?)['\"]\s*\}\s*\]\s*$"
-                        assistant_wrapper_match = re_module.match(assistant_wrapper_pattern, accumulated_response_text.strip(), re_module.DOTALL)
-                        
-                        if assistant_wrapper_match:
-                            # Extract the plain text from the wrapper
-                            extracted_text = assistant_wrapper_match.group(1)
-                            # Unescape common escape sequences
-                            extracted_text = extracted_text.replace("\\'", "'").replace('\\"', '"').replace("\\n", "\n")
-                            logger.debug(f"Extracted text from assistant wrapper: {extracted_text[:200]}...")
-                            final_text = extracted_text
-                            tool_calls = None
-                        else:
-                            # Check for tool call pattern
-                            # Simple approach: just look for "tool: {...}" pattern and extract the JSON
-                            # This avoids complex nested parsing issues
-                            tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
-                            tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
-                            
-                            logger.debug(f"Tool pattern match: {tool_match is not None}")
+                        # Simple approach: just look for "tool: {...}" pattern and extract the JSON
+                        # This avoids complex nested parsing issues
+                        tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
+                        tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
                         
                         if tool_match:
                             try:
@@ -1481,29 +1456,16 @@ class RotationHandler:
                                                     break
                                         
                                         tool_json_str = accumulated_response_text[json_start:json_end]
-                                        logger.debug(f"=== TOOL JSON EXTRACTION ===")
-                                        logger.debug(f"Extracted tool JSON length: {len(tool_json_str)}")
-                                        logger.debug(f"Extracted tool JSON (first 500 chars): {tool_json_str[:500]}")
-                                        logger.debug(f"First 20 bytes (repr): {repr(tool_json_str[:20])}")
-                                        logger.debug(f"ASCII codes for first 20 chars: {[ord(c) for c in tool_json_str[:20]]}")
+                                        logger.debug(f"Extracted tool JSON: {tool_json_str[:200]}...")
                                         
                                         try:
                                             parsed_tool = json.loads(tool_json_str)
-                                            logger.debug(f"Successfully parsed tool JSON")
-                                        except json.JSONDecodeError as e:
-                                            logger.debug(f"JSON parse error: {e}")
-                                            logger.debug(f"Error at position {e.pos if hasattr(e, 'pos') else 'unknown'}")
+                                        except json.JSONDecodeError:
                                             # Try fixing common issues: single quotes, trailing commas
                                             fixed_json = tool_json_str.replace("'", '"')
                                             fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
                                             fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
-                                            logger.debug(f"Fixed JSON (first 200 chars): {fixed_json[:200]}")
-                                            try:
-                                                parsed_tool = json.loads(fixed_json)
-                                                logger.debug(f"Successfully parsed fixed JSON")
-                                            except json.JSONDecodeError as e2:
-                                                logger.debug(f"Fixed JSON also failed: {e2}")
-                                                raise e  # Re-raise original error
+                                            parsed_tool = json.loads(fixed_json)
                                         
                                         # Convert to OpenAI tool_calls format
                                         tool_calls = [{
@@ -1586,8 +1548,8 @@ class RotationHandler:
                             yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
                     else:
                         # No tool calls detected, send text normally
-                        # Send the final text (which may have been extracted from wrapper)
-                        if final_text:
+                        # Send the accumulated text as a single chunk
+                        if accumulated_response_text:
                             text_chunk = {
                                 "id": response_id,
                                 "object": "chat.completion.chunk",
@@ -1600,7 +1562,7 @@ class RotationHandler:
                                 "choices": [{
                                     "index": 0,
                                     "delta": {
-                                        "content": final_text,
+                                        "content": accumulated_response_text,
                                         "refusal": None,
                                         "role": "assistant",
                                         "tool_calls": None
@@ -1613,10 +1575,8 @@ class RotationHandler:
                             yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
                     
                     # Send final chunk with finish reason and usage statistics
-                    # Use final_text for token counting (which may have been extracted from wrapper)
-                    text_for_token_count = final_text if final_text else accumulated_response_text
-                    if text_for_token_count:
-                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": text_for_token_count}], model_name)
+                    if accumulated_response_text:
+                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name)
                     total_tokens = effective_context + completion_tokens
                     final_chunk = {
                         "id": response_id,

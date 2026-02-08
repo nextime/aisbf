@@ -182,7 +182,22 @@ class Config:
         logger.info(f"Loading rotations from: {rotations_path}")
         with open(rotations_path) as f:
             data = json.load(f)
-            self.rotations = {k: RotationConfig(**v) for k, v in data['rotations'].items()}
+            
+            # Extract global notifyerrors setting (top-level, outside rotations)
+            self.global_notifyerrors = data.get('notifyerrors', False)
+            logger.info(f"Global notifyerrors setting: {self.global_notifyerrors}")
+            
+            # Load rotations, merging global notifyerrors with rotation-specific settings
+            self.rotations = {}
+            for k, v in data['rotations'].items():
+                # If rotation doesn't have its own notifyerrors, use global setting
+                if 'notifyerrors' not in v:
+                    v['notifyerrors'] = self.global_notifyerrors
+                    logger.info(f"Rotation '{k}' using global notifyerrors: {self.global_notifyerrors}")
+                else:
+                    logger.info(f"Rotation '{k}' has own notifyerrors: {v['notifyerrors']}")
+                self.rotations[k] = RotationConfig(**v)
+            
             logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
             
             # Validate that all providers referenced in rotations exist
