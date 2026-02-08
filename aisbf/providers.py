@@ -451,46 +451,97 @@ class GoogleProviderHandler(BaseProviderHandler):
                                             # Some models return tool calls as text content instead of using function_call attribute
                                             if response_text and not openai_tool_calls:
                                                 import json
-                                                try:
-                                                    # Try to parse as JSON
-                                                    parsed_json = json.loads(response_text.strip())
-                                                    if isinstance(parsed_json, dict):
-                                                        # Check if it looks like a tool call
-                                                        if 'action' in parsed_json or 'function' in parsed_json or 'name' in parsed_json:
-                                                            # This appears to be a tool call in JSON format
-                                                            # Convert to OpenAI tool_calls format
-                                                            if 'action' in parsed_json:
-                                                                # Google-style tool call
-                                                                openai_tool_call = {
-                                                                    "id": f"call_{call_id}",
-                                                                    "type": "function",
-                                                                    "function": {
-                                                                        "name": parsed_json.get('action', 'unknown'),
-                                                                        "arguments": {k: v for k, v in parsed_json.items() if k != 'action'}
-                                                                    }
-                                                                }
-                                                                openai_tool_calls.append(openai_tool_call)
-                                                                call_id += 1
-                                                                logging.info(f"Detected tool call in text content: {parsed_json}")
-                                                                # Clear response_text since we're using tool_calls instead
+                                                import re
+                                                
+                                                # First, check for "tool: {...}" format
+                                                tool_pattern = r'tool:\s*(\{[^}]*\})'
+                                                tool_match = re.search(tool_pattern, response_text, re.DOTALL)
+                                                
+                                                if tool_match:
+                                                    try:
+                                                        tool_json_str = tool_match.group(1)
+                                                        parsed_json = json.loads(tool_json_str)
+                                                        logging.info(f"Detected 'tool:' format in text content: {parsed_json}")
+                                                        
+                                                        # Convert to OpenAI tool_calls format
+                                                        openai_tool_call = {
+                                                            "id": f"call_{call_id}",
+                                                            "type": "function",
+                                                            "function": {
+                                                                "name": parsed_json.get('action', parsed_json.get('name', 'unknown')),
+                                                                "arguments": json.dumps({k: v for k, v in parsed_json.items() if k not in ['action', 'name']})
+                                                            }
+                                                        }
+                                                        openai_tool_calls.append(openai_tool_call)
+                                                        call_id += 1
+                                                        logging.info(f"Converted 'tool:' format to OpenAI tool_calls: {openai_tool_call}")
+                                                        
+                                                        # Extract any assistant text after the tool call
+                                                        assistant_pattern = r"assistant:\s*(\[.*\])"
+                                                        assistant_match = re.search(assistant_pattern, response_text, re.DOTALL)
+                                                        if assistant_match:
+                                                            try:
+                                                                assistant_content = json.loads(assistant_match.group(1))
+                                                                # Extract text from the assistant content
+                                                                if isinstance(assistant_content, list) and len(assistant_content) > 0:
+                                                                    for item in assistant_content:
+                                                                        if isinstance(item, dict) and item.get('type') == 'text':
+                                                                            response_text = item.get('text', '')
+                                                                            break
+                                                                    else:
+                                                                        response_text = ""
+                                                                else:
+                                                                    response_text = ""
+                                                            except json.JSONDecodeError:
                                                                 response_text = ""
-                                                            elif 'function' in parsed_json or 'name' in parsed_json:
-                                                                # OpenAI-style tool call
-                                                                openai_tool_call = {
-                                                                    "id": f"call_{call_id}",
-                                                                    "type": "function",
-                                                                    "function": {
-                                                                        "name": parsed_json.get('name', parsed_json.get('function', 'unknown')),
-                                                                        "arguments": parsed_json.get('arguments', parsed_json.get('parameters', {}))
+                                                        else:
+                                                            # Clear response_text since we're using tool_calls instead
+                                                            response_text = ""
+                                                    except (json.JSONDecodeError, Exception) as e:
+                                                        logging.debug(f"Failed to parse 'tool:' format: {e}")
+                                                
+                                                # Fall back to original JSON parsing if no tool: format found
+                                                elif not openai_tool_calls:
+                                                    try:
+                                                        # Try to parse as JSON
+                                                        parsed_json = json.loads(response_text.strip())
+                                                        if isinstance(parsed_json, dict):
+                                                            # Check if it looks like a tool call
+                                                            if 'action' in parsed_json or 'function' in parsed_json or 'name' in parsed_json:
+                                                                # This appears to be a tool call in JSON format
+                                                                # Convert to OpenAI tool_calls format
+                                                                if 'action' in parsed_json:
+                                                                    # Google-style tool call
+                                                                    openai_tool_call = {
+                                                                        "id": f"call_{call_id}",
+                                                                        "type": "function",
+                                                                        "function": {
+                                                                            "name": parsed_json.get('action', 'unknown'),
+                                                                            "arguments": json.dumps({k: v for k, v in parsed_json.items() if k != 'action'})
+                                                                        }
                                                                     }
-                                                                }
-                                                                openai_tool_calls.append(openai_tool_call)
-                                                                call_id += 1
-                                                                logging.info(f"Detected tool call in text content: {parsed_json}")
-                                                                # Clear response_text since we're using tool_calls instead
-                                                                response_text = ""
-                                                except (json.JSONDecodeError, Exception) as e:
-                                                    logging.debug(f"Response text is not valid JSON: {e}")
+                                                                    openai_tool_calls.append(openai_tool_call)
+                                                                    call_id += 1
+                                                                    logging.info(f"Detected tool call in text content: {parsed_json}")
+                                                                    # Clear response_text since we're using tool_calls instead
+                                                                    response_text = ""
+                                                                elif 'function' in parsed_json or 'name' in parsed_json:
+                                                                    # OpenAI-style tool call
+                                                                    openai_tool_call = {
+                                                                        "id": f"call_{call_id}",
+                                                                        "type": "function",
+                                                                        "function": {
+                                                                            "name": parsed_json.get('name', parsed_json.get('function', 'unknown')),
+                                                                            "arguments": json.dumps(parsed_json.get('arguments', parsed_json.get('parameters', {})))
+                                                                        }
+                                                                    }
+                                                                    openai_tool_calls.append(openai_tool_call)
+                                                                    call_id += 1
+                                                                    logging.info(f"Detected tool call in text content: {parsed_json}")
+                                                                    # Clear response_text since we're using tool_calls instead
+                                                                    response_text = ""
+                                                    except (json.JSONDecodeError, Exception) as e:
+                                                        logging.debug(f"Response text is not valid JSON: {e}")
                                             
                                             # Set tool_calls if we have any
                                             if openai_tool_calls:
