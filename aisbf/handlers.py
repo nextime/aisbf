@@ -961,17 +961,36 @@ class RotationHandler:
                 else:
                     return error_response
             else:
-                raise HTTPException(
-                    status_code=429,
-                    detail={
-                        "message": "No models available in rotation (all providers may be rate limited)",
-                        "rotation_id": rotation_id,
-                        "total_providers": len(providers),
-                        "skipped_providers": len(skipped_providers),
-                        "skipped_provider_ids": skipped_providers,
-                        "details": error_details
-                    }
-                )
+                logger.info(f"notifyerrors is disabled for rotation '{rotation_id}', returning error with status code 429")
+                # Return a normal response with error message and status code 429
+                error_message = f"All providers in rotation '{rotation_id}' failed. Details:\n{chr(10).join(error_details)}"
+                error_response = {
+                    "id": f"error-{rotation_id}-{int(time.time())}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": rotation_id,
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": error_message
+                        },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": len(error_message),
+                        "total_tokens": len(error_message)
+                    },
+                    "aisbf_error": True,
+                    "rotation_id": rotation_id,
+                    "error_details": error_details
+                }
+                # For streaming requests, wrap in a simple streaming response
+                if stream:
+                    return self._create_error_streaming_response(error_response, status_code=429)
+                else:
+                    return JSONResponse(status_code=429, content=error_response)
 
         # Sort models by weight in descending order (higher weight = higher priority)
         available_models.sort(key=lambda m: m['weight'], reverse=True)
@@ -1354,20 +1373,42 @@ class RotationHandler:
             else:
                 return error_response
         else:
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "message": f"All providers in rotation failed after {max_retries} attempts",
-                    "rotation_id": rotation_id,
-                    "attempted_models": [m['name'] for m in tried_models],
-                    "attempted_count": len(tried_models),
-                    "max_retries": max_retries,
-                    "last_error": last_error,
-                    "details": error_details
-                }
-            )
+            logger.info(f"notifyerrors is disabled for rotation '{rotation_id}', returning error with status code 429")
+            # Return a normal response with error message and status code 429
+            error_message = f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts. Details:\n{chr(10).join(error_details)}"
+            error_response = {
+                "id": f"error-{rotation_id}-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": rotation_id,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": error_message
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": len(error_message),
+                    "total_tokens": len(error_message)
+                },
+                "aisbf_error": True,
+                "rotation_id": rotation_id,
+                "attempted_models": [m['name'] for m in tried_models],
+                "attempted_count": len(tried_models),
+                "max_retries": max_retries,
+                "last_error": last_error,
+                "error_details": error_details
+            }
+            # For streaming requests, wrap in a simple streaming response
+            if stream:
+                return self._create_error_streaming_response(error_response, status_code=429)
+            else:
+                return JSONResponse(status_code=429, content=error_response)
 
-    def _create_error_streaming_response(self, error_response: Dict):
+    def _create_error_streaming_response(self, error_response: Dict, status_code: int = 200):
         """
         Create a simple StreamingResponse for error messages.
         
@@ -1376,6 +1417,7 @@ class RotationHandler:
         
         Args:
             error_response: The error response dict to stream
+            status_code: The HTTP status code to return (default: 200)
         
         Returns:
             StreamingResponse with the error response in OpenAI-compatible streaming format
@@ -1429,7 +1471,7 @@ class RotationHandler:
             # Send [DONE] marker
             yield b"data: [DONE]\n\n"
         
-        return StreamingResponse(error_stream_generator(), media_type="text/event-stream")
+        return StreamingResponse(error_stream_generator(), media_type="text/event-stream", status_code=status_code)
 
     def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int):
         """
