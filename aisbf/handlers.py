@@ -816,6 +816,9 @@ class RotationHandler:
         if not rotation_config:
             logger.error(f"Rotation {rotation_id} not found")
             raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found")
+        
+        # Check if notifyerrors is enabled for this rotation
+        notify_errors = rotation_config.get('notifyerrors', False)
 
         logger.info(f"Rotation config loaded successfully")
         providers = rotation_config.providers
@@ -916,17 +919,45 @@ class RotationHandler:
                     else:
                         error_details.append(f"  - {provider_id}: Not configured")
             
-            raise HTTPException(
-                status_code=503,
-                detail={
-                    "message": "No models available in rotation (all providers may be rate limited)",
+            # Check if notifyerrors is enabled - if so, return error as normal message instead of HTTP 503
+            if notify_errors:
+                logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
+                # Return a normal response with error message instead of HTTP 503
+                error_message = f"All providers in rotation '{rotation_id}' failed. Details: {'; '.join(error_details)}"
+                return {
+                    "id": f"error-{rotation_id}-{int(time.time())}",
+                    "object": "chat.completion",
+                    "created": int(time.time()),
+                    "model": rotation_id,
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": error_message
+                        },
+                        "finish_reason": "stop"
+                    }],
+                    "usage": {
+                        "prompt_tokens": 0,
+                        "completion_tokens": len(error_message),
+                        "total_tokens": len(error_message)
+                    },
+                    "aisbf_error": True,
                     "rotation_id": rotation_id,
-                    "total_providers": len(providers),
-                    "skipped_providers": len(skipped_providers),
-                    "skipped_provider_ids": skipped_providers,
-                    "details": error_details
+                    "error_details": error_details
                 }
-            )
+            else:
+                raise HTTPException(
+                    status_code=503,
+                    detail={
+                        "message": "No models available in rotation (all providers may be rate limited)",
+                        "rotation_id": rotation_id,
+                        "total_providers": len(providers),
+                        "skipped_providers": len(skipped_providers),
+                        "skipped_provider_ids": skipped_providers,
+                        "details": error_details
+                    }
+                )
 
         # Sort models by weight in descending order (higher weight = higher priority)
         available_models.sort(key=lambda m: m['weight'], reverse=True)
@@ -1234,18 +1265,50 @@ class RotationHandler:
             else:
                 error_details.append(f"  - {provider_id}: Not configured")
         
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "message": f"All providers in rotation failed after {max_retries} attempts",
+        # Check if notifyerrors is enabled - if so, return error as normal message instead of HTTP 503
+        if notify_errors:
+            logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
+            # Return a normal response with error message instead of HTTP 503
+            error_message = f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts. Details: {'; '.join(error_details)}"
+            return {
+                "id": f"error-{rotation_id}-{int(time.time())}",
+                "object": "chat.completion",
+                "created": int(time.time()),
+                "model": rotation_id,
+                "choices": [{
+                    "index": 0,
+                    "message": {
+                        "role": "assistant",
+                        "content": error_message
+                    },
+                    "finish_reason": "stop"
+                }],
+                "usage": {
+                    "prompt_tokens": 0,
+                    "completion_tokens": len(error_message),
+                    "total_tokens": len(error_message)
+                },
+                "aisbf_error": True,
                 "rotation_id": rotation_id,
                 "attempted_models": [m['name'] for m in tried_models],
                 "attempted_count": len(tried_models),
                 "max_retries": max_retries,
                 "last_error": last_error,
-                "details": error_details
+                "error_details": error_details
             }
-        )
+        else:
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": f"All providers in rotation failed after {max_retries} attempts",
+                    "rotation_id": rotation_id,
+                    "attempted_models": [m['name'] for m in tried_models],
+                    "attempted_count": len(tried_models),
+                    "max_retries": max_retries,
+                    "last_error": last_error,
+                    "details": error_details
+                }
+            )
 
     def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int):
         """

@@ -1,7 +1,9 @@
 {
+  "notifyerrors": false,
   "rotations": {
     "coding": {
       "model_name": "coding",
+      "notifyerrors": false,
       "providers": [
         {
           "provider_id": "gemini",
@@ -85,6 +87,7 @@
     },
     "general": {
       "model_name": "general",
+      "notifyerrors": false,
       "providers": [
         {
           "provider_id": "gemini",
@@ -122,6 +125,7 @@
     },
     "googletest": {
       "model_name": "googletest",
+      "notifyerrors": false,
       "providers": [
         {
           "provider_id": "gemini",
