@@ -27,7 +27,6 @@ from typing import Dict, List, Optional, Union, Any
 from .utils import count_messages_tokens
 from .config import config
 from .providers import get_provider_handler
-from .handlers import RotationHandler
 
 
 class ContextManager:
@@ -76,6 +75,8 @@ class ContextManager:
                 
                 if is_rotation:
                     # Use rotation handler for condensation
+                    # Import here to avoid circular import
+                    from .handlers import RotationHandler
                     rotation_handler = RotationHandler()
                     # Store rotation handler and rotation_id for later use
                     self._rotation_handler = rotation_handler
