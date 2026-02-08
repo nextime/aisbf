@@ -55,6 +55,7 @@ class ProviderConfig(BaseModel):
 
 class RotationConfig(BaseModel):
     providers: List[Dict]
+    notifyerrors: bool = False
 
 class AutoselectModelInfo(BaseModel):
     model_id: str
