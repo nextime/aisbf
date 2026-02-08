@@ -888,7 +888,45 @@ class RotationHandler:
         if not available_models:
             logger.error("No models available in rotation (all providers may be rate limited)")
             logger.error("All providers in this rotation are currently deactivated")
-            raise HTTPException(status_code=503, detail="No models available in rotation (all providers may be rate limited)")
+            
+            # Build detailed error message with provider status information
+            error_details = []
+            error_details.append(f"No models available in rotation '{rotation_id}'")
+            error_details.append(f"Total providers in rotation: {len(providers)}")
+            error_details.append(f"Providers skipped (rate limited): {len(skipped_providers)}")
+            
+            if skipped_providers:
+                error_details.append("Skipped providers:")
+                for provider_id in skipped_providers:
+                    provider_config = self.config.get_provider(provider_id)
+                    if provider_config:
+                        error_tracking = config.error_tracking.get(provider_id, {})
+                        disabled_until = error_tracking.get('disabled_until')
+                        failures = error_tracking.get('failures', 0)
+                        
+                        if disabled_until:
+                            import time
+                            cooldown_remaining = int(disabled_until - time.time())
+                            if cooldown_remaining > 0:
+                                error_details.append(f"  - {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
+                            else:
+                                error_details.append(f"  - {provider_id}: Rate limited (cooldown expired, failures: {failures})")
+                        else:
+                            error_details.append(f"  - {provider_id}: Rate limited (failures: {failures})")
+                    else:
+                        error_details.append(f"  - {provider_id}: Not configured")
+            
+            raise HTTPException(
+                status_code=503,
+                detail={
+                    "message": "No models available in rotation (all providers may be rate limited)",
+                    "rotation_id": rotation_id,
+                    "total_providers": len(providers),
+                    "skipped_providers": len(skipped_providers),
+                    "skipped_provider_ids": skipped_providers,
+                    "details": error_details
+                }
+            )
 
         # Sort models by weight in descending order (higher weight = higher priority)
         available_models.sort(key=lambda m: m['weight'], reverse=True)
@@ -1167,9 +1205,46 @@ class RotationHandler:
         logger.error(f"Attempted {len(tried_models)} different model(s): {[m['name'] for m in tried_models]}")
         logger.error(f"Last error: {last_error}")
         logger.error(f"Max retries ({max_retries}) reached without success")
+        
+        # Build detailed error message
+        error_details = []
+        error_details.append(f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts")
+        error_details.append(f"Attempted models: {[m['name'] for m in tried_models]}")
+        error_details.append(f"Last error: {last_error}")
+        
+        # Add provider status information
+        error_details.append("Provider status:")
+        for provider in providers:
+            provider_id = provider['provider_id']
+            provider_config = self.config.get_provider(provider_id)
+            if provider_config:
+                error_tracking = config.error_tracking.get(provider_id, {})
+                disabled_until = error_tracking.get('disabled_until')
+                failures = error_tracking.get('failures', 0)
+                
+                if disabled_until:
+                    import time
+                    cooldown_remaining = int(disabled_until - time.time())
+                    if cooldown_remaining > 0:
+                        error_details.append(f"  - {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
+                    else:
+                        error_details.append(f"  - {provider_id}: Rate limited (cooldown expired, failures: {failures})")
+                else:
+                    error_details.append(f"  - {provider_id}: Available (failures: {failures})")
+            else:
+                error_details.append(f"  - {provider_id}: Not configured")
+        
         raise HTTPException(
             status_code=503,
-            detail=f"All providers in rotation failed after {max_retries} attempts. Last error: {last_error}"
+            detail={
+                "message": f"All providers in rotation failed after {max_retries} attempts",
+                "rotation_id": rotation_id,
+                "attempted_models": [m['name'] for m in tried_models],
+                "attempted_count": len(tried_models),
+                "max_retries": max_retries,
+                "last_error": last_error,
+                "details": error_details
+            }
         )
 
     def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int):
