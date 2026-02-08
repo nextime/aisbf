@@ -1342,14 +1342,56 @@ class RotationHandler:
             error_response: The error response dict to stream
         
         Returns:
-            StreamingResponse with the error response as a single chunk
+            StreamingResponse with the error response in OpenAI-compatible streaming format
         """
         import json
         import time
         
+        # Extract values from error_response for proper streaming format
+        response_id = error_response.get('id', f"error-{int(time.time())}")
+        created = error_response.get('created', int(time.time()))
+        model = error_response.get('model', 'unknown')
+        content = error_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+        
         async def error_stream_generator():
-            # Send the error response as a single chunk
-            yield f"data: {json.dumps(error_response)}\n\n".encode('utf-8')
+            # First chunk: role and content
+            chunk_with_role = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {
+                        "role": "assistant",
+                        "content": content
+                    },
+                    "finish_reason": None
+                }]
+            }
+            yield f"data: {json.dumps(chunk_with_role)}\n\n".encode('utf-8')
+            
+            # Final chunk: finish_reason and usage
+            final_chunk = {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created,
+                "model": model,
+                "choices": [{
+                    "index": 0,
+                    "delta": {},
+                    "finish_reason": "stop"
+                }],
+                "usage": error_response.get('usage', {
+                    "prompt_tokens": 0,
+                    "completion_tokens": len(content),
+                    "total_tokens": len(content)
+                })
+            }
+            yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+            
+            # Send [DONE] marker
+            yield b"data: [DONE]\n\n"
         
         return StreamingResponse(error_stream_generator(), media_type="text/event-stream")
 
