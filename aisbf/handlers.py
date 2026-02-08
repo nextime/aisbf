@@ -930,7 +930,7 @@ class RotationHandler:
             if notify_errors:
                 logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
                 # Return a normal response with error message instead of HTTP 503
-                error_message = f"All providers in rotation '{rotation_id}' failed. Details: {'; '.join(error_details)}"
+                error_message = f"All providers in rotation '{rotation_id}' failed. Details:\n{chr(10).join(error_details)}"
                 error_response = {
                     "id": f"error-{rotation_id}-{int(time.time())}",
                     "object": "chat.completion",
@@ -1285,7 +1285,7 @@ class RotationHandler:
         if notify_errors:
             logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
             # Return a normal response with error message instead of HTTP 503
-            error_message = f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts. Details: {'; '.join(error_details)}"
+            error_message = f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts. Details:\n{chr(10).join(error_details)}"
             error_response = {
                 "id": f"error-{rotation_id}-{int(time.time())}",
                 "object": "chat.completion",
