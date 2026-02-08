@@ -1469,23 +1469,41 @@ class RotationHandler:
                                         logger.debug(f"First 20 bytes (repr): {repr(tool_json_str[:20])}")
                                         logger.debug(f"ASCII codes for first 20 chars: {[ord(c) for c in tool_json_str[:20]]}")
                                         
+                                        # The model may return literal \n (backslash-n) instead of actual newlines
+                                        # JSON requires actual newlines between tokens, not escape sequences
+                                        # We need to decode escape sequences, but carefully to preserve
+                                        # escaped quotes and backslashes inside string values
                                         try:
+                                            # First try parsing as-is
                                             parsed_tool = json.loads(tool_json_str)
-                                            logger.debug(f"Successfully parsed tool JSON")
+                                            logger.debug(f"Successfully parsed tool JSON as-is")
                                         except json.JSONDecodeError as e:
-                                            logger.debug(f"JSON parse error: {e}")
+                                            logger.debug(f"JSON parse error (as-is): {e}")
                                             logger.debug(f"Error at position {e.pos if hasattr(e, 'pos') else 'unknown'}")
-                                            # Try fixing common issues: single quotes, trailing commas
-                                            fixed_json = tool_json_str.replace("'", '"')
-                                            fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
-                                            fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
-                                            logger.debug(f"Fixed JSON (first 200 chars): {fixed_json[:200]}")
+                                            
+                                            # Try decoding escape sequences
+                                            # Replace literal \n (outside strings) with actual newlines
+                                            # This is tricky - we need to handle \n between tokens but preserve \\n in strings
                                             try:
-                                                parsed_tool = json.loads(fixed_json)
-                                                logger.debug(f"Successfully parsed fixed JSON")
-                                            except json.JSONDecodeError as e2:
-                                                logger.debug(f"Fixed JSON also failed: {e2}")
-                                                raise e  # Re-raise original error
+                                                # Use codecs to decode unicode escape sequences
+                                                import codecs
+                                                decoded_json = codecs.decode(tool_json_str, 'unicode_escape')
+                                                logger.debug(f"Decoded JSON (first 200 chars): {decoded_json[:200]}")
+                                                parsed_tool = json.loads(decoded_json)
+                                                logger.debug(f"Successfully parsed decoded JSON")
+                                            except (json.JSONDecodeError, UnicodeDecodeError) as e2:
+                                                logger.debug(f"Decoded JSON also failed: {e2}")
+                                                # Last resort: try fixing common issues
+                                                fixed_json = tool_json_str.replace("'", '"')
+                                                fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
+                                                fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
+                                                logger.debug(f"Fixed JSON (first 200 chars): {fixed_json[:200]}")
+                                                try:
+                                                    parsed_tool = json.loads(fixed_json)
+                                                    logger.debug(f"Successfully parsed fixed JSON")
+                                                except json.JSONDecodeError as e3:
+                                                    logger.debug(f"Fixed JSON also failed: {e3}")
+                                                    raise e  # Re-raise original error
                                         
                                         # Convert to OpenAI tool_calls format
                                         tool_calls = [{
