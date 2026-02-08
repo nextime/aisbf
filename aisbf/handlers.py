@@ -924,7 +924,7 @@ class RotationHandler:
                 logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
                 # Return a normal response with error message instead of HTTP 503
                 error_message = f"All providers in rotation '{rotation_id}' failed. Details: {'; '.join(error_details)}"
-                return {
+                error_response = {
                     "id": f"error-{rotation_id}-{int(time.time())}",
                     "object": "chat.completion",
                     "created": int(time.time()),
@@ -946,6 +946,11 @@ class RotationHandler:
                     "rotation_id": rotation_id,
                     "error_details": error_details
                 }
+                # Return as StreamingResponse if original request was streaming, otherwise return dict
+                if stream:
+                    return self._create_streaming_response(error_response, rotation_id)
+                else:
+                    return error_response
             else:
                 raise HTTPException(
                     status_code=503,
