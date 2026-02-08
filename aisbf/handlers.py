@@ -962,7 +962,7 @@ class RotationHandler:
                     return error_response
             else:
                 raise HTTPException(
-                    status_code=503,
+                    status_code=429,
                     detail={
                         "message": "No models available in rotation (all providers may be rate limited)",
                         "rotation_id": rotation_id,
@@ -1355,7 +1355,7 @@ class RotationHandler:
                 return error_response
         else:
             raise HTTPException(
-                status_code=503,
+                status_code=429,
                 detail={
                     "message": f"All providers in rotation failed after {max_retries} attempts",
                     "rotation_id": rotation_id,
