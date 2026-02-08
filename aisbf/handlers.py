@@ -820,6 +820,10 @@ class RotationHandler:
         # Check if notifyerrors is enabled for this rotation
         notify_errors = getattr(rotation_config, 'notifyerrors', False)
         logger.info(f"notifyerrors setting for rotation '{rotation_id}': {notify_errors}")
+        
+        # Extract stream setting early - needed for error handling
+        stream = request_data.get('stream', False)
+        logger.info(f"Request stream mode: {stream}")
 
         logger.info(f"Rotation config loaded successfully")
         providers = rotation_config.providers
