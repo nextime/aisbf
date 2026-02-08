@@ -1428,6 +1428,11 @@ class RotationHandler:
                     tool_calls = None
                     final_text = accumulated_response_text
                     
+                    logger.debug(f"=== ACCUMULATED RESPONSE TEXT ===")
+                    logger.debug(f"Total length: {len(accumulated_response_text)}")
+                    logger.debug(f"First 500 chars: {accumulated_response_text[:500]}")
+                    logger.debug(f"Last 200 chars: {accumulated_response_text[-200:]}")
+                    
                     # Check for tool call patterns in the accumulated text
                     if accumulated_response_text:
                         import re as re_module
@@ -1436,6 +1441,8 @@ class RotationHandler:
                         # This avoids complex nested parsing issues
                         tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
                         tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
+                        
+                        logger.debug(f"Tool pattern match: {tool_match is not None}")
                         
                         if tool_match:
                             try:
@@ -1456,16 +1463,29 @@ class RotationHandler:
                                                     break
                                         
                                         tool_json_str = accumulated_response_text[json_start:json_end]
-                                        logger.debug(f"Extracted tool JSON: {tool_json_str[:200]}...")
+                                        logger.debug(f"=== TOOL JSON EXTRACTION ===")
+                                        logger.debug(f"Extracted tool JSON length: {len(tool_json_str)}")
+                                        logger.debug(f"Extracted tool JSON (first 500 chars): {tool_json_str[:500]}")
+                                        logger.debug(f"First 20 bytes (repr): {repr(tool_json_str[:20])}")
+                                        logger.debug(f"ASCII codes for first 20 chars: {[ord(c) for c in tool_json_str[:20]]}")
                                         
                                         try:
                                             parsed_tool = json.loads(tool_json_str)
-                                        except json.JSONDecodeError:
+                                            logger.debug(f"Successfully parsed tool JSON")
+                                        except json.JSONDecodeError as e:
+                                            logger.debug(f"JSON parse error: {e}")
+                                            logger.debug(f"Error at position {e.pos if hasattr(e, 'pos') else 'unknown'}")
                                             # Try fixing common issues: single quotes, trailing commas
                                             fixed_json = tool_json_str.replace("'", '"')
                                             fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
                                             fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
-                                            parsed_tool = json.loads(fixed_json)
+                                            logger.debug(f"Fixed JSON (first 200 chars): {fixed_json[:200]}")
+                                            try:
+                                                parsed_tool = json.loads(fixed_json)
+                                                logger.debug(f"Successfully parsed fixed JSON")
+                                            except json.JSONDecodeError as e2:
+                                                logger.debug(f"Fixed JSON also failed: {e2}")
+                                                raise e  # Re-raise original error
                                         
                                         # Convert to OpenAI tool_calls format
                                         tool_calls = [{
