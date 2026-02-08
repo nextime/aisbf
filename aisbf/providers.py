@@ -453,9 +453,14 @@ class GoogleProviderHandler(BaseProviderHandler):
                                                 import json
                                                 import re
                                                 
-                                                # First, check for "tool: {...}" format
+                                                # Pattern 1: "tool: {...}" format
                                                 tool_pattern = r'tool:\s*(\{[^}]*\})'
                                                 tool_match = re.search(tool_pattern, response_text, re.DOTALL)
+                                                
+                                                # Pattern 2: "content" field followed by "assistant:" format
+                                                # This handles: "content": "..." } assistant: [...]
+                                                content_assistant_pattern = r'"content":\s*"(.*?)"\s*\}\s*assistant:\s*(\[.*?\])\s*$'
+                                                content_assistant_match = re.search(content_assistant_pattern, response_text, re.DOTALL | re.IGNORECASE)
                                                 
                                                 if tool_match:
                                                     try:
@@ -500,7 +505,45 @@ class GoogleProviderHandler(BaseProviderHandler):
                                                     except (json.JSONDecodeError, Exception) as e:
                                                         logging.debug(f"Failed to parse 'tool:' format: {e}")
                                                 
-                                                # Fall back to original JSON parsing if no tool: format found
+                                                elif content_assistant_match:
+                                                    # Handle "content": "..." } assistant: [...] format
+                                                    try:
+                                                        tool_content = content_assistant_match.group(1)
+                                                        assistant_json_str = content_assistant_match.group(2)
+                                                        
+                                                        logging.info(f"Detected 'content/assistant:' format - tool content length: {len(tool_content)}")
+                                                        
+                                                        # The content is the tool argument - treat as a write action
+                                                        openai_tool_call = {
+                                                            "id": f"call_{call_id}",
+                                                            "type": "function",
+                                                            "function": {
+                                                                "name": "write",
+                                                                "arguments": json.dumps({"content": tool_content})
+                                                            }
+                                                        }
+                                                        openai_tool_calls.append(openai_tool_call)
+                                                        call_id += 1
+                                                        logging.info(f"Converted 'content/assistant:' format to OpenAI tool_calls")
+                                                        
+                                                        # Extract assistant text
+                                                        try:
+                                                            assistant_content = json.loads(assistant_json_str)
+                                                            if isinstance(assistant_content, list) and len(assistant_content) > 0:
+                                                                for item in assistant_content:
+                                                                    if isinstance(item, dict) and item.get('type') == 'text':
+                                                                        response_text = item.get('text', '')
+                                                                        break
+                                                                else:
+                                                                    response_text = ""
+                                                            else:
+                                                                response_text = ""
+                                                        except json.JSONDecodeError:
+                                                            response_text = ""
+                                                    except Exception as e:
+                                                        logging.debug(f"Failed to parse 'content/assistant:' format: {e}")
+                                                
+                                                # Fall back to original JSON parsing if no special format found
                                                 elif not openai_tool_calls:
                                                     try:
                                                         # Try to parse as JSON
