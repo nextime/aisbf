@@ -953,9 +953,9 @@ class RotationHandler:
                     "rotation_id": rotation_id,
                     "error_details": error_details
                 }
-                # Return as StreamingResponse if original request was streaming, otherwise return dict
+                # For streaming requests, wrap in a simple streaming response
                 if stream:
-                    return self._create_streaming_response(error_response, rotation_id)
+                    return self._create_error_streaming_response(error_response)
                 else:
                     return error_response
             else:
@@ -1312,9 +1312,9 @@ class RotationHandler:
                 "last_error": last_error,
                 "error_details": error_details
             }
-            # Return as StreamingResponse if original request was streaming, otherwise return dict
+            # For streaming requests, wrap in a simple streaming response
             if stream:
-                return self._create_streaming_response(error_response, rotation_id)
+                return self._create_error_streaming_response(error_response)
             else:
                 return error_response
         else:
@@ -1330,6 +1330,28 @@ class RotationHandler:
                     "details": error_details
                 }
             )
+
+    def _create_error_streaming_response(self, error_response: Dict):
+        """
+        Create a simple StreamingResponse for error messages.
+        
+        This is used when notifyerrors is enabled and we need to return
+        an error as a streaming response instead of raising an HTTPException.
+        
+        Args:
+            error_response: The error response dict to stream
+        
+        Returns:
+            StreamingResponse with the error response as a single chunk
+        """
+        import json
+        import time
+        
+        async def error_stream_generator():
+            # Send the error response as a single chunk
+            yield f"data: {json.dumps(error_response)}\n\n".encode('utf-8')
+        
+        return StreamingResponse(error_stream_generator(), media_type="text/event-stream")
 
     def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int):
         """
