@@ -922,7 +922,7 @@ class RotationHandler:
                         error_details.append(f"  - {provider_id}: Not configured")
             
             # Check if notifyerrors is enabled - if so, return error as normal message instead of HTTP 503
-            logger.info(f"Checking notify_errors: {notify_errors}")
+            logger.info(f"Checking notifyerrors: {notify_errors}")
             if notify_errors:
                 logger.info(f"notifyerrors is enabled for rotation '{rotation_id}', returning error as normal message")
                 # Return a normal response with error message instead of HTTP 503
