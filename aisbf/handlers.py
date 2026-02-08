@@ -481,6 +481,7 @@ class RequestHandler:
                                 if tool_call["id"] not in seen_tool_call_ids:
                                     delta_tool_calls.append(tool_call)
                                     seen_tool_call_ids.add(tool_call["id"])
+                                    logger.info(f"Adding tool call to delta: {tool_call}")
                             
                             # Check if this is the last chunk
                             is_last_chunk = (chunk_idx == total_chunks - 1)
@@ -507,7 +508,7 @@ class RequestHandler:
                                             "content": delta_text if delta_text else "",
                                             "refusal": None,
                                             "role": "assistant",
-                                            "tool_calls": delta_tool_calls if delta_tool_calls else None
+                                            "tool_calls": delta_tool_calls if len(delta_tool_calls) > 0 else None
                                         },
                                         "finish_reason": chunk_finish_reason,
                                         "logprobs": None,
