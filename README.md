@@ -141,18 +141,11 @@ See `config/providers.json` and `config/rotations.json` for configuration exampl
 ## Donations
 The project includes multiple donation options to support its development:
 
-### Web3/MetaMask Donation
-Works on any website - The Web3 donation is completely independent of the current page
-Click the "🦊 Donate with MetaMask" button in the extension popup (only appears if MetaMask is detected)
-Supports both modern window.ethereum and legacy window.web3 providers
-Default donation: 0.1 ETH to 0xdA6dAb526515b5cb556d20269207D43fcc760E51
-Users can modify the amount in MetaMask before confirming
+### Ethereum Donation
+ETH to 0xdA6dAb526515b5cb556d20269207D43fcc760E51
 
 ### PayPal Donation
-Click the "💳 Donate with PayPal" button in the extension popup
-Opens PayPal donation page for info@nexlab.net
-Traditional payment method for users without cryptocurrency wallets
-Always available regardless of browser setup
+https://paypal.me/nexlab
 
 ### Bitcoin Donation
 Address: bc1qcpt2uutqkz4456j5r78rjm3gwq03h5fpwmcc5u

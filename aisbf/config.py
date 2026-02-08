@@ -35,6 +35,14 @@ class ProviderModelConfig(BaseModel):
     max_request_tokens: Optional[int] = None
 
 
+class CondensationConfig(BaseModel):
+    """Configuration for context condensation"""
+    provider_id: Optional[str] = None
+    model: Optional[str] = None
+    rotation_id: Optional[str] = None
+    enabled: bool = True
+
+
 class ProviderConfig(BaseModel):
     id: str
     name: str
@@ -63,6 +71,7 @@ class AppConfig(BaseModel):
     providers: Dict[str, ProviderConfig]
     rotations: Dict[str, RotationConfig]
     autoselect: Dict[str, AutoselectConfig]
+    condensation: Optional[CondensationConfig] = None
     error_tracking: Dict[str, Dict]
 
 class Config:
@@ -71,6 +80,7 @@ class Config:
         self._load_providers()
         self._load_rotations()
         self._load_autoselect()
+        self._load_condensation()
         self._initialize_error_tracking()
 
     def _get_config_source_dir(self):
@@ -208,6 +218,30 @@ class Config:
         with open(autoselect_path) as f:
             data = json.load(f)
             self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
+    
+    def _load_condensation(self):
+        """Load condensation configuration from providers.json"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_condensation START ===")
+        
+        providers_path = Path.home() / '.aisbf' / 'providers.json'
+        if not providers_path.exists():
+            # Fallback to source config if user config doesn't exist
+            try:
+                source_dir = self._get_config_source_dir()
+                providers_path = source_dir / 'providers.json'
+            except FileNotFoundError:
+                logger.warning("Could not find providers.json for condensation config")
+                self.condensation = CondensationConfig()
+                return
+        
+        with open(providers_path) as f:
+            data = json.load(f)
+            condensation_data = data.get('condensation', {})
+            self.condensation = CondensationConfig(**condensation_data)
+            logger.info(f"Loaded condensation config: provider_id={self.condensation.provider_id}, model={self.condensation.model}, enabled={self.condensation.enabled}")
+            logger.info(f"=== Config._load_condensation END ===")
 
     def _initialize_error_tracking(self):
         self.error_tracking = {}
@@ -235,5 +269,8 @@ class Config:
 
     def get_autoselect(self, autoselect_id: str) -> AutoselectConfig:
         return self.autoselect.get(autoselect_id)
+    
+    def get_condensation(self) -> CondensationConfig:
+        return self.condensation
 
 config = Config()

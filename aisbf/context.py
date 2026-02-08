@@ -25,6 +25,9 @@ Context management and condensation for AISBF.
 import logging
 from typing import Dict, List, Optional, Union, Any
 from .utils import count_messages_tokens
+from .config import config
+from .providers import get_provider_handler
+from .handlers import RotationHandler
 
 
 class ContextManager:
@@ -32,18 +35,70 @@ class ContextManager:
     Manages context size and performs condensation when needed.
     """
     
-    def __init__(self, model_config: Dict, provider_handler=None):
+    def __init__(self, model_config: Dict, provider_handler=None, condensation_config=None):
         """
         Initialize the context manager.
         
         Args:
             model_config: Model configuration dictionary containing context_size, condense_context, condense_method
-            provider_handler: Optional provider handler for making summarization requests
+            provider_handler: Optional provider handler for making summarization requests (fallback)
+            condensation_config: Optional condensation configuration for dedicated provider/model/rotation
         """
         self.context_size = model_config.get('context_size')
         self.condense_context = model_config.get('condense_context', 0)
         self.condense_method = model_config.get('condense_method')
         self.provider_handler = provider_handler
+        self.condensation_config = condensation_config or config.get_condensation()
+        
+        # Initialize condensation provider handler if configured
+        self.condensation_handler = None
+        self.condensation_model = None
+        self._rotation_handler = None
+        self._rotation_id = None
+        
+        if (self.condensation_config and 
+            self.condensation_config.enabled):
+            try:
+                # Check if model is a rotation ID or direct model name
+                model_value = self.condensation_config.model
+                
+                # Check if this model value is a rotation ID (exists in rotations config)
+                is_rotation = False
+                if model_value:
+                    try:
+                        rotation_config = config.get_rotation(model_value)
+                        if rotation_config:
+                            is_rotation = True
+                            logger = logging.getLogger(__name__)
+                            logger.info(f"Condensation model '{model_value}' is a rotation ID")
+                    except:
+                        pass  # Not a rotation, treat as direct model
+                
+                if is_rotation:
+                    # Use rotation handler for condensation
+                    rotation_handler = RotationHandler()
+                    # Store rotation handler and rotation_id for later use
+                    self._rotation_handler = rotation_handler
+                    self._rotation_id = model_value
+                    # The actual model will be selected by rotation handler
+                    self.condensation_model = None  # Will be determined by rotation
+                    logger = logging.getLogger(__name__)
+                    logger.info(f"Initialized condensation with rotation: rotation_id={model_value}")
+                elif self.condensation_config.provider_id and model_value:
+                    # Use provider handler for condensation with direct model
+                    provider_config = config.get_provider(self.condensation_config.provider_id)
+                    if provider_config:
+                        api_key = provider_config.api_key
+                        self.condensation_handler = get_provider_handler(
+                            self.condensation_config.provider_id, 
+                            api_key
+                        )
+                        self.condensation_model = model_value
+                        logger = logging.getLogger(__name__)
+                        logger.info(f"Initialized condensation handler: provider={self.condensation_config.provider_id}, model={model_value}")
+            except Exception as e:
+                logger = logging.getLogger(__name__)
+                logger.warning(f"Failed to initialize condensation handler: {e}")
         
         # Normalize condense_context to 0-100 range
         if self.condense_context and self.condense_context > 100:
@@ -198,9 +253,14 @@ class ContextManager:
         logger = logging.getLogger(__name__)
         logger.info(f"Conversational condensation: {len(messages)} messages")
         
-        if not self.provider_handler:
+        # Use dedicated condensation handler if available, otherwise fallback to provider_handler
+        handler = self.condensation_handler if self.condensation_handler else self.provider_handler
+        if not handler:
             logger.warning("No provider handler available for conversational condensation, skipping")
             return messages
+        
+        # Use dedicated condensation model if configured, otherwise use same model
+        condense_model = self.condensation_model if self.condensation_model else model
         
         if len(messages) <= 4:
             # Not enough messages to condense
@@ -227,36 +287,68 @@ class ContextManager:
                 summary_prompt += f"{role}: {content}\n"
         
         try:
-            # Request summary from the model
-            summary_messages = [{"role": "user", "content": summary_prompt}]
-            summary_response = await self.provider_handler.handle_request(
-                model=model,
-                messages=summary_messages,
-                max_tokens=1000,
-                temperature=0.3,
-                stream=False
-            )
-            
-            # Extract summary content
-            if isinstance(summary_response, dict):
-                summary_content = summary_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+            # If using rotation handler, call rotation handler's method
+            if self._rotation_handler and not self.condensation_model:
+                # Create a minimal request for condensation
+                condensation_request = {
+                    "messages": [{"role": "user", "content": summary_prompt}],
+                    "temperature": 0.3,
+                    "max_tokens": 1000,
+                    "stream": False
+                }
+                # Call rotation handler to get condensation
+                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
+                # Extract summary content
+                if isinstance(response, dict):
+                    summary_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    
+                    if summary_content:
+                        # Create summary message
+                        summary_message = {
+                            "role": "system",
+                            "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
+                        }
+                        
+                        # Build condensed messages: system + summary + recent
+                        condensed = system_messages + [summary_message] + recent_messages
+                        
+                        # Update stored summary
+                        self.conversation_summary = summary_content
+                        self.summary_token_count = count_messages_tokens([summary_message], model)
+                        
+                        logger.info(f"Conversational: Created summary via rotation ({len(summary_content)} chars)")
+                        return condensed
+            else:
+                # Request summary from the model directly
+                summary_messages = [{"role": "user", "content": summary_prompt}]
+                summary_response = await handler.handle_request(
+                    model=condense_model,
+                    messages=summary_messages,
+                    max_tokens=1000,
+                    temperature=0.3,
+                    stream=False
+                )
                 
-                if summary_content:
-                    # Create summary message
-                    summary_message = {
-                        "role": "system",
-                        "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
-                    }
+                # Extract summary content
+                if isinstance(summary_response, dict):
+                    summary_content = summary_response.get('choices', [{}])[0].get('message', {}).get('content', '')
                     
-                    # Build condensed messages: system + summary + recent
-                    condensed = system_messages + [summary_message] + recent_messages
-                    
-                    # Update stored summary
-                    self.conversation_summary = summary_content
-                    self.summary_token_count = count_messages_tokens([summary_message], model)
-                    
-                    logger.info(f"Conversational: Created summary ({len(summary_content)} chars)")
-                    return condensed
+                    if summary_content:
+                        # Create summary message
+                        summary_message = {
+                            "role": "system",
+                            "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
+                        }
+                        
+                        # Build condensed messages: system + summary + recent
+                        condensed = system_messages + [summary_message] + recent_messages
+                        
+                        # Update stored summary
+                        self.conversation_summary = summary_content
+                        self.summary_token_count = count_messages_tokens([summary_message], model)
+                        
+                        logger.info(f"Conversational: Created summary ({len(summary_content)} chars)")
+                        return condensed
             
         except Exception as e:
             logger.error(f"Error during conversational condensation: {e}")
@@ -278,9 +370,14 @@ class ContextManager:
         logger = logging.getLogger(__name__)
         logger.info(f"Semantic condensation: {len(messages)} messages")
         
-        if not self.provider_handler:
+        # Use dedicated condensation handler if available, otherwise fallback to provider_handler
+        handler = self.condensation_handler if self.condensation_handler else self.provider_handler
+        if not handler:
             logger.warning("No provider handler available for semantic condensation, skipping")
             return messages
+        
+        # Use dedicated condensation model if configured, otherwise use same model
+        condense_model = self.condensation_model if self.condensation_model else model
         
         if len(messages) <= 2:
             return messages
@@ -321,33 +418,65 @@ Conversation History:
 Provide only the relevant information in a concise format."""
         
         try:
-            # Request pruned context from the model
-            prune_messages = [{"role": "user", "content": prune_prompt}]
-            prune_response = await self.provider_handler.handle_request(
-                model=model,
-                messages=prune_messages,
-                max_tokens=2000,
-                temperature=0.2,
-                stream=False
-            )
-            
-            # Extract pruned content
-            if isinstance(prune_response, dict):
-                pruned_content = prune_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                
-                if pruned_content:
-                    # Create pruned context message
-                    pruned_message = {
-                        "role": "system",
-                        "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
-                    }
+            # If using rotation handler, call rotation handler's method
+            if self._rotation_handler and not self.condensation_model:
+                # Create a minimal request for condensation
+                condensation_request = {
+                    "messages": [{"role": "user", "content": prune_prompt}],
+                    "temperature": 0.2,
+                    "max_tokens": 2000,
+                    "stream": False
+                }
+                # Call rotation handler to get condensation
+                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
+                # Extract pruned content
+                if isinstance(response, dict):
+                    pruned_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
                     
-                    # Build condensed messages: system + pruned + last user message
-                    last_message = messages[-1] if messages else None
-                    if last_message and last_message.get('role') != 'system':
-                        condensed = system_messages + [pruned_message, last_message]
-                    else:
-                        condensed = system_messages + [pruned_message]
+                    if pruned_content:
+                        # Create pruned context message
+                        pruned_message = {
+                            "role": "system",
+                            "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
+                        }
+                        
+                        # Build condensed messages: system + pruned + last user message
+                        last_message = messages[-1] if messages else None
+                        if last_message and last_message.get('role') != 'system':
+                            condensed = system_messages + [pruned_message, last_message]
+                        else:
+                            condensed = system_messages + [pruned_message]
+                        
+                        logger.info(f"Semantic: Pruned to relevant context via rotation ({len(pruned_content)} chars)")
+                        return condensed
+            else:
+                # Request pruned context from the model directly
+                prune_messages = [{"role": "user", "content": prune_prompt}]
+                prune_response = await handler.handle_request(
+                    model=condense_model,
+                    messages=prune_messages,
+                    max_tokens=2000,
+                    temperature=0.2,
+                    stream=False
+                )
+                
+                # Extract pruned content
+                if isinstance(prune_response, dict):
+                    pruned_content = prune_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+                    
+                    if pruned_content:
+                        # Create pruned context message
+                        pruned_message = {
+                            "role": "system",
+                            "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
+                        }
+                        
+                        # Build condensed messages: system + pruned + last user message
+                        last_message = messages[-1] if messages else None
+                        if last_message and last_message.get('role') != 'system':
+                            condensed = system_messages + [pruned_message, last_message]
+                        else:
+                            condensed = system_messages + [pruned_message]
                     
                     logger.info(f"Semantic: Pruned to relevant context ({len(pruned_content)} chars)")
                     return condensed

@@ -263,7 +263,7 @@ class RequestHandler:
             
             # Apply context condensation if needed
             if context_config.get('condense_context', 0) > 0:
-                context_manager = ContextManager(context_config, handler)
+                context_manager = ContextManager(context_config, handler, self.config.get_condensation())
                 if context_manager.should_condense(messages, model):
                     logger.info("Context condensation triggered")
                     messages = await context_manager.condense_context(messages, model)
@@ -369,7 +369,7 @@ class RequestHandler:
         
         # Apply context condensation if needed
         if context_config.get('condense_context', 0) > 0:
-            context_manager = ContextManager(context_config, handler)
+            context_manager = ContextManager(context_config, handler, self.config.get_condensation())
             if context_manager.should_condense(messages, model):
                 import logging
                 logger = logging.getLogger(__name__)
@@ -1017,7 +1017,7 @@ class RotationHandler:
                 
                 # Apply context condensation if needed
                 if context_config.get('condense_context', 0) > 0:
-                    context_manager = ContextManager(context_config, handler)
+                    context_manager = ContextManager(context_config, handler, self.config.get_condensation())
                     if context_manager.should_condense(messages, model_name):
                         logger.info("Context condensation triggered")
                         messages = await context_manager.condense_context(messages, model_name)

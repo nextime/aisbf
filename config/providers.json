@@ -1,4 +1,9 @@
 {
+  "condensation": {
+    "provider_id": "gemini",
+    "model": "gemini-1.5-flash",
+    "enabled": true
+  },
   "providers": {
     "gemini": {
       "id": "gemini",
