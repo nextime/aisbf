@@ -313,7 +313,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                 
                 if function_declarations:
                     google_tools = {"function_declarations": function_declarations}
-                    config["tools"] = google_tools
+                    config["tools"] = [google_tools]
                     logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to config")
 
             # Handle streaming request
