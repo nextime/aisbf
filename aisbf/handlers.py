@@ -483,6 +483,9 @@ class RequestHandler:
                             is_last_chunk = (chunk_idx == total_chunks - 1)
                             chunk_finish_reason = finish_reason if is_last_chunk else None
                             
+                            # Debug logging
+                            logger.debug(f"Chunk {chunk_idx}/{total_chunks}: delta_text='{delta_text}', delta_tool_calls={len(delta_tool_calls)}, is_last={is_last_chunk}, condition={bool(delta_text or delta_tool_calls or is_last_chunk)}")
+                            
                             # Only send if there's new content, new tool calls, or it's the last chunk with finish_reason
                             if delta_text or delta_tool_calls or is_last_chunk:
                                 # Create OpenAI-compatible chunk with additional fields
