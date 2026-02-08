@@ -900,12 +900,12 @@ class RotationHandler:
             
             # Build detailed error message with provider status information
             error_details = []
-            error_details.append(f"No models available in rotation '{rotation_id}'")
-            error_details.append(f"Total providers in rotation: {len(providers)}")
-            error_details.append(f"Providers skipped (rate limited): {len(skipped_providers)}")
+            error_details.append(f"**No models available in rotation '{rotation_id}'**")
+            error_details.append(f"**Total providers in rotation:** {len(providers)}")
+            error_details.append(f"**Providers skipped (rate limited):** {len(skipped_providers)}")
             
             if skipped_providers:
-                error_details.append("Skipped providers:")
+                error_details.append("**Skipped providers:**")
                 for provider_id in skipped_providers:
                     provider_config = self.config.get_provider(provider_id)
                     if provider_config:
@@ -917,13 +917,13 @@ class RotationHandler:
                             import time
                             cooldown_remaining = int(disabled_until - time.time())
                             if cooldown_remaining > 0:
-                                error_details.append(f"  - {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
+                                error_details.append(f"• {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
                             else:
-                                error_details.append(f"  - {provider_id}: Rate limited (cooldown expired, failures: {failures})")
+                                error_details.append(f"• {provider_id}: Rate limited (cooldown expired, failures: {failures})")
                         else:
-                            error_details.append(f"  - {provider_id}: Rate limited (failures: {failures})")
+                            error_details.append(f"• {provider_id}: Rate limited (failures: {failures})")
                     else:
-                        error_details.append(f"  - {provider_id}: Not configured")
+                        error_details.append(f"• {provider_id}: Not configured")
             
             # Check if notifyerrors is enabled - if so, return error as normal message instead of HTTP 503
             logger.info(f"Checking notifyerrors: {notify_errors}")
@@ -1251,12 +1251,38 @@ class RotationHandler:
         
         # Build detailed error message
         error_details = []
-        error_details.append(f"All providers in rotation '{rotation_id}' failed after {max_retries} attempts")
-        error_details.append(f"Attempted models: {[m['name'] for m in tried_models]}")
-        error_details.append(f"Last error: {last_error}")
+        error_details.append(f"**All providers in rotation '{rotation_id}' failed after {max_retries} attempts**")
+        error_details.append(f"**Attempted models:** {[m['name'] for m in tried_models]}")
+        
+        # Format last error with JSON indentation if it contains JSON
+        try:
+            # Check if last_error contains JSON-like structure
+            if '{' in last_error or '[' in last_error:
+                # Try to extract and format JSON
+                import json
+                # Find JSON start and end
+                json_start = last_error.find('{') if '{' in last_error else last_error.find('[')
+                if json_start != -1:
+                    json_end = last_error.rfind('}') + 1 if '{' in last_error else last_error.rfind(']') + 1
+                    json_str = last_error[json_start:json_end]
+                    try:
+                        # Prettify JSON
+                        parsed_json = json.loads(json_str)
+                        formatted_json = json.dumps(parsed_json, indent=2)
+                        # Replace JSON part with formatted version
+                        error_part = last_error[:json_start]
+                        error_details.append(f"**Last error:** {error_part}\n```json\n{formatted_json}\n```")
+                    except:
+                        error_details.append(f"**Last error:** {last_error}")
+                else:
+                    error_details.append(f"**Last error:** {last_error}")
+            else:
+                error_details.append(f"**Last error:** {last_error}")
+        except:
+            error_details.append(f"**Last error:** {last_error}")
         
         # Add provider status information
-        error_details.append("Provider status:")
+        error_details.append("**Provider status:**")
         for provider in providers:
             provider_id = provider['provider_id']
             provider_config = self.config.get_provider(provider_id)
@@ -1269,13 +1295,13 @@ class RotationHandler:
                     import time
                     cooldown_remaining = int(disabled_until - time.time())
                     if cooldown_remaining > 0:
-                        error_details.append(f"  - {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
+                        error_details.append(f"• {provider_id}: Rate limited (cooldown: {cooldown_remaining}s remaining, failures: {failures})")
                     else:
-                        error_details.append(f"  - {provider_id}: Rate limited (cooldown expired, failures: {failures})")
+                        error_details.append(f"• {provider_id}: Rate limited (cooldown expired, failures: {failures})")
                 else:
-                    error_details.append(f"  - {provider_id}: Available (failures: {failures})")
+                    error_details.append(f"• {provider_id}: Available (failures: {failures})")
             else:
-                error_details.append(f"  - {provider_id}: Not configured")
+                error_details.append(f"• {provider_id}: Not configured")
         
         # Check if notifyerrors is enabled - if so, return error as normal message instead of HTTP 503
         # Get stream parameter from request_data to determine response type
