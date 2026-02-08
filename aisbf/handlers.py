@@ -1431,98 +1431,19 @@ class RotationHandler:
                     # Check for tool call patterns in the accumulated text
                     if accumulated_response_text:
                         import re as re_module
-                        import ast as ast_module  # For parsing Python-style literals with single quotes
                         
-                        # Pattern 0: "assistant: [...]" wrapping everything (nested format)
-                        outer_assistant_pattern = r"^assistant:\s*(\[.*\])\s*$"
-                        outer_assistant_match = re_module.match(outer_assistant_pattern, accumulated_response_text.strip(), re_module.DOTALL)
+                        # Simple approach: just look for "tool: {...}" pattern and extract the JSON
+                        # This avoids complex nested parsing issues
+                        tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
+                        tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
                         
-                        if outer_assistant_match:
+                        if tool_match:
                             try:
-                                # Try JSON first, then fall back to ast.literal_eval for Python-style single quotes
-                                try:
-                                    outer_content = json.loads(outer_assistant_match.group(1))
-                                except json.JSONDecodeError:
-                                    # Model may have used single quotes instead of double quotes
-                                    outer_content = ast_module.literal_eval(outer_assistant_match.group(1))
-                                if isinstance(outer_content, list) and len(outer_content) > 0:
-                                    for item in outer_content:
-                                        if isinstance(item, dict) and item.get('type') == 'text':
-                                            inner_text = item.get('text', '')
-                                            # Now parse the inner text for tool calls
-                                            inner_tool_pattern = r'tool:\s*(\{.*?\})\s*(?:assistant:\s*(\[.*\]))?\s*$'
-                                            inner_tool_match = re_module.search(inner_tool_pattern, inner_text, re_module.DOTALL)
-                                            
-                                            if inner_tool_match:
-                                                tool_json_str = inner_tool_match.group(1)
-                                                # Parse the tool JSON - handle multi-line content
-                                                try:
-                                                    # Extract JSON using a more robust method
-                                                    tool_start = inner_text.find('tool:')
-                                                    if tool_start != -1:
-                                                        json_start = inner_text.find('{', tool_start)
-                                                        brace_count = 0
-                                                        json_end = json_start
-                                                        for i, c in enumerate(inner_text[json_start:], json_start):
-                                                            if c == '{':
-                                                                brace_count += 1
-                                                            elif c == '}':
-                                                                brace_count -= 1
-                                                                if brace_count == 0:
-                                                                    json_end = i + 1
-                                                                    break
-                                                        tool_json_str = inner_text[json_start:json_end]
-                                                        parsed_tool = json.loads(tool_json_str)
-                                                        
-                                                        # Convert to OpenAI tool_calls format
-                                                        tool_calls = [{
-                                                            "id": f"call_0",
-                                                            "type": "function",
-                                                            "function": {
-                                                                "name": parsed_tool.get('action', parsed_tool.get('name', 'unknown')),
-                                                                "arguments": json.dumps({k: v for k, v in parsed_tool.items() if k not in ['action', 'name']})
-                                                            }
-                                                        }]
-                                                        logger.info(f"Converted streaming tool call to OpenAI format: {tool_calls}")
-                                                        
-                                                        # Extract the final assistant text if present
-                                                        if inner_tool_match.group(2):
-                                                            try:
-                                                                # Try JSON first, then fall back to ast.literal_eval
-                                                                try:
-                                                                    final_assistant = json.loads(inner_tool_match.group(2))
-                                                                except json.JSONDecodeError:
-                                                                    final_assistant = ast_module.literal_eval(inner_tool_match.group(2))
-                                                                if isinstance(final_assistant, list) and len(final_assistant) > 0:
-                                                                    for final_item in final_assistant:
-                                                                        if isinstance(final_item, dict) and final_item.get('type') == 'text':
-                                                                            final_text = final_item.get('text', '')
-                                                                            break
-                                                                    else:
-                                                                        final_text = ""
-                                                                else:
-                                                                    final_text = ""
-                                                            except (json.JSONDecodeError, ValueError, SyntaxError):
-                                                                final_text = ""
-                                                        else:
-                                                            final_text = ""
-                                                except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
-                                                    logger.debug(f"Failed to parse streaming tool JSON: {e}")
-                                            break
-                            except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
-                                logger.debug(f"Failed to parse outer assistant format in streaming: {e}")
-                        
-                        # Pattern 1: Simple "tool: {...}" format (not nested)
-                        elif not tool_calls:
-                            tool_pattern = r'tool:\s*(\{.*?\})\s*(?:assistant:\s*(\[.*\]))?\s*$'
-                            tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
-                            
-                            if tool_match:
-                                try:
-                                    # Extract JSON using brace counting
-                                    tool_start = accumulated_response_text.find('tool:')
-                                    if tool_start != -1:
-                                        json_start = accumulated_response_text.find('{', tool_start)
+                                # Extract the tool JSON using brace counting for robustness
+                                tool_start = accumulated_response_text.find('tool:')
+                                if tool_start != -1:
+                                    json_start = accumulated_response_text.find('{', tool_start)
+                                    if json_start != -1:
                                         brace_count = 0
                                         json_end = json_start
                                         for i, c in enumerate(accumulated_response_text[json_start:], json_start):
@@ -1533,8 +1454,18 @@ class RotationHandler:
                                                 if brace_count == 0:
                                                     json_end = i + 1
                                                     break
+                                        
                                         tool_json_str = accumulated_response_text[json_start:json_end]
-                                        parsed_tool = json.loads(tool_json_str)
+                                        logger.debug(f"Extracted tool JSON: {tool_json_str[:200]}...")
+                                        
+                                        try:
+                                            parsed_tool = json.loads(tool_json_str)
+                                        except json.JSONDecodeError:
+                                            # Try fixing common issues: single quotes, trailing commas
+                                            fixed_json = tool_json_str.replace("'", '"')
+                                            fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
+                                            fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
+                                            parsed_tool = json.loads(fixed_json)
                                         
                                         # Convert to OpenAI tool_calls format
                                         tool_calls = [{
@@ -1545,31 +1476,22 @@ class RotationHandler:
                                                 "arguments": json.dumps({k: v for k, v in parsed_tool.items() if k not in ['action', 'name']})
                                             }
                                         }]
-                                        logger.info(f"Converted simple streaming tool call to OpenAI format: {tool_calls}")
+                                        logger.info(f"Converted streaming tool call to OpenAI format: {tool_calls}")
                                         
-                                        # Extract the final assistant text if present
-                                        if tool_match.group(2):
-                                            try:
-                                                # Try JSON first, then fall back to ast.literal_eval
-                                                try:
-                                                    final_assistant = json.loads(tool_match.group(2))
-                                                except json.JSONDecodeError:
-                                                    final_assistant = ast_module.literal_eval(tool_match.group(2))
-                                                if isinstance(final_assistant, list) and len(final_assistant) > 0:
-                                                    for final_item in final_assistant:
-                                                        if isinstance(final_item, dict) and final_item.get('type') == 'text':
-                                                            final_text = final_item.get('text', '')
-                                                            break
-                                                    else:
-                                                        final_text = ""
-                                                else:
-                                                    final_text = ""
-                                            except (json.JSONDecodeError, ValueError, SyntaxError):
-                                                final_text = ""
+                                        # Extract final assistant text after the tool JSON
+                                        # Look for pattern: }\\nassistant: [{'type': 'text', 'text': "..."}]
+                                        # or just return empty since the tool call is the main content
+                                        after_tool = accumulated_response_text[json_end:]
+                                        assistant_pattern = r"assistant:\s*\[.*'text':\s*['\"](.+?)['\"].*\]\s*\]?\s*$"
+                                        assistant_match = re_module.search(assistant_pattern, after_tool, re_module.DOTALL)
+                                        if assistant_match:
+                                            final_text = assistant_match.group(1)
+                                            # Unescape common escape sequences
+                                            final_text = final_text.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
                                         else:
                                             final_text = ""
-                                except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
-                                    logger.debug(f"Failed to parse simple streaming tool JSON: {e}")
+                            except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
+                                logger.debug(f"Failed to parse tool JSON in streaming: {e}")
                     
                     # Now send the response chunks
                     # If we detected tool calls, send them in the first chunk with role
