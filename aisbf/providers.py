@@ -303,16 +303,18 @@ class GoogleProviderHandler(BaseProviderHandler):
                 for tool in tools:
                     if tool.get("type") == "function":
                         function = tool.get("function", {})
-                        function_declaration = {
-                            "name": function.get("name"),
-                            "description": function.get("description", ""),
-                            "parameters": function.get("parameters", {})
-                        }
+                        # Use Google's SDK types for proper validation
+                        from google import genai
+                        function_declaration = genai.FunctionDeclaration(
+                            name=function.get("name"),
+                            description=function.get("description", ""),
+                            parameters=function.get("parameters", {})
+                        )
                         function_declarations.append(function_declaration)
                         logging.info(f"GoogleProviderHandler: Converted tool to Google format: {function_declaration}")
                 
                 if function_declarations:
-                    # Google API expects tools to be a list of tool declarations directly
+                    # Google API expects tools to be a list of FunctionDeclaration objects
                     config["tools"] = function_declarations
                     logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to config")
 
