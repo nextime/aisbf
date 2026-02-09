@@ -312,8 +312,8 @@ class GoogleProviderHandler(BaseProviderHandler):
                         logging.info(f"GoogleProviderHandler: Converted tool to Google format: {function_declaration}")
                 
                 if function_declarations:
-                    google_tools = {"function_declarations": function_declarations}
-                    config["tools"] = [google_tools]
+                    # Google API expects tools to be a list of tool declarations directly
+                    config["tools"] = function_declarations
                     logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to config")
 
             # Handle streaming request
