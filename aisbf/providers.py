@@ -304,8 +304,8 @@ class GoogleProviderHandler(BaseProviderHandler):
                     if tool.get("type") == "function":
                         function = tool.get("function", {})
                         # Use Google's SDK types for proper validation
-                        from google.genai import types
-                        function_declaration = types.FunctionDeclaration(
+                        from google.genai import types as genai_types
+                        function_declaration = genai_types.FunctionDeclaration(
                             name=function.get("name"),
                             description=function.get("description", ""),
                             parameters=function.get("parameters", {})
