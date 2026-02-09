@@ -314,9 +314,10 @@ class GoogleProviderHandler(BaseProviderHandler):
                         logging.info(f"GoogleProviderHandler: Converted tool to Google format: {function_declaration}")
                 
                 if function_declarations:
-                    # Google API expects tools to be a list of FunctionDeclaration objects
-                    config["tools"] = function_declarations
-                    logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to config")
+                    # Google API expects tools to be a Tool object with function_declarations
+                    from google.genai import types as genai_types
+                    google_tools = [genai_types.Tool(function_declarations=function_declarations)]
+                    logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to google_tools")
 
             # Handle streaming request
             if stream:
@@ -331,7 +332,8 @@ class GoogleProviderHandler(BaseProviderHandler):
                 for chunk in stream_client.models.generate_content_stream(
                     model=model,
                     contents=content,
-                    config=config
+                    config=config,
+                    tools=google_tools
                 ):
                     chunks.append(chunk)
                 
@@ -351,7 +353,8 @@ class GoogleProviderHandler(BaseProviderHandler):
                 response = self.client.models.generate_content(
                     model=model,
                     contents=content,
-                    config=config
+                    config=config,
+                    tools=google_tools
                 )
 
                 logging.info(f"GoogleProviderHandler: Response received: {response}")
