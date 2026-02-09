@@ -316,8 +316,12 @@ class GoogleProviderHandler(BaseProviderHandler):
                 if function_declarations:
                     # Google API expects tools to be a Tool object with function_declarations
                     from google.genai import types as genai_types
-                    google_tools = [genai_types.Tool(function_declarations=function_declarations)]
+                    google_tools = genai_types.Tool(function_declarations=function_declarations)
                     logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to google_tools")
+                    
+                    # Add tools to config for both streaming and non-streaming
+                    config["tools"] = google_tools
+                    logging.info(f"GoogleProviderHandler: Added tools to config")
 
             # Handle streaming request
             if stream:
@@ -329,11 +333,11 @@ class GoogleProviderHandler(BaseProviderHandler):
                 # We need to iterate over the streaming response immediately without yielding control
                 # to ensure the client stays alive
                 chunks = []
+                
                 for chunk in stream_client.models.generate_content_stream(
                     model=model,
                     contents=content,
-                    config=config,
-                    tools=google_tools
+                    config=config
                 ):
                     chunks.append(chunk)
                 
@@ -353,8 +357,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                 response = self.client.models.generate_content(
                     model=model,
                     contents=content,
-                    config=config,
-                    tools=google_tools
+                    config=config
                 )
 
                 logging.info(f"GoogleProviderHandler: Response received: {response}")
