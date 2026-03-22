@@ -2091,8 +2091,8 @@ class AutoselectHandler:
         
         return result
 
-    def _build_autoselect_prompt(self, user_prompt: str, autoselect_config) -> str:
-        """Build the prompt for model selection"""
+    def _build_autoselect_messages(self, user_prompt: str, autoselect_config) -> List[Dict]:
+        """Build the messages for model selection (system + user)"""
         skill_content = self._get_skill_file_content()
         
         # Build the available models list
@@ -2100,16 +2100,20 @@ class AutoselectHandler:
         for model_info in autoselect_config.available_models:
             models_list += f"<model><model_id>{model_info.model_id}</model_id><model_description>{model_info.description}</model_description></model>\n"
         
-        # Build the complete prompt
-        prompt = f"""{skill_content}
- 
-<aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
+        # System message with the skill content
+        system_message = skill_content
+        
+        # User message with the prompt and model list
+        user_message = f"""<aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
 <aisbf_autoselect_list>
 {models_list}
 </aisbf_autoselect_list>
-<aisbf_autoselect_fallback>{autoselect_config.fallback}</aisbf_autoselect_fallback>
-"""
-        return prompt
+<aisbf_autoselect_fallback>{autoselect_config.fallback}</aisbf_autoselect_fallback>"""
+        
+        return [
+            {"role": "system", "content": system_message},
+            {"role": "user", "content": user_message}
+        ]
 
     def _extract_model_selection(self, response: str) -> Optional[str]:
         """Extract the model_id from the autoselection response"""
@@ -2118,25 +2122,30 @@ class AutoselectHandler:
             return match.group(1).strip()
         return None
 
-    async def _get_model_selection(self, prompt: str, autoselect_config) -> str:
+    async def _get_model_selection(self, user_prompt: str, autoselect_config) -> str:
         """Send the autoselect prompt to a model and get the selection"""
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
         logger.info(f"Using '{autoselect_config.selection_model}' for model selection")
         
+        # Build messages (system + user)
+        messages = self._build_autoselect_messages(user_prompt, autoselect_config)
+        
         # Create a minimal request for model selection
         selection_request = {
-            "messages": [{"role": "user", "content": prompt}],
-            "temperature": 0.1,  # Low temperature for more deterministic selection
+            "messages": messages,
+            "temperature": 0,  # Deterministic selection
             "max_tokens": 100,   # We only need a short response
-            "stream": False
+            "stream": False,
+            "stop": ["</aisbf_model_autoselection>"]  # Stop at the closing tag
         }
         
         logger.info(f"Selection request parameters:")
-        logger.info(f"  Temperature: 0.1 (low for deterministic selection)")
+        logger.info(f"  Temperature: 0 (deterministic)")
         logger.info(f"  Max tokens: 100 (short response expected)")
         logger.info(f"  Stream: False")
+        logger.info(f"  Stop: </aisbf_model_autoselection>")
         
         # Determine if selection_model is a rotation, provider, or special keyword
         selection_model = autoselect_config.selection_model
@@ -2145,7 +2154,9 @@ class AutoselectHandler:
             # Check if it's the special "internal" keyword
             if selection_model == "internal":
                 logger.info(f"Selection model is 'internal' - using local HuggingFace model")
-                response_content = await self._run_internal_model_selection(prompt)
+                # For internal model, build the full prompt (system + user combined)
+                full_prompt = messages[0]["content"] + "\n\n" + messages[1]["content"]
+                response_content = await self._run_internal_model_selection(full_prompt)
                 
                 if not response_content:
                     logger.error("Internal model returned no response")
@@ -2296,14 +2307,9 @@ class AutoselectHandler:
         logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
-        # Build the autoselect prompt
-        logger.info(f"Building autoselect prompt...")
-        autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
-        logger.info(f"Autoselect prompt built (length: {len(autoselect_prompt)} characters)")
-
         # Get the model selection
         logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(autoselect_prompt, autoselect_config)
+        selected_model_id = await self._get_model_selection(user_prompt, autoselect_config)
 
         # Validate the selected model
         logger.info(f"=== MODEL VALIDATION ===")
@@ -2399,14 +2405,9 @@ class AutoselectHandler:
         logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
-        # Build the autoselect prompt
-        logger.info(f"Building autoselect prompt...")
-        autoselect_prompt = self._build_autoselect_prompt(user_prompt, autoselect_config)
-        logger.info(f"Autoselect prompt built (length: {len(autoselect_prompt)} characters)")
-
         # Get the model selection
         logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(autoselect_prompt, autoselect_config)
+        selected_model_id = await self._get_model_selection(user_prompt, autoselect_config)
 
         # Validate the selected model
         logger.info(f"=== MODEL VALIDATION ===")
