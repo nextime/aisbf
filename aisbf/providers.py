@@ -49,6 +49,180 @@ class BaseProviderHandler:
         self.model_last_request_time = {}  # {model_name: timestamp}
         # Token usage tracking for rate limits
         self.token_usage = {}  # {model_name: {"TPM": [], "TPH": [], "TPD": []}}
+    
+    def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
+        """
+        Parse 429 rate limit response to extract wait time in seconds.
+        
+        Checks multiple sources:
+        1. Retry-After header (seconds or HTTP date)
+        2. X-RateLimit-Reset header (Unix timestamp)
+        3. Response body fields (retry_after, reset_time, etc.)
+        
+        Returns:
+            Wait time in seconds, or None if cannot be determined
+        """
+        import logging
+        import re
+        from email.utils import parsedate_to_datetime
+        from datetime import datetime, timezone
+        
+        logger = logging.getLogger(__name__)
+        logger.info("=== PARSING 429 RATE LIMIT RESPONSE ===")
+        
+        wait_seconds = None
+        
+        # Check Retry-After header
+        if headers:
+            retry_after = headers.get('Retry-After') or headers.get('retry-after')
+            if retry_after:
+                logger.info(f"Found Retry-After header: {retry_after}")
+                try:
+                    # Try parsing as integer (seconds)
+                    wait_seconds = int(retry_after)
+                    logger.info(f"Parsed Retry-After as seconds: {wait_seconds}")
+                except ValueError:
+                    # Try parsing as HTTP date
+                    try:
+                        retry_date = parsedate_to_datetime(retry_after)
+                        now = datetime.now(timezone.utc)
+                        wait_seconds = int((retry_date - now).total_seconds())
+                        logger.info(f"Parsed Retry-After as date, wait seconds: {wait_seconds}")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse Retry-After header: {e}")
+            
+            # Check X-RateLimit-Reset header (Unix timestamp)
+            if not wait_seconds:
+                reset_time = headers.get('X-RateLimit-Reset') or headers.get('x-ratelimit-reset')
+                if reset_time:
+                    logger.info(f"Found X-RateLimit-Reset header: {reset_time}")
+                    try:
+                        reset_timestamp = int(reset_time)
+                        now_timestamp = int(time.time())
+                        wait_seconds = reset_timestamp - now_timestamp
+                        logger.info(f"Calculated wait from reset timestamp: {wait_seconds} seconds")
+                    except Exception as e:
+                        logger.warning(f"Failed to parse X-RateLimit-Reset header: {e}")
+        
+        # Check response body
+        if not wait_seconds and isinstance(response_data, dict):
+            logger.info(f"Checking response body for rate limit info: {response_data}")
+            
+            # Common field names for retry/reset time
+            retry_fields = [
+                'retry_after', 'retryAfter', 'retry_after_seconds',
+                'wait_seconds', 'waitSeconds', 'retry_in'
+            ]
+            reset_fields = [
+                'reset_time', 'resetTime', 'reset_at', 'resetAt',
+                'reset_timestamp', 'resetTimestamp'
+            ]
+            
+            # Check retry fields (direct seconds)
+            for field in retry_fields:
+                if field in response_data:
+                    try:
+                        wait_seconds = int(response_data[field])
+                        logger.info(f"Found {field} in response body: {wait_seconds} seconds")
+                        break
+                    except (ValueError, TypeError) as e:
+                        logger.warning(f"Failed to parse {field}: {e}")
+            
+            # Check reset fields (timestamp)
+            if not wait_seconds:
+                for field in reset_fields:
+                    if field in response_data:
+                        try:
+                            reset_timestamp = int(response_data[field])
+                            now_timestamp = int(time.time())
+                            wait_seconds = reset_timestamp - now_timestamp
+                            logger.info(f"Found {field} in response body, calculated wait: {wait_seconds} seconds")
+                            break
+                        except (ValueError, TypeError) as e:
+                            logger.warning(f"Failed to parse {field}: {e}")
+            
+            # Check for error message with time information
+            if not wait_seconds:
+                error_msg = response_data.get('error', {})
+                if isinstance(error_msg, dict):
+                    message = error_msg.get('message', '')
+                elif isinstance(error_msg, str):
+                    message = error_msg
+                else:
+                    message = response_data.get('message', '')
+                
+                if message:
+                    logger.info(f"Checking error message for time info: {message}")
+                    # Look for patterns like "try again in X seconds/minutes/hours"
+                    patterns = [
+                        r'try again in (\d+)\s*(second|minute|hour|day)s?',
+                        r'retry after (\d+)\s*(second|minute|hour|day)s?',
+                        r'wait (\d+)\s*(second|minute|hour|day)s?',
+                        r'available in (\d+)\s*(second|minute|hour|day)s?',
+                    ]
+                    
+                    for pattern in patterns:
+                        match = re.search(pattern, message, re.IGNORECASE)
+                        if match:
+                            value = int(match.group(1))
+                            unit = match.group(2).lower()
+                            
+                            # Convert to seconds
+                            multipliers = {
+                                'second': 1,
+                                'minute': 60,
+                                'hour': 3600,
+                                'day': 86400
+                            }
+                            wait_seconds = value * multipliers.get(unit, 1)
+                            logger.info(f"Extracted wait time from message: {value} {unit}(s) = {wait_seconds} seconds")
+                            break
+        
+        # Ensure wait_seconds is positive and reasonable
+        if wait_seconds:
+            if wait_seconds < 0:
+                logger.warning(f"Calculated negative wait time: {wait_seconds}, setting to 60 seconds")
+                wait_seconds = 60
+            elif wait_seconds > 86400:  # More than 1 day
+                logger.warning(f"Calculated very long wait time: {wait_seconds}, capping at 1 day")
+                wait_seconds = 86400
+            
+            logger.info(f"Final parsed wait time: {wait_seconds} seconds")
+        else:
+            logger.warning("Could not determine wait time from 429 response, using default 60 seconds")
+            wait_seconds = 60
+        
+        logger.info("=== END PARSING 429 RATE LIMIT RESPONSE ===")
+        return wait_seconds
+    
+    def handle_429_error(self, response_data: Union[Dict, str] = None, headers: Dict = None):
+        """
+        Handle 429 rate limit error by parsing the response and disabling provider
+        for the appropriate duration.
+        
+        Args:
+            response_data: Response body (dict or string)
+            headers: Response headers
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.error("=== 429 RATE LIMIT ERROR DETECTED ===")
+        logger.error(f"Provider: {self.provider_id}")
+        
+        # Parse the response to get wait time
+        wait_seconds = self.parse_429_response(response_data, headers)
+        
+        # Disable provider for the calculated duration
+        self.error_tracking['disabled_until'] = time.time() + wait_seconds
+        
+        logger.error(f"!!! PROVIDER DISABLED DUE TO RATE LIMIT !!!")
+        logger.error(f"Provider: {self.provider_id}")
+        logger.error(f"Reason: 429 Too Many Requests")
+        logger.error(f"Disabled for: {wait_seconds} seconds ({wait_seconds / 60:.1f} minutes)")
+        logger.error(f"Disabled until: {self.error_tracking['disabled_until']}")
+        logger.error(f"Provider will be automatically re-enabled after cooldown")
+        logger.error("=== END 429 RATE LIMIT ERROR ===")
 
     def is_rate_limited(self) -> bool:
         if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
@@ -1329,6 +1503,19 @@ class KiroProviderHandler(BaseProviderHandler):
                 headers=headers
             )
             
+            # Check for 429 rate limit error before raising
+            if response.status_code == 429:
+                try:
+                    response_data = response.json()
+                except Exception:
+                    response_data = response.text
+                
+                # Handle 429 error with intelligent parsing
+                self.handle_429_error(response_data, dict(response.headers))
+                
+                # Re-raise the error after handling
+                response.raise_for_status()
+            
             response.raise_for_status()
             response_data = response.json()
             
@@ -1534,6 +1721,20 @@ class OllamaProviderHandler(BaseProviderHandler):
             logger.info(f"Response content type: {response.headers.get('content-type')}")
             logger.info(f"Response content length: {len(response.content)} bytes")
             logger.info(f"Raw response content (first 500 chars): {response.text[:500]}")
+            
+            # Check for 429 rate limit error before raising
+            if response.status_code == 429:
+                try:
+                    response_data = response.json()
+                except Exception:
+                    response_data = response.text
+                
+                # Handle 429 error with intelligent parsing
+                self.handle_429_error(response_data, dict(response.headers))
+                
+                # Re-raise the error after handling
+                response.raise_for_status()
+            
             response.raise_for_status()
             
             # Ollama may return multiple JSON objects, parse them all

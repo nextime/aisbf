@@ -109,9 +109,26 @@ See `config/providers.json` and `config/rotations.json` for configuration exampl
 ### General Endpoints
 - `GET /` - Server status and provider list (includes providers, rotations, and autoselect)
 
-### Provider Endpoints
+### OpenAI-Compatible v1 Endpoints (Recommended)
+These endpoints follow the standard OpenAI API format with `provider/model` notation:
+
+- `POST /api/v1/chat/completions` - Chat completions (model format: `provider/model-name`)
+  - Example: `{"model": "openai/gpt-4", "messages": [...]}`
+  - Supports providers, rotations, and autoselect
+- `GET /api/v1/models` - List all available models from all providers
+- `POST /api/v1/audio/transcriptions` - Audio transcription (model format: `provider/model-name`)
+- `POST /api/v1/audio/speech` - Text-to-speech (model format: `provider/model-name`)
+- `POST /api/v1/images/generations` - Image generation (model format: `provider/model-name`)
+- `POST /api/v1/embeddings` - Text embeddings (model format: `provider/model-name`)
+- `GET /api/proxy/{content_id}` - Proxy generated content (images, audio, etc.)
+
+### Provider Endpoints (Legacy)
 - `POST /api/{provider_id}/chat/completions` - Chat completions for a specific provider
 - `GET /api/{provider_id}/models` - List available models for a specific provider
+- `POST /api/{provider_id}/audio/transcriptions` - Audio transcription
+- `POST /api/{provider_id}/audio/speech` - Text-to-speech
+- `POST /api/{provider_id}/images/generations` - Image generation
+- `POST /api/{provider_id}/embeddings` - Text embeddings
 
 ### Rotation Endpoints
 - `GET /api/rotations` - List all available rotation configurations
@@ -130,6 +147,17 @@ See `config/providers.json` and `config/rotations.json` for configuration exampl
   - Fallback to default model if selection fails
   - Supports both streaming and non-streaming responses
 - `GET /api/autoselect/models` - List all models across all autoselect configurations
+
+### Dashboard Endpoints
+- `GET /dashboard` - Web-based configuration dashboard
+- `GET /dashboard/login` - Dashboard login page
+- `POST /dashboard/login` - Handle dashboard authentication
+- `GET /dashboard/logout` - Logout from dashboard
+- `GET /dashboard/providers` - Edit providers configuration
+- `GET /dashboard/rotations` - Edit rotations configuration
+- `GET /dashboard/autoselect` - Edit autoselect configuration
+- `GET /dashboard/settings` - Edit server settings
+- `POST /dashboard/restart` - Restart the server
 
 ## Error Handling
 - Rate limiting for failed requests

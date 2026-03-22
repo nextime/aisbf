@@ -24,7 +24,8 @@
           "rate_limit_TPD": 1000000,
           "context_size": 1000000,
           "condense_context": 80,
-          "condense_method": ["hierarchical", "semantic"]
+          "condense_method": ["hierarchical", "semantic"],
+          "capabilities": ["t2t", "vision", "function_calling"]
         },
         {
           "name": "gemini-1.5-pro",
@@ -35,7 +36,8 @@
           "rate_limit_TPD": 1000000,
           "context_size": 2000000,
           "condense_context": 85,
-          "condense_method": "conversational"
+          "condense_method": "conversational",
+          "capabilities": ["t2t", "vision", "function_calling"]
         }
       ]
     },

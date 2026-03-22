@@ -648,9 +648,438 @@ class RequestHandler:
             await handler.apply_rate_limit()
 
             models = await handler.get_models()
-            return [model.dict() for model in models]
+            
+            # Enhance model information with context window and capabilities
+            enhanced_models = []
+            for model in models:
+                model_dict = model.dict()
+                model_name = model_dict.get('id', '')
+                
+                # Try to find model config in provider config
+                model_config = None
+                if provider_config.models:
+                    for m in provider_config.models:
+                        if m.name == model_name:
+                            model_config = m
+                            break
+                
+                # Add context window information
+                if model_config and hasattr(model_config, 'context_size'):
+                    model_dict['context_window'] = model_config.context_size
+                elif 'context_window' not in model_dict:
+                    # Try to infer from model name or set a default
+                    model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                
+                # Add capabilities information
+                if model_config and hasattr(model_config, 'capabilities'):
+                    model_dict['capabilities'] = model_config.capabilities
+                elif 'capabilities' not in model_dict:
+                    # Auto-detect capabilities based on model name and provider type
+                    model_dict['capabilities'] = self._detect_capabilities(model_name, provider_config.type)
+                
+                enhanced_models.append(model_dict)
+            
+            return enhanced_models
         except Exception as e:
             raise HTTPException(status_code=500, detail=str(e))
+    
+    def _infer_context_window(self, model_name: str, provider_type: str) -> int:
+        """Infer context window size from model name or provider type"""
+        model_lower = model_name.lower()
+        
+        # Known model patterns
+        if 'gpt-4' in model_lower:
+            if 'turbo' in model_lower or '1106' in model_lower or '0125' in model_lower:
+                return 128000
+            return 8192
+        elif 'gpt-3.5' in model_lower:
+            if 'turbo' in model_lower and ('1106' in model_lower or '0125' in model_lower):
+                return 16385
+            return 4096
+        elif 'claude-3' in model_lower:
+            return 200000
+        elif 'claude-2' in model_lower:
+            return 100000
+        elif 'gemini' in model_lower:
+            if '1.5' in model_lower:
+                return 2000000 if 'pro' in model_lower else 1000000
+            elif '2.0' in model_lower:
+                return 1000000
+            return 32000
+        elif 'llama' in model_lower:
+            if '3' in model_lower:
+                return 128000
+            return 4096
+        elif 'mistral' in model_lower:
+            if 'large' in model_lower:
+                return 32000
+            return 8192
+        
+        # Default based on provider type
+        if provider_type == 'google':
+            return 32000
+        elif provider_type == 'anthropic':
+            return 100000
+        elif provider_type == 'openai':
+            return 8192
+        
+        # Generic default
+        return 4096
+    
+    def _detect_capabilities(self, model_name: str, provider_type: str) -> List[str]:
+        """Auto-detect model capabilities based on model name and provider type"""
+        model_lower = model_name.lower()
+        capabilities = []
+        
+        # Text-to-text (default for most models)
+        if not any(keyword in model_lower for keyword in ['embedding', 'embed', 'whisper', 'tts', 'dall-e', 'stable-diffusion']):
+            capabilities.append('t2t')
+        
+        # Text-to-image generation
+        if any(keyword in model_lower for keyword in ['dall-e', 'dalle', 'stable-diffusion', 'sd-', 'sdxl', 'midjourney', 'imagen', 'flux']):
+            capabilities.append('t2i')
+        
+        # Image-to-image (editing, style transfer)
+        if any(keyword in model_lower for keyword in ['stable-diffusion', 'sd-', 'sdxl', 'controlnet', 'img2img']):
+            capabilities.append('i2i')
+        
+        # Vision/Image understanding (image-to-text)
+        if any(keyword in model_lower for keyword in ['vision', 'gpt-4-turbo', 'gpt-4o', 'claude-3', 'gemini-1.5', 'gemini-2.0', 'gemini-pro-vision', 'llava', 'blip']):
+            capabilities.append('vision')
+            capabilities.append('i2t')
+        
+        # Audio transcription (audio-to-text)
+        if any(keyword in model_lower for keyword in ['whisper', 'transcribe', 'speech-to-text', 'stt']):
+            capabilities.append('transcription')
+            capabilities.append('a2t')
+        
+        # Text-to-speech
+        if any(keyword in model_lower for keyword in ['tts', 'text-to-speech', 'elevenlabs', 'bark', 'tortoise']):
+            capabilities.append('tts')
+            capabilities.append('t2a')
+        
+        # Text-to-video generation
+        if any(keyword in model_lower for keyword in ['sora', 'runway', 'pika', 'text-to-video', 't2v']):
+            capabilities.append('t2v')
+        
+        # Image-to-video generation
+        if any(keyword in model_lower for keyword in ['runway', 'pika', 'img2video', 'i2v']):
+            capabilities.append('i2v')
+        
+        # Video-to-video (editing)
+        if any(keyword in model_lower for keyword in ['runway', 'video-edit', 'v2v']):
+            capabilities.append('v2v')
+        
+        # Video understanding (video-to-text)
+        if any(keyword in model_lower for keyword in ['video-llama', 'video-chat', 'v2t']):
+            capabilities.append('v2t')
+        
+        # Audio-to-audio (music generation, audio processing)
+        if any(keyword in model_lower for keyword in ['musicgen', 'audiogen', 'riffusion', 'a2a']):
+            capabilities.append('a2a')
+        
+        # Text embeddings
+        if any(keyword in model_lower for keyword in ['embedding', 'embed', 'ada-002', 'bge', 'e5', 'instructor']):
+            capabilities.append('embeddings')
+        
+        # Function calling / tool use
+        if any(keyword in model_lower for keyword in ['gpt-4', 'gpt-3.5-turbo', 'claude-3', 'gemini', 'function', 'tool']):
+            capabilities.append('function_calling')
+        
+        # Code generation
+        if any(keyword in model_lower for keyword in ['codex', 'code-', 'starcoder', 'codellama', 'deepseek-coder', 'phind']):
+            capabilities.append('code_generation')
+            capabilities.append('code_completion')
+        
+        # Translation
+        if any(keyword in model_lower for keyword in ['translate', 'translation', 'm2m', 'nllb']):
+            capabilities.append('translation')
+        
+        # Summarization
+        if any(keyword in model_lower for keyword in ['summarize', 'summary', 'bart', 'pegasus']):
+            capabilities.append('summarization')
+        
+        # Classification
+        if any(keyword in model_lower for keyword in ['classifier', 'classification', 'bert-', 'roberta-']):
+            capabilities.append('classification')
+        
+        # Sentiment analysis
+        if any(keyword in model_lower for keyword in ['sentiment', 'emotion']):
+            capabilities.append('sentiment_analysis')
+        
+        # Named Entity Recognition
+        if any(keyword in model_lower for keyword in ['ner', 'entity', 'spacy']):
+            capabilities.append('ner')
+        
+        # Question answering
+        if any(keyword in model_lower for keyword in ['qa', 'question', 'squad']):
+            capabilities.append('question_answering')
+        
+        # Reasoning (chain-of-thought)
+        if any(keyword in model_lower for keyword in ['reasoning', 'cot', 'o1', 'o3']):
+            capabilities.append('reasoning')
+        
+        # Search / RAG
+        if any(keyword in model_lower for keyword in ['search', 'retrieval', 'rag']):
+            capabilities.append('search')
+        
+        # Content moderation
+        if any(keyword in model_lower for keyword in ['moderation', 'safety', 'content-filter']):
+            capabilities.append('moderation')
+        
+        # Fine-tuning support
+        if any(keyword in model_lower for keyword in ['fine-tune', 'finetune', 'ft-']):
+            capabilities.append('fine_tuning')
+        
+        # Multimodal (multiple input/output types)
+        if any(keyword in model_lower for keyword in ['gpt-4o', 'gemini', 'claude-3', 'multimodal', 'mm-']):
+            capabilities.append('multimodal')
+        
+        # OCR (Optical Character Recognition)
+        if any(keyword in model_lower for keyword in ['ocr', 'tesseract', 'paddleocr', 'easyocr']):
+            capabilities.append('ocr')
+        
+        # Image captioning
+        if any(keyword in model_lower for keyword in ['caption', 'blip', 'git-']):
+            capabilities.append('image_captioning')
+        
+        # Object detection
+        if any(keyword in model_lower for keyword in ['yolo', 'detection', 'rcnn', 'detr']):
+            capabilities.append('object_detection')
+        
+        # Segmentation
+        if any(keyword in model_lower for keyword in ['segment', 'sam', 'mask']):
+            capabilities.append('segmentation')
+        
+        # 3D generation
+        if any(keyword in model_lower for keyword in ['3d', 'nerf', 'gaussian', 'mesh']):
+            capabilities.append('3d_generation')
+        
+        # Animation
+        if any(keyword in model_lower for keyword in ['animate', 'motion', 'pose']):
+            capabilities.append('animation')
+        
+        return capabilities
+    
+    async def handle_audio_transcription(self, request: Request, provider_id: str, form_data) -> Dict:
+        """Handle audio transcription requests"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Audio Transcription Handler START ===")
+        
+        provider_config = self.config.get_provider(provider_id)
+        
+        if provider_config.api_key_required:
+            api_key = request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not api_key:
+                raise HTTPException(status_code=401, detail="API key required")
+        else:
+            api_key = None
+        
+        handler = get_provider_handler(provider_id, api_key)
+        
+        if handler.is_rate_limited():
+            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        
+        try:
+            await handler.apply_rate_limit()
+            result = await handler.handle_audio_transcription(form_data)
+            handler.record_success()
+            return result
+        except Exception as e:
+            handler.record_failure()
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def handle_text_to_speech(self, request: Request, provider_id: str, request_data: Dict) -> StreamingResponse:
+        """Handle text-to-speech requests"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Text-to-Speech Handler START ===")
+        
+        provider_config = self.config.get_provider(provider_id)
+        
+        if provider_config.api_key_required:
+            api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not api_key:
+                raise HTTPException(status_code=401, detail="API key required")
+        else:
+            api_key = None
+        
+        handler = get_provider_handler(provider_id, api_key)
+        
+        if handler.is_rate_limited():
+            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        
+        try:
+            await handler.apply_rate_limit()
+            result = await handler.handle_text_to_speech(request_data)
+            handler.record_success()
+            return result
+        except Exception as e:
+            handler.record_failure()
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def handle_image_generation(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
+        """Handle image generation requests with URL rewriting"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Image Generation Handler START ===")
+        
+        provider_config = self.config.get_provider(provider_id)
+        
+        if provider_config.api_key_required:
+            api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not api_key:
+                raise HTTPException(status_code=401, detail="API key required")
+        else:
+            api_key = None
+        
+        handler = get_provider_handler(provider_id, api_key)
+        
+        if handler.is_rate_limited():
+            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        
+        try:
+            await handler.apply_rate_limit()
+            result = await handler.handle_image_generation(request_data)
+            
+            # Rewrite URLs in the response to point to our proxy
+            result = self._rewrite_content_urls(result, request)
+            
+            handler.record_success()
+            return result
+        except Exception as e:
+            handler.record_failure()
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    async def handle_embeddings(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
+        """Handle embeddings requests"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Embeddings Handler START ===")
+        
+        provider_config = self.config.get_provider(provider_id)
+        
+        if provider_config.api_key_required:
+            api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
+            if not api_key:
+                raise HTTPException(status_code=401, detail="API key required")
+        else:
+            api_key = None
+        
+        handler = get_provider_handler(provider_id, api_key)
+        
+        if handler.is_rate_limited():
+            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        
+        try:
+            await handler.apply_rate_limit()
+            result = await handler.handle_embeddings(request_data)
+            handler.record_success()
+            return result
+        except Exception as e:
+            handler.record_failure()
+            raise HTTPException(status_code=500, detail=str(e))
+    
+    def _rewrite_content_urls(self, response: Dict, request: Request) -> Dict:
+        """Rewrite content URLs to point to our proxy endpoint"""
+        import logging
+        import hashlib
+        import json
+        logger = logging.getLogger(__name__)
+        
+        # Get the base URL from the request
+        scheme = request.url.scheme
+        host = request.headers.get('host', request.url.netloc)
+        base_url = f"{scheme}://{host}"
+        
+        # Store URL mappings in a simple in-memory cache (in production, use Redis or similar)
+        if not hasattr(self, '_url_cache'):
+            self._url_cache = {}
+        
+        def rewrite_url(original_url: str) -> str:
+            """Rewrite a single URL"""
+            # Check if URL is already public and accessible
+            if self._is_public_url(original_url):
+                logger.info(f"URL is public, passing through: {original_url}")
+                return original_url
+            
+            # Generate a unique ID for this URL
+            url_hash = hashlib.md5(original_url.encode()).hexdigest()[:16]
+            
+            # Store the mapping
+            self._url_cache[url_hash] = original_url
+            
+            # Return the proxy URL
+            proxy_url = f"{base_url}/api/proxy/{url_hash}"
+            logger.info(f"Rewrote URL: {original_url} -> {proxy_url}")
+            return proxy_url
+        
+        # Recursively rewrite URLs in the response
+        def rewrite_recursive(obj):
+            if isinstance(obj, dict):
+                for key, value in obj.items():
+                    if key in ['url', 'image_url', 'audio_url', 'video_url'] and isinstance(value, str):
+                        obj[key] = rewrite_url(value)
+                    else:
+                        obj[key] = rewrite_recursive(value)
+            elif isinstance(obj, list):
+                return [rewrite_recursive(item) for item in obj]
+            return obj
+        
+        return rewrite_recursive(response)
+    
+    def _is_public_url(self, url: str) -> bool:
+        """Check if a URL is publicly accessible (doesn't need proxying)"""
+        # URLs from major CDNs and public services don't need proxying
+        public_domains = [
+            'cloudflare.com',
+            'amazonaws.com',
+            'googleusercontent.com',
+            'azure.com',
+            'cdn.',
+            'storage.googleapis.com'
+        ]
+        
+        return any(domain in url.lower() for domain in public_domains)
+    
+    async def handle_content_proxy(self, content_id: str) -> StreamingResponse:
+        """Proxy content from the original URL"""
+        import logging
+        import httpx
+        logger = logging.getLogger(__name__)
+        
+        # Get the original URL from cache
+        if not hasattr(self, '_url_cache'):
+            self._url_cache = {}
+        
+        original_url = self._url_cache.get(content_id)
+        if not original_url:
+            raise HTTPException(status_code=404, detail="Content not found")
+        
+        logger.info(f"Proxying content: {content_id} -> {original_url}")
+        
+        try:
+            # Fetch the content from the original URL
+            async with httpx.AsyncClient() as client:
+                response = await client.get(original_url, follow_redirects=True)
+                response.raise_for_status()
+                
+                # Determine content type
+                content_type = response.headers.get('content-type', 'application/octet-stream')
+                
+                # Return the content as a streaming response
+                return StreamingResponse(
+                    iter([response.content]),
+                    media_type=content_type,
+                    headers={
+                        'Content-Disposition': response.headers.get('content-disposition', ''),
+                        'Cache-Control': 'public, max-age=3600'
+                    }
+                )
+        except Exception as e:
+            logger.error(f"Error proxying content: {str(e)}")
+            raise HTTPException(status_code=500, detail=f"Error fetching content: {str(e)}")
 
 class RotationHandler:
     def __init__(self):
@@ -1940,16 +2369,127 @@ class RotationHandler:
 
         all_models = []
         for provider in rotation_config.providers:
+            provider_id = provider['provider_id']
+            provider_config = self.config.get_provider(provider_id)
+            
             for model in provider['models']:
-                all_models.append({
-                    "id": f"{provider['provider_id']}/{model['name']}",
-                    "name": model['name'],
-                    "provider_id": provider['provider_id'],
+                model_name = model['name']
+                model_dict = {
+                    "id": f"{provider_id}/{model_name}",
+                    "name": model_name,
+                    "provider_id": provider_id,
                     "weight": model['weight'],
                     "rate_limit": model.get('rate_limit')
-                })
+                }
+                
+                # Add context window information
+                if model.get('context_size'):
+                    model_dict['context_window'] = model['context_size']
+                elif provider_config:
+                    # Try to find in provider config
+                    for pm in provider_config.models or []:
+                        if pm.name == model_name and hasattr(pm, 'context_size'):
+                            model_dict['context_window'] = pm.context_size
+                            break
+                    if 'context_window' not in model_dict:
+                        model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                
+                # Add capabilities information
+                if model.get('capabilities'):
+                    model_dict['capabilities'] = model['capabilities']
+                elif provider_config:
+                    # Try to find in provider config
+                    for pm in provider_config.models or []:
+                        if pm.name == model_name and hasattr(pm, 'capabilities'):
+                            model_dict['capabilities'] = pm.capabilities
+                            break
+                    if 'capabilities' not in model_dict:
+                        model_dict['capabilities'] = self._detect_capabilities(model_name, provider_config.type)
+                
+                all_models.append(model_dict)
 
         return all_models
+    
+    def _infer_context_window(self, model_name: str, provider_type: str) -> int:
+        """Infer context window size from model name or provider type"""
+        model_lower = model_name.lower()
+        
+        # Known model patterns
+        if 'gpt-4' in model_lower:
+            if 'turbo' in model_lower or '1106' in model_lower or '0125' in model_lower:
+                return 128000
+            return 8192
+        elif 'gpt-3.5' in model_lower:
+            if 'turbo' in model_lower and ('1106' in model_lower or '0125' in model_lower):
+                return 16385
+            return 4096
+        elif 'claude-3' in model_lower:
+            return 200000
+        elif 'claude-2' in model_lower:
+            return 100000
+        elif 'gemini' in model_lower:
+            if '1.5' in model_lower:
+                return 2000000 if 'pro' in model_lower else 1000000
+            elif '2.0' in model_lower:
+                return 1000000
+            return 32000
+        elif 'llama' in model_lower:
+            if '3' in model_lower:
+                return 128000
+            return 4096
+        elif 'mistral' in model_lower:
+            if 'large' in model_lower:
+                return 32000
+            return 8192
+        
+        # Default based on provider type
+        if provider_type == 'google':
+            return 32000
+        elif provider_type == 'anthropic':
+            return 100000
+        elif provider_type == 'openai':
+            return 8192
+        
+        # Generic default
+        return 4096
+    
+    def _detect_capabilities(self, model_name: str, provider_type: str) -> List[str]:
+        """Auto-detect model capabilities based on model name and provider type"""
+        model_lower = model_name.lower()
+        capabilities = []
+        
+        # Text-to-text is the default capability for all models
+        capabilities.append('t2t')
+        
+        # Image generation models
+        if any(keyword in model_lower for keyword in ['dall-e', 'dalle', 'stable-diffusion', 'sd-', 'midjourney', 'imagen']):
+            capabilities.append('t2i')
+        
+        # Vision models (can process images)
+        if any(keyword in model_lower for keyword in ['vision', 'gpt-4-turbo', 'gpt-4o', 'claude-3', 'gemini-1.5', 'gemini-2.0']):
+            capabilities.append('vision')
+        
+        # Audio transcription models
+        if any(keyword in model_lower for keyword in ['whisper', 'transcribe']):
+            capabilities.append('transcription')
+        
+        # Text-to-speech models
+        if any(keyword in model_lower for keyword in ['tts', 'text-to-speech', 'elevenlabs']):
+            capabilities.append('tts')
+        
+        # Video generation models
+        if any(keyword in model_lower for keyword in ['sora', 'runway', 'pika', 'video']):
+            capabilities.append('i2v')
+        
+        # Embedding models
+        if any(keyword in model_lower for keyword in ['embedding', 'embed', 'ada-002']):
+            capabilities.append('embeddings')
+        
+        # Function calling / tool use
+        if any(keyword in model_lower for keyword in ['gpt-4', 'gpt-3.5-turbo', 'claude-3', 'gemini']):
+            capabilities.append('function_calling')
+        
+        return capabilities
 
 class AutoselectHandler:
     def __init__(self):

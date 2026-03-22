@@ -38,6 +38,7 @@ import sys
 import os
 import argparse
 import secrets
+import hashlib
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -46,6 +47,9 @@ import json
 
 # Global variable to store custom config directory
 _custom_config_dir = None
+
+# Global variable to store original command line arguments for restart
+_original_argv = None
 
 def set_config_dir(config_dir: str):
     """Set custom config directory before importing config"""
@@ -449,7 +453,14 @@ async def dashboard_login_page(request: Request):
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle dashboard login"""
     dashboard_config = server_config.get('dashboard_config', {})
-    if username == dashboard_config.get('username', 'admin') and password == dashboard_config.get('password', 'admin'):
+    stored_username = dashboard_config.get('username', 'admin')
+    stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
+    
+    # Hash the submitted password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    # Compare username and hashed password
+    if username == stored_username and password_hash == stored_password_hash:
         request.session['logged_in'] = True
         request.session['username'] = username
         return RedirectResponse(url="/dashboard", status_code=303)
@@ -735,8 +746,9 @@ async def dashboard_settings_save(
     aisbf_config['auth']['enabled'] = auth_enabled
     aisbf_config['auth']['tokens'] = [t.strip() for t in auth_tokens.split('\n') if t.strip()]
     aisbf_config['dashboard']['username'] = dashboard_username
-    if dashboard_password:  # Only update if provided
-        aisbf_config['dashboard']['password'] = dashboard_password
+    if dashboard_password:  # Only update if provided - hash the password
+        password_hash = hashlib.sha256(dashboard_password.encode()).hexdigest()
+        aisbf_config['dashboard']['password'] = password_hash
     aisbf_config['internal_model']['model_id'] = internal_model_id
     
     # Save config
@@ -752,6 +764,47 @@ async def dashboard_settings_save(
         "success": "Settings saved successfully! Restart server for changes to take effect."
     })
 
+@app.post("/dashboard/restart")
+async def dashboard_restart(request: Request):
+    """Restart the server"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    import os
+    import signal
+    
+    logger.info("Server restart requested from dashboard")
+    
+    # Schedule restart after response is sent
+    def restart_server():
+        import time
+        time.sleep(1)  # Give time for response to be sent
+        logger.info("Restarting server...")
+        os.execv(sys.executable, [sys.executable] + _original_argv)
+    
+    import threading
+    threading.Thread(target=restart_server, daemon=True).start()
+    
+    return JSONResponse({"message": "Server is restarting..."})
+
+def parse_provider_from_model(model: str) -> tuple[str, str]:
+    """
+    Parse provider and model from model field.
+    
+    Supports formats:
+    - "provider/model" -> ("provider", "model")
+    - "provider/namespace/model" -> ("provider", "namespace/model")
+    - "model" -> (None, "model")
+    
+    Returns:
+        tuple: (provider_id, actual_model_name)
+    """
+    if '/' in model:
+        parts = model.split('/', 1)
+        return parts[0], parts[1]
+    return None, model
+
 @app.get("/")
 async def root():
     return {
@@ -760,6 +813,173 @@ async def root():
         "rotations": list(config.rotations.keys()),
         "autoselect": list(config.autoselect.keys())
     }
+
+# Standard OpenAI-compatible v1 endpoints
+@app.post("/api/v1/chat/completions")
+async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
+    """Standard OpenAI-compatible chat completions endpoint"""
+    logger.info(f"=== V1 CHAT COMPLETION REQUEST ===")
+    logger.info(f"Model: {body.model}")
+    
+    # Parse provider from model field
+    provider_id, actual_model = parse_provider_from_model(body.model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model' (e.g., 'openai/gpt-4')"
+        )
+    
+    logger.info(f"Parsed provider: {provider_id}, model: {actual_model}")
+    
+    # Update body with actual model name
+    body_dict = body.model_dump()
+    body_dict['model'] = actual_model
+    
+    # Check if it's an autoselect
+    if provider_id in config.autoselect:
+        if body.stream:
+            return await autoselect_handler.handle_autoselect_streaming_request(provider_id, body_dict)
+        else:
+            return await autoselect_handler.handle_autoselect_request(provider_id, body_dict)
+    
+    # Check if it's a rotation
+    if provider_id in config.rotations:
+        return await rotation_handler.handle_rotation_request(provider_id, body_dict)
+    
+    # Check if it's a provider
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
+    
+    # Handle as direct provider request
+    if body.stream:
+        return await request_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+    else:
+        return await request_handler.handle_chat_completion(request, provider_id, body_dict)
+
+@app.get("/api/v1/models")
+async def v1_list_all_models(request: Request):
+    """List all available models from all providers"""
+    logger.info("=== V1 LIST ALL MODELS REQUEST ===")
+    
+    all_models = []
+    
+    # Add provider models
+    for provider_id in config.providers.keys():
+        try:
+            models = await request_handler.handle_model_list(request, provider_id)
+            for model in models:
+                # Prepend provider to model ID
+                model['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                model['provider'] = provider_id
+                all_models.append(model)
+        except Exception as e:
+            logger.warning(f"Error listing models for provider {provider_id}: {e}")
+    
+    # Add rotation models
+    for rotation_id in config.rotations.keys():
+        try:
+            models = await rotation_handler.handle_rotation_model_list(rotation_id)
+            for model in models:
+                model['id'] = f"{rotation_id}/{model.get('name', '')}"
+                model['type'] = 'rotation'
+                all_models.append(model)
+        except Exception as e:
+            logger.warning(f"Error listing models for rotation {rotation_id}: {e}")
+    
+    # Add autoselect models
+    for autoselect_id in config.autoselect.keys():
+        try:
+            models = await autoselect_handler.handle_autoselect_model_list(autoselect_id)
+            for model in models:
+                model['id'] = f"{autoselect_id}/{model.get('name', model.get('id', ''))}"
+                model['type'] = 'autoselect'
+                all_models.append(model)
+        except Exception as e:
+            logger.warning(f"Error listing models for autoselect {autoselect_id}: {e}")
+    
+    return {"object": "list", "data": all_models}
+
+@app.post("/api/v1/audio/transcriptions")
+async def v1_audio_transcriptions(request: Request):
+    """Standard audio transcription endpoint"""
+    logger.info("=== V1 AUDIO TRANSCRIPTION REQUEST ===")
+    
+    form = await request.form()
+    model = form.get('model', '')
+    
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model' (e.g., 'openai/whisper-1')"
+        )
+    
+    # Create new form data with updated model
+    from starlette.datastructures import FormData
+    updated_form = FormData()
+    for key, value in form.items():
+        if key == 'model':
+            updated_form[key] = actual_model
+        else:
+            updated_form[key] = value
+    
+    return await request_handler.handle_audio_transcription(request, provider_id, updated_form)
+
+@app.post("/api/v1/audio/speech")
+async def v1_audio_speech(request: Request, body: dict):
+    """Standard text-to-speech endpoint"""
+    logger.info("=== V1 TEXT-TO-SPEECH REQUEST ===")
+    
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model' (e.g., 'openai/tts-1')"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_text_to_speech(request, provider_id, body)
+
+@app.post("/api/v1/images/generations")
+async def v1_image_generations(request: Request, body: dict):
+    """Standard image generation endpoint"""
+    logger.info("=== V1 IMAGE GENERATION REQUEST ===")
+    
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model' (e.g., 'openai/dall-e-3')"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_image_generation(request, provider_id, body)
+
+@app.post("/api/v1/embeddings")
+async def v1_embeddings(request: Request, body: dict):
+    """Standard embeddings endpoint"""
+    logger.info("=== V1 EMBEDDINGS REQUEST ===")
+    
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model' (e.g., 'openai/text-embedding-ada-002')"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_embeddings(request, provider_id, body)
 
 @app.get("/api/rotations")
 async def list_rotations():
@@ -1034,6 +1254,78 @@ async def list_models(request: Request, provider_id: str):
         logger.error(f"Error handling list_models: {str(e)}", exc_info=True)
         raise
 
+# Audio endpoints
+@app.post("/api/{provider_id}/audio/transcriptions")
+async def audio_transcriptions(provider_id: str, request: Request):
+    """Handle audio transcription requests"""
+    logger.info(f"=== AUDIO TRANSCRIPTION REQUEST ===")
+    logger.info(f"Provider ID: {provider_id}")
+    
+    # Get form data (audio file upload)
+    form = await request.form()
+    
+    try:
+        result = await request_handler.handle_audio_transcription(request, provider_id, form)
+        return result
+    except Exception as e:
+        logger.error(f"Error handling audio transcription: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+@app.post("/api/{provider_id}/audio/speech")
+async def audio_speech(provider_id: str, request: Request, body: dict):
+    """Handle text-to-speech requests"""
+    logger.info(f"=== TEXT-TO-SPEECH REQUEST ===")
+    logger.info(f"Provider ID: {provider_id}")
+    
+    try:
+        result = await request_handler.handle_text_to_speech(request, provider_id, body)
+        return result
+    except Exception as e:
+        logger.error(f"Error handling text-to-speech: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Image endpoints
+@app.post("/api/{provider_id}/images/generations")
+async def image_generations(provider_id: str, request: Request, body: dict):
+    """Handle image generation requests"""
+    logger.info(f"=== IMAGE GENERATION REQUEST ===")
+    logger.info(f"Provider ID: {provider_id}")
+    
+    try:
+        result = await request_handler.handle_image_generation(request, provider_id, body)
+        return result
+    except Exception as e:
+        logger.error(f"Error handling image generation: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Embeddings endpoint
+@app.post("/api/{provider_id}/embeddings")
+async def embeddings(provider_id: str, request: Request, body: dict):
+    """Handle embeddings requests"""
+    logger.info(f"=== EMBEDDINGS REQUEST ===")
+    logger.info(f"Provider ID: {provider_id}")
+    
+    try:
+        result = await request_handler.handle_embeddings(request, provider_id, body)
+        return result
+    except Exception as e:
+        logger.error(f"Error handling embeddings: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+# Content proxy endpoint
+@app.get("/api/proxy/{content_id}")
+async def proxy_content(content_id: str):
+    """Proxy generated content (images, audio, etc.)"""
+    logger.info(f"=== PROXY CONTENT REQUEST ===")
+    logger.info(f"Content ID: {content_id}")
+    
+    try:
+        result = await request_handler.handle_content_proxy(content_id)
+        return result
+    except Exception as e:
+        logger.error(f"Error proxying content: {str(e)}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
 @app.post("/api/{provider_id}")
 async def catch_all_post(provider_id: str, request: Request):
     """Catch-all for POST requests to help debug routing issues"""
@@ -1085,6 +1377,10 @@ Examples:
     parser.add_argument('--no-auth', action='store_true', help='Disable authentication (override config)')
     
     args = parser.parse_args()
+    
+    # Store original command line arguments for restart functionality
+    global _original_argv
+    _original_argv = sys.argv.copy()
     
     # Set custom config directory if provided
     if args.config:

@@ -86,6 +86,7 @@ setup(
             'config/rotations.json',
             'config/autoselect.json',
             'config/autoselect.md',
+            'config/aisbf.json',
         ]),
         # Install aisbf package to share directory for venv installation
         ('share/aisbf/aisbf', [
@@ -97,6 +98,16 @@ setup(
             'aisbf/context.py',
             'aisbf/utils.py',
             'aisbf/database.py',
+        ]),
+        # Install dashboard templates
+        ('share/aisbf/templates', [
+            'templates/base.html',
+        ]),
+        ('share/aisbf/templates/dashboard', [
+            'templates/dashboard/login.html',
+            'templates/dashboard/index.html',
+            'templates/dashboard/edit_config.html',
+            'templates/dashboard/settings.html',
         ]),
     ],
     entry_points={

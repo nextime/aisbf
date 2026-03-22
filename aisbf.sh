@@ -41,6 +41,37 @@ fi
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
 
+# Function to get port from config file
+get_port() {
+    local CONFIG_FILE="$SHARE_DIR/config/aisbf.json"
+    local DEFAULT_PORT=17765
+    
+    # Check if config file exists
+    if [ ! -f "$CONFIG_FILE" ]; then
+        echo "$DEFAULT_PORT"
+        return
+    fi
+    
+    # Try to read port from config using Python
+    local PORT=$(python3 -c "
+import json
+import sys
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+        print(config.get('port', $DEFAULT_PORT))
+except:
+    print($DEFAULT_PORT)
+" 2>/dev/null)
+    
+    # Validate port is a number
+    if [[ "$PORT" =~ ^[0-9]+$ ]]; then
+        echo "$PORT"
+    else
+        echo "$DEFAULT_PORT"
+    fi
+}
+
 # Function to create venv if it doesn't exist
 ensure_venv() {
     if [ ! -d "$VENV_DIR" ]; then
@@ -79,15 +110,20 @@ start_server() {
     # Update venv packages silently
     update_venv
     
+    # Get port from config
+    PORT=$(get_port)
+    
     # Activate the virtual environment
     source $VENV_DIR/bin/activate
     
     # Change to share directory where main.py is located
     cd $SHARE_DIR
     
+    echo "Starting AISBF on port $PORT..."
+    
     # Start the proxy server with logging
     # Redirect stderr to suppress BrokenPipeError during shutdown
-    uvicorn main:app --host 127.0.0.1 --port 17765 2>&1 | while IFS= read -r line; do
+    uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | while IFS= read -r line; do
         # Filter out BrokenPipeError logging errors
         if [[ "$line" != *"--- Logging error ---"* ]] && [[ "$line" != *"BrokenPipeError"* ]] && [[ "$line" != *"Call stack:"* ]] && [[ "$line" != *"File "*"/python"* ]] && [[ "$line" != *"Message:"* ]] && [[ "$line" != *"Arguments:"* ]]; then
             echo "$line" | tee -a "$LOG_DIR/aisbf_stdout.log"
@@ -115,9 +151,14 @@ start_daemon() {
     # Update venv packages silently
     update_venv
     
+    # Get port from config
+    PORT=$(get_port)
+    
+    echo "Starting AISBF on port $PORT in background..."
+    
     # Start in background with nohup and logging
     # Filter out BrokenPipeError logging errors
-    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port 17765 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     PID=$!
     echo $PID > "$PIDFILE"
     echo "AISBF started in background (PID: $PID)"
