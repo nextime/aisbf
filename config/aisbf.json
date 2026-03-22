@@ -8,7 +8,10 @@
   },
   "auth": {
     "enabled": false,
-    "tokens": []
+    "tokens": [
+      "your-secret-token-1",
+      "your-secret-token-2"
+    ]
   },
   "dashboard": {
     "enabled": true,
