@@ -2,7 +2,8 @@
   "condensation": {
     "provider_id": "gemini",
     "model": "gemini-1.5-flash",
-    "enabled": true
+    "enabled": true,
+    "max_context": 8000
   },
   "providers": {
     "gemini": {

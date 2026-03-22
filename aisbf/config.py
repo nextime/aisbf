@@ -41,6 +41,7 @@ class CondensationConfig(BaseModel):
     model: Optional[str] = None
     rotation_id: Optional[str] = None
     enabled: bool = True
+    max_context: Optional[int] = None  # Maximum context size for condensation model
 
 
 class ProviderConfig(BaseModel):

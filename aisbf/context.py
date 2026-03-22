@@ -54,49 +54,67 @@ class ContextManager:
         self.condensation_model = None
         self._rotation_handler = None
         self._rotation_id = None
+        self._internal_model = None
+        self._internal_tokenizer = None
+        self._internal_model_lock = None
+        self._use_internal_model = False
         
-        if (self.condensation_config and 
+        # Get max_context for condensation model
+        self.condensation_max_context = None
+        if self.condensation_config and hasattr(self.condensation_config, 'max_context'):
+            self.condensation_max_context = self.condensation_config.max_context
+        
+        if (self.condensation_config and
             self.condensation_config.enabled):
             try:
                 # Check if model is a rotation ID or direct model name
                 model_value = self.condensation_config.model
                 
-                # Check if this model value is a rotation ID (exists in rotations config)
-                is_rotation = False
-                if model_value:
-                    try:
-                        rotation_config = config.get_rotation(model_value)
-                        if rotation_config:
-                            is_rotation = True
-                            logger = logging.getLogger(__name__)
-                            logger.info(f"Condensation model '{model_value}' is a rotation ID")
-                    except:
-                        pass  # Not a rotation, treat as direct model
-                
-                if is_rotation:
-                    # Use rotation handler for condensation
-                    # Import here to avoid circular import
-                    from .handlers import RotationHandler
-                    rotation_handler = RotationHandler()
-                    # Store rotation handler and rotation_id for later use
-                    self._rotation_handler = rotation_handler
-                    self._rotation_id = model_value
-                    # The actual model will be selected by rotation handler
-                    self.condensation_model = None  # Will be determined by rotation
+                # Check for "internal" keyword
+                if model_value == "internal":
                     logger = logging.getLogger(__name__)
-                    logger.info(f"Initialized condensation with rotation: rotation_id={model_value}")
-                elif self.condensation_config.provider_id and model_value:
-                    # Use provider handler for condensation with direct model
-                    provider_config = config.get_provider(self.condensation_config.provider_id)
-                    if provider_config:
-                        api_key = provider_config.api_key
-                        self.condensation_handler = get_provider_handler(
-                            self.condensation_config.provider_id, 
-                            api_key
-                        )
-                        self.condensation_model = model_value
+                    logger.info(f"Condensation model is 'internal' - will use local HuggingFace model")
+                    self._use_internal_model = True
+                    # Set default max_context for internal model if not specified
+                    if not self.condensation_max_context:
+                        self.condensation_max_context = 4000  # Conservative default for small models
+                else:
+                    # Check if this model value is a rotation ID (exists in rotations config)
+                    is_rotation = False
+                    if model_value:
+                        try:
+                            rotation_config = config.get_rotation(model_value)
+                            if rotation_config:
+                                is_rotation = True
+                                logger = logging.getLogger(__name__)
+                                logger.info(f"Condensation model '{model_value}' is a rotation ID")
+                        except:
+                            pass  # Not a rotation, treat as direct model
+                    
+                    if is_rotation:
+                        # Use rotation handler for condensation
+                        # Import here to avoid circular import
+                        from .handlers import RotationHandler
+                        rotation_handler = RotationHandler()
+                        # Store rotation handler and rotation_id for later use
+                        self._rotation_handler = rotation_handler
+                        self._rotation_id = model_value
+                        # The actual model will be selected by rotation handler
+                        self.condensation_model = None  # Will be determined by rotation
                         logger = logging.getLogger(__name__)
-                        logger.info(f"Initialized condensation handler: provider={self.condensation_config.provider_id}, model={model_value}")
+                        logger.info(f"Initialized condensation with rotation: rotation_id={model_value}")
+                    elif self.condensation_config.provider_id and model_value:
+                        # Use provider handler for condensation with direct model
+                        provider_config = config.get_provider(self.condensation_config.provider_id)
+                        if provider_config:
+                            api_key = provider_config.api_key
+                            self.condensation_handler = get_provider_handler(
+                                self.condensation_config.provider_id,
+                                api_key
+                            )
+                            self.condensation_model = model_value
+                            logger = logging.getLogger(__name__)
+                            logger.info(f"Initialized condensation handler: provider={self.condensation_config.provider_id}, model={model_value}")
             except Exception as e:
                 logger = logging.getLogger(__name__)
                 logger.warning(f"Failed to initialize condensation handler: {e}")
@@ -121,6 +139,114 @@ class ContextManager:
         logger.info(f"  context_size: {self.context_size}")
         logger.info(f"  condense_context: {self.condense_context}%")
         logger.info(f"  condense_method: {self.condense_method}")
+        logger.info(f"  condensation_max_context: {self.condensation_max_context}")
+        logger.info(f"  use_internal_model: {self._use_internal_model}")
+    
+    def _initialize_internal_model(self):
+        """Initialize the internal HuggingFace model for condensation (lazy loading)"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self._internal_model is not None:
+            return  # Already initialized
+        
+        try:
+            import torch
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            import threading
+            
+            logger.info("=== INITIALIZING INTERNAL CONDENSATION MODEL ===")
+            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+            logger.info(f"Model: {model_name}")
+            
+            # Check for GPU availability
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Device: {device}")
+            
+            # Load tokenizer
+            logger.info("Loading tokenizer...")
+            self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name)
+            logger.info("Tokenizer loaded")
+            
+            # Load model
+            logger.info("Loading model...")
+            self._internal_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                device_map="auto" if device == "cuda" else None
+            )
+            
+            if device == "cpu":
+                self._internal_model = self._internal_model.to(device)
+            
+            logger.info("Model loaded successfully")
+            
+            # Initialize thread lock for model access
+            self._internal_model_lock = threading.Lock()
+            
+            logger.info("=== INTERNAL CONDENSATION MODEL READY ===")
+        except ImportError as e:
+            logger.error(f"Failed to import required libraries for internal model: {e}")
+            logger.error("Please install: pip install torch transformers")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
+            raise
+    
+    async def _run_internal_model_condensation(self, prompt: str) -> str:
+        """Run the internal model for condensation in a separate thread"""
+        import logging
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        logger = logging.getLogger(__name__)
+        
+        # Initialize model if needed
+        if self._internal_model is None:
+            self._initialize_internal_model()
+        
+        def run_inference():
+            """Run inference in a separate thread"""
+            with self._internal_model_lock:
+                try:
+                    import torch
+                    
+                    # Tokenize input
+                    inputs = self._internal_tokenizer(prompt, return_tensors="pt")
+                    
+                    # Move to same device as model
+                    device = next(self._internal_model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    
+                    # Generate response
+                    with torch.no_grad():
+                        outputs = self._internal_model.generate(
+                            **inputs,
+                            max_new_tokens=500,
+                            temperature=0.3,
+                            top_p=0.8,
+                            repetition_penalty=1.1,
+                            do_sample=True,
+                            pad_token_id=self._internal_tokenizer.eos_token_id
+                        )
+                    
+                    # Decode response
+                    response = self._internal_tokenizer.decode(outputs[0], skip_special_tokens=True)
+                    
+                    # Extract only the generated part (remove the prompt)
+                    if response.startswith(prompt):
+                        response = response[len(prompt):].strip()
+                    
+                    return response
+                except Exception as e:
+                    logger.error(f"Error during internal model inference: {e}", exc_info=True)
+                    return None
+        
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = await loop.run_in_executor(executor, run_inference)
+        
+        return result
     
     def should_condense(self, messages: List[Dict], model: str) -> bool:
         """

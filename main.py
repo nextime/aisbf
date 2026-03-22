@@ -38,6 +38,51 @@ from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
+import json
+
+def load_server_config():
+    """Load server configuration from aisbf.json"""
+    # Try user config first
+    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    
+    if not config_path.exists():
+        # Try installed locations
+        installed_dirs = [
+            Path('/usr/share/aisbf'),
+            Path.home() / '.local' / 'share' / 'aisbf',
+        ]
+        
+        for installed_dir in installed_dirs:
+            test_path = installed_dir / 'aisbf.json'
+            if test_path.exists():
+                config_path = test_path
+                break
+        else:
+            # Fallback to source tree config directory
+            source_dir = Path(__file__).parent / 'config'
+            test_path = source_dir / 'aisbf.json'
+            if test_path.exists():
+                config_path = test_path
+    
+    # Load config or use defaults
+    if config_path.exists():
+        try:
+            with open(config_path) as f:
+                config_data = json.load(f)
+                server_config = config_data.get('server', {})
+                return {
+                    'host': server_config.get('host', '0.0.0.0'),
+                    'port': server_config.get('port', 8000)
+                }
+        except Exception as e:
+            logger = logging.getLogger(__name__)
+            logger.warning(f"Error loading aisbf.json: {e}, using defaults")
+    
+    # Return defaults
+    return {
+        'host': '0.0.0.0',
+        'port': 8000
+    }
 
 class BrokenPipeFilter(logging.Filter):
     """Filter to suppress BrokenPipeError logging errors"""
@@ -533,8 +578,14 @@ async def catch_all_post(provider_id: str, request: Request):
 def main():
     """Main entry point for the AISBF server"""
     import uvicorn
-    logger.info("Starting AI Proxy Server on http://127.0.0.1:17765")
-    uvicorn.run(app, host="127.0.0.1", port=17765)
+    
+    # Load server configuration
+    server_config = load_server_config()
+    host = server_config['host']
+    port = server_config['port']
+    
+    logger.info(f"Starting AI Proxy Server on http://{host}:{port}")
+    uvicorn.run(app, host=host, port=port)
 
 if __name__ == "__main__":
     main()
