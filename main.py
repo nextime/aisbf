@@ -28,17 +28,30 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
-from aisbf.config import config
 from aisbf.database import initialize_database
 import time
 import logging
 import sys
 import os
+import argparse
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 import json
+
+# Global variable to store custom config directory
+_custom_config_dir = None
+
+def set_config_dir(config_dir: str):
+    """Set custom config directory before importing config"""
+    global _custom_config_dir
+    _custom_config_dir = config_dir
+    os.environ['AISBF_CONFIG_DIR'] = config_dir
+
+def get_config_dir():
+    """Get custom config directory if set"""
+    return _custom_config_dir or os.environ.get('AISBF_CONFIG_DIR')
 
 def generate_self_signed_cert(cert_file: Path, key_file: Path):
     """Generate self-signed SSL certificate"""
@@ -109,10 +122,22 @@ def generate_self_signed_cert(cert_file: Path, key_file: Path):
         logger.error("cryptography library not installed. Install with: pip install cryptography")
         raise
 
-def load_server_config():
+def load_server_config(custom_config_dir=None):
     """Load server configuration from aisbf.json"""
-    # Try user config first
-    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    # If custom config directory is provided, try it first
+    if custom_config_dir:
+        config_path = Path(custom_config_dir) / 'aisbf.json'
+        if config_path.exists():
+            pass  # Use this path
+        else:
+            # Fall through to default locations
+            config_path = None
+    else:
+        config_path = None
+    
+    # Try user config first if not found in custom dir
+    if not config_path or not config_path.exists():
+        config_path = Path.home() / '.aisbf' / 'aisbf.json'
     
     if not config_path.exists():
         # Try installed locations
@@ -162,7 +187,7 @@ def load_server_config():
                 
                 return {
                     'host': server_config.get('host', '0.0.0.0'),
-                    'port': server_config.get('port', 8000),
+                    'port': server_config.get('port', 17765),
                     'protocol': protocol,
                     'ssl_certfile': ssl_certfile if protocol == 'https' else None,
                     'ssl_keyfile': ssl_keyfile if protocol == 'https' else None,
@@ -176,7 +201,7 @@ def load_server_config():
     # Return defaults
     return {
         'host': '0.0.0.0',
-        'port': 8000,
+        'port': 17765,
         'protocol': 'http',
         'ssl_certfile': None,
         'ssl_keyfile': None,
@@ -313,15 +338,16 @@ def setup_logging():
 # Configure logging
 logger = setup_logging()
 
-# Load server configuration
-server_config = load_server_config()
-
-# Initialize handlers
-request_handler = RequestHandler()
-rotation_handler = RotationHandler()
-autoselect_handler = AutoselectHandler()
-
+# Note: config will be imported after parsing CLI args if --config is provided
+# For now, we'll delay the import and initialization
 app = FastAPI(title="AI Proxy Server")
+
+# These will be initialized in main() after config is loaded
+request_handler = None
+rotation_handler = None
+autoselect_handler = None
+server_config = None
+config = None
 
 # Authentication middleware
 @app.middleware("http")
@@ -713,14 +739,96 @@ def main():
     """Main entry point for the AISBF server"""
     import uvicorn
     
+    # Parse command-line arguments
+    parser = argparse.ArgumentParser(
+        description='AISBF - AI Service Broker Framework',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+Examples:
+  aisbf                                    # Start with default settings
+  aisbf --host 127.0.0.1 --port 8080      # Custom host and port
+  aisbf --config /path/to/config          # Use custom config directory
+  aisbf --https --ssl-cert cert.pem       # Enable HTTPS with custom cert
+        """
+    )
+    
+    parser.add_argument('--config', type=str, help='Custom config directory path')
+    parser.add_argument('--host', type=str, help='Server host (default: 0.0.0.0)')
+    parser.add_argument('--port', type=int, help='Server port (default: 17765)')
+    parser.add_argument('--https', action='store_true', help='Enable HTTPS')
+    parser.add_argument('--ssl-cert', type=str, help='SSL certificate file path')
+    parser.add_argument('--ssl-key', type=str, help='SSL private key file path')
+    parser.add_argument('--no-auth', action='store_true', help='Disable authentication (override config)')
+    
+    args = parser.parse_args()
+    
+    # Set custom config directory if provided
+    if args.config:
+        set_config_dir(args.config)
+        logger.info(f"Using custom config directory: {args.config}")
+    
+    # Import config after setting custom directory
+    global config, request_handler, rotation_handler, autoselect_handler, server_config
+    from aisbf.config import config
+    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+    
+    # Initialize handlers
+    request_handler = RequestHandler()
+    rotation_handler = RotationHandler()
+    autoselect_handler = AutoselectHandler()
+    
     # Load server configuration
-    server_config = load_server_config()
-    host = server_config['host']
-    port = server_config['port']
-    protocol = server_config.get('protocol', 'http')
-    ssl_certfile = server_config.get('ssl_certfile')
-    ssl_keyfile = server_config.get('ssl_keyfile')
-    auth_enabled = server_config.get('auth_enabled', False)
+    server_config = load_server_config(args.config)
+    
+    # CLI arguments take precedence over config file
+    host = args.host if args.host else server_config['host']
+    port = args.port if args.port else server_config['port']
+    
+    # Protocol handling
+    if args.https:
+        protocol = 'https'
+        ssl_certfile = args.ssl_cert if args.ssl_cert else server_config.get('ssl_certfile')
+        ssl_keyfile = args.ssl_key if args.ssl_key else server_config.get('ssl_keyfile')
+        
+        # Auto-generate if not provided
+        if not ssl_certfile or not ssl_keyfile:
+            ssl_dir = Path.home() / '.aisbf' / 'ssl'
+            ssl_certfile = str(ssl_dir / 'cert.pem')
+            ssl_keyfile = str(ssl_dir / 'key.pem')
+        
+        cert_path = Path(ssl_certfile).expanduser()
+        key_path = Path(ssl_keyfile).expanduser()
+        
+        if not cert_path.exists() or not key_path.exists():
+            generate_self_signed_cert(cert_path, key_path)
+    else:
+        protocol = server_config.get('protocol', 'http')
+        ssl_certfile = server_config.get('ssl_certfile')
+        ssl_keyfile = server_config.get('ssl_keyfile')
+        
+        # Handle HTTPS from config
+        if protocol == 'https':
+            if not ssl_certfile or not ssl_keyfile:
+                ssl_dir = Path.home() / '.aisbf' / 'ssl'
+                ssl_certfile = str(ssl_dir / 'cert.pem')
+                ssl_keyfile = str(ssl_dir / 'key.pem')
+            
+            cert_path = Path(ssl_certfile).expanduser()
+            key_path = Path(ssl_keyfile).expanduser()
+            
+            if not cert_path.exists() or not key_path.exists():
+                generate_self_signed_cert(cert_path, key_path)
+    
+    # Authentication handling
+    auth_enabled = not args.no_auth and server_config.get('auth_enabled', False)
+    
+    # Update global server_config with final values
+    server_config['host'] = host
+    server_config['port'] = port
+    server_config['protocol'] = protocol
+    server_config['ssl_certfile'] = ssl_certfile if protocol == 'https' else None
+    server_config['ssl_keyfile'] = ssl_keyfile if protocol == 'https' else None
+    server_config['auth_enabled'] = auth_enabled
     
     # Log server configuration
     logger.info(f"=== AISBF Server Configuration ===")
@@ -728,6 +836,8 @@ def main():
     logger.info(f"Host: {host}")
     logger.info(f"Port: {port}")
     logger.info(f"Authentication: {'Enabled' if auth_enabled else 'Disabled'}")
+    if args.config:
+        logger.info(f"Config Directory: {args.config}")
     
     if protocol == 'https':
         logger.info(f"SSL Certificate: {ssl_certfile}")

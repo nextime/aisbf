@@ -22,10 +22,11 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 Configuration management for AISBF.
 """
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 from pydantic import BaseModel, Field
 import json
 import shutil
+import os
 from pathlib import Path
 
 class ProviderModelConfig(BaseModel):
@@ -97,6 +98,12 @@ class AppConfig(BaseModel):
 
 class Config:
     def __init__(self):
+        self._custom_config_dir = None
+        # Check for custom config directory from environment variable
+        custom_dir = os.environ.get('AISBF_CONFIG_DIR')
+        if custom_dir:
+            self._custom_config_dir = Path(custom_dir)
+        
         self._ensure_config_directory()
         self._load_providers()
         self._load_rotations()
@@ -106,6 +113,11 @@ class Config:
 
     def _get_config_source_dir(self):
         """Get the directory containing default config files"""
+        # If custom config directory is set, use it first
+        if self._custom_config_dir and self._custom_config_dir.exists():
+            if (self._custom_config_dir / 'providers.json').exists():
+                return self._custom_config_dir
+        
         # Try installed location first
         installed_dirs = [
             Path('/usr/share/aisbf'),
