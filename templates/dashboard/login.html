@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+
+{% block title %}Login - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<div style="max-width: 400px; margin: 50px auto;">
+    <h2 style="margin-bottom: 30px; text-align: center;">Dashboard Login</h2>
+    
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    
+    <form method="POST" action="/dashboard/login">
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autofocus>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required>
+        </div>
+        
+        <button type="submit" class="btn" style="width: 100%;">Login</button>
+    </form>
+</div>
+{% endblock %}

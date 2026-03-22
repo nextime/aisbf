@@ -22,18 +22,22 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 Main application for AISBF.
 """
-from fastapi import FastAPI, HTTPException, Request, status
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi import FastAPI, HTTPException, Request, status, Form
+from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
+from fastapi.templating import Jinja2Templates
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.database import initialize_database
+from starlette.middleware.sessions import SessionMiddleware
+from itsdangerous import URLSafeTimedSerializer
 import time
 import logging
 import sys
 import os
 import argparse
+import secrets
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -342,6 +346,13 @@ logger = setup_logging()
 # For now, we'll delay the import and initialization
 app = FastAPI(title="AI Proxy Server")
 
+# Initialize Jinja2 templates
+templates = Jinja2Templates(directory="templates")
+
+# Add session middleware (will be configured with secret key in main())
+# Placeholder - will be added in main() after we have a secret key
+session_secret_key = None
+
 # These will be initialized in main() after config is loaded
 request_handler = None
 rotation_handler = None
@@ -354,8 +365,8 @@ config = None
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint
-        if request.url.path == "/":
+        # Skip auth for root endpoint and dashboard routes
+        if request.url.path == "/" or request.url.path.startswith("/dashboard"):
             response = await call_next(request)
             return response
         
@@ -427,6 +438,319 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Dashboard routes
+@app.get("/dashboard/login", response_class=HTMLResponse)
+async def dashboard_login_page(request: Request):
+    """Show dashboard login page"""
+    return templates.TemplateResponse("dashboard/login.html", {"request": request})
+
+@app.post("/dashboard/login")
+async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
+    """Handle dashboard login"""
+    dashboard_config = server_config.get('dashboard_config', {})
+    if username == dashboard_config.get('username', 'admin') and password == dashboard_config.get('password', 'admin'):
+        request.session['logged_in'] = True
+        request.session['username'] = username
+        return RedirectResponse(url="/dashboard", status_code=303)
+    return templates.TemplateResponse("dashboard/login.html", {"request": request, "error": "Invalid credentials"})
+
+@app.get("/dashboard/logout")
+async def dashboard_logout(request: Request):
+    """Handle dashboard logout"""
+    request.session.clear()
+    return RedirectResponse(url="/dashboard/login", status_code=303)
+
+def require_dashboard_auth(request: Request):
+    """Check if user is logged in to dashboard"""
+    if not request.session.get('logged_in'):
+        return RedirectResponse(url="/dashboard/login", status_code=303)
+    return None
+
+@app.get("/dashboard", response_class=HTMLResponse)
+async def dashboard_index(request: Request):
+    """Dashboard overview page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    return templates.TemplateResponse("dashboard/index.html", {
+        "request": request,
+        "session": request.session,
+        "providers_count": len(config.providers) if config else 0,
+        "rotations_count": len(config.rotations) if config else 0,
+        "autoselect_count": len(config.autoselect) if config else 0,
+        "server_config": server_config or {}
+    })
+
+@app.get("/dashboard/providers", response_class=HTMLResponse)
+async def dashboard_providers(request: Request):
+    """Edit providers configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Load providers.json
+    config_path = Path.home() / '.aisbf' / 'providers.json'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'providers.json'
+    
+    with open(config_path) as f:
+        config_content = f.read()
+    
+    return templates.TemplateResponse("dashboard/edit_config.html", {
+        "request": request,
+        "session": request.session,
+        "title": "Providers Configuration",
+        "config_content": config_content
+    })
+
+@app.post("/dashboard/providers")
+async def dashboard_providers_save(request: Request, config: str = Form(...)):
+    """Save providers configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Validate JSON
+        json.loads(config)
+        
+        # Save to file
+        config_path = Path.home() / '.aisbf' / 'providers.json'
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, 'w') as f:
+            f.write(config)
+        
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Providers Configuration",
+            "config_content": config,
+            "success": "Configuration saved successfully! Restart server for changes to take effect."
+        })
+    except json.JSONDecodeError as e:
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Providers Configuration",
+            "config_content": config,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.get("/dashboard/rotations", response_class=HTMLResponse)
+async def dashboard_rotations(request: Request):
+    """Edit rotations configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    config_path = Path.home() / '.aisbf' / 'rotations.json'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'rotations.json'
+    
+    with open(config_path) as f:
+        config_content = f.read()
+    
+    return templates.TemplateResponse("dashboard/edit_config.html", {
+        "request": request,
+        "session": request.session,
+        "title": "Rotations Configuration",
+        "config_content": config_content
+    })
+
+@app.post("/dashboard/rotations")
+async def dashboard_rotations_save(request: Request, config: str = Form(...)):
+    """Save rotations configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        json.loads(config)
+        config_path = Path.home() / '.aisbf' / 'rotations.json'
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, 'w') as f:
+            f.write(config)
+        
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Rotations Configuration",
+            "config_content": config,
+            "success": "Configuration saved successfully! Restart server for changes to take effect."
+        })
+    except json.JSONDecodeError as e:
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Rotations Configuration",
+            "config_content": config,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.get("/dashboard/autoselect", response_class=HTMLResponse)
+async def dashboard_autoselect(request: Request):
+    """Edit autoselect configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    config_path = Path.home() / '.aisbf' / 'autoselect.json'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'autoselect.json'
+    
+    with open(config_path) as f:
+        config_content = f.read()
+    
+    return templates.TemplateResponse("dashboard/edit_config.html", {
+        "request": request,
+        "session": request.session,
+        "title": "Autoselect Configuration",
+        "config_content": config_content
+    })
+
+@app.post("/dashboard/autoselect")
+async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
+    """Save autoselect configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        json.loads(config)
+        config_path = Path.home() / '.aisbf' / 'autoselect.json'
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(config_path, 'w') as f:
+            f.write(config)
+        
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Autoselect Configuration",
+            "config_content": config,
+            "success": "Configuration saved successfully! Restart server for changes to take effect."
+        })
+    except json.JSONDecodeError as e:
+        return templates.TemplateResponse("dashboard/edit_config.html", {
+            "request": request,
+            "session": request.session,
+            "title": "Autoselect Configuration",
+            "config_content": config,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.get("/dashboard/condensation", response_class=HTMLResponse)
+async def dashboard_condensation(request: Request):
+    """Edit condensation prompts"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Load condensation_conversational.md
+    config_path = Path.home() / '.aisbf' / 'condensation_conversational.md'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'condensation_conversational.md'
+    
+    with open(config_path) as f:
+        config_content = f.read()
+    
+    return templates.TemplateResponse("dashboard/edit_config.html", {
+        "request": request,
+        "session": request.session,
+        "title": "Condensation Prompts (Conversational)",
+        "config_content": config_content
+    })
+
+@app.post("/dashboard/condensation")
+async def dashboard_condensation_save(request: Request, config: str = Form(...)):
+    """Save condensation prompts"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    config_path = Path.home() / '.aisbf' / 'condensation_conversational.md'
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w') as f:
+        f.write(config)
+    
+    return templates.TemplateResponse("dashboard/edit_config.html", {
+        "request": request,
+        "session": request.session,
+        "title": "Condensation Prompts (Conversational)",
+        "config_content": config,
+        "success": "Prompts saved successfully!"
+    })
+
+@app.get("/dashboard/settings", response_class=HTMLResponse)
+async def dashboard_settings(request: Request):
+    """Edit server settings"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Load aisbf.json
+    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+    
+    with open(config_path) as f:
+        aisbf_config = json.load(f)
+    
+    return templates.TemplateResponse("dashboard/settings.html", {
+        "request": request,
+        "session": request.session,
+        "config": aisbf_config
+    })
+
+@app.post("/dashboard/settings")
+async def dashboard_settings_save(
+    request: Request,
+    host: str = Form(...),
+    port: int = Form(...),
+    protocol: str = Form(...),
+    auth_enabled: bool = Form(False),
+    auth_tokens: str = Form(""),
+    dashboard_username: str = Form(...),
+    dashboard_password: str = Form(""),
+    internal_model_id: str = Form(...)
+):
+    """Save server settings"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Load current config
+    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    if not config_path.exists():
+        config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+    
+    with open(config_path) as f:
+        aisbf_config = json.load(f)
+    
+    # Update config
+    aisbf_config['server']['host'] = host
+    aisbf_config['server']['port'] = port
+    aisbf_config['server']['protocol'] = protocol
+    aisbf_config['auth']['enabled'] = auth_enabled
+    aisbf_config['auth']['tokens'] = [t.strip() for t in auth_tokens.split('\n') if t.strip()]
+    aisbf_config['dashboard']['username'] = dashboard_username
+    if dashboard_password:  # Only update if provided
+        aisbf_config['dashboard']['password'] = dashboard_password
+    aisbf_config['internal_model']['model_id'] = internal_model_id
+    
+    # Save config
+    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    with open(config_path, 'w') as f:
+        json.dump(aisbf_config, f, indent=2)
+    
+    return templates.TemplateResponse("dashboard/settings.html", {
+        "request": request,
+        "session": request.session,
+        "config": aisbf_config,
+        "success": "Settings saved successfully! Restart server for changes to take effect."
+    })
 
 @app.get("/")
 async def root():
@@ -779,6 +1103,25 @@ Examples:
     
     # Load server configuration
     server_config = load_server_config(args.config)
+    
+    # Add session middleware for dashboard
+    secret_key = secrets.token_urlsafe(32)
+    app.add_middleware(SessionMiddleware, secret_key=secret_key)
+    
+    # Load dashboard config
+    aisbf_config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    if not aisbf_config_path.exists():
+        if args.config:
+            aisbf_config_path = Path(args.config) / 'aisbf.json'
+        else:
+            aisbf_config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+    
+    if aisbf_config_path.exists():
+        with open(aisbf_config_path) as f:
+            aisbf_config = json.load(f)
+            server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
+    else:
+        server_config['dashboard_config'] = {'username': 'admin', 'password': 'admin'}
     
     # CLI arguments take precedence over config file
     host = args.host if args.host else server_config['host']

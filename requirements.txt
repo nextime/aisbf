@@ -13,3 +13,5 @@ langchain-text-splitters
 tiktoken
 torch
 transformers
+jinja2
+itsdangerous

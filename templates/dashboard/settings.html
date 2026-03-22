@@ -1,0 +1,75 @@
+{% extends "base.html" %}
+
+{% block title %}Settings - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Server Settings</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<form method="POST">
+    <h3 style="margin-bottom: 20px;">Server Configuration</h3>
+    
+    <div class="form-group">
+        <label for="host">Host</label>
+        <input type="text" id="host" name="host" value="{{ config.server.host }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="port">Port</label>
+        <input type="number" id="port" name="port" value="{{ config.server.port }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="protocol">Protocol</label>
+        <select id="protocol" name="protocol">
+            <option value="http" {% if config.server.protocol == 'http' %}selected{% endif %}>HTTP</option>
+            <option value="https" {% if config.server.protocol == 'https' %}selected{% endif %}>HTTPS</option>
+        </select>
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Authentication</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="auth_enabled" {% if config.auth.enabled %}checked{% endif %}>
+            Enable API Authentication
+        </label>
+    </div>
+    
+    <div class="form-group">
+        <label for="auth_tokens">Auth Tokens (one per line)</label>
+        <textarea id="auth_tokens" name="auth_tokens" style="min-height: 100px;">{{ '\n'.join(config.auth.tokens) }}</textarea>
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Dashboard</h3>
+    
+    <div class="form-group">
+        <label for="dashboard_username">Dashboard Username</label>
+        <input type="text" id="dashboard_username" name="dashboard_username" value="{{ config.dashboard.username }}" required>
+    </div>
+    
+    <div class="form-group">
+        <label for="dashboard_password">Dashboard Password</label>
+        <input type="password" id="dashboard_password" name="dashboard_password" placeholder="Leave blank to keep current">
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Internal Model</h3>
+    
+    <div class="form-group">
+        <label for="internal_model_id">Model ID</label>
+        <input type="text" id="internal_model_id" name="internal_model_id" value="{{ config.internal_model.model_id }}" required>
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-top: 30px;">
+        <button type="submit" class="btn">Save Settings</button>
+        <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+{% endblock %}
