@@ -371,6 +371,32 @@ class ContextManager:
         
         return condensed
     
+    def _load_system_prompt(self, method: str) -> str:
+        """Load system prompt from markdown file"""
+        from pathlib import Path
+        
+        # Try installed locations first
+        installed_dirs = [
+            Path('/usr/share/aisbf'),
+            Path.home() / '.local' / 'share' / 'aisbf',
+        ]
+        
+        for installed_dir in installed_dirs:
+            prompt_file = installed_dir / f'condensation_{method}.md'
+            if prompt_file.exists():
+                with open(prompt_file) as f:
+                    return f.read()
+        
+        # Fallback to source tree config directory
+        source_dir = Path(__file__).parent.parent / 'config'
+        prompt_file = source_dir / f'condensation_{method}.md'
+        if prompt_file.exists():
+            with open(prompt_file) as f:
+                return f.read()
+        
+        # Return empty string if not found
+        return ""
+    
     async def _conversational_condense(self, messages: List[Dict], model: str) -> List[Dict]:
         """
         CONVERSATIONAL SUMMARIZATION (MEMORY BUFFERING)
@@ -380,14 +406,18 @@ class ContextManager:
         logger = logging.getLogger(__name__)
         logger.info(f"Conversational condensation: {len(messages)} messages")
         
-        # Use dedicated condensation handler if available, otherwise fallback to provider_handler
-        handler = self.condensation_handler if self.condensation_handler else self.provider_handler
-        if not handler:
-            logger.warning("No provider handler available for conversational condensation, skipping")
-            return messages
-        
-        # Use dedicated condensation model if configured, otherwise use same model
-        condense_model = self.condensation_model if self.condensation_model else model
+        # Check if using internal model
+        if self._use_internal_model:
+            logger.info("Using internal model for conversational condensation")
+        else:
+            # Use dedicated condensation handler if available, otherwise fallback to provider_handler
+            handler = self.condensation_handler if self.condensation_handler else self.provider_handler
+            if not handler:
+                logger.warning("No provider handler available for conversational condensation, skipping")
+                return messages
+            
+            # Use dedicated condensation model if configured, otherwise use same model
+            condense_model = self.condensation_model if self.condensation_model else model
         
         if len(messages) <= 4:
             # Not enough messages to condense
@@ -405,13 +435,16 @@ class ContextManager:
         if not messages_to_summarize:
             return messages
         
-        # Build summary prompt
-        summary_prompt = "Summarize the following conversation history, including key facts, decisions, and the current goal. Keep it concise but comprehensive.\n\n"
+        # Load system prompt from markdown file
+        system_prompt = self._load_system_prompt('conversational')
+        
+        # Build conversation text
+        conversation_text = ""
         for msg in messages_to_summarize:
             role = msg.get('role', 'unknown')
             content = msg.get('content', '')
             if content:
-                summary_prompt += f"{role}: {content}\n"
+                conversation_text += f"{role}: {content}\n"
         
         try:
             # If using rotation handler, call rotation handler's method
