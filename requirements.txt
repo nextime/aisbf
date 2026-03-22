@@ -11,3 +11,5 @@ openai
 anthropic
 langchain-text-splitters
 tiktoken
+torch
+transformers

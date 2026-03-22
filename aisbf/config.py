@@ -53,10 +53,28 @@ class ProviderConfig(BaseModel):
     api_key: Optional[str] = None  # Optional API key in provider config
     models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
     kiro_config: Optional[Dict] = None  # Optional Kiro-specific configuration (credentials, region, etc.)
+    # Default settings for models in this provider
+    default_rate_limit: Optional[float] = None
+    default_max_request_tokens: Optional[int] = None
+    default_rate_limit_TPM: Optional[int] = None
+    default_rate_limit_TPH: Optional[int] = None
+    default_rate_limit_TPD: Optional[int] = None
+    default_context_size: Optional[int] = None
+    default_condense_context: Optional[int] = None
+    default_condense_method: Optional[Union[str, List[str]]] = None
 
 class RotationConfig(BaseModel):
     providers: List[Dict]
     notifyerrors: bool = False
+    # Default settings for models in this rotation
+    default_rate_limit: Optional[float] = None
+    default_max_request_tokens: Optional[int] = None
+    default_rate_limit_TPM: Optional[int] = None
+    default_rate_limit_TPH: Optional[int] = None
+    default_rate_limit_TPD: Optional[int] = None
+    default_context_size: Optional[int] = None
+    default_condense_context: Optional[int] = None
+    default_condense_method: Optional[Union[str, List[str]]] = None
 
 class AutoselectModelInfo(BaseModel):
     model_id: str

@@ -662,6 +662,50 @@ class RotationHandler:
         if provider_config:
             return provider_config.type
         return None
+    
+    def _apply_defaults_to_model(self, model: Dict, provider_config, rotation_config) -> Dict:
+        """
+        Apply default settings to a model configuration.
+        
+        Priority order:
+        1. Model-specific settings (highest priority)
+        2. Rotation default settings
+        3. Provider default settings (lowest priority)
+        
+        Args:
+            model: The model configuration dict
+            provider_config: The provider configuration
+            rotation_config: The rotation configuration
+            
+        Returns:
+            Model dict with defaults applied
+        """
+        # List of fields that can have defaults
+        default_fields = [
+            'rate_limit',
+            'max_request_tokens',
+            'rate_limit_TPM',
+            'rate_limit_TPH',
+            'rate_limit_TPD',
+            'context_size',
+            'condense_context',
+            'condense_method'
+        ]
+        
+        for field in default_fields:
+            # If field is not set in model, try rotation defaults, then provider defaults
+            if field not in model or model[field] is None:
+                # Try rotation defaults first
+                rotation_default = getattr(rotation_config, f'default_{field}', None)
+                if rotation_default is not None:
+                    model[field] = rotation_default
+                else:
+                    # Try provider defaults
+                    provider_default = getattr(provider_config, f'default_{field}', None)
+                    if provider_default is not None:
+                        model[field] = provider_default
+        
+        return model
 
     async def _handle_chunked_rotation_request(
         self,
@@ -893,11 +937,40 @@ class RotationHandler:
             
             logger.info(f"  [AVAILABLE] Provider {provider_id} is active and ready")
             
-            models_in_provider = len(provider['models'])
+            # Check if models are specified in rotation config
+            # If not, use models from provider config
+            rotation_models = provider.get('models')
+            if not rotation_models:
+                logger.info(f"  No models specified in rotation config for {provider_id}")
+                logger.info(f"  Will use models from provider configuration")
+                
+                # Get models from provider config
+                if provider_config.models:
+                    # Use models from provider config with default weight of 1
+                    rotation_models = []
+                    for provider_model in provider_config.models:
+                        model_dict = {
+                            'name': provider_model.name,
+                            'weight': 1,  # Default weight
+                            'rate_limit': provider_model.rate_limit,
+                            'max_request_tokens': provider_model.max_request_tokens
+                        }
+                        rotation_models.append(model_dict)
+                    logger.info(f"  Loaded {len(rotation_models)} model(s) from provider config")
+                else:
+                    logger.warning(f"  No models defined in provider config for {provider_id}")
+                    logger.warning(f"  Skipping this provider")
+                    skipped_providers.append(provider_id)
+                    continue
+            
+            models_in_provider = len(rotation_models)
             total_models_considered += models_in_provider
             logger.info(f"  Found {models_in_provider} model(s) in this provider")
             
-            for model in provider['models']:
+            for model in rotation_models:
+                # Apply defaults: model-specific > rotation defaults > provider defaults
+                model = self._apply_defaults_to_model(model, provider_config, rotation_config)
+                
                 model_name = model['name']
                 model_weight = model['weight']
                 model_rate_limit = model.get('rate_limit', 'N/A')
@@ -1882,6 +1955,9 @@ class AutoselectHandler:
     def __init__(self):
         self.config = config
         self._skill_file_content = None
+        self._internal_model = None
+        self._internal_tokenizer = None
+        self._internal_model_lock = None
 
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""
@@ -1910,6 +1986,110 @@ class AutoselectHandler:
             raise FileNotFoundError("Could not find autoselect.md skill file")
         
         return self._skill_file_content
+    
+    def _initialize_internal_model(self):
+        """Initialize the internal HuggingFace model for selection (lazy loading)"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self._internal_model is not None:
+            return  # Already initialized
+        
+        try:
+            import torch
+            from transformers import AutoTokenizer, AutoModelForCausalLM
+            import threading
+            
+            logger.info("=== INITIALIZING INTERNAL SELECTION MODEL ===")
+            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+            logger.info(f"Model: {model_name}")
+            
+            # Check for GPU availability
+            device = "cuda" if torch.cuda.is_available() else "cpu"
+            logger.info(f"Device: {device}")
+            
+            # Load tokenizer
+            logger.info("Loading tokenizer...")
+            self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name)
+            logger.info("Tokenizer loaded")
+            
+            # Load model
+            logger.info("Loading model...")
+            self._internal_model = AutoModelForCausalLM.from_pretrained(
+                model_name,
+                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                device_map="auto" if device == "cuda" else None
+            )
+            
+            if device == "cpu":
+                self._internal_model = self._internal_model.to(device)
+            
+            logger.info("Model loaded successfully")
+            
+            # Initialize thread lock for model access
+            self._internal_model_lock = threading.Lock()
+            
+            logger.info("=== INTERNAL SELECTION MODEL READY ===")
+        except ImportError as e:
+            logger.error(f"Failed to import required libraries for internal model: {e}")
+            logger.error("Please install: pip install torch transformers")
+            raise
+        except Exception as e:
+            logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
+            raise
+    
+    async def _run_internal_model_selection(self, prompt: str) -> str:
+        """Run the internal model for selection in a separate thread"""
+        import logging
+        import asyncio
+        from concurrent.futures import ThreadPoolExecutor
+        logger = logging.getLogger(__name__)
+        
+        # Initialize model if needed
+        if self._internal_model is None:
+            self._initialize_internal_model()
+        
+        def run_inference():
+            """Run inference in a separate thread"""
+            with self._internal_model_lock:
+                try:
+                    import torch
+                    
+                    # Tokenize input
+                    inputs = self._internal_tokenizer(prompt, return_tensors="pt")
+                    
+                    # Move to same device as model
+                    device = next(self._internal_model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    
+                    # Generate response
+                    with torch.no_grad():
+                        outputs = self._internal_model.generate(
+                            **inputs,
+                            max_new_tokens=100,
+                            temperature=0.1,
+                            do_sample=True,
+                            pad_token_id=self._internal_tokenizer.eos_token_id
+                        )
+                    
+                    # Decode response
+                    response = self._internal_tokenizer.decode(outputs[0], skip_special_tokens=True)
+                    
+                    # Extract only the generated part (remove the prompt)
+                    if response.startswith(prompt):
+                        response = response[len(prompt):].strip()
+                    
+                    return response
+                except Exception as e:
+                    logger.error(f"Error during internal model inference: {e}", exc_info=True)
+                    return None
+        
+        # Run in thread pool to avoid blocking
+        loop = asyncio.get_event_loop()
+        with ThreadPoolExecutor(max_workers=1) as executor:
+            result = await loop.run_in_executor(executor, run_inference)
+        
+        return result
 
     def _build_autoselect_prompt(self, user_prompt: str, autoselect_config) -> str:
         """Build the prompt for model selection"""
@@ -1943,11 +2123,7 @@ class AutoselectHandler:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
-        logger.info(f"Using '{autoselect_config.selection_model}' rotation for model selection")
-        
-        # Use the first available provider/model for the selection
-        # This is a simple implementation - could be enhanced to use a specific selection model
-        rotation_handler = RotationHandler()
+        logger.info(f"Using '{autoselect_config.selection_model}' for model selection")
         
         # Create a minimal request for model selection
         selection_request = {
@@ -1962,10 +2138,79 @@ class AutoselectHandler:
         logger.info(f"  Max tokens: 100 (short response expected)")
         logger.info(f"  Stream: False")
         
-        # Use the configured selection rotation for the selection
+        # Determine if selection_model is a rotation, provider, or special keyword
+        selection_model = autoselect_config.selection_model
+        
         try:
-            logger.info(f"Sending selection request to rotation handler...")
-            response = await rotation_handler.handle_rotation_request(autoselect_config.selection_model, selection_request)
+            # Check if it's the special "internal" keyword
+            if selection_model == "internal":
+                logger.info(f"Selection model is 'internal' - using local HuggingFace model")
+                response_content = await self._run_internal_model_selection(prompt)
+                
+                if not response_content:
+                    logger.error("Internal model returned no response")
+                    return None
+                
+                logger.info(f"Internal model response: {response_content[:200]}..." if len(response_content) > 200 else f"Internal model response: {response_content}")
+                
+                # Extract model selection from response
+                model_id = self._extract_model_selection(response_content)
+                
+                if model_id:
+                    logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
+                    logger.info(f"Selected model ID: {model_id}")
+                else:
+                    logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
+                    logger.warning(f"Could not extract model ID from internal model response")
+                
+                return model_id
+            # Check if it's a rotation
+            elif selection_model in self.config.rotations:
+                logger.info(f"Selection model '{selection_model}' is a rotation")
+                rotation_handler = RotationHandler()
+                response = await rotation_handler.handle_rotation_request(selection_model, selection_request)
+            # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
+            elif '/' in selection_model:
+                provider_id, model_name = selection_model.split('/', 1)
+                logger.info(f"Selection model '{selection_model}' is a direct provider model")
+                logger.info(f"  Provider: {provider_id}, Model: {model_name}")
+                
+                if provider_id not in self.config.providers:
+                    logger.error(f"Provider '{provider_id}' not found in configuration")
+                    return None
+                
+                # Use the direct provider handler
+                request_handler = RequestHandler()
+                selection_request['model'] = model_name
+                response = await request_handler.handle_chat_completion(
+                    request=None,  # No HTTP request object needed
+                    provider_id=provider_id,
+                    request_data=selection_request
+                )
+            # Check if it's just a provider ID (use any model from that provider)
+            elif selection_model in self.config.providers:
+                logger.info(f"Selection model '{selection_model}' is a provider (will use first available model)")
+                provider_config = self.config.get_provider(selection_model)
+                
+                # Get first available model from provider
+                if provider_config.models and len(provider_config.models) > 0:
+                    model_name = provider_config.models[0].name
+                    logger.info(f"  Using model: {model_name}")
+                    
+                    request_handler = RequestHandler()
+                    selection_request['model'] = model_name
+                    response = await request_handler.handle_chat_completion(
+                        request=None,
+                        provider_id=selection_model,
+                        request_data=selection_request
+                    )
+                else:
+                    logger.error(f"Provider '{selection_model}' has no models configured")
+                    return None
+            else:
+                logger.error(f"Selection model '{selection_model}' not found in rotations or providers")
+                return None
+            
             logger.info(f"Selection response received")
             
             content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
@@ -2017,16 +2262,38 @@ class AutoselectHandler:
         logger.info(f"User messages count: {len(user_messages)}")
         
         # Build a string representation of the user prompt
+        # Limit to last 10 messages or 8000 tokens, whichever comes first
+        MAX_SELECTION_MESSAGES = 10
+        MAX_SELECTION_TOKENS = 8000
+        
+        # Take the last N messages
+        limited_messages = user_messages[-MAX_SELECTION_MESSAGES:] if len(user_messages) > MAX_SELECTION_MESSAGES else user_messages
+        logger.info(f"Limited to last {len(limited_messages)} messages for selection")
+        
+        # Build prompt and check token count
         user_prompt = ""
-        for msg in user_messages:
+        final_messages = []
+        for msg in limited_messages:
             role = msg.get('role', 'user')
             content = msg.get('content', '')
             if isinstance(content, list):
                 # Handle complex content (e.g., with images)
                 content = str(content)
-            user_prompt += f"{role}: {content}\n"
-
-        logger.info(f"User prompt length: {len(user_prompt)} characters")
+            
+            # Check if adding this message would exceed token limit
+            test_prompt = user_prompt + f"{role}: {content}\n"
+            # Use a simple token estimation (rough approximation: 1 token ≈ 4 chars)
+            estimated_tokens = len(test_prompt) // 4
+            
+            if estimated_tokens > MAX_SELECTION_TOKENS:
+                logger.info(f"Reached token limit ({estimated_tokens} > {MAX_SELECTION_TOKENS}), stopping at {len(final_messages)} messages")
+                break
+            
+            user_prompt = test_prompt
+            final_messages.append(msg)
+        
+        logger.info(f"Final message count for selection: {len(final_messages)}")
+        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
         # Build the autoselect prompt
@@ -2099,15 +2366,37 @@ class AutoselectHandler:
         logger.info(f"User messages count: {len(user_messages)}")
         
         # Build a string representation of the user prompt
+        # Limit to last 10 messages or 8000 tokens, whichever comes first
+        MAX_SELECTION_MESSAGES = 10
+        MAX_SELECTION_TOKENS = 8000
+        
+        # Take the last N messages
+        limited_messages = user_messages[-MAX_SELECTION_MESSAGES:] if len(user_messages) > MAX_SELECTION_MESSAGES else user_messages
+        logger.info(f"Limited to last {len(limited_messages)} messages for selection")
+        
+        # Build prompt and check token count
         user_prompt = ""
-        for msg in user_messages:
+        final_messages = []
+        for msg in limited_messages:
             role = msg.get('role', 'user')
             content = msg.get('content', '')
             if isinstance(content, list):
                 content = str(content)
-            user_prompt += f"{role}: {content}\n"
-
-        logger.info(f"User prompt length: {len(user_prompt)} characters")
+            
+            # Check if adding this message would exceed token limit
+            test_prompt = user_prompt + f"{role}: {content}\n"
+            # Use a simple token estimation (rough approximation: 1 token ≈ 4 chars)
+            estimated_tokens = len(test_prompt) // 4
+            
+            if estimated_tokens > MAX_SELECTION_TOKENS:
+                logger.info(f"Reached token limit ({estimated_tokens} > {MAX_SELECTION_TOKENS}), stopping at {len(final_messages)} messages")
+                break
+            
+            user_prompt = test_prompt
+            final_messages.append(msg)
+        
+        logger.info(f"Final message count for selection: {len(final_messages)}")
+        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
         # Build the autoselect prompt
@@ -2140,21 +2429,63 @@ class AutoselectHandler:
         logger.info(f"Selection method: {'AI-selected' if selected_model_id != autoselect_config.fallback else 'Fallback'}")
         logger.info(f"Request mode: Streaming")
 
-        # Now proxy the actual streaming request to the selected rotation
-        # The rotation handler will return a StreamingResponse with proper handling
-        # based on the selected provider's type (google vs others)
-        logger.info(f"Proxying streaming request to rotation: {selected_model_id}")
-        rotation_handler = RotationHandler()
-        
-        # The rotation handler handles streaming internally and returns a StreamingResponse
-        response = await rotation_handler.handle_rotation_request(
-            selected_model_id,
-            {**request_data, "stream": True}
-        )
-        
-        logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
-        # Return the StreamingResponse directly - rotation handler already handled the conversion
-        return response
+        # Proxy the streaming request to the selected model (rotation or direct provider)
+        try:
+            # Ensure stream is set to True
+            request_data['stream'] = True
+            
+            # Check if it's a rotation first
+            if selected_model_id in self.config.rotations:
+                logger.info(f"Proxying streaming request to rotation: {selected_model_id}")
+                rotation_handler = RotationHandler()
+                response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+            # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
+            elif '/' in selected_model_id:
+                provider_id, model_name = selected_model_id.split('/', 1)
+                logger.info(f"Proxying streaming request to direct provider model: {selected_model_id}")
+                logger.info(f"  Provider: {provider_id}, Model: {model_name}")
+                
+                if provider_id not in self.config.providers:
+                    logger.error(f"Provider '{provider_id}' not found in configuration")
+                    raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
+                
+                # Use the direct provider handler
+                request_handler = RequestHandler()
+                request_data['model'] = model_name
+                response = await request_handler.handle_streaming_chat_completion(
+                    request=None,
+                    provider_id=provider_id,
+                    request_data=request_data
+                )
+            # Check if it's just a provider ID (use first available model)
+            elif selected_model_id in self.config.providers:
+                logger.info(f"Proxying streaming request to provider: {selected_model_id} (will use first available model)")
+                provider_config = self.config.get_provider(selected_model_id)
+                
+                # Get first available model from provider
+                if provider_config.models and len(provider_config.models) > 0:
+                    model_name = provider_config.models[0].name
+                    logger.info(f"  Using model: {model_name}")
+                    
+                    request_handler = RequestHandler()
+                    request_data['model'] = model_name
+                    response = await request_handler.handle_streaming_chat_completion(
+                        request=None,
+                        provider_id=selected_model_id,
+                        request_data=request_data
+                    )
+                else:
+                    logger.error(f"Provider '{selected_model_id}' has no models configured")
+                    raise HTTPException(status_code=400, detail=f"Provider {selected_model_id} has no models configured")
+            else:
+                logger.error(f"Selected model '{selected_model_id}' not found in rotations or providers")
+                raise HTTPException(status_code=400, detail=f"Model {selected_model_id} not found")
+            
+            logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
+            return response
+        except Exception as e:
+            logger.error(f"Error proxying to selected model: {str(e)}", exc_info=True)
+            raise
 
     async def handle_autoselect_model_list(self, autoselect_id: str) -> List[Dict]:
         """List the available models for an autoselect endpoint"""

@@ -11,6 +11,7 @@
       "endpoint": "https://generativelanguage.googleapis.com/v1beta",
       "type": "google",
       "api_key_required": true,
+      "api_key": "YOUR_GEMINI_API_KEY",
       "rate_limit": 0,
       "models": [
         {
@@ -43,6 +44,7 @@
       "endpoint": "https://api.openai.com/v1",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_OPENAI_API_KEY",
       "rate_limit": 0
     },
     "anthropic": {
@@ -51,6 +53,7 @@
       "endpoint": "https://api.anthropic.com/v1",
       "type": "anthropic",
       "api_key_required": true,
+      "api_key": "YOUR_ANTHROPIC_API_KEY",
       "rate_limit": 0
     },
     "ollama": {
@@ -67,6 +70,7 @@
       "endpoint": "https://your-azure-endpoint.openai.azure.com",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_AZURE_OPENAI_API_KEY",
       "rate_limit": 0
     },
     "cohere": {
@@ -75,6 +79,7 @@
       "endpoint": "https://api.cohere.com/v1",
       "type": "cohere",
       "api_key_required": true,
+      "api_key": "YOUR_COHERE_API_KEY",
       "rate_limit": 0
     },
     "huggingface": {
@@ -83,6 +88,7 @@
       "endpoint": "https://api-inference.huggingface.co",
       "type": "huggingface",
       "api_key_required": true,
+      "api_key": "YOUR_HUGGINGFACE_API_KEY",
       "rate_limit": 0
     },
     "replicate": {
@@ -91,6 +97,7 @@
       "endpoint": "https://api.replicate.com/v1",
       "type": "replicate",
       "api_key_required": true,
+      "api_key": "YOUR_REPLICATE_API_KEY",
       "rate_limit": 0
     },
     "togetherai": {
@@ -99,6 +106,7 @@
       "endpoint": "https://api.together.xyz/v1",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_TOGETHERAI_API_KEY",
       "rate_limit": 0
     },
     "groq": {
@@ -107,6 +115,7 @@
       "endpoint": "https://api.groq.com/openai/v1",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_GROQ_API_KEY",
       "rate_limit": 0
     },
     "mistralai": {
@@ -115,6 +124,7 @@
       "endpoint": "https://api.mistral.ai/v1",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_MISTRALAI_API_KEY",
       "rate_limit": 0
     },
     "stabilityai": {
@@ -123,6 +133,7 @@
       "endpoint": "https://api.stability.ai/v2beta",
       "type": "stabilityai",
       "api_key_required": true,
+      "api_key": "YOUR_STABILITYAI_API_KEY",
       "rate_limit": 0
     },
     "kilo": {
@@ -131,6 +142,7 @@
       "endpoint": "https://kilocode.ai/api/openrouter",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_KILO_API_KEY",
       "rate_limit": 0
     },
     "perplexity": {
@@ -139,6 +151,7 @@
       "endpoint": "https://api.perplexity.ai",
       "type": "openai",
       "api_key_required": true,
+      "api_key": "YOUR_PERPLEXITY_API_KEY",
       "rate_limit": 0
     },
     "poe": {
@@ -147,6 +160,7 @@
       "endpoint": "https://api.poe.com/v1",
       "type": "poe",
       "api_key_required": true,
+      "api_key": "YOUR_POE_API_KEY",
       "rate_limit": 0
     },
     "lanai": {
@@ -155,6 +169,7 @@
       "endpoint": "https://api.lanai.ai/v1",
       "type": "lanai",
       "api_key_required": true,
+      "api_key": "YOUR_LANAI_API_KEY",
       "rate_limit": 0
     },
     "amazon": {
@@ -163,6 +178,7 @@
       "endpoint": "https://api.amazon.com/bedrock/v1",
       "type": "amazon",
       "api_key_required": true,
+      "api_key": "YOUR_AMAZON_API_KEY",
       "rate_limit": 0
     },
     "ibm": {
@@ -171,6 +187,7 @@
       "endpoint": "https://api.ibm.com/watson/v1",
       "type": "ibm",
       "api_key_required": true,
+      "api_key": "YOUR_IBM_API_KEY",
       "rate_limit": 0
     },
     "microsoft": {
@@ -179,6 +196,7 @@
       "endpoint": "https://api.microsoft.com/v1",
       "type": "microsoft",
       "api_key_required": true,
+      "api_key": "YOUR_MICROSOFT_API_KEY",
       "rate_limit": 0
     },
     "kiro": {

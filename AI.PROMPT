@@ -331,6 +331,39 @@ When making changes:
 2. Add to `PROVIDER_HANDLERS` dictionary
 3. Add provider configuration to `config/providers.json`
 
+### Configuration Architecture
+
+**API Key Management:**
+- API keys are stored centrally in `config/providers.json`
+- Each provider definition includes an `api_key` field
+- Rotation and autoselect configurations reference providers by name only
+- The system automatically resolves API keys by matching provider names
+
+**Priority Order for API Keys:**
+1. API key from provider config (providers.json) - highest priority
+2. API key from rotation config (rotations.json) - fallback for backward compatibility
+
+**Model Selection in Rotations:**
+- If models are specified in rotation config: uses those models
+- If no models specified: randomly selects from provider's available models
+- Models from provider config are used with default weight of 1
+
+**Default Settings Hierarchy:**
+Settings can be specified at three levels with the following priority:
+1. Model-specific settings (highest priority)
+2. Rotation default settings
+3. Provider default settings (lowest priority)
+
+**Supported Default Fields:**
+- `default_rate_limit`: Rate limiting between requests
+- `default_max_request_tokens`: Maximum tokens per request
+- `default_rate_limit_TPM`: Tokens per minute limit
+- `default_rate_limit_TPH`: Tokens per hour limit
+- `default_rate_limit_TPD`: Tokens per day limit
+- `default_context_size`: Context window size
+- `default_condense_context`: Context condensation threshold
+- `default_condense_method`: Context condensation method
+
 ### Kiro Gateway Integration
 
 **Overview:**
@@ -353,12 +386,33 @@ Kiro Gateway is a third-party proxy gateway that provides OpenAI and Anthropic-c
 In `config/providers.json`:
 ```json
 {
+  "gemini": {
+    "id": "gemini",
+    "name": "Google AI Studio",
+    "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+    "type": "google",
+    "api_key_required": true,
+    "api_key": "YOUR_GEMINI_API_KEY",
+    "rate_limit": 0,
+    "default_rate_limit": 0,
+    "default_max_request_tokens": 1000000,
+    "default_context_size": 1000000,
+    "models": [
+      {
+        "name": "gemini-2.0-flash",
+        "rate_limit": 0,
+        "max_request_tokens": 1000000,
+        "context_size": 1000000
+      }
+    ]
+  },
   "kiro": {
     "id": "kiro",
     "name": "Kiro Gateway (Amazon Q Developer)",
     "endpoint": "http://localhost:8000/v1",
     "type": "kiro",
     "api_key_required": true,
+    "api_key": "YOUR_KIRO_API_KEY",
     "rate_limit": 0,
     "models": [
       {
@@ -372,20 +426,39 @@ In `config/providers.json`:
 }
 ```
 
-In `config/rotations.json`:
+In `config/rotations.json` (API keys are now referenced from providers.json):
 ```json
 {
+  "coding": {
+    "model_name": "coding",
+    "notifyerrors": false,
+    "default_rate_limit": 0,
+    "default_context_size": 100000,
+    "providers": [
+      {
+        "provider_id": "gemini",
+        "models": [
+          {
+            "name": "gemini-2.0-flash",
+            "weight": 3,
+            "rate_limit": 0
+          }
+        ]
+      },
+      {
+        "provider_id": "openai"
+      }
+    ]
+  },
   "kiro-claude": {
     "model_name": "kiro-claude",
     "providers": [
       {
         "provider_id": "kiro",
-        "api_key": "YOUR_KIRO_GATEWAY_API_KEY",
         "models": [
           {
             "name": "claude-sonnet-4-5",
-            "weight": 3,
-            "rate_limit": 0
+            "weight": 3
           }
         ]
       }
@@ -393,6 +466,8 @@ In `config/rotations.json`:
   }
 }
 ```
+
+**Note:** In the example above, the "openai" provider entry has no models specified, so the system will randomly select from all models defined in the provider's configuration.
 
 **Setup Requirements:**
 1. Kiro Gateway must be running (typically on `http://localhost:8000`)
@@ -514,6 +589,20 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
 
 ### Recent Updates
+
+**2026-03-22 - Configuration Refactoring**
+- Centralized API key storage in providers.json
+- API keys are now stored only in provider definitions, not in rotation/autoselect configs
+- Rotation and autoselect configurations reference providers by name only
+- Added support for provider-only entries in rotations (no models specified)
+- When no models specified, system randomly selects from provider's available models
+- Added default settings support at provider level (default_rate_limit, default_max_request_tokens, etc.)
+- Added default settings support at rotation level
+- Settings priority: model-specific > rotation defaults > provider defaults
+- Updated ProviderConfig with default setting fields
+- Updated RotationConfig with default setting fields
+- Added _apply_defaults_to_model() method in RotationHandler
+- Updated configuration examples in AI.PROMPT
 
 **2026-02-07 - Version 0.2.7**
 - Added max_request_tokens support for automatic request splitting
