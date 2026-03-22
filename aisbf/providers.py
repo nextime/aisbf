@@ -823,7 +823,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                     "id": f"google-{model}-{int(time.time())}",
                     "object": "chat.completion",
                     "created": int(time.time()),
-                    "model": model,
+                    "model": f"{self.provider_id}/{model}",
                     "choices": [{
                         "index": 0,
                         "message": {
@@ -1141,7 +1141,7 @@ class AnthropicProviderHandler(BaseProviderHandler):
                 "id": f"anthropic-{model}-{int(time.time())}",
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": model,
+                "model": f"{self.provider_id}/{model}",
                 "choices": [{
                     "index": 0,
                     "message": {
@@ -1198,6 +1198,255 @@ class AnthropicProviderHandler(BaseProviderHandler):
             Model(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", provider_id=self.provider_id),
             Model(id="claude-3-opus-20240229", name="Claude 3 Opus", provider_id=self.provider_id)
         ]
+
+class KiroProviderHandler(BaseProviderHandler):
+    """
+    Handler for direct Kiro API integration (Amazon Q Developer).
+    
+    This handler makes direct API calls to Kiro's API using credentials from
+    Kiro IDE or kiro-cli, with FULL kiro-gateway feature parity including:
+    - Tool calls/function calling
+    - Images/multimodal content
+    - Complex message merging and validation
+    - Role normalization
+    - Complete OpenAI <-> Kiro format conversion
+    """
+    def __init__(self, provider_id: str, api_key: str):
+        super().__init__(provider_id, api_key)
+        self.provider_config = config.get_provider(provider_id)
+        self.region = "us-east-1"  # Default region
+        
+        # Initialize KiroAuthManager with credentials from config
+        self.auth_manager = None
+        self._init_auth_manager()
+        
+        # HTTP client for making requests
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+        
+    def _init_auth_manager(self):
+        """Initialize KiroAuthManager with credentials from config"""
+        try:
+            from .kiro_auth import KiroAuthManager
+            
+            # Get Kiro-specific configuration from provider config
+            kiro_config = getattr(self.provider_config, 'kiro_config', None)
+            
+            if not kiro_config:
+                import logging
+                logging.warning(f"No kiro_config found in provider {self.provider_id}, using defaults")
+                kiro_config = {}
+            
+            # Extract credentials from provider config
+            refresh_token = kiro_config.get('refresh_token') if isinstance(kiro_config, dict) else None
+            profile_arn = kiro_config.get('profile_arn') if isinstance(kiro_config, dict) else None
+            region = kiro_config.get('region', 'us-east-1') if isinstance(kiro_config, dict) else 'us-east-1'
+            creds_file = kiro_config.get('creds_file') if isinstance(kiro_config, dict) else None
+            sqlite_db = kiro_config.get('sqlite_db') if isinstance(kiro_config, dict) else None
+            client_id = kiro_config.get('client_id') if isinstance(kiro_config, dict) else None
+            client_secret = kiro_config.get('client_secret') if isinstance(kiro_config, dict) else None
+            
+            self.region = region
+            
+            # Initialize auth manager
+            self.auth_manager = KiroAuthManager(
+                refresh_token=refresh_token,
+                profile_arn=profile_arn,
+                region=region,
+                creds_file=creds_file,
+                sqlite_db=sqlite_db,
+                client_id=client_id,
+                client_secret=client_secret
+            )
+            
+            import logging
+            logging.info(f"KiroProviderHandler: Auth manager initialized for region {region}")
+            
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to initialize KiroAuthManager: {e}")
+            self.auth_manager = None
+
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            import json
+            import uuid
+            logging.info(f"KiroProviderHandler: Handling request for model {model}")
+            if AISBF_DEBUG:
+                logging.info(f"KiroProviderHandler: Messages: {messages}")
+                logging.info(f"KiroProviderHandler: Tools: {tools}")
+            else:
+                logging.info(f"KiroProviderHandler: Messages count: {len(messages)}")
+                logging.info(f"KiroProviderHandler: Tools count: {len(tools) if tools else 0}")
+            
+            if not self.auth_manager:
+                raise Exception("Kiro authentication not configured. Please set kiro_config in provider configuration.")
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Get access token and profile ARN
+            access_token = await self.auth_manager.get_access_token()
+            profile_arn = self.auth_manager.profile_arn
+            
+            if not profile_arn:
+                raise Exception("Profile ARN not available. Please configure Kiro credentials.")
+            
+            # Use full kiro-gateway conversion pipeline
+            from .kiro_converters_openai import build_kiro_payload_from_dict
+            
+            conversation_id = str(uuid.uuid4())
+            
+            # Build Kiro API payload using full conversion pipeline
+            # This handles ALL features: tools, images, message merging, role normalization, etc.
+            payload = build_kiro_payload_from_dict(
+                model=model,
+                messages=messages,
+                tools=tools,
+                conversation_id=conversation_id,
+                profile_arn=profile_arn
+            )
+            
+            if AISBF_DEBUG:
+                logging.info(f"KiroProviderHandler: Kiro payload: {json.dumps(payload, indent=2)}")
+            
+            # Make request to Kiro API
+            headers = self.auth_manager.get_auth_headers(access_token)
+            headers["Content-Type"] = "application/json"
+            
+            kiro_api_url = f"https://q.{self.region}.amazonaws.com/generateAssistantResponse"
+            
+            logging.info(f"KiroProviderHandler: Sending request to {kiro_api_url}")
+            
+            response = await self.client.post(
+                kiro_api_url,
+                json=payload,
+                headers=headers
+            )
+            
+            response.raise_for_status()
+            response_data = response.json()
+            
+            if AISBF_DEBUG:
+                logging.info(f"KiroProviderHandler: Raw Kiro response: {json.dumps(response_data, indent=2)}")
+            
+            logging.info(f"KiroProviderHandler: Response received")
+            
+            # Parse Kiro response and convert to OpenAI format
+            openai_response = self._parse_kiro_response(response_data, model)
+            
+            self.record_success()
+            return openai_response
+            
+        except Exception as e:
+            import logging
+            logging.error(f"KiroProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+
+    def _parse_kiro_response(self, kiro_response: Dict, model: str) -> Dict:
+        """
+        Parse Kiro API response and convert to OpenAI format.
+        
+        Handles:
+        - Text content
+        - Tool calls (toolUses)
+        - Finish reasons
+        - Usage statistics
+        """
+        import logging
+        import json
+        
+        # Extract assistant message content
+        assistant_content = ""
+        tool_calls = None
+        finish_reason = "stop"
+        
+        # Kiro response structure varies, try different paths
+        if "message" in kiro_response:
+            assistant_content = kiro_response["message"]
+        elif "content" in kiro_response:
+            assistant_content = kiro_response["content"]
+        elif "conversationState" in kiro_response:
+            conv_state = kiro_response["conversationState"]
+            if "currentMessage" in conv_state:
+                current_msg = conv_state["currentMessage"]
+                if "assistantResponseMessage" in current_msg:
+                    assistant_msg = current_msg["assistantResponseMessage"]
+                    assistant_content = assistant_msg.get("content", "")
+                    
+                    # Check for tool uses
+                    if "toolUses" in assistant_msg:
+                        tool_uses = assistant_msg["toolUses"]
+                        tool_calls = []
+                        for idx, tool_use in enumerate(tool_uses):
+                            tool_call = {
+                                "id": tool_use.get("toolUseId", f"call_{idx}"),
+                                "type": "function",
+                                "function": {
+                                    "name": tool_use.get("name", ""),
+                                    "arguments": json.dumps(tool_use.get("input", {}))
+                                }
+                            }
+                            tool_calls.append(tool_call)
+                        
+                        if tool_calls:
+                            finish_reason = "tool_calls"
+                            logging.info(f"KiroProviderHandler: Parsed {len(tool_calls)} tool calls from response")
+        
+        # Build OpenAI-style response
+        openai_response = {
+            "id": f"kiro-{int(time.time())}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": f"{self.provider_id}/{model}",
+            "choices": [{
+                "index": 0,
+                "message": {
+                    "role": "assistant",
+                    "content": assistant_content if not tool_calls else None
+                },
+                "finish_reason": finish_reason
+            }],
+            "usage": {
+                "prompt_tokens": 0,
+                "completion_tokens": 0,
+                "total_tokens": 0
+            }
+        }
+        
+        # Add tool_calls if present
+        if tool_calls:
+            openai_response["choices"][0]["message"]["tool_calls"] = tool_calls
+        
+        return openai_response
+
+    async def get_models(self) -> List[Model]:
+        try:
+            import logging
+            logging.info("KiroProviderHandler: Getting models list")
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Return static list of Claude models available through Kiro
+            return [
+                Model(id="anthropic.claude-3-5-sonnet-20241022-v2:0", name="Claude 3.5 Sonnet v2", provider_id=self.provider_id),
+                Model(id="anthropic.claude-3-5-haiku-20241022-v1:0", name="Claude 3.5 Haiku", provider_id=self.provider_id),
+                Model(id="anthropic.claude-3-5-sonnet-20240620-v1:0", name="Claude 3.5 Sonnet v1", provider_id=self.provider_id),
+                Model(id="anthropic.claude-sonnet-3-5-v2", name="Claude 3.5 Sonnet v2 (alias)", provider_id=self.provider_id),
+                Model(id="claude-sonnet-4-5", name="Claude 3.5 Sonnet v2 (short)", provider_id=self.provider_id),
+                Model(id="claude-haiku-4-5", name="Claude 3.5 Haiku (short)", provider_id=self.provider_id),
+            ]
+        except Exception as e:
+            import logging
+            logging.error(f"KiroProviderHandler: Error getting models: {str(e)}", exc_info=True)
+            raise e
 
 class OllamaProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
@@ -1335,7 +1584,7 @@ class OllamaProviderHandler(BaseProviderHandler):
                 "id": f"ollama-{model}-{int(time.time())}",
                 "object": "chat.completion",
                 "created": int(time.time()),
-                "model": model,
+                "model": f"{self.provider_id}/{model}",
                 "choices": [{
                     "index": 0,
                     "message": {
@@ -1375,7 +1624,8 @@ PROVIDER_HANDLERS = {
     'google': GoogleProviderHandler,
     'openai': OpenAIProviderHandler,
     'anthropic': AnthropicProviderHandler,
-    'ollama': OllamaProviderHandler
+    'ollama': OllamaProviderHandler,
+    'kiro': KiroProviderHandler
 }
 
 def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:

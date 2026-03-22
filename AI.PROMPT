@@ -331,6 +331,94 @@ When making changes:
 2. Add to `PROVIDER_HANDLERS` dictionary
 3. Add provider configuration to `config/providers.json`
 
+### Kiro Gateway Integration
+
+**Overview:**
+Kiro Gateway is a third-party proxy gateway that provides OpenAI and Anthropic-compatible APIs for Kiro (Amazon Q Developer / AWS CodeWhisperer). It's located in the `vendor/kiro-gateway` directory and has been integrated as a provider type in AISBF.
+
+**What is Kiro Gateway:**
+- Proxy gateway for accessing Claude models through Kiro IDE/CLI credentials
+- Provides OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/models`)
+- Supports both Kiro IDE and kiro-cli authentication methods
+- Offers access to Claude models (Sonnet 4.5, Haiku 4.5, Opus 4.5, etc.)
+- Includes features like extended thinking, tool calling, and streaming
+
+**Integration Architecture:**
+- `KiroProviderHandler` class in `aisbf/providers.py` - treats kiro-gateway as an OpenAI-compatible endpoint
+- Uses the OpenAI SDK to communicate with kiro-gateway
+- Supports all standard AISBF features: streaming, tools, rate limiting, error tracking
+
+**Configuration:**
+
+In `config/providers.json`:
+```json
+{
+  "kiro": {
+    "id": "kiro",
+    "name": "Kiro Gateway (Amazon Q Developer)",
+    "endpoint": "http://localhost:8000/v1",
+    "type": "kiro",
+    "api_key_required": true,
+    "rate_limit": 0,
+    "models": [
+      {
+        "name": "claude-sonnet-4-5",
+        "rate_limit": 0,
+        "max_request_tokens": 200000,
+        "context_size": 200000
+      }
+    ]
+  }
+}
+```
+
+In `config/rotations.json`:
+```json
+{
+  "kiro-claude": {
+    "model_name": "kiro-claude",
+    "providers": [
+      {
+        "provider_id": "kiro",
+        "api_key": "YOUR_KIRO_GATEWAY_API_KEY",
+        "models": [
+          {
+            "name": "claude-sonnet-4-5",
+            "weight": 3,
+            "rate_limit": 0
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**Setup Requirements:**
+1. Kiro Gateway must be running (typically on `http://localhost:8000`)
+2. Kiro Gateway must be configured with valid Kiro credentials (IDE or CLI)
+3. Set `PROXY_API_KEY` in kiro-gateway's `.env` file
+4. Use that same API key in AISBF's provider configuration
+
+**Available Models:**
+- `claude-sonnet-4-5` - Enhanced model, balanced performance
+- `claude-haiku-4-5` - Fast model for quick responses
+- `claude-opus-4-5` - Top-tier model (may require paid tier)
+- `claude-sonnet-4` - Previous generation model
+- `auto` - Automatic model selection
+
+**Usage:**
+Once configured, kiro-gateway can be used like any other provider in AISBF:
+- Direct provider access: `/api/kiro/chat/completions`
+- Rotation access: `/api/kiro-claude/chat/completions`
+- Model listing: `/api/kiro/models`
+
+**Benefits:**
+- Access Claude models through Kiro credentials without direct Anthropic API access
+- Leverage Kiro's free tier or paid plans
+- Use Claude models in AISBF rotations alongside other providers
+- Automatic failover and load balancing with other providers
+
 ### Modifying Configuration
 1. Edit files in `~/.aisbf/` for user-specific changes
 2. Edit files in installed location for system-wide defaults

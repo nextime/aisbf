@@ -144,6 +144,45 @@
           ]
         }
       ]
+    },
+    "kiro-claude": {
+      "model_name": "kiro-claude",
+      "notifyerrors": false,
+      "providers": [
+        {
+          "provider_id": "kiro",
+          "api_key": "YOUR_KIRO_GATEWAY_API_KEY",
+          "models": [
+            {
+              "name": "claude-sonnet-4-5",
+              "weight": 3,
+              "rate_limit": 0,
+              "max_request_tokens": 200000,
+              "context_size": 200000,
+              "condense_context": 80,
+              "condense_method": ["hierarchical", "semantic"]
+            },
+            {
+              "name": "claude-haiku-4-5",
+              "weight": 2,
+              "rate_limit": 0,
+              "max_request_tokens": 200000,
+              "context_size": 200000,
+              "condense_context": 75,
+              "condense_method": "conversational"
+            },
+            {
+              "name": "claude-sonnet-4",
+              "weight": 1,
+              "rate_limit": 0,
+              "max_request_tokens": 200000,
+              "context_size": 200000,
+              "condense_context": 80,
+              "condense_method": "conversational"
+            }
+          ]
+        }
+      ]
     }
   }
 }

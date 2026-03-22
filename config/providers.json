@@ -180,6 +180,32 @@
       "type": "microsoft",
       "api_key_required": true,
       "rate_limit": 0
+    },
+    "kiro": {
+      "id": "kiro",
+      "name": "Kiro IDE (Amazon Q Developer)",
+      "endpoint": "https://q.us-east-1.amazonaws.com",
+      "type": "kiro",
+      "api_key_required": false,
+      "rate_limit": 0,
+      "kiro_config": {
+        "_comment": "Uses Kiro IDE credentials (VS Code extension)",
+        "creds_file": "~/.config/Code/User/globalStorage/amazon.q/credentials.json",
+        "region": "us-east-1"
+      }
+    },
+    "kiro-cli": {
+      "id": "kiro-cli",
+      "name": "Kiro CLI (Amazon Q Developer)",
+      "endpoint": "https://q.us-east-1.amazonaws.com",
+      "type": "kiro",
+      "api_key_required": false,
+      "rate_limit": 0,
+      "kiro_config": {
+        "_comment": "Uses kiro-cli credentials (SQLite database)",
+        "sqlite_db": "~/.local/share/kiro-cli/data.sqlite3",
+        "region": "us-east-1"
+      }
     }
   }
 }

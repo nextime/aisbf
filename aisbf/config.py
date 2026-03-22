@@ -52,6 +52,7 @@ class ProviderConfig(BaseModel):
     rate_limit: float = 0.0
     api_key: Optional[str] = None  # Optional API key in provider config
     models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
+    kiro_config: Optional[Dict] = None  # Optional Kiro-specific configuration (credentials, region, etc.)
 
 class RotationConfig(BaseModel):
     providers: List[Dict]
