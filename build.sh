@@ -34,11 +34,29 @@ if ! command -v python &> /dev/null; then
     exit 1
 fi
 
+# Function to run pip with --break-system-packages if needed
+pip_install() {
+    # Try without --break-system-packages first
+    if pip install "$@" 2>&1 | grep -q "externally-managed-environment"; then
+        echo "System requires --break-system-packages flag, retrying..."
+        pip install --break-system-packages "$@"
+    elif ! pip install "$@" 2>&1; then
+        # If first attempt failed, check if it's the externally-managed error
+        if pip install "$@" 2>&1 | grep -q "externally-managed-environment"; then
+            echo "System requires --break-system-packages flag, retrying..."
+            pip install --break-system-packages "$@"
+        else
+            # Re-run to show the actual error
+            pip install "$@"
+        fi
+    fi
+}
+
 # Install build tools if not already installed
 echo "Checking for build tools..."
 if ! python -m build --version &> /dev/null; then
     echo "Installing build and twine..."
-    pip install build twine
+    pip_install build twine
 fi
 
 # Clean previous builds
