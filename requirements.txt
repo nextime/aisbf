@@ -15,3 +15,5 @@ torch
 transformers
 jinja2
 itsdangerous
+bs4
+protobuf>=3.20,<4
