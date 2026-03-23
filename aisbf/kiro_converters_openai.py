@@ -30,22 +30,121 @@ Contains functions for:
 """
 
 import logging
+import re
 from typing import Any, Dict, List, Optional, Tuple
 
 # Use standard Python logging
 logger = logging.getLogger(__name__)
 
-# Configuration - hidden models that need normalization
+# Import Kiro models for type hints
+from .kiro_models import ChatMessage, Tool
+
+# Hidden models - not returned by Kiro /ListAvailableModels API but still functional.
+# These need special internal IDs that differ from their display names.
+# Format: "normalized_display_name" → "internal_kiro_id"
+# Matches kiro-gateway's config.py HIDDEN_MODELS
 HIDDEN_MODELS = {
-    "claude-sonnet-4-5": "anthropic.claude-3-5-sonnet-20241022-v2:0",
-    "claude-haiku-4-5": "anthropic.claude-3-5-haiku-20241022-v1:0",
-    "claude-opus-4-5": "anthropic.claude-3-5-opus-20250514-v1:0",
-    "claude-sonnet-4": "anthropic.claude-3-5-sonnet-20240620-v1:0",
+    # Claude 3.7 Sonnet - legacy flagship model, still works!
+    "claude-3.7-sonnet": "CLAUDE_3_7_SONNET_20250219_V1_0",
 }
 
+
+def normalize_model_name(name: str) -> str:
+    """
+    Normalize client model name to Kiro format.
+    
+    Ported from kiro-gateway's model_resolver.py normalize_model_name().
+    
+    Transformations applied:
+    1. claude-haiku-4-5 → claude-haiku-4.5 (dash to dot for minor version)
+    2. claude-haiku-4-5-20251001 → claude-haiku-4.5 (strip date suffix)
+    3. claude-haiku-4-5-latest → claude-haiku-4.5 (strip 'latest' suffix)
+    4. claude-sonnet-4-20250514 → claude-sonnet-4 (strip date, no minor)
+    5. claude-3-7-sonnet → claude-3.7-sonnet (legacy format normalization)
+    6. claude-3-7-sonnet-20250219 → claude-3.7-sonnet (legacy + strip date)
+    7. claude-4.5-opus-high → claude-opus-4.5 (inverted format with suffix)
+    
+    Args:
+        name: External model name from client
+    
+    Returns:
+        Normalized model name in Kiro format
+    """
+    if not name:
+        return name
+    
+    # Lowercase for consistent matching
+    name_lower = name.lower()
+    
+    # Pattern 1: Standard format - claude-{family}-{major}-{minor}(-{suffix})?
+    # Matches: claude-haiku-4-5, claude-haiku-4-5-20251001, claude-haiku-4-5-latest
+    # IMPORTANT: Minor version is 1-2 digits only! 8-digit dates should NOT match here.
+    standard_pattern = r'^(claude-(?:haiku|sonnet|opus)-\d+)-(\d{1,2})(?:-(?:\d{8}|latest|\d+))?$'
+    match = re.match(standard_pattern, name_lower)
+    if match:
+        base = match.group(1)  # claude-haiku-4
+        minor = match.group(2)  # 5
+        return f"{base}.{minor}"  # claude-haiku-4.5
+    
+    # Pattern 2: Standard format without minor - claude-{family}-{major}(-{date})?
+    # Matches: claude-sonnet-4, claude-sonnet-4-20250514
+    no_minor_pattern = r'^(claude-(?:haiku|sonnet|opus)-\d+)(?:-\d{8})?$'
+    match = re.match(no_minor_pattern, name_lower)
+    if match:
+        return match.group(1)  # claude-sonnet-4
+    
+    # Pattern 3: Legacy format - claude-{major}-{minor}-{family}(-{suffix})?
+    # Matches: claude-3-7-sonnet, claude-3-7-sonnet-20250219
+    legacy_pattern = r'^(claude)-(\d+)-(\d+)-(haiku|sonnet|opus)(?:-(?:\d{8}|latest|\d+))?$'
+    match = re.match(legacy_pattern, name_lower)
+    if match:
+        prefix = match.group(1)  # claude
+        major = match.group(2)   # 3
+        minor = match.group(3)   # 7
+        family = match.group(4)  # sonnet
+        return f"{prefix}-{major}.{minor}-{family}"  # claude-3.7-sonnet
+    
+    # Pattern 4: Already normalized with dot but has date suffix
+    # Matches: claude-haiku-4.5-20251001, claude-3.7-sonnet-20250219
+    dot_with_date_pattern = r'^(claude-(?:\d+\.\d+-)?(?:haiku|sonnet|opus)(?:-\d+\.\d+)?)-\d{8}$'
+    match = re.match(dot_with_date_pattern, name_lower)
+    if match:
+        return match.group(1)
+    
+    # Pattern 5: Inverted format with suffix - claude-{major}.{minor}-{family}-{suffix}
+    # Matches: claude-4.5-opus-high, claude-4.5-sonnet-low
+    # Convert to: claude-{family}-{major}.{minor}
+    # NOTE: Requires a suffix to avoid matching already-normalized formats
+    inverted_with_suffix_pattern = r'^claude-(\d+)\.(\d+)-(haiku|sonnet|opus)-(.+)$'
+    match = re.match(inverted_with_suffix_pattern, name_lower)
+    if match:
+        major = match.group(1)   # 4
+        minor = match.group(2)   # 5
+        family = match.group(3)  # opus
+        return f"claude-{family}-{major}.{minor}"  # claude-opus-4.5
+    
+    # No transformation needed - return as-is
+    return name
+
+
 def get_model_id_for_kiro(model: str, hidden_models: dict) -> str:
-    """Normalize model name for Kiro API"""
-    return hidden_models.get(model, model)
+    """
+    Get the model ID to send to Kiro API.
+    
+    Normalizes the name first (dashes→dots, strip dates),
+    then checks hidden_models for special internal IDs.
+    
+    Ported from kiro-gateway's model_resolver.py get_model_id_for_kiro().
+    
+    Args:
+        model: External model name from client
+        hidden_models: Dict mapping display names to internal Kiro IDs
+    
+    Returns:
+        Model ID to send to Kiro API
+    """
+    normalized = normalize_model_name(model)
+    return hidden_models.get(normalized, normalized)
 
 # Import from core - reuse shared logic
 from .kiro_converters import (

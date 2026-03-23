@@ -311,8 +311,7 @@ def get_truncation_recovery_system_addition() -> str:
     Returns:
         System prompt addition text (empty string if truncation recovery is disabled)
     """
-    from kiro.config import TRUNCATION_RECOVERY
-    
+    # Use module-level constant (defined at top of file)
     if not TRUNCATION_RECOVERY:
         return ""
     

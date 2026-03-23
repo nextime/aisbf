@@ -403,9 +403,133 @@ class RequestHandler:
                 # Check if this is a Google streaming response by checking provider type from config
                 # This is more reliable than checking response iterability which can cause false positives
                 is_google_stream = provider_config.type == 'google'
+                is_kiro_stream = provider_config.type == 'kiro'
                 logger.info(f"Is Google streaming response: {is_google_stream} (provider type: {provider_config.type})")
-                
-                if is_google_stream:
+                logger.info(f"Is Kiro streaming response: {is_kiro_stream} (provider type: {provider_config.type})")
+
+                if is_kiro_stream:
+                    # Handle Kiro streaming response
+                    # Kiro returns an async generator that yields OpenAI-compatible SSE strings directly
+                    # We need to parse these and handle tool calls properly
+                    accumulated_response_text = ""  # Track full response for token counting
+                    chunk_count = 0
+                    tool_calls_from_stream = []  # Track tool calls from stream
+                    completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
+                    created_time = int(time.time())
+
+                    async for chunk in response:
+                        chunk_count += 1
+                        try:
+                            logger.debug(f"Kiro chunk type: {type(chunk)}")
+                            logger.debug(f"Kiro chunk: {chunk}")
+
+                            # Parse SSE chunk to extract JSON data
+                            chunk_data = None
+                            if isinstance(chunk, str) and chunk.startswith('data: '):
+                                data_str = chunk[6:].strip()  # Remove 'data: ' prefix
+                                if data_str and data_str != '[DONE]':
+                                    try:
+                                        chunk_data = json.loads(data_str)
+                                    except json.JSONDecodeError:
+                                        logger.warning(f"Failed to parse Kiro chunk JSON: {data_str}")
+                                        continue
+                            elif isinstance(chunk, bytes):
+                                # Try to decode bytes as SSE
+                                try:
+                                    chunk_str = chunk.decode('utf-8')
+                                    if chunk_str.startswith('data: '):
+                                        data_str = chunk_str[6:].strip()
+                                        if data_str and data_str != '[DONE]':
+                                            chunk_data = json.loads(data_str)
+                                except (UnicodeDecodeError, json.JSONDecodeError):
+                                    logger.warning(f"Failed to parse Kiro bytes chunk")
+                                    continue
+                            
+                            if chunk_data:
+                                # Extract content and tool calls from chunk
+                                choices = chunk_data.get('choices', [])
+                                if choices:
+                                    delta = choices[0].get('delta', {})
+                                    
+                                    # Track content
+                                    delta_content = delta.get('content', '')
+                                    if delta_content:
+                                        accumulated_response_text += delta_content
+                                    
+                                    # Track tool calls
+                                    delta_tool_calls = delta.get('tool_calls', [])
+                                    if delta_tool_calls:
+                                        for tc in delta_tool_calls:
+                                            tool_calls_from_stream.append(tc)
+                                            logger.debug(f"Collected tool call from Kiro stream: {tc}")
+                                
+                                # Pass through the chunk as-is
+                                if isinstance(chunk, str):
+                                    yield chunk.encode('utf-8')
+                                elif isinstance(chunk, bytes):
+                                    yield chunk
+                                else:
+                                    yield f"data: {json.dumps(chunk_data)}\n\n".encode('utf-8')
+                            else:
+                                # Pass through non-data chunks as-is (like [DONE])
+                                if isinstance(chunk, str):
+                                    yield chunk.encode('utf-8')
+                                elif isinstance(chunk, bytes):
+                                    yield chunk
+                                else:
+                                    yield f"data: {json.dumps(chunk)}\n\n".encode('utf-8')
+
+                        except Exception as chunk_error:
+                            error_msg = str(chunk_error)
+                            logger.warning(f"Error processing Kiro chunk: {error_msg}")
+                            logger.warning(f"Chunk type: {type(chunk)}")
+                            logger.warning(f"Chunk content: {chunk}")
+                            continue
+
+                    # After stream ends, process collected tool calls
+                    if tool_calls_from_stream:
+                        logger.info(f"Processing {len(tool_calls_from_stream)} tool calls from Kiro stream")
+                        
+                        # Add required index field to each tool_call
+                        # according to OpenAI API specification for streaming
+                        indexed_tool_calls = []
+                        for idx, tc in enumerate(tool_calls_from_stream):
+                            # Extract function with None protection
+                            func = tc.get("function") or {}
+                            # Use "or" for protection against explicit None in values
+                            tool_name = func.get("name") or ""
+                            tool_args = func.get("arguments") or "{}"
+                            
+                            logger.debug(f"Tool call [{idx}] '{tool_name}': id={tc.get('id')}, args_length={len(tool_args)}")
+                            
+                            indexed_tc = {
+                                "index": idx,
+                                "id": tc.get("id"),
+                                "type": tc.get("type", "function"),
+                                "function": {
+                                    "name": tool_name,
+                                    "arguments": tool_args
+                                }
+                            }
+                            indexed_tool_calls.append(indexed_tc)
+                        
+                        # Send tool calls chunk
+                        tool_calls_chunk = {
+                            "id": completion_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_time,
+                            "model": request_data['model'],
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"tool_calls": indexed_tool_calls},
+                                "finish_reason": None
+                            }]
+                        }
+                        yield f"data: {json.dumps(tool_calls_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+
+                    logger.info(f"Kiro streaming processed {chunk_count} chunks total")
+
+                elif is_google_stream:
                     # Handle Google's streaming response
                     # Google provider returns an async generator
                     # Note: Google returns accumulated text, so we need to track and send only deltas
@@ -2309,55 +2433,96 @@ class RotationHandler:
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
                 else:
-                    # Handle OpenAI/Anthropic streaming responses
-                    # OpenAI SDK returns a sync Stream object, not an async iterator
-                    # So we use a regular for loop, not async for
+                    # Handle OpenAI/Anthropic/Kiro streaming responses
+                    # Some providers return async generators, others return sync iterables
                     accumulated_response_text = ""  # Track full response for token counting
-                    for chunk in response:
+
+                    # Check if response is an async generator
+                    import inspect
+                    if inspect.iscoroutinefunction(response) or hasattr(response, '__aiter__'):
+                        # Handle async generator (like Kiro)
+                        logger.info(f"Detected async generator response, using async for loop")
+                        chunk_count = 0
                         try:
-                            logger.debug(f"Chunk type: {type(chunk)}")
-                            logger.debug(f"Chunk: {chunk}")
-                            
-                            # For OpenAI-compatible providers, just pass through the raw chunk
-                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                            
-                            # Track response content for token calculation
-                            if isinstance(chunk_dict, dict):
-                                choices = chunk_dict.get('choices', [])
-                                if choices:
-                                    delta = choices[0].get('delta', {})
-                                    delta_content = delta.get('content', '')
-                                    if delta_content:
-                                        accumulated_response_text += delta_content
-                            
-                            # Add effective_context to the last chunk (when finish_reason is present)
-                            if isinstance(chunk_dict, dict):
-                                choices = chunk_dict.get('choices', [])
-                                if choices and choices[0].get('finish_reason') is not None:
-                                    # This is the last chunk, add effective_context
-                                    if 'usage' not in chunk_dict:
-                                        chunk_dict['usage'] = {}
-                                    chunk_dict['usage']['effective_context'] = effective_context
-                                    
-                                    # If provider doesn't provide token counts, calculate them
-                                    if chunk_dict['usage'].get('total_tokens') is None:
-                                        # Calculate completion tokens from accumulated response
-                                        if accumulated_response_text:
-                                            completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name)
-                                        else:
-                                            completion_tokens = 0
-                                        total_tokens = effective_context + completion_tokens
-                                        chunk_dict['usage']['prompt_tokens'] = effective_context
-                                        chunk_dict['usage']['completion_tokens'] = completion_tokens
-                                        chunk_dict['usage']['total_tokens'] = total_tokens
-                            
-                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                        except Exception as chunk_error:
-                            error_msg = str(chunk_error)
-                            logger.warning(f"Error serializing chunk: {error_msg}")
-                            logger.warning(f"Chunk type: {type(chunk)}")
-                            logger.warning(f"Chunk content: {chunk}")
-                            continue
+                            async for chunk in response:
+                                chunk_count += 1
+                                try:
+                                    logger.debug(f"Async chunk type: {type(chunk)}")
+                                    logger.debug(f"Async chunk: {chunk}")
+
+                                    # For Kiro, chunks are already properly formatted SSE bytes
+                                    # Just pass them through directly
+                                    if isinstance(chunk, bytes):
+                                        logger.debug(f"Yielding raw bytes chunk: {len(chunk)} bytes")
+                                        yield chunk
+                                    else:
+                                        # Fallback: treat as dict and serialize
+                                        chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                                        yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                                except Exception as chunk_error:
+                                    error_msg = str(chunk_error)
+                                    logger.warning(f"Error processing async chunk: {error_msg}")
+                                    logger.warning(f"Chunk type: {type(chunk)}")
+                                    logger.warning(f"Chunk content: {chunk}")
+                                    continue
+                        except Exception as async_error:
+                            logger.error(f"Error in async for loop: {async_error}")
+                            logger.error(f"Response type: {type(response)}")
+                            logger.error(f"Response has __aiter__: {hasattr(response, '__aiter__')}")
+                            logger.error(f"Response is coroutine function: {inspect.iscoroutinefunction(response)}")
+                            # Re-raise to trigger failure recording
+                            raise async_error
+                        finally:
+                            logger.info(f"Async generator processed {chunk_count} chunks total")
+                    else:
+                        # Handle sync iterable (like OpenAI SDK)
+                        logger.info(f"Detected sync iterable response, using regular for loop")
+                        for chunk in response:
+                            try:
+                                logger.debug(f"Sync chunk type: {type(chunk)}")
+                                logger.debug(f"Sync chunk: {chunk}")
+
+                                # For OpenAI-compatible providers, just pass through the raw chunk
+                                # Convert chunk to dict and serialize as JSON
+                                chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+
+                                # Track response content for token calculation
+                                if isinstance(chunk_dict, dict):
+                                    choices = chunk_dict.get('choices', [])
+                                    if choices:
+                                        delta = choices[0].get('delta', {})
+                                        delta_content = delta.get('content', '')
+                                        if delta_content:
+                                            accumulated_response_text += delta_content
+
+                                # Add effective_context to the last chunk (when finish_reason is present)
+                                if isinstance(chunk_dict, dict):
+                                    choices = chunk_dict.get('choices', [])
+                                    if choices and choices[0].get('finish_reason') is not None:
+                                        # This is the last chunk, add effective_context
+                                        if 'usage' not in chunk_dict:
+                                            chunk_dict['usage'] = {}
+                                        chunk_dict['usage']['effective_context'] = effective_context
+
+                                        # If provider doesn't provide token counts, calculate them
+                                        if chunk_dict['usage'].get('total_tokens') is None:
+                                            # Calculate completion tokens from accumulated response
+                                            if accumulated_response_text:
+                                                completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], request_data['model'])
+                                            else:
+                                                completion_tokens = 0
+                                            total_tokens = effective_context + completion_tokens
+                                            chunk_dict['usage']['prompt_tokens'] = effective_context
+                                            chunk_dict['usage']['completion_tokens'] = completion_tokens
+                                            chunk_dict['usage']['total_tokens'] = total_tokens
+
+                                yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                error_msg = str(chunk_error)
+                                logger.warning(f"Error serializing sync chunk: {error_msg}")
+                                logger.warning(f"Chunk type: {type(chunk)}")
+                                logger.warning(f"Chunk content: {chunk}")
+                                continue
                 
                 handler.record_success()
             except Exception as e:

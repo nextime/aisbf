@@ -1308,9 +1308,35 @@ async def dashboard_prompts(request: Request):
     
     prompts_data = []
     for prompt_file in prompt_files:
+        # Check user config first
         config_path = Path.home() / '.aisbf' / prompt_file['filename']
+        
         if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / prompt_file['filename']
+            # Try installed locations
+            installed_dirs = [
+                Path.home() / '.local' / 'share' / 'aisbf',
+                Path('/usr/share/aisbf'),
+                Path(__file__).parent,  # For source tree
+            ]
+            
+            source_path = None
+            for installed_dir in installed_dirs:
+                test_path = installed_dir / prompt_file['filename']
+                if test_path.exists():
+                    source_path = test_path
+                    break
+                # Also check config subdirectory
+                test_path = installed_dir / 'config' / prompt_file['filename']
+                if test_path.exists():
+                    source_path = test_path
+                    break
+            
+            if source_path:
+                # Copy to user config directory
+                config_path.parent.mkdir(parents=True, exist_ok=True)
+                import shutil
+                shutil.copy2(source_path, config_path)
+                logger.info(f"Copied prompt from {source_path} to {config_path}")
         
         if config_path.exists():
             with open(config_path) as f:
@@ -1320,6 +1346,14 @@ async def dashboard_prompts(request: Request):
                 'name': prompt_file['name'],
                 'filename': prompt_file['filename'],
                 'content': content
+            })
+        else:
+            # Add empty prompt if file not found
+            prompts_data.append({
+                'key': prompt_file['key'],
+                'name': prompt_file['name'],
+                'filename': prompt_file['filename'],
+                'content': f'# {prompt_file["name"]}\n\nPrompt template not found. Please add your prompt here.'
             })
     
     # Check for success parameter
@@ -1391,10 +1425,37 @@ async def dashboard_settings(request: Request):
     if auth_check:
         return auth_check
     
-    # Load aisbf.json
+    # Load aisbf.json - check user config first, then installed locations
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    
     if not config_path.exists():
-        config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+        # Try installed locations
+        installed_dirs = [
+            Path.home() / '.local' / 'share' / 'aisbf',
+            Path('/usr/share/aisbf'),
+            Path(__file__).parent,  # For source tree
+        ]
+        
+        source_path = None
+        for installed_dir in installed_dirs:
+            test_path = installed_dir / 'aisbf.json'
+            if test_path.exists():
+                source_path = test_path
+                break
+            # Also check config subdirectory
+            test_path = installed_dir / 'config' / 'aisbf.json'
+            if test_path.exists():
+                source_path = test_path
+                break
+        
+        if source_path:
+            # Copy to user config directory
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            import shutil
+            shutil.copy2(source_path, config_path)
+            logger.info(f"Copied config from {source_path} to {config_path}")
+        else:
+            raise HTTPException(status_code=500, detail="Configuration file not found in any location")
     
     with open(config_path) as f:
         aisbf_config = json.load(f)
@@ -1550,12 +1611,21 @@ async def dashboard_docs(request: Request):
     if auth_check:
         return auth_check
     
-    # Try to find DOCUMENTATION.md
-    doc_path = Path(__file__).parent / 'DOCUMENTATION.md'
-    if not doc_path.exists():
-        doc_path = Path.home() / '.aisbf' / 'DOCUMENTATION.md'
+    # Try to find DOCUMENTATION.md in multiple locations
+    search_paths = [
+        Path.home() / '.aisbf' / 'DOCUMENTATION.md',
+        Path.home() / '.local' / 'share' / 'aisbf' / 'DOCUMENTATION.md',
+        Path('/usr/share/aisbf') / 'DOCUMENTATION.md',
+        Path(__file__).parent / 'DOCUMENTATION.md',
+    ]
     
-    if doc_path.exists():
+    doc_path = None
+    for path in search_paths:
+        if path.exists():
+            doc_path = path
+            break
+    
+    if doc_path and doc_path.exists():
         with open(doc_path, encoding='utf-8') as f:
             markdown_content = f.read()
             # Convert markdown to HTML with extensions for better formatting
@@ -1580,12 +1650,21 @@ async def dashboard_about(request: Request):
     if auth_check:
         return auth_check
     
-    # Try to find README.md
-    readme_path = Path(__file__).parent / 'README.md'
-    if not readme_path.exists():
-        readme_path = Path.home() / '.aisbf' / 'README.md'
+    # Try to find README.md in multiple locations
+    search_paths = [
+        Path.home() / '.aisbf' / 'README.md',
+        Path.home() / '.local' / 'share' / 'aisbf' / 'README.md',
+        Path('/usr/share/aisbf') / 'README.md',
+        Path(__file__).parent / 'README.md',
+    ]
     
-    if readme_path.exists():
+    readme_path = None
+    for path in search_paths:
+        if path.exists():
+            readme_path = path
+            break
+    
+    if readme_path and readme_path.exists():
         with open(readme_path, encoding='utf-8') as f:
             markdown_content = f.read()
             # Convert markdown to HTML with extensions for better formatting
@@ -1610,12 +1689,21 @@ async def dashboard_license(request: Request):
     if auth_check:
         return auth_check
     
-    # Try to find LICENSE.txt
-    license_path = Path(__file__).parent / 'LICENSE.txt'
-    if not license_path.exists():
-        license_path = Path.home() / '.aisbf' / 'LICENSE.txt'
+    # Try to find LICENSE.txt in multiple locations
+    search_paths = [
+        Path.home() / '.aisbf' / 'LICENSE.txt',
+        Path.home() / '.local' / 'share' / 'aisbf' / 'LICENSE.txt',
+        Path('/usr/share/aisbf') / 'LICENSE.txt',
+        Path(__file__).parent / 'LICENSE.txt',
+    ]
     
-    if license_path.exists():
+    license_path = None
+    for path in search_paths:
+        if path.exists():
+            license_path = path
+            break
+    
+    if license_path and license_path.exists():
         with open(license_path, encoding='utf-8') as f:
             content = f.read()
             # Convert to HTML with pre tags to preserve formatting

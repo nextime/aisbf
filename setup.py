@@ -82,10 +82,15 @@ setup(
             'main.py',
             'requirements.txt',
             'aisbf.sh',
+            'DOCUMENTATION.md',
+            'README.md',
+            'LICENSE.txt',
             'config/providers.json',
             'config/rotations.json',
             'config/autoselect.json',
             'config/autoselect.md',
+            'config/condensation_conversational.md',
+            'config/condensation_semantic.md',
             'config/aisbf.json',
         ]),
         # Install aisbf package to share directory for venv installation
@@ -104,6 +109,7 @@ setup(
             'aisbf/kiro_converters.py',
             'aisbf/kiro_converters_openai.py',
             'aisbf/kiro_models.py',
+            'aisbf/kiro_parsers.py',
             'aisbf/kiro_utils.py',
         ]),
         # Install dashboard templates

@@ -100,9 +100,13 @@ class KiroAuthManager:
         """Load credentials from SQLite database (kiro-cli)"""
         if not self.sqlite_db:
             return
-            
+        
+        # Expand ~ in path
+        db_path = Path(self.sqlite_db).expanduser()
+        conn = None
+        
         try:
-            conn = sqlite3.connect(self.sqlite_db)
+            conn = sqlite3.connect(str(db_path))
             cursor = conn.cursor()
             
             # Try to find token in SQLite
@@ -120,9 +124,13 @@ class KiroAuthManager:
             if token_data:
                 self._access_token = token_data.get('access_token')
                 self._refresh_token = token_data.get('refresh_token')
+                self.refresh_token = token_data.get('refresh_token')  # Update public refresh_token too
                 self._expires_at = datetime.fromisoformat(
                     token_data.get('expires_at', '1970-01-01T00:00:00Z')
                 )
+                # Also try to get profile_arn from token data
+                if 'profile_arn' in token_data:
+                    self.profile_arn = token_data['profile_arn']
                 logger.info(f"Loaded credentials from SQLite key: {token_key}")
             
             # Try to get device registration for AWS SSO OIDC
@@ -133,23 +141,60 @@ class KiroAuthManager:
                     reg_data = json.loads(row[0])
                     self.client_id = reg_data.get('clientId')
                     self.client_secret = reg_data.get('clientSecret')
+                    # Also check for profile_arn in registration data
+                    if 'profileArn' in reg_data:
+                        self.profile_arn = reg_data['profileArn']
                     break
+            
+            # If profile_arn still not found, try to query it directly from the database
+            if not self.profile_arn:
+                # Try common profile ARN keys
+                profile_keys = [
+                    "kirocli:profile:arn",
+                    "codewhisperer:profile:arn",
+                    "kirocli:social:profile",
+                    "codewhisperer:social:profile"
+                ]
+                for profile_key in profile_keys:
+                    cursor.execute("SELECT value FROM auth_kv WHERE key = ?", (profile_key,))
+                    row = cursor.fetchone()
+                    if row:
+                        try:
+                            profile_data = json.loads(row[0])
+                            if isinstance(profile_data, dict):
+                                self.profile_arn = profile_data.get('arn') or profile_data.get('profileArn')
+                            elif isinstance(profile_data, str):
+                                self.profile_arn = profile_data
+                            if self.profile_arn:
+                                logger.info(f"Loaded profile ARN from SQLite key: {profile_key}")
+                                break
+                        except json.JSONDecodeError:
+                            # Value might be a plain string
+                            self.profile_arn = row[0]
+                            logger.info(f"Loaded profile ARN (plain string) from SQLite key: {profile_key}")
+                            break
                     
         except Exception as e:
             logger.error(f"Failed to load from SQLite: {e}")
         finally:
-            conn.close()
+            if conn:
+                conn.close()
     
     def _load_from_creds_file(self):
         """Load credentials from JSON file"""
         if not self.creds_file:
             return
-            
+        
+        # Expand ~ in path
+        creds_path = Path(self.creds_file).expanduser()
+        
         try:
-            with open(self.creds_file, 'r') as f:
+            with open(creds_path, 'r') as f:
                 data = json.load(f)
                 
-            self.refresh_token = data.get('refreshToken', self.refresh_token)
+            refresh_token_value = data.get('refreshToken', self.refresh_token)
+            self.refresh_token = refresh_token_value
+            self._refresh_token = refresh_token_value  # Keep private token in sync
             self._access_token = data.get('accessToken')
             self.profile_arn = data.get('profileArn', self.profile_arn)
             
@@ -205,6 +250,7 @@ class KiroAuthManager:
             self._access_token = data['accessToken']
             if 'refreshToken' in data:
                 self.refresh_token = data['refreshToken']
+                self._refresh_token = data['refreshToken']  # Keep private token in sync
             
             # Calculate expiration (1 hour default)
             self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=3600)
@@ -234,6 +280,7 @@ class KiroAuthManager:
             self._access_token = data['access_token']
             if 'refresh_token' in data:
                 self.refresh_token = data['refresh_token']
+                self._refresh_token = data['refresh_token']  # Keep private token in sync
             
             expires_in = data.get('expires_in', 3600)
             self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
@@ -242,9 +289,12 @@ class KiroAuthManager:
         """Save updated credentials to file"""
         if not self.creds_file:
             return
-            
+        
+        # Expand ~ in path
+        creds_path = Path(self.creds_file).expanduser()
+        
         try:
-            with open(self.creds_file, 'r') as f:
+            with open(creds_path, 'r') as f:
                 data = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             data = {}
@@ -257,7 +307,7 @@ class KiroAuthManager:
             'region': self.region
         })
         
-        with open(self.creds_file, 'w') as f:
+        with open(creds_path, 'w') as f:
             json.dump(data, f, indent=2)
     
     def get_auth_headers(self, token: str) -> dict:
