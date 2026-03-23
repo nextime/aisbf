@@ -2,6 +2,20 @@
 
 A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, and AI-assisted model selection to optimize AI service usage across multiple providers.
 
+![AISBF Dashboard](screenshot.png)
+
+## Web Dashboard
+
+AISBF includes a comprehensive web-based dashboard for easy configuration and management:
+
+- **Provider Management**: Configure API keys, endpoints, and model settings
+- **Rotation Configuration**: Set up weighted load balancing across providers
+- **Autoselect Configuration**: Configure AI-powered model selection
+- **Server Settings**: Manage SSL/TLS, authentication, and TOR hidden service
+- **Real-time Monitoring**: View provider status and configuration
+
+Access the dashboard at `http://localhost:17765/dashboard` (default credentials: admin/admin)
+
 ## Key Features
 
 - **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
