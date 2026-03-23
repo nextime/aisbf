@@ -859,7 +859,7 @@ app.add_middleware(
 @app.get("/dashboard/login", response_class=HTMLResponse)
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
-    return templates.TemplateResponse("dashboard/login.html", {"request": request, "session": request.session})
+    return templates.TemplateResponse("dashboard/login.html", {"request": request})
 
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -876,7 +876,7 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['logged_in'] = True
         request.session['username'] = username
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
-    return templates.TemplateResponse("dashboard/login.html", {"request": request, "session": request.session, "error": "Invalid credentials"})
+    return templates.TemplateResponse("dashboard/login.html", {"request": request, "error": "Invalid credentials"})
 
 @app.get("/dashboard/logout")
 async def dashboard_logout(request: Request):
