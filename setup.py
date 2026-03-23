@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.4.0",
+    version="0.5.0",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -98,6 +98,13 @@ setup(
             'aisbf/context.py',
             'aisbf/utils.py',
             'aisbf/database.py',
+            'aisbf/mcp.py',
+            'aisbf/tor.py',
+            'aisbf/kiro_auth.py',
+            'aisbf/kiro_converters.py',
+            'aisbf/kiro_converters_openai.py',
+            'aisbf/kiro_models.py',
+            'aisbf/kiro_utils.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
