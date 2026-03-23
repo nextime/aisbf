@@ -1,6 +1,6 @@
 # Kiro Gateway Integration Guide
 
-This guide explains how to use [kiro-gateway](vendor/kiro-gateway) with AISBF to access Claude models through Kiro (Amazon Q Developer / AWS CodeWhisperer) credentials.
+This guide explains how to use kiro-gateway with AISBF to access Claude models through Kiro (Amazon Q Developer / AWS CodeWhisperer) credentials.
 
 ## Table of Contents
 
@@ -8,9 +8,10 @@ This guide explains how to use [kiro-gateway](vendor/kiro-gateway) with AISBF to
 - [What is Kiro Gateway?](#what-is-kiro-gateway)
 - [Prerequisites](#prerequisites)
 - [Setup Instructions](#setup-instructions)
-  - [Step 1: Configure Kiro Gateway](#step-1-configure-kiro-gateway)
-  - [Step 2: Start Kiro Gateway](#step-2-start-kiro-gateway)
-  - [Step 3: Configure AISBF](#step-3-configure-aisbf)
+  - [Step 1: Install Kiro Gateway](#step-1-install-kiro-gateway)
+  - [Step 2: Configure Kiro Gateway](#step-2-configure-kiro-gateway)
+  - [Step 3: Start Kiro Gateway](#step-3-start-kiro-gateway)
+  - [Step 4: Configure AISBF](#step-4-configure-aisbf)
 - [Usage Examples](#usage-examples)
 - [Available Models](#available-models)
 - [Troubleshooting](#troubleshooting)
@@ -27,7 +28,7 @@ Kiro Gateway is a proxy gateway that provides OpenAI and Anthropic-compatible AP
 
 ## What is Kiro Gateway?
 
-Kiro Gateway is a standalone FastAPI application located in [`vendor/kiro-gateway`](vendor/kiro-gateway) that:
+Kiro Gateway is a standalone FastAPI application that:
 
 - Proxies requests to Kiro's backend API
 - Provides OpenAI-compatible endpoints (`/v1/chat/completions`, `/v1/models`)
@@ -35,67 +36,72 @@ Kiro Gateway is a standalone FastAPI application located in [`vendor/kiro-gatewa
 - Supports both Kiro IDE and kiro-cli authentication methods
 - Includes features like extended thinking, tool calling, and streaming
 
+Kiro Gateway is maintained as a separate project. You can find it at: https://github.com/jwadow/kiro-gateway
+
 ## Prerequisites
 
 Before setting up kiro-gateway with AISBF, ensure you have:
 
 1. **Kiro Credentials**: Either Kiro IDE or kiro-cli configured and authenticated
-2. **Python 3.8+**: Required for running kiro-gateway
+2. **Python 3.10+**: Required for running kiro-gateway
 3. **AISBF Installed**: AISBF should be installed and configured
 4. **Network Access**: Both services should be able to communicate (typically on localhost)
 
 ## Setup Instructions
 
-### Step 1: Configure Kiro Gateway
+### Step 1: Install Kiro Gateway
 
-1. Navigate to the kiro-gateway directory:
-   ```bash
-   cd vendor/kiro-gateway
-   ```
+Clone and install kiro-gateway from GitHub:
 
-2. Install dependencies:
-   ```bash
-   pip install -r requirements.txt
-   ```
+```bash
+# Clone the kiro-gateway repository
+git clone https://github.com/jwadow/kiro-gateway.git
+cd kiro-gateway
 
-3. Create a `.env` file with your configuration:
-   ```bash
-   # Authentication method (choose one)
-   KIRO_AUTH_METHOD=ide  # or 'cli'
-   
-   # For IDE authentication
-   KIRO_IDE_CONFIG_PATH=/path/to/your/.kiro/config.json
-   
-   # For CLI authentication
-   KIRO_CLI_PATH=/path/to/kiro-cli
-   
-   # API Key for securing the proxy
-   PROXY_API_KEY=your-secure-api-key-here
-   
-   # Optional: Server configuration
-   HOST=0.0.0.0
-   PORT=8000
-   LOG_LEVEL=INFO
-   ```
+# Install dependencies
+pip install -r requirements.txt
+```
 
-4. **Important**: Choose your authentication method:
+### Step 2: Configure Kiro Gateway
+
+1. Create a `.env` file with your configuration:
+
+```bash
+# Authentication method (choose one)
+KIRO_AUTH_METHOD=ide  # or 'cli'
+
+# For IDE authentication
+KIRO_IDE_CONFIG_PATH=~/.config/Code/User/globalStorage/amazon.q/credentials.json
+
+# For CLI authentication
+KIRO_CLI_PATH=/path/to/kiro-cli
+
+# API Key for securing the proxy
+PROXY_API_KEY=your-secure-api-key-here
+
+# Optional: Server configuration
+HOST=127.0.0.1
+PORT=8000
+LOG_LEVEL=INFO
+```
+
+2. **Important**: Choose your authentication method:
 
    **Option A: Kiro IDE Authentication**
    - Set `KIRO_AUTH_METHOD=ide`
-   - Set `KIRO_IDE_CONFIG_PATH` to your Kiro IDE config location
-   - Default location: `~/.kiro/config.json`
+   - Set `KIRO_IDE_CONFIG_PATH` to your Kiro IDE credentials location
+   - Typical location: `~/.config/Code/User/globalStorage/amazon.q/credentials.json`
 
    **Option B: kiro-cli Authentication**
    - Set `KIRO_AUTH_METHOD=cli`
    - Set `KIRO_CLI_PATH` to your kiro-cli executable
    - Ensure kiro-cli is authenticated: `kiro-cli auth login`
 
-### Step 2: Start Kiro Gateway
+### Step 3: Start Kiro Gateway
 
 Start the kiro-gateway server:
 
 ```bash
-cd vendor/kiro-gateway
 python main.py
 ```
 
@@ -104,12 +110,12 @@ You should see output indicating the server is running:
 INFO:     Started server process
 INFO:     Waiting for application startup.
 INFO:     Application startup complete.
-INFO:     Uvicorn running on http://0.0.0.0:8000
+Uvicorn running on http://127.0.0.1:8000
 ```
 
 **Tip**: Run kiro-gateway in a separate terminal or as a background service to keep it running while using AISBF.
 
-### Step 3: Configure AISBF
+### Step 4: Configure AISBF
 
 1. **Add Kiro Provider to `~/.aisbf/providers.json`**:
 
@@ -121,6 +127,7 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
        "endpoint": "http://localhost:8000/v1",
        "type": "kiro",
        "api_key_required": true,
+       "api_key": "YOUR_KIRO_GATEWAY_API_KEY",
        "rate_limit": 0,
        "models": [
          {
@@ -169,7 +176,6 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
        "providers": [
          {
            "provider_id": "kiro",
-           "api_key": "YOUR_KIRO_GATEWAY_API_KEY",
            "models": [
              {
                "name": "claude-sonnet-4-5",
@@ -189,12 +195,13 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
    ```
 
 3. **Restart AISBF** to apply the configuration changes:
+
    ```bash
-   # If running as a service
-   sudo systemctl restart aisbf
+   # If running as a daemon
+   aisbf restart
    
    # If running manually
-   ./aisbf.sh
+   aisbf
    ```
 
 ## Usage Examples
@@ -204,9 +211,8 @@ INFO:     Uvicorn running on http://0.0.0.0:8000
 Access kiro-gateway directly through AISBF:
 
 ```bash
-curl -X POST http://localhost:5000/api/kiro/chat/completions \
+curl -X POST http://localhost:17765/api/kiro/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_AISBF_API_KEY" \
   -d '{
     "model": "claude-sonnet-4-5",
     "messages": [
@@ -220,9 +226,8 @@ curl -X POST http://localhost:5000/api/kiro/chat/completions \
 Use kiro-gateway through a rotation (with automatic model selection):
 
 ```bash
-curl -X POST http://localhost:5000/api/kiro-claude/chat/completions \
+curl -X POST http://localhost:17765/api/kiro-claude/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_AISBF_API_KEY" \
   -d '{
     "messages": [
       {"role": "user", "content": "Explain quantum computing"}
@@ -235,9 +240,8 @@ curl -X POST http://localhost:5000/api/kiro-claude/chat/completions \
 Enable streaming for real-time responses:
 
 ```bash
-curl -X POST http://localhost:5000/api/kiro/chat/completions \
+curl -X POST http://localhost:17765/api/kiro/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_AISBF_API_KEY" \
   -d '{
     "model": "claude-sonnet-4-5",
     "messages": [
@@ -252,9 +256,8 @@ curl -X POST http://localhost:5000/api/kiro/chat/completions \
 Use Claude's tool calling capabilities:
 
 ```bash
-curl -X POST http://localhost:5000/api/kiro/chat/completions \
+curl -X POST http://localhost:17765/api/kiro/chat/completions \
   -H "Content-Type: application/json" \
-  -H "Authorization: Bearer YOUR_AISBF_API_KEY" \
   -d '{
     "model": "claude-sonnet-4-5",
     "messages": [
@@ -283,8 +286,7 @@ curl -X POST http://localhost:5000/api/kiro/chat/completions \
 Query available models through kiro-gateway:
 
 ```bash
-curl http://localhost:5000/api/kiro/models \
-  -H "Authorization: Bearer YOUR_AISBF_API_KEY"
+curl http://localhost:17765/api/kiro/models
 ```
 
 ## Available Models
@@ -319,7 +321,7 @@ Kiro Gateway provides access to the following Claude models:
 
 **Solutions**:
 1. Verify `PROXY_API_KEY` in kiro-gateway's `.env` matches the API key in AISBF's configuration
-2. For IDE auth: Check that `KIRO_IDE_CONFIG_PATH` points to a valid config file
+2. For IDE auth: Check that `KIRO_IDE_CONFIG_PATH` points to a valid credentials file
 3. For CLI auth: Run `kiro-cli auth status` to verify authentication
 4. Try re-authenticating: `kiro-cli auth login`
 
@@ -395,7 +397,7 @@ Kiro Gateway provides access to the following Claude models:
 
 - **[`KiroProviderHandler`](aisbf/providers.py)**: Handler class in AISBF that manages kiro-gateway communication
 - **OpenAI SDK**: Used to communicate with kiro-gateway's OpenAI-compatible endpoints
-- **Kiro Gateway**: Standalone FastAPI proxy in [`vendor/kiro-gateway`](vendor/kiro-gateway)
+- **Kiro Gateway**: Standalone FastAPI proxy (external project)
 - **Kiro Credentials**: IDE or CLI authentication for accessing Kiro API
 
 ### Benefits of This Architecture
@@ -409,17 +411,16 @@ Kiro Gateway provides access to the following Claude models:
 ## Additional Resources
 
 - [AISBF Documentation](DOCUMENTATION.md)
-- [Kiro Gateway README](vendor/kiro-gateway/README.md)
-- [Kiro Gateway Architecture](vendor/kiro-gateway/ARCHITECTURE.md)
+- [Kiro Gateway GitHub](https://github.com/jwadow/kiro-gateway)
 - [AISBF AI.PROMPT](AI.PROMPT) - Contains integration details and configuration examples
 
 ## Support
 
 For issues related to:
 - **AISBF**: Check [DOCUMENTATION.md](DOCUMENTATION.md) and [DEBUG_GUIDE.md](DEBUG_GUIDE.md)
-- **Kiro Gateway**: Check [`vendor/kiro-gateway/README.md`](vendor/kiro-gateway/README.md)
+- **Kiro Gateway**: Check [Kiro Gateway GitHub](https://github.com/jwadow/kiro-gateway)
 - **Kiro Credentials**: Refer to Amazon Q Developer / AWS CodeWhisperer documentation
 
 ---
 
-**Last Updated**: 2026-03-21
+**Last Updated**: 2026-03-23
