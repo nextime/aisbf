@@ -67,6 +67,14 @@ class Model(BaseModel):
     condense_context: Optional[int] = None  # Percentage (0-100) at which to condense context
     condense_method: Optional[Union[str, List[str]]] = None  # Method(s) for condensation: "hierarchical", "conversational", "semantic", "algorithmic"
     error_cooldown: Optional[int] = None  # Cooldown period in seconds after 3 consecutive failures (default: 300)
+    # OpenRouter-style extended fields
+    description: Optional[str] = None
+    context_length: Optional[int] = None
+    architecture: Optional[Dict] = None  # modality, input_modalities, output_modalities, tokenizer, instruct_type
+    pricing: Optional[Dict] = None  # prompt, completion, input_cache_read
+    top_provider: Optional[Dict] = None  # context_length, max_completion_tokens, is_moderated
+    supported_parameters: Optional[List[str]] = None
+    default_parameters: Optional[Dict] = None
 
 class Provider(BaseModel):
     id: str
