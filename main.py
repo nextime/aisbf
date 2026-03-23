@@ -31,6 +31,7 @@ from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.mcp import mcp_server, MCPAuthLevel, load_mcp_config
 from aisbf.database import initialize_database
+from aisbf.tor import setup_tor_hidden_service, TorHiddenService
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.datastructures import Headers
@@ -480,6 +481,7 @@ autoselect_handler = None
 server_config = None
 config = None
 _initialized = False
+tor_service = None
 
 # Model cache for dynamically fetched provider models
 _model_cache = {}
@@ -664,7 +666,7 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
 @app.on_event("startup")
 async def startup_event():
     """Initialize app on startup (for uvicorn import case)."""
-    global config, server_config, _cache_refresh_task
+    global config, server_config, _cache_refresh_task, tor_service
     if not _initialized:
         # Use environment variable for config dir if set
         custom_config_dir = get_config_dir()
@@ -689,8 +691,22 @@ async def startup_event():
         if 'condensation' in config._loaded_files:
             logger.info(f"Condensation: {config._loaded_files['condensation']}")
         
+        if 'tor' in config._loaded_files:
+            logger.info(f"TOR:          {config._loaded_files['tor']}")
+        
         logger.info("=" * 80)
         logger.info("")
+    
+    # Setup TOR hidden service if enabled
+    if config and hasattr(config, 'tor') and config.tor:
+        tor_config = config.tor
+        if tor_config.enabled:
+            local_port = server_config.get('port', 17765) if server_config else 17765
+            tor_service = setup_tor_hidden_service(tor_config, local_port)
+            if tor_service:
+                logger.info("TOR hidden service successfully initialized")
+            else:
+                logger.warning("TOR hidden service initialization failed")
     
     # Start background task for model cache refresh
     if _cache_refresh_task is None:
@@ -743,6 +759,17 @@ async def startup_event():
     logger.info(f"Available providers: {list(config.providers.keys()) if config else []}")
     logger.info(f"Available rotations: {list(config.rotations.keys()) if config else []}")
     logger.info(f"Available autoselect: {list(config.autoselect.keys()) if config else []}")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    """Cleanup on shutdown"""
+    global tor_service
+    
+    # Cleanup TOR hidden service
+    if tor_service:
+        logger.info("Shutting down TOR hidden service...")
+        tor_service.disconnect()
+        logger.info("TOR hidden service shutdown complete")
 
 # Authentication middleware
 @app.middleware("http")
@@ -1292,7 +1319,15 @@ async def dashboard_settings_save(
     autoselect_model_id: str = Form(...),
     mcp_enabled: bool = Form(False),
     autoselect_tokens: str = Form(""),
-    fullconfig_tokens: str = Form("")
+    fullconfig_tokens: str = Form(""),
+    tor_enabled: bool = Form(False),
+    tor_control_port: int = Form(9051),
+    tor_control_host: str = Form("127.0.0.1"),
+    tor_control_password: str = Form(""),
+    tor_hidden_service_dir: str = Form(""),
+    tor_hidden_service_port: int = Form(80),
+    tor_socks_port: int = Form(9050),
+    tor_socks_host: str = Form("127.0.0.1")
 ):
     """Save server settings"""
     auth_check = require_dashboard_auth(request)
@@ -1326,6 +1361,18 @@ async def dashboard_settings_save(
     aisbf_config['mcp']['enabled'] = mcp_enabled
     aisbf_config['mcp']['autoselect_tokens'] = [t.strip() for t in autoselect_tokens.split('\n') if t.strip()]
     aisbf_config['mcp']['fullconfig_tokens'] = [t.strip() for t in fullconfig_tokens.split('\n') if t.strip()]
+    
+    # Update TOR config
+    if 'tor' not in aisbf_config:
+        aisbf_config['tor'] = {}
+    aisbf_config['tor']['enabled'] = tor_enabled
+    aisbf_config['tor']['control_port'] = tor_control_port
+    aisbf_config['tor']['control_host'] = tor_control_host
+    aisbf_config['tor']['control_password'] = tor_control_password if tor_control_password else None
+    aisbf_config['tor']['hidden_service_dir'] = tor_hidden_service_dir if tor_hidden_service_dir else None
+    aisbf_config['tor']['hidden_service_port'] = tor_hidden_service_port
+    aisbf_config['tor']['socks_port'] = tor_socks_port
+    aisbf_config['tor']['socks_host'] = tor_socks_host
     
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
@@ -1363,6 +1410,30 @@ async def dashboard_restart(request: Request):
     threading.Thread(target=restart_server, daemon=True).start()
     
     return JSONResponse({"message": "Server is restarting..."})
+
+@app.get("/dashboard/tor/status")
+async def dashboard_tor_status(request: Request):
+    """Get TOR hidden service status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    global tor_service
+    
+    if tor_service:
+        status = tor_service.get_status()
+    else:
+        status = {
+            'enabled': False,
+            'connected': False,
+            'onion_address': None,
+            'service_id': None,
+            'control_host': None,
+            'control_port': None,
+            'hidden_service_port': None
+        }
+    
+    return JSONResponse(status)
 
 @app.get("/dashboard/docs", response_class=HTMLResponse)
 async def dashboard_docs(request: Request):

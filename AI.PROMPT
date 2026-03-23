@@ -621,6 +621,24 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 
 ### Recent Updates
 
+**2026-03-23 - TOR Hidden Service Support**
+- Added full TOR hidden service support for exposing AISBF over TOR network
+- Created aisbf/tor.py module with TorHiddenService class for managing TOR connections
+- Added TorConfig model to config.py for TOR configuration management
+- Updated config/aisbf.json with TOR configuration section (enabled, control_port, control_host, control_password, hidden_service_dir, hidden_service_port, socks_port, socks_host)
+- Integrated TOR service into main.py with startup/shutdown event handlers
+- Added TOR configuration UI to dashboard settings page with real-time status display
+- Added get_tor_status MCP tool for monitoring TOR hidden service status (fullconfig access required)
+- Updated README.md with comprehensive TOR configuration guide
+- Updated DOCUMENTATION.md with detailed TOR setup, troubleshooting, and security considerations
+- Added stem library dependency to requirements.txt
+- Bumped version to 0.5.0 in pyproject.toml
+- Supports both ephemeral (temporary) and persistent (fixed onion address) hidden services
+- Dashboard displays TOR status, onion address, and provides configuration interface
+- All AISBF endpoints (API, dashboard, MCP) accessible over TOR network
+- Automatic TOR service initialization on startup when enabled
+- Proper cleanup on shutdown to remove ephemeral services
+
 **2026-03-23 - Configurable Error Cooldown Implementation**
 - Added `error_cooldown` field to Model class in models.py for model-specific cooldown configuration
 - Added `default_error_cooldown` field to ProviderConfig in config.py for provider-level defaults

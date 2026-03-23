@@ -32,5 +32,15 @@
   "internal_model": {
     "condensation_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3",
     "autoselect_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+  },
+  "tor": {
+    "enabled": false,
+    "control_port": 9051,
+    "control_host": "127.0.0.1",
+    "control_password": null,
+    "hidden_service_dir": null,
+    "hidden_service_port": 80,
+    "socks_port": 9050,
+    "socks_host": "127.0.0.1"
   }
 }

@@ -372,6 +372,15 @@ class MCPServer:
                     }
                 },
                 {
+                    "name": "get_tor_status",
+                    "description": "Get TOR hidden service status (requires fullconfig access)",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
                     "name": "delete_autoselect_config",
                     "description": "Delete an autoselect configuration (requires fullconfig access)",
                     "inputSchema": {
@@ -456,6 +465,7 @@ class MCPServer:
                 'set_provider_config': self._set_provider_config,
                 'get_server_config': self._get_server_config,
                 'set_server_config': self._set_server_config,
+                'get_tor_status': self._get_tor_status,
                 'delete_autoselect_config': self._delete_autoselect_config,
                 'delete_rotation_config': self._delete_rotation_config,
                 'delete_provider_config': self._delete_provider_config,
@@ -854,6 +864,38 @@ class MCPServer:
             json.dump(full_config, f, indent=2)
         
         return {"status": "success", "message": "Server config saved. Restart server for changes to take effect."}
+    
+    async def _get_tor_status(self, args: Dict) -> Dict:
+        """Get TOR hidden service status"""
+        # Import tor_service from main module
+        try:
+            import main
+            tor_service = getattr(main, 'tor_service', None)
+            
+            if tor_service:
+                status = tor_service.get_status()
+                return {"tor_status": status}
+            else:
+                return {
+                    "tor_status": {
+                        "enabled": False,
+                        "connected": False,
+                        "onion_address": None,
+                        "service_id": None,
+                        "control_host": None,
+                        "control_port": None,
+                        "hidden_service_port": None
+                    }
+                }
+        except Exception as e:
+            logger.error(f"Error getting TOR status: {e}")
+            return {
+                "tor_status": {
+                    "enabled": False,
+                    "connected": False,
+                    "error": str(e)
+                }
+            }
     
     async def _delete_autoselect_config(self, args: Dict) -> Dict:
         """Delete autoselect configuration"""

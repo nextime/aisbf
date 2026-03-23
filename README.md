@@ -18,6 +18,7 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
+- **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
 
 ## Author
@@ -122,6 +123,109 @@ The system will automatically:
 - Fall back to self-signed certificates if Let's Encrypt fails
 - Check certificate expiry on startup
 - Renew certificates when they expire within 30 days
+
+### TOR Hidden Service Configuration
+
+AISBF can be exposed over the TOR network as a hidden service, providing anonymous access to your AI proxy server.
+
+#### Prerequisites
+- TOR must be installed and running on your system
+- TOR control port must be enabled (default: 9051)
+
+**Installation:**
+```bash
+# Ubuntu/Debian
+sudo apt-get install tor
+
+# CentOS/RHEL
+sudo yum install tor
+
+# macOS
+brew install tor
+```
+
+**Enable TOR Control Port:**
+Edit `/etc/tor/torrc` (or `~/.torrc` on macOS) and add:
+```
+ControlPort 9051
+CookieAuthentication 1
+```
+
+Then restart TOR:
+```bash
+sudo systemctl restart tor  # Linux
+brew services restart tor   # macOS
+```
+
+#### Configuration
+
+**Via Dashboard:**
+1. Navigate to Dashboard → Settings
+2. Scroll to "TOR Hidden Service" section
+3. Enable "Enable TOR Hidden Service"
+4. Configure settings:
+   - **Control Host**: TOR control port host (default: 127.0.0.1)
+   - **Control Port**: TOR control port (default: 9051)
+   - **Control Password**: Optional password for TOR control authentication
+   - **Hidden Service Directory**: Leave blank for ephemeral service, or specify path for persistent service
+   - **Hidden Service Port**: Port exposed on the hidden service (default: 80)
+   - **SOCKS Proxy Host**: TOR SOCKS proxy host (default: 127.0.0.1)
+   - **SOCKS Proxy Port**: TOR SOCKS proxy port (default: 9050)
+5. Save settings and restart server
+
+**Via Configuration File:**
+Edit `~/.aisbf/aisbf.json`:
+```json
+{
+  "tor": {
+    "enabled": true,
+    "control_port": 9051,
+    "control_host": "127.0.0.1",
+    "control_password": null,
+    "hidden_service_dir": null,
+    "hidden_service_port": 80,
+    "socks_port": 9050,
+    "socks_host": "127.0.0.1"
+  }
+}
+```
+
+#### Ephemeral vs Persistent Hidden Services
+
+**Ephemeral (Default):**
+- Temporary hidden service created on startup
+- New onion address generated each time
+- No files stored on disk
+- Ideal for temporary or testing purposes
+- Set `hidden_service_dir` to `null` or leave blank
+
+**Persistent:**
+- Permanent hidden service with fixed onion address
+- Address persists across restarts
+- Keys stored in specified directory
+- Ideal for production use
+- Set `hidden_service_dir` to a path (e.g., `~/.aisbf/tor_hidden_service`)
+
+#### Accessing Your Hidden Service
+
+Once enabled, the onion address will be displayed:
+- In the server logs on startup
+- In the Dashboard → Settings → TOR Hidden Service status section
+- Via MCP `get_tor_status` tool (requires fullconfig access)
+
+Access your service via TOR Browser or any TOR-enabled client:
+```
+http://your-onion-address.onion/
+```
+
+#### Security Considerations
+
+- TOR hidden services provide anonymity but not authentication
+- Enable API authentication in AISBF settings for additional security
+- Use strong dashboard passwords
+- Consider using persistent hidden services for production
+- Monitor access logs for suspicious activity
+- Keep TOR and AISBF updated
 
 ### Provider-Level Defaults
 

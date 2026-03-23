@@ -18,3 +18,4 @@ itsdangerous
 bs4
 protobuf>=3.20,<4
 markdown
+stem

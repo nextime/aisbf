@@ -96,6 +96,197 @@ Installs to:
 3. Copies default configs from installed location to `~/.aisbf/`
 4. Loads configuration from `~/.aisbf/` on subsequent runs
 
+## TOR Hidden Service Support
+
+AISBF includes full support for exposing the API and dashboard over the TOR network as a hidden service. This provides anonymous access to your AI proxy server without revealing your server's IP address.
+
+### Prerequisites
+
+**TOR Installation:**
+```bash
+# Ubuntu/Debian
+sudo apt-get install tor
+
+# CentOS/RHEL
+sudo yum install tor
+
+# macOS
+brew install tor
+```
+
+**Python stem Library:**
+```bash
+pip install stem
+```
+
+**Enable TOR Control Port:**
+
+Edit `/etc/tor/torrc` (or `~/.torrc` on macOS):
+```
+ControlPort 9051
+CookieAuthentication 1
+```
+
+Restart TOR:
+```bash
+sudo systemctl restart tor  # Linux
+brew services restart tor   # macOS
+```
+
+### Configuration
+
+TOR hidden service can be configured via the dashboard or configuration file.
+
+**Configuration File (`~/.aisbf/aisbf.json`):**
+```json
+{
+  "tor": {
+    "enabled": true,
+    "control_port": 9051,
+    "control_host": "127.0.0.1",
+    "control_password": null,
+    "hidden_service_dir": null,
+    "hidden_service_port": 80,
+    "socks_port": 9050,
+    "socks_host": "127.0.0.1"
+  }
+}
+```
+
+**Configuration Options:**
+
+- **`enabled`**: Enable/disable TOR hidden service (default: false)
+- **`control_port`**: TOR control port (default: 9051)
+- **`control_host`**: TOR control host (default: 127.0.0.1)
+- **`control_password`**: Optional password for TOR control authentication
+- **`hidden_service_dir`**: Directory for persistent hidden service keys (null for ephemeral)
+- **`hidden_service_port`**: Port exposed on the hidden service (default: 80)
+- **`socks_port`**: TOR SOCKS proxy port (default: 9050)
+- **`socks_host`**: TOR SOCKS proxy host (default: 127.0.0.1)
+
+### Ephemeral vs Persistent Hidden Services
+
+**Ephemeral Hidden Service (Default):**
+- Temporary service created on startup
+- New onion address generated each time
+- No files stored on disk
+- Ideal for testing or temporary deployments
+- Set `hidden_service_dir` to `null`
+
+**Persistent Hidden Service:**
+- Permanent service with fixed onion address
+- Address persists across restarts
+- Keys stored in specified directory
+- Ideal for production use
+- Set `hidden_service_dir` to a path (e.g., `~/.aisbf/tor_hidden_service`)
+
+Example persistent configuration:
+```json
+{
+  "tor": {
+    "enabled": true,
+    "hidden_service_dir": "~/.aisbf/tor_hidden_service",
+    "hidden_service_port": 80
+  }
+}
+```
+
+### Dashboard Configuration
+
+1. Navigate to **Dashboard → Settings**
+2. Scroll to **TOR Hidden Service** section
+3. Enable **Enable TOR Hidden Service** checkbox
+4. Configure options as needed
+5. Save settings and restart server
+
+The dashboard displays:
+- Current TOR status (Active/Disabled/Error)
+- Onion address (when active)
+- Real-time status updates
+
+### Accessing the Hidden Service
+
+Once enabled, the onion address is displayed:
+- In server logs on startup
+- In Dashboard → Settings → TOR Hidden Service status
+- Via MCP `get_tor_status` tool (fullconfig access required)
+
+Access via TOR Browser or TOR-enabled client:
+```
+http://your-onion-address.onion/
+```
+
+All AISBF endpoints are available over TOR:
+- API endpoints: `http://your-onion-address.onion/api/v1/chat/completions`
+- Dashboard: `http://your-onion-address.onion/dashboard`
+- MCP server: `http://your-onion-address.onion/mcp`
+
+### Security Considerations
+
+**Authentication:**
+- TOR provides anonymity, not authentication
+- Enable API authentication in AISBF settings
+- Use strong dashboard passwords
+- Consider IP-based access controls for clearnet access
+
+**Best Practices:**
+- Use persistent hidden services for production
+- Regularly update TOR and AISBF
+- Monitor access logs for suspicious activity
+- Enable rate limiting
+- Use HTTPS for clearnet access (TOR handles encryption)
+
+**Network Isolation:**
+- TOR traffic is automatically encrypted
+- Hidden services don't reveal server IP
+- Consider running AISBF in isolated environment
+- Use firewall rules to restrict clearnet access
+
+### Troubleshooting
+
+**Connection Failed:**
+- Verify TOR is running: `systemctl status tor` or `brew services list`
+- Check TOR control port is enabled in torrc
+- Verify control port is accessible: `telnet 127.0.0.1 9051`
+- Check AISBF logs for detailed error messages
+
+**Authentication Failed:**
+- Verify CookieAuthentication is enabled in torrc
+- Check control_password matches torrc configuration
+- Ensure AISBF has permission to read TOR cookie file
+
+**Onion Address Not Generated:**
+- Check TOR logs: `journalctl -u tor` or `tail -f /var/log/tor/log`
+- Verify hidden_service_dir permissions (if using persistent)
+- Ensure stem library is installed: `pip list | grep stem`
+
+**Service Not Accessible:**
+- Verify AISBF is running and listening on configured port
+- Check hidden_service_port matches AISBF local port
+- Test local access first: `curl http://localhost:17765`
+- Verify TOR Browser is configured correctly
+
+### MCP Integration
+
+The MCP server includes a `get_tor_status` tool for monitoring TOR hidden service status:
+
+```json
+{
+  "method": "tools/call",
+  "params": {
+    "name": "get_tor_status",
+    "arguments": {}
+  }
+}
+```
+
+Response includes:
+- `enabled`: Whether TOR is enabled
+- `connected`: Connection status to TOR control port
+- `onion_address`: Current onion address (if active)
+- `service_id`: Service ID for ephemeral services
+- `control_host` and `control_port`: TOR control connection details
+
 ## API Endpoints
 
 ### General Endpoints

@@ -132,9 +132,74 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">Used when autoselect selection_model is set to "internal"</small>
     </div>
     
+    <h3 style="margin: 30px 0 20px;">TOR Hidden Service</h3>
+    
+    <div id="tor-status" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+            <strong>Status:</strong>
+            <span id="tor-status-text" style="color: #666;">Loading...</span>
+        </div>
+        <div id="tor-onion-address" style="display: none; margin-top: 10px;">
+            <strong>Onion Address:</strong>
+            <code id="tor-onion-value" style="background: #16213e; padding: 5px 10px; border-radius: 4px; display: inline-block; margin-left: 10px;"></code>
+        </div>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="tor_enabled" id="tor_enabled" {% if config.tor and config.tor.enabled %}checked{% endif %} onchange="toggleTorFields()">
+            Enable TOR Hidden Service
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Expose AISBF over TOR network as a hidden service</small>
+    </div>
+    
+    <div id="tor-fields" style="display: {% if config.tor and config.tor.enabled %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="tor_control_host">TOR Control Host</label>
+            <input type="text" id="tor_control_host" name="tor_control_host" value="{{ config.tor.control_host if config.tor else '127.0.0.1' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">TOR control port host (default: 127.0.0.1)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_control_port">TOR Control Port</label>
+            <input type="number" id="tor_control_port" name="tor_control_port" value="{{ config.tor.control_port if config.tor else 9051 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">TOR control port (default: 9051)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_control_password">TOR Control Password</label>
+            <input type="password" id="tor_control_password" name="tor_control_password" value="{{ config.tor.control_password if config.tor and config.tor.control_password else '' }}" placeholder="Leave blank if no password">
+            <small style="color: #666; display: block; margin-top: 5px;">Password for TOR control port authentication (optional)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_hidden_service_dir">Hidden Service Directory</label>
+            <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service">
+            <small style="color: #666; display: block; margin-top: 5px;">Directory for persistent hidden service. Leave blank for ephemeral (temporary) service.</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_hidden_service_port">Hidden Service Port</label>
+            <input type="number" id="tor_hidden_service_port" name="tor_hidden_service_port" value="{{ config.tor.hidden_service_port if config.tor else 80 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Port exposed on the hidden service (default: 80)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_socks_host">SOCKS Proxy Host</label>
+            <input type="text" id="tor_socks_host" name="tor_socks_host" value="{{ config.tor.socks_host if config.tor else '127.0.0.1' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">TOR SOCKS proxy host (default: 127.0.0.1)</small>
+        </div>
+        
+        <div class="form-group">
+            <label for="tor_socks_port">SOCKS Proxy Port</label>
+            <input type="number" id="tor_socks_port" name="tor_socks_port" value="{{ config.tor.socks_port if config.tor else 9050 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">TOR SOCKS proxy port (default: 9050)</small>
+        </div>
+    </div>
+    
     <div style="display: flex; gap: 10px; margin-top: 30px;">
         <button type="submit" class="btn">Save Settings</button>
-        <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+        <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 
@@ -149,5 +214,53 @@ function toggleSSLFields() {
         sslFields.style.display = 'none';
     }
 }
+
+function toggleTorFields() {
+    const torEnabled = document.getElementById('tor_enabled').checked;
+    const torFields = document.getElementById('tor-fields');
+    
+    if (torEnabled) {
+        torFields.style.display = 'block';
+    } else {
+        torFields.style.display = 'none';
+    }
+}
+
+async function checkTorStatus() {
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/tor/status") }}');
+        const status = await response.json();
+        
+        const statusText = document.getElementById('tor-status-text');
+        const onionAddressDiv = document.getElementById('tor-onion-address');
+        const onionValue = document.getElementById('tor-onion-value');
+        
+        if (status.enabled && status.connected && status.onion_address) {
+            statusText.textContent = 'Active';
+            statusText.style.color = '#4caf50';
+            onionAddressDiv.style.display = 'block';
+            onionValue.textContent = status.onion_address;
+        } else if (status.enabled && !status.connected) {
+            statusText.textContent = 'Enabled but not connected';
+            statusText.style.color = '#ff9800';
+            onionAddressDiv.style.display = 'none';
+        } else {
+            statusText.textContent = 'Disabled';
+            statusText.style.color = '#666';
+            onionAddressDiv.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error checking TOR status:', error);
+        document.getElementById('tor-status-text').textContent = 'Error checking status';
+        document.getElementById('tor-status-text').style.color = '#f44336';
+    }
+}
+
+// Check TOR status on page load
+document.addEventListener('DOMContentLoaded', function() {
+    checkTorStatus();
+    // Refresh status every 30 seconds
+    setInterval(checkTorStatus, 30000);
+});
 </script>
 {% endblock %}

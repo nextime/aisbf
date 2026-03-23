@@ -93,12 +93,24 @@ class AutoselectConfig(BaseModel):
     fallback: str
     available_models: List[AutoselectModelInfo]
 
+class TorConfig(BaseModel):
+    """Configuration for TOR hidden service"""
+    enabled: bool = False
+    control_port: int = 9051
+    control_host: str = "127.0.0.1"
+    control_password: Optional[str] = None
+    hidden_service_dir: Optional[str] = None
+    hidden_service_port: int = 80
+    socks_port: int = 9050
+    socks_host: str = "127.0.0.1"
+
 class AppConfig(BaseModel):
     providers: Dict[str, ProviderConfig]
     rotations: Dict[str, RotationConfig]
     autoselect: Dict[str, AutoselectConfig]
     condensation: Optional[CondensationConfig] = None
     error_tracking: Dict[str, Dict]
+    tor: Optional[TorConfig] = None
 
 class Config:
     def __init__(self):
@@ -116,6 +128,7 @@ class Config:
         self._load_rotations()
         self._load_autoselect()
         self._load_condensation()
+        self._load_tor()
         self._initialize_error_tracking()
         self._log_configuration_summary()
 
@@ -319,6 +332,36 @@ class Config:
             self._loaded_files['condensation'] = str(providers_path.absolute())
             logger.info(f"Loaded condensation config: provider_id={self.condensation.provider_id}, model={self.condensation.model}, enabled={self.condensation.enabled}")
             logger.info(f"=== Config._load_condensation END ===")
+    
+    def _load_tor(self):
+        """Load TOR configuration from aisbf.json"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_tor START ===")
+        
+        aisbf_path = Path.home() / '.aisbf' / 'aisbf.json'
+        logger.info(f"Looking for TOR config in: {aisbf_path}")
+        
+        if not aisbf_path.exists():
+            logger.info(f"User config not found, falling back to source config")
+            # Fallback to source config if user config doesn't exist
+            try:
+                source_dir = self._get_config_source_dir()
+                aisbf_path = source_dir / 'aisbf.json'
+                logger.info(f"Using source config at: {aisbf_path}")
+            except FileNotFoundError:
+                logger.warning("Could not find aisbf.json for TOR config")
+                self.tor = TorConfig()
+                return
+        
+        logger.info(f"Loading TOR config from: {aisbf_path}")
+        with open(aisbf_path) as f:
+            data = json.load(f)
+            tor_data = data.get('tor', {})
+            self.tor = TorConfig(**tor_data)
+            self._loaded_files['tor'] = str(aisbf_path.absolute())
+            logger.info(f"Loaded TOR config: enabled={self.tor.enabled}, control_port={self.tor.control_port}, hidden_service_port={self.tor.hidden_service_port}")
+            logger.info(f"=== Config._load_tor END ===")
 
     def _initialize_error_tracking(self):
         self.error_tracking = {}
@@ -374,5 +417,8 @@ class Config:
     
     def get_condensation(self) -> CondensationConfig:
         return self.condensation
+    
+    def get_tor(self) -> TorConfig:
+        return self.tor
 
 config = Config()
