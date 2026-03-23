@@ -72,6 +72,22 @@ except:
     fi
 }
 
+# Function to check if package was upgraded
+check_package_upgrade() {
+    local INSTALLED_VERSION_FILE="$VENV_DIR/.aisbf_version"
+    local CURRENT_VERSION=$(python3 -c "import aisbf; print(aisbf.__version__)" 2>/dev/null || echo "unknown")
+    local SAVED_VERSION=""
+    
+    if [ -f "$INSTALLED_VERSION_FILE" ]; then
+        SAVED_VERSION=$(cat "$INSTALLED_VERSION_FILE")
+    fi
+    
+    if [ "$SAVED_VERSION" != "$CURRENT_VERSION" ]; then
+        return 0  # Needs update
+    fi
+    return 1  # No update needed
+}
+
 # Function to create venv if it doesn't exist
 ensure_venv() {
     if [ ! -d "$VENV_DIR" ]; then
@@ -88,6 +104,20 @@ ensure_venv() {
         # This allows the venv to find the aisbf module
         echo "Installing aisbf package in venv"
         "$VENV_DIR/bin/pip" install aisbf
+        
+        # Save version for future upgrade detection
+        python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
+    else
+        # Check if package was upgraded via pip
+        if check_package_upgrade; then
+            echo "Package upgrade detected, updating venv..."
+            "$VENV_DIR/bin/pip" install --upgrade aisbf
+            if [ -f "$SHARE_DIR/requirements.txt" ]; then
+                "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            fi
+            python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
+            echo "Virtual environment updated successfully"
+        fi
     fi
 }
 
