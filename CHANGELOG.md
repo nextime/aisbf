@@ -5,10 +5,29 @@
 - OpenRouter-style extended fields to Model class (description, context_length, architecture, pricing, top_provider, supported_parameters, default_parameters)
 - Web dashboard section to README with screenshot reference
 - Comprehensive dashboard documentation including features and access information
+- Kiro AWS Event Stream parsing, converters, and TODO roadmap
+- Credential validation for kiro/kiro-cli providers
+- TOR hidden service support with persistent/ephemeral options
+- MCP (Model Context Protocol) server endpoint
+- Proxy-awareness with configurable error cooldown features
+- Kiro provider integration
 
 ### Fixed
 - Model class now supports OpenRouter metadata fields preventing crashes in models list API
 - Aligned Model class with ProviderModelConfig, RotationConfig, and AutoselectConfig field definitions
+- Premature tool call finalization in Kiro streaming responses
+- Kiro credential validation to handle dict-based config
+- Template session references for Python 3.13 compatibility
+- Python 3.13 compatibility issue with Jinja2 template caching
+- Ollama Provider Handler initialization
+- PyPI package: include mcp.py, tor.py and kiro modules in distribution
+
+### Changed
+- Improved venv handling to use system-installed aisbf package
+- Auto-update venv feature on pip package upgrade
+- Default port changed to 17765
+- Intelligent 429 rate limit handling and improved configuration
+- Automatic --break-system-packages detection in build.sh
 
 ## [0.1.2] - 2026-02-06
 ### Changed
