@@ -13,6 +13,17 @@
       "your-secret-token-2"
     ]
   },
+  "mcp": {
+    "enabled": false,
+    "autoselect_tokens": [
+      "mcp-autoselect-token-1",
+      "mcp-autoselect-token-2"
+    ],
+    "fullconfig_tokens": [
+      "mcp-fullconfig-token-1",
+      "mcp-fullconfig-token-2"
+    ]
+  },
   "dashboard": {
     "enabled": true,
     "username": "admin",

@@ -29,6 +29,7 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.templating import Jinja2Templates
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+from aisbf.mcp import mcp_server, MCPAuthLevel, load_mcp_config
 from aisbf.database import initialize_database
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -2564,6 +2565,365 @@ Examples:
     else:
         logger.info(f"Starting AI Proxy Server on http://{host}:{port}")
         uvicorn.run(app, host=host, port=port)
+
+# MCP (Model Context Protocol) endpoints
+# These endpoints allow remote agents to configure the system and make model requests
+
+def get_mcp_auth_level(request: Request) -> int:
+    """Get MCP authentication level from request header"""
+    mcp_config = load_mcp_config()
+    
+    if not mcp_config.get('enabled', False):
+        # If MCP is not explicitly enabled, check for legacy auth tokens
+        if server_config and server_config.get('auth_enabled', False):
+            auth_header = request.headers.get('Authorization', '')
+            if auth_header.startswith('Bearer '):
+                token = auth_header.replace('Bearer ', '')
+                if token in server_config.get('auth_tokens', []):
+                    return MCPAuthLevel.FULLCONFIG
+        # Default to no access if MCP is not enabled
+        return MCPAuthLevel.NONE
+    
+    fullconfig_tokens = mcp_config.get('fullconfig_tokens', [])
+    autoselect_tokens = mcp_config.get('autoselect_tokens', [])
+    
+    auth_header = request.headers.get('Authorization', '')
+    if not auth_header.startswith('Bearer '):
+        return MCPAuthLevel.NONE
+    
+    token = auth_header.replace('Bearer ', '')
+    
+    if token in fullconfig_tokens:
+        return MCPAuthLevel.FULLCONFIG
+    
+    if token in autoselect_tokens:
+        return MCPAuthLevel.AUTOSELECT
+    
+    return MCPAuthLevel.NONE
+
+
+@app.get("/mcp")
+async def mcp_sse(request: Request):
+    """
+    MCP SSE (Server-Sent Events) endpoint.
+    
+    This endpoint provides MCP protocol support via Server-Sent Events.
+    It supports both tool calls and streaming responses.
+    
+    Authentication:
+    - Use 'Authorization: Bearer <token>' header
+    - Tokens in 'mcp.fullconfig_tokens' have full configuration access
+    - Tokens in 'mcp.autoselect_tokens' have autoselection/autorotation access only
+    """
+    # Check authentication
+    auth_level = get_mcp_auth_level(request)
+    
+    if auth_level == MCPAuthLevel.NONE:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or missing MCP authentication token"}
+        )
+    
+    async def event_generator():
+        """Generate SSE events for MCP responses"""
+        import json
+        
+        # Send initial connection event
+        yield f"data: {json.dumps({'event': 'connected', 'auth_level': auth_level})}\n\n".encode('utf-8')
+        
+        # Read request from query parameter (for GET) or stream body (for POST)
+        request_text = ""
+        
+        # For SSE, we need to read the request body
+        try:
+            body = await request._receive()
+            if body and isinstance(body, bytes):
+                request_text = body.decode('utf-8')
+            elif body and isinstance(body, dict):
+                request_text = json.dumps(body)
+        except Exception as e:
+            logger.warning(f"Error reading MCP request body: {e}")
+        
+        # If no body, check query params
+        if not request_text:
+            request_text = request.query_params.get('request', '{}')
+        
+        try:
+            mcp_request = json.loads(request_text) if request_text else {}
+        except json.JSONDecodeError:
+            yield f"data: {json.dumps({'error': 'Invalid JSON request'})}\n\n".encode('utf-8')
+            return
+        
+        method = mcp_request.get('method', '')
+        request_id = mcp_request.get('id')
+        params = mcp_request.get('params', {})
+        
+        # Handle different MCP methods
+        if method == 'initialize':
+            # Return server capabilities
+            capabilities = {
+                "tools": {
+                    "listChanged": True
+                },
+                "resources": {
+                    "subscribe": True,
+                    "listChanged": True
+                }
+            }
+            
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "protocolVersion": "2024-11-05",
+                    "capabilities": capabilities,
+                    "serverInfo": {
+                        "name": "AISBF MCP Server",
+                        "version": "1.0.0"
+                    }
+                }
+            }
+            yield f"data: {json.dumps(response)}\n\n".encode('utf-8')
+            
+        elif method == 'tools/list':
+            # Return available tools
+            tools = mcp_server.get_available_tools(auth_level)
+            response = {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": {
+                    "tools": tools
+                }
+            }
+            yield f"data: {json.dumps(response)}\n\n".encode('utf-8')
+            
+        elif method == 'tools/call':
+            # Call a tool
+            tool_name = params.get('name')
+            arguments = params.get('arguments', {})
+            
+            if not tool_name:
+                yield f"data: {json.dumps({'error': 'Tool name is required'})}\n\n".encode('utf-8')
+                return
+            
+            try:
+                result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+                response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "result": result
+                }
+                yield f"data: {json.dumps(response)}\n\n".encode('utf-8')
+            except HTTPException as e:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": e.status_code,
+                        "message": e.detail
+                    }
+                }
+                yield f"data: {json.dumps(error_response)}\n\n".encode('utf-8')
+            except Exception as e:
+                error_response = {
+                    "jsonrpc": "2.0",
+                    "id": request_id,
+                    "error": {
+                        "code": -32603,
+                        "message": str(e)
+                    }
+                }
+                yield f"data: {json.dumps(error_response)}\n\n".encode('utf-8')
+        
+        # Send done event
+        yield f"data: {json.dumps({'event': 'done'})}\n\n".encode('utf-8')
+    
+    return StreamingResponse(event_generator(), media_type="text/event-stream")
+
+
+@app.post("/mcp")
+async def mcp_post(request: Request):
+    """
+    MCP HTTP POST endpoint.
+    
+    This endpoint provides MCP protocol support via regular HTTP POST requests.
+    
+    Authentication:
+    - Use 'Authorization: Bearer <token>' header
+    - Tokens in 'mcp.fullconfig_tokens' have full configuration access
+    - Tokens in 'mcp.autoselect_tokens' have autoselection/autorotation access only
+    """
+    # Check authentication
+    auth_level = get_mcp_auth_level(request)
+    
+    if auth_level == MCPAuthLevel.NONE:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or missing MCP authentication token"}
+        )
+    
+    # Parse request body
+    try:
+        body = await request.body()
+        mcp_request = json.loads(body.decode('utf-8')) if body else {}
+    except json.JSONDecodeError:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON request body"}
+        )
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid request body"}
+        )
+    
+    method = mcp_request.get('method', '')
+    request_id = mcp_request.get('id')
+    params = mcp_request.get('params', {})
+    
+    # Handle different MCP methods
+    if method == 'initialize':
+        # Return server capabilities
+        capabilities = {
+            "tools": {
+                "listChanged": True
+            },
+            "resources": {
+                "subscribe": True,
+                "listChanged": True
+            }
+        }
+        
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": capabilities,
+                "serverInfo": {
+                    "name": "AISBF MCP Server",
+                    "version": "1.0.0"
+                }
+            }
+        }
+        
+    elif method == 'tools/list':
+        # Return available tools
+        tools = mcp_server.get_available_tools(auth_level)
+        return {
+            "jsonrpc": "2.0",
+            "id": request_id,
+            "result": {
+                "tools": tools
+            }
+        }
+        
+    elif method == 'tools/call':
+        # Call a tool
+        tool_name = params.get('name')
+        arguments = params.get('arguments', {})
+        
+        if not tool_name:
+            return JSONResponse(
+                status_code=400,
+                content={"error": "Tool name is required"}
+            )
+        
+        try:
+            result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "result": result
+            }
+        except HTTPException as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": e.status_code,
+                    "message": e.detail
+                }
+            }
+        except Exception as e:
+            return {
+                "jsonrpc": "2.0",
+                "id": request_id,
+                "error": {
+                    "code": -32603,
+                    "message": str(e)
+                }
+            }
+    
+    return JSONResponse(
+        status_code=400,
+        content={"error": "Unknown MCP method"}
+    )
+
+
+@app.get("/mcp/tools")
+async def mcp_list_tools(request: Request):
+    """
+    List available MCP tools for the authenticated client.
+    """
+    auth_level = get_mcp_auth_level(request)
+    
+    if auth_level == MCPAuthLevel.NONE:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or missing MCP authentication token"}
+        )
+    
+    tools = mcp_server.get_available_tools(auth_level)
+    return {"tools": tools}
+
+
+@app.post("/mcp/tools/call")
+async def mcp_call_tool(request: Request):
+    """
+    Call an MCP tool directly via HTTP POST.
+    """
+    auth_level = get_mcp_auth_level(request)
+    
+    if auth_level == MCPAuthLevel.NONE:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Invalid or missing MCP authentication token"}
+        )
+    
+    # Parse request body
+    try:
+        body = await request.body()
+        body_data = json.loads(body.decode('utf-8')) if body else {}
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON request body"}
+        )
+    
+    tool_name = body_data.get('name')
+    arguments = body_data.get('arguments', {})
+    
+    if not tool_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Tool name is required"}
+        )
+    
+    try:
+        result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+        return {"result": result}
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"error": e.detail}
+        )
+    except Exception as e:
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
 
 if __name__ == "__main__":
     main()
