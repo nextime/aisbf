@@ -1,5 +1,15 @@
 # AISBF Changelog
 
+## [Unreleased]
+### Added
+- OpenRouter-style extended fields to Model class (description, context_length, architecture, pricing, top_provider, supported_parameters, default_parameters)
+- Web dashboard section to README with screenshot reference
+- Comprehensive dashboard documentation including features and access information
+
+### Fixed
+- Model class now supports OpenRouter metadata fields preventing crashes in models list API
+- Aligned Model class with ProviderModelConfig, RotationConfig, and AutoselectConfig field definitions
+
 ## [0.1.2] - 2026-02-06
 ### Changed
 - Updated version from 0.1.1 to 0.1.2 for PyPI release
