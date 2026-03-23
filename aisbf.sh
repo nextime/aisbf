@@ -92,7 +92,8 @@ check_package_upgrade() {
 ensure_venv() {
     if [ ! -d "$VENV_DIR" ]; then
         echo "Creating virtual environment at $VENV_DIR"
-        python3 -m venv "$VENV_DIR"
+        # Create venv with --system-site-packages to access system-installed aisbf
+        python3 -m venv --system-site-packages "$VENV_DIR"
         
         # Install requirements if requirements.txt exists
         if [ -f "$SHARE_DIR/requirements.txt" ]; then
@@ -100,18 +101,13 @@ ensure_venv() {
             "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
         fi
         
-        # Install aisbf package from system site-packages into venv
-        # This allows the venv to find the aisbf module
-        echo "Installing aisbf package in venv"
-        "$VENV_DIR/bin/pip" install aisbf
-        
         # Save version for future upgrade detection
         python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
     else
         # Check if package was upgraded via pip
         if check_package_upgrade; then
-            echo "Package upgrade detected, updating venv..."
-            "$VENV_DIR/bin/pip" install --upgrade aisbf
+            echo "Package upgrade detected, updating venv dependencies..."
+            # Only update requirements, aisbf is accessed from system site-packages
             if [ -f "$SHARE_DIR/requirements.txt" ]; then
                 "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
             fi
