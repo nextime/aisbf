@@ -3,23 +3,52 @@
 This document provides practical examples for using the AISBF API endpoints.
 
 ## Table of Contents
-- [OpenAI-Compatible v1 Endpoints](#openai-compatible-v1-endpoints)
+- [Three Proxy Paths](#three-proxy-paths)
 - [Chat Completions](#chat-completions)
 - [Audio Endpoints](#audio-endpoints)
 - [Image Generation](#image-generation)
 - [Embeddings](#embeddings)
 - [Model Listing](#model-listing)
-- [Rotations](#rotations)
-- [Autoselect](#autoselect)
+- [Advanced Features](#advanced-features)
+
+## Three Proxy Paths
+
+AISBF provides three ways to proxy AI models:
+
+### PATH 1: Direct Provider Models
+Format: `{provider_id}/{model_name}`
+```bash
+# Examples:
+"openai/gpt-4"
+"gemini/gemini-2.0-flash"
+"anthropic/claude-3-5-sonnet-20241022"
+"kilotest/kilo/free"
+```
+
+### PATH 2: Rotations
+Format: `rotation/{rotation_name}`
+```bash
+# Examples:
+"rotation/coding"
+"rotation/general"
+```
+
+### PATH 3: Autoselect
+Format: `autoselect/{autoselect_name}`
+```bash
+# Examples:
+"autoselect/autoselect"
+```
 
 ## OpenAI-Compatible v1 Endpoints
 
-The v1 endpoints follow the standard OpenAI API format with `provider/model` notation.
+The v1 endpoints follow the standard OpenAI API format and support all three proxy paths.
 
 ### Chat Completions
 
-#### Using cURL
+#### PATH 1: Direct Provider Models
 
+Using cURL:
 ```bash
 curl -X POST http://localhost:17765/api/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -31,26 +60,7 @@ curl -X POST http://localhost:17765/api/v1/chat/completions \
   }'
 ```
 
-#### Using Python
-
-```python
-import requests
-
-response = requests.post(
-    "http://localhost:17765/api/v1/chat/completions",
-    json={
-        "model": "openai/gpt-4",
-        "messages": [
-            {"role": "user", "content": "Hello, how are you?"}
-        ]
-    }
-)
-
-print(response.json())
-```
-
-#### Using Python with OpenAI SDK
-
+Using Python with OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -69,31 +79,7 @@ response = client.chat.completions.create(
 print(response.choices[0].message.content)
 ```
 
-#### Streaming Response
-
-```python
-from openai import OpenAI
-
-client = OpenAI(
-    base_url="http://localhost:17765/api/v1",
-    api_key="dummy"
-)
-
-stream = client.chat.completions.create(
-    model="gemini/gemini-2.0-flash",
-    messages=[
-        {"role": "user", "content": "Write a short poem"}
-    ],
-    stream=True
-)
-
-for chunk in stream:
-    if chunk.choices[0].delta.content:
-        print(chunk.choices[0].delta.content, end="")
-```
-
-#### Using Different Providers
-
+Different providers:
 ```bash
 # Google Gemini
 curl -X POST http://localhost:17765/api/v1/chat/completions \
@@ -111,6 +97,14 @@ curl -X POST http://localhost:17765/api/v1/chat/completions \
     "messages": [{"role": "user", "content": "Hello"}]
   }'
 
+# Custom provider with nested model path
+curl -X POST http://localhost:17765/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "kilotest/kilo/free",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }'
+
 # Ollama (local)
 curl -X POST http://localhost:17765/api/v1/chat/completions \
   -H "Content-Type: application/json" \
@@ -120,16 +114,130 @@ curl -X POST http://localhost:17765/api/v1/chat/completions \
   }'
 ```
 
+#### PATH 2: Rotations (Load Balancing)
+
+Using cURL:
+```bash
+curl -X POST http://localhost:17765/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "rotation/coding",
+    "messages": [
+      {"role": "user", "content": "Write a Python function to sort a list"}
+    ]
+  }'
+```
+
+Using Python with OpenAI SDK:
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:17765/api/v1",
+    api_key="dummy"
+)
+
+response = client.chat.completions.create(
+    model="rotation/coding",
+    messages=[
+        {"role": "user", "content": "Write a Python function to sort a list"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+#### PATH 3: Autoselect (AI-Powered Selection)
+
+Using cURL:
+```bash
+curl -X POST http://localhost:17765/api/v1/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "autoselect/autoselect",
+    "messages": [
+      {"role": "user", "content": "Debug this Python code: def add(a,b): return a-b"}
+    ]
+  }'
+```
+
+Using Python with OpenAI SDK:
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:17765/api/v1",
+    api_key="dummy"
+)
+
+response = client.chat.completions.create(
+    model="autoselect/autoselect",
+    messages=[
+        {"role": "user", "content": "Debug this Python code: def add(a,b): return a-b"}
+    ]
+)
+
+print(response.choices[0].message.content)
+```
+
+#### Streaming Response
+
+Works with all three proxy paths:
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:17765/api/v1",
+    api_key="dummy"
+)
+
+# PATH 1: Direct provider
+stream = client.chat.completions.create(
+    model="gemini/gemini-2.0-flash",
+    messages=[{"role": "user", "content": "Write a short poem"}],
+    stream=True
+)
+
+# PATH 2: Rotation
+stream = client.chat.completions.create(
+    model="rotation/coding",
+    messages=[{"role": "user", "content": "Write a short poem"}],
+    stream=True
+)
+
+# PATH 3: Autoselect
+stream = client.chat.completions.create(
+    model="autoselect/autoselect",
+    messages=[{"role": "user", "content": "Write a short poem"}],
+    stream=True
+)
+
+for chunk in stream:
+    if chunk.choices[0].delta.content:
+        print(chunk.choices[0].delta.content, end="")
+```
+
 ## Audio Endpoints
+
+**Note:** Audio endpoints support all three proxy paths (direct providers, rotations, and autoselect).
 
 ### Audio Transcription
 
+Using `/api/audio/transcriptions`:
+```bash
+curl -X POST http://localhost:17765/api/audio/transcriptions \
+  -F "file=@audio.mp3" \
+  -F "model=openai/whisper-1"
+```
+
+Using `/api/v1/audio/transcriptions` (OpenAI-compatible):
 ```bash
 curl -X POST http://localhost:17765/api/v1/audio/transcriptions \
   -F "file=@audio.mp3" \
   -F "model=openai/whisper-1"
 ```
 
+Using Python with OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -149,8 +257,9 @@ print(transcript.text)
 
 ### Text-to-Speech
 
+Using `/api/audio/speech`:
 ```bash
-curl -X POST http://localhost:17765/api/v1/audio/speech \
+curl -X POST http://localhost:17765/api/audio/speech \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/tts-1",
@@ -160,6 +269,7 @@ curl -X POST http://localhost:17765/api/v1/audio/speech \
   --output speech.mp3
 ```
 
+Using Python with OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -179,8 +289,11 @@ response.stream_to_file("speech.mp3")
 
 ## Image Generation
 
+**Note:** Image generation supports all three proxy paths (direct providers, rotations, and autoselect).
+
+Using `/api/images/generations`:
 ```bash
-curl -X POST http://localhost:17765/api/v1/images/generations \
+curl -X POST http://localhost:17765/api/images/generations \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/dall-e-3",
@@ -190,6 +303,7 @@ curl -X POST http://localhost:17765/api/v1/images/generations \
   }'
 ```
 
+Using Python with OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -210,8 +324,11 @@ print(response.data[0].url)
 
 ## Embeddings
 
+**Note:** Embeddings support all three proxy paths (direct providers, rotations, and autoselect).
+
+Using `/api/embeddings`:
 ```bash
-curl -X POST http://localhost:17765/api/v1/embeddings \
+curl -X POST http://localhost:17765/api/embeddings \
   -H "Content-Type: application/json" \
   -d '{
     "model": "openai/text-embedding-ada-002",
@@ -219,6 +336,7 @@ curl -X POST http://localhost:17765/api/v1/embeddings \
   }'
 ```
 
+Using Python with OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -237,12 +355,27 @@ print(response.data[0].embedding)
 
 ## Model Listing
 
-### List All Models
+### List All Models (All Three Proxy Paths)
 
+The `/api/models` endpoint lists models from all three proxy paths:
+
+Using cURL:
 ```bash
-curl http://localhost:17765/api/v1/models
+curl http://localhost:17765/api/models
 ```
 
+Using Python:
+```python
+import requests
+
+response = requests.get("http://localhost:17765/api/models")
+models = response.json()["data"]
+
+for model in models:
+    print(f"{model['id']} - Type: {model.get('type', 'unknown')}")
+```
+
+Using OpenAI SDK:
 ```python
 from openai import OpenAI
 
@@ -256,90 +389,22 @@ for model in models.data:
     print(f"{model.id} - {model.owned_by}")
 ```
 
-## Rotations
-
-Rotations provide weighted load balancing across multiple providers.
-
-### Using Rotation with v1 Endpoint
-
-```bash
-curl -X POST http://localhost:17765/api/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "coding",
-    "messages": [
-      {"role": "user", "content": "Write a Python function to sort a list"}
-    ]
-  }'
+Example output:
+```
+openai/gpt-4 - Type: provider
+gemini/gemini-2.0-flash - Type: provider
+rotation/coding - Type: rotation
+rotation/general - Type: rotation
+autoselect/autoselect - Type: autoselect
 ```
 
-### Using Legacy Rotation Endpoint
+## Legacy Endpoints
 
+For backward compatibility, these endpoints are still available:
+
+### Legacy Provider Endpoints
 ```bash
-curl -X POST http://localhost:17765/api/rotations/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "coding",
-    "messages": [
-      {"role": "user", "content": "Write a Python function to sort a list"}
-    ]
-  }'
-```
-
-### List Available Rotations
-
-```bash
-curl http://localhost:17765/api/rotations
-```
-
-### List Rotation Models
-
-```bash
-curl http://localhost:17765/api/rotations/models
-```
-
-## Autoselect
-
-Autoselect uses AI to automatically select the best model based on your request.
-
-### Using Autoselect with v1 Endpoint
-
-```bash
-curl -X POST http://localhost:17765/api/v1/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "autoselect",
-    "messages": [
-      {"role": "user", "content": "Debug this Python code: def add(a,b): return a-b"}
-    ]
-  }'
-```
-
-### Using Legacy Autoselect Endpoint
-
-```bash
-curl -X POST http://localhost:17765/api/autoselect/chat/completions \
-  -H "Content-Type: application/json" \
-  -d '{
-    "model": "autoselect",
-    "messages": [
-      {"role": "user", "content": "Debug this Python code: def add(a,b): return a-b"}
-    ]
-  }'
-```
-
-### List Available Autoselect Configurations
-
-```bash
-curl http://localhost:17765/api/autoselect
-```
-
-## Legacy Provider Endpoints
-
-You can also use provider-specific endpoints:
-
-```bash
-# Direct provider access
+# Direct provider access (model without provider prefix)
 curl -X POST http://localhost:17765/api/openai/chat/completions \
   -H "Content-Type: application/json" \
   -d '{
@@ -349,6 +414,34 @@ curl -X POST http://localhost:17765/api/openai/chat/completions \
 
 # List provider models
 curl http://localhost:17765/api/openai/models
+```
+
+### Legacy Rotation Endpoints
+```bash
+# List rotations
+curl http://localhost:17765/api/rotations
+
+# Use rotation (model name = rotation name)
+curl -X POST http://localhost:17765/api/rotations/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "coding",
+    "messages": [{"role": "user", "content": "Write code"}]
+  }'
+```
+
+### Legacy Autoselect Endpoints
+```bash
+# List autoselect configurations
+curl http://localhost:17765/api/autoselect
+
+# Use autoselect (model name = autoselect name)
+curl -X POST http://localhost:17765/api/autoselect/chat/completions \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "autoselect",
+    "messages": [{"role": "user", "content": "Help me"}]
+  }'
 ```
 
 ## Authentication
@@ -383,6 +476,7 @@ response = client.chat.completions.create(
 
 ### Using fetch API
 
+PATH 1: Direct Provider
 ```javascript
 const response = await fetch('http://localhost:17765/api/v1/chat/completions', {
   method: 'POST',
@@ -401,8 +495,47 @@ const data = await response.json();
 console.log(data.choices[0].message.content);
 ```
 
+PATH 2: Rotation
+```javascript
+const response = await fetch('http://localhost:17765/api/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    model: 'rotation/coding',
+    messages: [
+      { role: 'user', content: 'Write a sorting function' }
+    ]
+  })
+});
+
+const data = await response.json();
+console.log(data.choices[0].message.content);
+```
+
+PATH 3: Autoselect
+```javascript
+const response = await fetch('http://localhost:17765/api/v1/chat/completions', {
+  method: 'POST',
+  headers: {
+    'Content-Type': 'application/json',
+  },
+  body: JSON.stringify({
+    model: 'autoselect/autoselect',
+    messages: [
+      { role: 'user', content: 'Help me with this task' }
+    ]
+  })
+});
+
+const data = await response.json();
+console.log(data.choices[0].message.content);
+```
+
 ### Using OpenAI SDK
 
+Works with all three proxy paths:
 ```javascript
 import OpenAI from 'openai';
 
@@ -411,18 +544,30 @@ const client = new OpenAI({
   apiKey: 'dummy'
 });
 
-const response = await client.chat.completions.create({
+// PATH 1: Direct provider
+const response1 = await client.chat.completions.create({
   model: 'openai/gpt-4',
-  messages: [
-    { role: 'user', content: 'Hello, how are you?' }
-  ]
+  messages: [{ role: 'user', content: 'Hello' }]
 });
 
-console.log(response.choices[0].message.content);
+// PATH 2: Rotation
+const response2 = await client.chat.completions.create({
+  model: 'rotation/coding',
+  messages: [{ role: 'user', content: 'Write code' }]
+});
+
+// PATH 3: Autoselect
+const response3 = await client.chat.completions.create({
+  model: 'autoselect/autoselect',
+  messages: [{ role: 'user', content: 'Help me' }]
+});
+
+console.log(response1.choices[0].message.content);
 ```
 
 ### Streaming in JavaScript
 
+Works with all three proxy paths:
 ```javascript
 import OpenAI from 'openai';
 
@@ -431,8 +576,9 @@ const client = new OpenAI({
   apiKey: 'dummy'
 });
 
+// Use any of the three proxy paths
 const stream = await client.chat.completions.create({
-  model: 'gemini/gemini-2.0-flash',
+  model: 'gemini/gemini-2.0-flash',  // or 'rotation/coding' or 'autoselect/autoselect'
   messages: [
     { role: 'user', content: 'Write a short poem' }
   ],

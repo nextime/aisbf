@@ -108,6 +108,11 @@ setup(
             'templates/dashboard/index.html',
             'templates/dashboard/edit_config.html',
             'templates/dashboard/settings.html',
+            'templates/dashboard/providers.html',
+            'templates/dashboard/rotations.html',
+            'templates/dashboard/autoselect.html',
+            'templates/dashboard/prompts.html',
+            'templates/dashboard/docs.html',
         ]),
     ],
     entry_points={

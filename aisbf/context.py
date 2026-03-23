@@ -145,6 +145,8 @@ class ContextManager:
     def _initialize_internal_model(self):
         """Initialize the internal HuggingFace model for condensation (lazy loading)"""
         import logging
+        import json
+        from pathlib import Path
         logger = logging.getLogger(__name__)
         
         if self._internal_model is not None:
@@ -156,7 +158,33 @@ class ContextManager:
             import threading
             
             logger.info("=== INITIALIZING INTERNAL CONDENSATION MODEL ===")
-            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+            
+            # Load model name from config
+            config_path = Path.home() / '.aisbf' / 'aisbf.json'
+            if not config_path.exists():
+                # Try installed locations
+                installed_dirs = [
+                    Path('/usr/share/aisbf'),
+                    Path.home() / '.local' / 'share' / 'aisbf',
+                ]
+                for installed_dir in installed_dirs:
+                    test_path = installed_dir / 'aisbf.json'
+                    if test_path.exists():
+                        config_path = test_path
+                        break
+                else:
+                    # Fallback to source tree
+                    config_path = Path(__file__).parent.parent / 'config' / 'aisbf.json'
+            
+            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"  # Default
+            if config_path.exists():
+                try:
+                    with open(config_path) as f:
+                        aisbf_config = json.load(f)
+                        model_name = aisbf_config.get('internal_model', {}).get('condensation_model_id', model_name)
+                except Exception as e:
+                    logger.warning(f"Error loading condensation model config: {e}, using default")
+            
             logger.info(f"Model: {model_name}")
             
             # Check for GPU availability
@@ -700,7 +728,13 @@ def get_context_config_for_model(
     rotation_model_config: Optional[Dict] = None
 ) -> Dict:
     """
-    Get context configuration for a specific model.
+    Get context configuration for a specific model with cascading fallback.
+    
+    Priority order for each field:
+    1. Rotation model config (if explicitly set)
+    2. Provider model-specific config (if exists)
+    3. Provider default config (fallback)
+    4. System default (0 for condense_context, None for others)
     
     Args:
         model_name: Name of the model
@@ -716,19 +750,47 @@ def get_context_config_for_model(
         'condense_method': None
     }
     
-    # Check rotation model config first (highest priority)
-    if rotation_model_config:
-        context_config['context_size'] = rotation_model_config.get('context_size')
-        context_config['condense_context'] = rotation_model_config.get('condense_context', 0)
-        context_config['condense_method'] = rotation_model_config.get('condense_method')
+    # Step 1: Get provider-level defaults and model-specific config
+    model_specific_config = None
+    if provider_config:
+        # Try to find model-specific config in provider
+        if hasattr(provider_config, 'models') and provider_config.models:
+            for model in provider_config.models:
+                if model.get('name') == model_name:
+                    model_specific_config = model
+                    break
+        
+        # Build base config from provider (model-specific > provider defaults)
+        # context_size
+        if model_specific_config and model_specific_config.get('context_size') is not None:
+            context_config['context_size'] = model_specific_config.get('context_size')
+        elif hasattr(provider_config, 'default_context_size') and provider_config.default_context_size is not None:
+            context_config['context_size'] = provider_config.default_context_size
+        
+        # condense_context
+        if model_specific_config and model_specific_config.get('condense_context') is not None:
+            context_config['condense_context'] = model_specific_config.get('condense_context')
+        elif hasattr(provider_config, 'default_condense_context') and provider_config.default_condense_context is not None:
+            context_config['condense_context'] = provider_config.default_condense_context
+        else:
+            context_config['condense_context'] = 0
+        
+        # condense_method
+        if model_specific_config and model_specific_config.get('condense_method') is not None:
+            context_config['condense_method'] = model_specific_config.get('condense_method')
+        elif hasattr(provider_config, 'default_condense_method') and provider_config.default_condense_method is not None:
+            context_config['condense_method'] = provider_config.default_condense_method
     
-    # Fall back to provider config
-    elif provider_config and hasattr(provider_config, 'models'):
-        for model in provider_config.models:
-            if model.get('name') == model_name:
-                context_config['context_size'] = model.get('context_size')
-                context_config['condense_context'] = model.get('condense_context', 0)
-                context_config['condense_method'] = model.get('condense_method')
-                break
+    # Step 2: Override with rotation model config (only if explicitly set)
+    if rotation_model_config:
+        # Only override if the field is explicitly set in rotation config
+        if 'context_size' in rotation_model_config and rotation_model_config['context_size'] is not None:
+            context_config['context_size'] = rotation_model_config['context_size']
+        
+        if 'condense_context' in rotation_model_config and rotation_model_config['condense_context'] is not None:
+            context_config['condense_context'] = rotation_model_config['condense_context']
+        
+        if 'condense_method' in rotation_model_config and rotation_model_config['condense_method'] is not None:
+            context_config['condense_method'] = rotation_model_config['condense_method']
     
     return context_config

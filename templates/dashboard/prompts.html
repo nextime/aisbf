@@ -1,0 +1,108 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Prompts - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Prompts Configuration</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div style="margin-bottom: 20px;">
+    <label style="font-weight: 500; margin-bottom: 10px; display: block;">Select Prompt File:</label>
+    <select id="prompt-selector" onchange="switchPrompt()" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; font-size: 14px;">
+        {% for prompt in prompts %}
+        <option value="{{ prompt.key }}" {% if loop.first %}selected{% endif %}>{{ prompt.name }}</option>
+        {% endfor %}
+    </select>
+</div>
+
+<form method="POST" id="prompt-form">
+    <input type="hidden" name="prompt_key" id="prompt_key" value="">
+    
+    <div class="form-group">
+        <label for="prompt_content" style="font-weight: 500; margin-bottom: 10px; display: block;">Prompt Content:</label>
+        <textarea id="prompt_content" name="prompt_content" style="width: 100%; min-height: 400px; padding: 10px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; font-size: 13px; line-height: 1.5;"></textarea>
+        <small style="color: #666; display: block; margin-top: 5px;">Edit the prompt template. Use markdown formatting as needed.</small>
+    </div>
+    
+    <div style="display: flex; gap: 10px; margin-top: 20px;">
+        <button type="submit" class="btn">Save Prompt</button>
+        <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    </div>
+</form>
+
+<script>
+const prompts = {{ prompts_data | safe }};
+let currentPromptKey = '';
+
+function switchPrompt() {
+    const selector = document.getElementById('prompt-selector');
+    const key = selector.value;
+    currentPromptKey = key;
+    
+    const prompt = prompts.find(p => p.key === key);
+    if (prompt) {
+        document.getElementById('prompt_content').value = prompt.content;
+        document.getElementById('prompt_key').value = key;
+    }
+}
+
+// Initialize with first prompt
+if (prompts.length > 0) {
+    currentPromptKey = prompts[0].key;
+    document.getElementById('prompt_content').value = prompts[0].content;
+    document.getElementById('prompt_key').value = prompts[0].key;
+}
+</script>
+
+<style>
+.form-group {
+    margin-bottom: 20px;
+}
+
+textarea {
+    resize: vertical;
+}
+
+.btn {
+    padding: 10px 20px;
+    border: none;
+    border-radius: 3px;
+    cursor: pointer;
+    font-size: 14px;
+    text-decoration: none;
+    display: inline-block;
+}
+
+.btn-secondary {
+    background: #6c757d;
+    color: white;
+}
+
+.btn-secondary:hover {
+    background: #5a6268;
+}
+</style>
+{% endblock %}

@@ -1366,6 +1366,11 @@ class RotationHandler:
             
             logger.info(f"  [AVAILABLE] Provider {provider_id} is active and ready")
             
+            # Check if provider-level weight is specified
+            provider_weight = provider.get('weight', 1)  # Default to 1 if not specified
+            if provider.get('weight') is not None:
+                logger.info(f"  Provider-level weight: {provider_weight}")
+            
             # Check if models are specified in rotation config
             # If not, use models from provider config
             rotation_models = provider.get('models')
@@ -1375,17 +1380,17 @@ class RotationHandler:
                 
                 # Get models from provider config
                 if provider_config.models:
-                    # Use models from provider config with default weight of 1
+                    # Use models from provider config with provider-level weight
                     rotation_models = []
                     for provider_model in provider_config.models:
                         model_dict = {
                             'name': provider_model.name,
-                            'weight': 1,  # Default weight
+                            'weight': provider_weight,  # Use provider-level weight
                             'rate_limit': provider_model.rate_limit,
                             'max_request_tokens': provider_model.max_request_tokens
                         }
                         rotation_models.append(model_dict)
-                    logger.info(f"  Loaded {len(rotation_models)} model(s) from provider config")
+                    logger.info(f"  Loaded {len(rotation_models)} model(s) from provider config with weight {provider_weight}")
                 else:
                     logger.warning(f"  No models defined in provider config for {provider_id}")
                     logger.warning(f"  Skipping this provider")
@@ -2530,6 +2535,8 @@ class AutoselectHandler:
     def _initialize_internal_model(self):
         """Initialize the internal HuggingFace model for selection (lazy loading)"""
         import logging
+        import json
+        from pathlib import Path
         logger = logging.getLogger(__name__)
         
         if self._internal_model is not None:
@@ -2541,7 +2548,33 @@ class AutoselectHandler:
             import threading
             
             logger.info("=== INITIALIZING INTERNAL SELECTION MODEL ===")
-            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+            
+            # Load model name from config
+            config_path = Path.home() / '.aisbf' / 'aisbf.json'
+            if not config_path.exists():
+                # Try installed locations
+                installed_dirs = [
+                    Path('/usr/share/aisbf'),
+                    Path.home() / '.local' / 'share' / 'aisbf',
+                ]
+                for installed_dir in installed_dirs:
+                    test_path = installed_dir / 'aisbf.json'
+                    if test_path.exists():
+                        config_path = test_path
+                        break
+                else:
+                    # Fallback to source tree
+                    config_path = Path(__file__).parent.parent / 'config' / 'aisbf.json'
+            
+            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"  # Default
+            if config_path.exists():
+                try:
+                    with open(config_path) as f:
+                        aisbf_config = json.load(f)
+                        model_name = aisbf_config.get('internal_model', {}).get('autoselect_model_id', model_name)
+                except Exception as e:
+                    logger.warning(f"Error loading autoselect model config: {e}, using default")
+            
             logger.info(f"Model: {model_name}")
             
             # Check for GPU availability

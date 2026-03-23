@@ -1,0 +1,410 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Rotations - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Rotations Configuration</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div class="form-group" style="margin-bottom: 20px;">
+    <label>
+        <input type="checkbox" id="global-notify" onchange="updateGlobalNotify(this.checked)">
+        Global Notify Errors
+    </label>
+</div>
+
+<div id="rotations-list" style="margin-bottom: 20px;">
+    <!-- Rotations list will be rendered here -->
+</div>
+
+<button type="button" class="btn" onclick="addRotation()" style="margin-top: 20px;">Add Rotation</button>
+<div style="display: flex; gap: 10px; margin-top: 20px;">
+    <button type="button" class="btn" onclick="saveRotations()">Save Configuration</button>
+    <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+</div>
+
+<script>
+let rotationsConfig = {{ rotations_json | safe }};
+let availableProviders = {{ available_providers | safe }};
+let expandedRotations = new Set();
+
+document.getElementById('global-notify').checked = rotationsConfig.notifyerrors || false;
+
+function renderRotationsList() {
+    const container = document.getElementById('rotations-list');
+    container.innerHTML = '';
+    
+    Object.entries(rotationsConfig.rotations || {}).forEach(([key, rotation]) => {
+        const rotationItem = document.createElement('div');
+        rotationItem.className = 'rotation-item';
+        rotationItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+        
+        const isExpanded = expandedRotations.has(key);
+        const providerCount = rotation.providers ? rotation.providers.length : 0;
+        
+        rotationItem.innerHTML = `
+            <div class="rotation-header" onclick="toggleRotation('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
+                    <strong style="font-size: 16px;">${key}</strong>
+                    <span style="color: #a0a0a0; font-size: 14px;">(${providerCount} provider${providerCount !== 1 ? 's' : ''})</span>
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+            </div>
+            <div id="rotation-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+                <!-- Details will be rendered here -->
+            </div>
+        `;
+        
+        container.appendChild(rotationItem);
+        
+        if (isExpanded) {
+            renderRotationDetails(key);
+        }
+    });
+}
+
+function toggleRotation(key) {
+    if (expandedRotations.has(key)) {
+        expandedRotations.delete(key);
+    } else {
+        expandedRotations.add(key);
+    }
+    renderRotationsList();
+}
+
+function renderRotationDetails(rotationKey) {
+    const container = document.getElementById(`rotation-details-${rotationKey}`);
+    const rotation = rotationsConfig.rotations[rotationKey];
+    
+    container.innerHTML = `
+        <div class="form-group">
+            <label>Model Name</label>
+            <input type="text" value="${rotation.model_name}" onchange="updateRotation('${rotationKey}', 'model_name', this.value)" required>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
+                Notify Errors
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>Default Rate Limit (seconds)</label>
+            <input type="number" value="${rotation.default_rate_limit || ''}" onchange="updateRotation('${rotationKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
+        </div>
+        
+        <div class="form-group">
+            <label>Default Context Size</label>
+            <input type="number" value="${rotation.default_context_size || ''}" onchange="updateRotation('${rotationKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+        </div>
+        
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Providers</h4>
+        <div id="providers-${rotationKey}"></div>
+        <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${rotationKey}')" style="margin-top: 10px;">Add Provider</button>
+    `;
+    
+    renderRotationProviders(rotationKey);
+}
+
+function renderRotationProviders(rotationKey) {
+    const container = document.getElementById(`providers-${rotationKey}`);
+    const rotation = rotationsConfig.rotations[rotationKey];
+    
+    if (!rotation.providers || rotation.providers.length === 0) {
+        container.innerHTML = '<p style="color: #a0a0a0;">No providers configured</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    rotation.providers.forEach((provider, providerIndex) => {
+        const providerDiv = document.createElement('div');
+        providerDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        
+        const providerOptions = availableProviders.map(p => 
+            `<option value="${p}" ${provider.provider_id === p ? 'selected' : ''}>${p}</option>`
+        ).join('');
+        
+        providerDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong>Provider ${providerIndex + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${rotationKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Provider ID</label>
+                <select onchange="updateRotationProvider('${rotationKey}', ${providerIndex}, 'provider_id', this.value)" required>
+                    <option value="">Select provider...</option>
+                    ${providerOptions}
+                </select>
+            </div>
+            
+            <div class="form-group">
+                <label>Weight (optional, for provider-level weight)</label>
+                <input type="number" value="${provider.weight || ''}" onchange="updateRotationProvider('${rotationKey}', ${providerIndex}, 'weight', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <h5 style="margin-top: 15px; margin-bottom: 10px;">Models</h5>
+            <div id="models-${rotationKey}-${providerIndex}"></div>
+            <button type="button" class="btn btn-secondary" onclick="addRotationModel('${rotationKey}', ${providerIndex})" style="margin-top: 10px; font-size: 12px;">Add Model</button>
+            <p style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">Leave models empty to use all models from provider config</p>
+        `;
+        
+        container.appendChild(providerDiv);
+        renderRotationModels(rotationKey, providerIndex);
+    });
+}
+
+function renderRotationModels(rotationKey, providerIndex) {
+    const container = document.getElementById(`models-${rotationKey}-${providerIndex}`);
+    const provider = rotationsConfig.rotations[rotationKey].providers[providerIndex];
+    
+    if (!provider.models || provider.models.length === 0) {
+        container.innerHTML = '<p style="color: #a0a0a0; font-size: 12px;">No models specified (will use all from provider)</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    provider.models.forEach((model, modelIndex) => {
+        const modelDiv = document.createElement('div');
+        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 10px; margin-bottom: 8px; border-radius: 3px; background: #16213e;';
+        
+        modelDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                <strong style="font-size: 13px;">Model ${modelIndex + 1}</strong>
+                <button type="button" onclick="removeRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Remove</button>
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Model Name</label>
+                <input type="text" value="${model.name}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'name', this.value)" required style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Weight</label>
+                <input type="number" value="${model.weight || 1}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'weight', parseInt(this.value))" style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Rate Limit (seconds)</label>
+                <input type="number" value="${model.rate_limit || 0}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'rate_limit', parseFloat(this.value))" step="0.1" style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Max Request Tokens</label>
+                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional" style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Context Size</label>
+                <input type="number" value="${model.context_size || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional" style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">Condense Context (%)</label>
+                <input type="number" value="${model.condense_context || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (default: 80)" style="font-size: 12px; padding: 5px;">
+            </div>
+            
+            <div class="form-group" style="margin-bottom: 0;">
+                <label style="font-size: 12px;">Condense Method</label>
+                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="e.g., semantic, conversational, hierarchical" style="font-size: 12px; padding: 5px;">
+            </div>
+        `;
+        
+        container.appendChild(modelDiv);
+    });
+}
+
+function updateGlobalNotify(value) {
+    rotationsConfig.notifyerrors = value;
+}
+
+function addRotation() {
+    const key = prompt('Enter rotation key (e.g., "coding", "general"):');
+    if (!key || rotationsConfig.rotations[key]) {
+        alert('Invalid or duplicate rotation key');
+        return;
+    }
+    
+    if (!rotationsConfig.rotations) {
+        rotationsConfig.rotations = {};
+    }
+    
+    rotationsConfig.rotations[key] = {
+        model_name: key,
+        notifyerrors: false,
+        providers: []
+    };
+    
+    expandedRotations.add(key);
+    renderRotationsList();
+}
+
+function removeRotation(key) {
+    if (confirm(`Remove rotation "${key}"?`)) {
+        delete rotationsConfig.rotations[key];
+        expandedRotations.delete(key);
+        renderRotationsList();
+    }
+}
+
+function updateRotation(key, field, value) {
+    rotationsConfig.rotations[key][field] = value;
+}
+
+function addRotationProvider(rotationKey) {
+    if (!rotationsConfig.rotations[rotationKey].providers) {
+        rotationsConfig.rotations[rotationKey].providers = [];
+    }
+    
+    rotationsConfig.rotations[rotationKey].providers.push({
+        provider_id: '',
+        models: []
+    });
+    
+    renderRotationProviders(rotationKey);
+}
+
+function removeRotationProvider(rotationKey, providerIndex) {
+    if (confirm('Remove this provider?')) {
+        rotationsConfig.rotations[rotationKey].providers.splice(providerIndex, 1);
+        renderRotationProviders(rotationKey);
+    }
+}
+
+function updateRotationProvider(rotationKey, providerIndex, field, value) {
+    rotationsConfig.rotations[rotationKey].providers[providerIndex][field] = value;
+}
+
+function addRotationModel(rotationKey, providerIndex) {
+    const provider = rotationsConfig.rotations[rotationKey].providers[providerIndex];
+    if (!provider.models) {
+        provider.models = [];
+    }
+    
+    provider.models.push({
+        name: '',
+        weight: 1,
+        rate_limit: 0
+    });
+    
+    renderRotationModels(rotationKey, providerIndex);
+}
+
+function removeRotationModel(rotationKey, providerIndex, modelIndex) {
+    if (confirm('Remove this model?')) {
+        rotationsConfig.rotations[rotationKey].providers[providerIndex].models.splice(modelIndex, 1);
+        renderRotationModels(rotationKey, providerIndex);
+    }
+}
+
+function updateRotationModel(rotationKey, providerIndex, modelIndex, field, value) {
+    rotationsConfig.rotations[rotationKey].providers[providerIndex].models[modelIndex][field] = value;
+}
+
+function updateRotationModelCondenseMethod(rotationKey, providerIndex, modelIndex, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        rotationsConfig.rotations[rotationKey].providers[providerIndex].models[modelIndex].condense_method = null;
+        return;
+    }
+    
+    // Check if it's a comma-separated list
+    if (trimmed.includes(',')) {
+        rotationsConfig.rotations[rotationKey].providers[providerIndex].models[modelIndex].condense_method = 
+            trimmed.split(',').map(s => s.trim()).filter(s => s);
+    } else {
+        rotationsConfig.rotations[rotationKey].providers[providerIndex].models[modelIndex].condense_method = trimmed;
+    }
+}
+
+async function saveRotations() {
+    try {
+        const response = await fetch('/dashboard/rotations', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'config=' + encodeURIComponent(JSON.stringify(rotationsConfig, null, 2))
+        });
+        
+        if (response.ok) {
+            window.location.href = '/dashboard/rotations?success=1';
+        } else {
+            alert('Error saving configuration');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Initial render
+renderRotationsList();
+</script>
+
+<style>
+.rotation-item {
+    animation: fadeIn 0.3s;
+}
+
+.rotation-header:hover {
+    background: #0f3460;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.form-group input[type="text"],
+.form-group input[type="number"],
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    font-size: 14px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+
+.form-group input[type="checkbox"] {
+    margin-right: 5px;
+}
+</style>
+{% endblock %}

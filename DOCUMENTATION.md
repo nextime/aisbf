@@ -485,6 +485,377 @@ aisbf stop
 ```
 Stops running daemon and removes PID file.
 
+## Proxy Deployment
+
+AISBF is fully proxy-aware and can be deployed behind reverse proxies like nginx, Apache, or Caddy. The application automatically detects and respects standard proxy headers to ensure correct URL generation and routing.
+
+### Proxy-Awareness Features
+
+AISBF automatically handles:
+- **X-Forwarded-Proto**: Detects original protocol (http/https)
+- **X-Forwarded-Host**: Detects original hostname
+- **X-Forwarded-Port**: Detects original port
+- **X-Forwarded-Prefix** or **X-Script-Name**: Detects URL subpath/prefix
+- **X-Forwarded-For**: Detects original client IP address
+
+All URLs in the dashboard, redirects, and API responses are automatically adjusted based on these headers.
+
+### Nginx Proxy Configuration Examples
+
+#### Example 1: Simple Reverse Proxy (Root Path)
+
+Deploy AISBF at the root of a domain (e.g., `https://aisbf.example.com/`):
+
+```nginx
+server {
+    listen 80;
+    server_name aisbf.example.com;
+    
+    # Redirect HTTP to HTTPS
+    return 301 https://$server_name$request_uri;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name aisbf.example.com;
+    
+    # SSL configuration
+    ssl_certificate /etc/ssl/certs/aisbf.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/aisbf.example.com.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # Proxy settings
+    location / {
+        proxy_pass http://127.0.0.1:17765;
+        proxy_http_version 1.1;
+        
+        # Proxy headers for AISBF proxy-awareness
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # WebSocket support for streaming
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts for long-running requests
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Buffering settings for streaming
+        proxy_buffering off;
+        proxy_cache off;
+    }
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Logging
+    access_log /var/log/nginx/aisbf_access.log;
+    error_log /var/log/nginx/aisbf_error.log;
+}
+```
+
+#### Example 2: Reverse Proxy with Subpath
+
+Deploy AISBF at a subpath (e.g., `https://example.com/aisbf/`):
+
+```nginx
+server {
+    listen 443 ssl http2;
+    server_name example.com;
+    
+    # SSL configuration
+    ssl_certificate /etc/ssl/certs/example.com.crt;
+    ssl_certificate_key /etc/ssl/private/example.com.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # AISBF at /aisbf subpath
+    location /aisbf/ {
+        # Remove /aisbf prefix before proxying
+        rewrite ^/aisbf/(.*) /$1 break;
+        
+        proxy_pass http://127.0.0.1:17765;
+        proxy_http_version 1.1;
+        
+        # Proxy headers for AISBF proxy-awareness
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # IMPORTANT: Set the subpath prefix
+        proxy_set_header X-Forwarded-Prefix /aisbf;
+        
+        # WebSocket support for streaming
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts for long-running requests
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Buffering settings for streaming
+        proxy_buffering off;
+        proxy_cache off;
+    }
+    
+    # Other locations for your main application
+    location / {
+        # Your main application configuration
+        root /var/www/html;
+        index index.html;
+    }
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Logging
+    access_log /var/log/nginx/example_access.log;
+    error_log /var/log/nginx/example_error.log;
+}
+```
+
+#### Example 3: Load Balancing Multiple AISBF Instances
+
+Deploy multiple AISBF instances for high availability:
+
+```nginx
+upstream aisbf_backend {
+    # Multiple AISBF instances
+    server 127.0.0.1:17765 max_fails=3 fail_timeout=30s;
+    server 127.0.0.1:17766 max_fails=3 fail_timeout=30s;
+    server 127.0.0.1:17767 max_fails=3 fail_timeout=30s;
+    
+    # Load balancing method
+    least_conn;  # Route to instance with fewest connections
+    
+    # Session persistence (optional, for dashboard sessions)
+    ip_hash;
+}
+
+server {
+    listen 443 ssl http2;
+    server_name aisbf.example.com;
+    
+    # SSL configuration
+    ssl_certificate /etc/ssl/certs/aisbf.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/aisbf.example.com.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    location / {
+        proxy_pass http://aisbf_backend;
+        proxy_http_version 1.1;
+        
+        # Proxy headers for AISBF proxy-awareness
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # WebSocket support for streaming
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts for long-running requests
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 300s;
+        proxy_read_timeout 300s;
+        
+        # Buffering settings for streaming
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # Health check
+        proxy_next_upstream error timeout http_502 http_503 http_504;
+    }
+    
+    # Health check endpoint
+    location /health {
+        proxy_pass http://aisbf_backend/health;
+        access_log off;
+    }
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Logging
+    access_log /var/log/nginx/aisbf_access.log;
+    error_log /var/log/nginx/aisbf_error.log;
+}
+```
+
+#### Example 4: API-Only Deployment with Rate Limiting
+
+Deploy AISBF as an API-only service with rate limiting:
+
+```nginx
+# Define rate limiting zones
+limit_req_zone $binary_remote_addr zone=aisbf_api:10m rate=10r/s;
+limit_req_zone $binary_remote_addr zone=aisbf_dashboard:10m rate=5r/s;
+
+server {
+    listen 443 ssl http2;
+    server_name api.example.com;
+    
+    # SSL configuration
+    ssl_certificate /etc/ssl/certs/api.example.com.crt;
+    ssl_certificate_key /etc/ssl/private/api.example.com.key;
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers HIGH:!aNULL:!MD5;
+    
+    # API endpoints with rate limiting
+    location /api/ {
+        # Apply rate limiting
+        limit_req zone=aisbf_api burst=20 nodelay;
+        
+        proxy_pass http://127.0.0.1:17765;
+        proxy_http_version 1.1;
+        
+        # Proxy headers for AISBF proxy-awareness
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # WebSocket support for streaming
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        
+        # Timeouts for long-running AI requests
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 600s;
+        proxy_read_timeout 600s;
+        
+        # Buffering settings for streaming
+        proxy_buffering off;
+        proxy_cache off;
+        
+        # CORS headers (if needed)
+        add_header Access-Control-Allow-Origin "*" always;
+        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
+        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
+    }
+    
+    # Dashboard with stricter rate limiting
+    location /dashboard/ {
+        limit_req zone=aisbf_dashboard burst=10 nodelay;
+        
+        proxy_pass http://127.0.0.1:17765;
+        proxy_http_version 1.1;
+        
+        # Proxy headers for AISBF proxy-awareness
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_set_header X-Forwarded-Host $host;
+        proxy_set_header X-Forwarded-Port $server_port;
+        
+        # Standard proxy settings
+        proxy_buffering off;
+    }
+    
+    # Block all other paths
+    location / {
+        return 404;
+    }
+    
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+    
+    # Logging
+    access_log /var/log/nginx/aisbf_api_access.log;
+    error_log /var/log/nginx/aisbf_api_error.log;
+}
+```
+
+### Testing Proxy Configuration
+
+After configuring nginx, test the setup:
+
+1. **Test nginx configuration:**
+   ```bash
+   sudo nginx -t
+   ```
+
+2. **Reload nginx:**
+   ```bash
+   sudo systemctl reload nginx
+   ```
+
+3. **Test AISBF through proxy:**
+   ```bash
+   # Test root endpoint
+   curl https://aisbf.example.com/
+   
+   # Test with subpath
+   curl https://example.com/aisbf/
+   
+   # Test API endpoint
+   curl -X POST https://aisbf.example.com/api/v1/chat/completions \
+     -H "Content-Type: application/json" \
+     -d '{"model": "provider/model-name", "messages": [{"role": "user", "content": "Hello"}]}'
+   ```
+
+4. **Check dashboard URLs:**
+   - Open the dashboard in a browser
+   - Verify all links and redirects work correctly
+   - Check that the restart button uses the correct URL
+
+### Troubleshooting Proxy Issues
+
+If you encounter issues:
+
+1. **Check nginx error logs:**
+   ```bash
+   sudo tail -f /var/log/nginx/aisbf_error.log
+   ```
+
+2. **Verify proxy headers are being sent:**
+   - Check AISBF logs for received headers
+   - Enable debug logging in AISBF if needed
+
+3. **Common issues:**
+   - **404 errors with subpath**: Ensure `X-Forwarded-Prefix` header is set correctly
+   - **Redirect loops**: Check that `X-Forwarded-Proto` is set to `https`
+   - **Broken dashboard links**: Verify all proxy headers are configured
+   - **Streaming not working**: Ensure `proxy_buffering off` is set
+
+### Security Considerations
+
+When deploying behind a proxy:
+
+1. **Bind AISBF to localhost only** (default: `127.0.0.1:17765`)
+2. **Use HTTPS** for all external connections
+3. **Enable authentication** in AISBF configuration
+4. **Configure rate limiting** in nginx
+5. **Set security headers** in nginx configuration
+6. **Keep SSL certificates up to date**
+7. **Monitor access logs** for suspicious activity
+
 ## Key Classes and Functions
 
 ### aisbf/config.py

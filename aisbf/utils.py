@@ -178,3 +178,334 @@ def get_max_request_tokens_for_model(
     
     logger.debug(f"No max_request_tokens configured for model {model_name}")
     return None
+
+
+def generate_self_signed_certificate(cert_path: str, key_path: str) -> bool:
+    """
+    Generate a self-signed SSL certificate and private key.
+    
+    Args:
+        cert_path: Path where the certificate should be saved
+        key_path: Path where the private key should be saved
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from cryptography import x509
+        from cryptography.x509.oid import NameOID
+        from cryptography.hazmat.primitives import hashes
+        from cryptography.hazmat.primitives.asymmetric import rsa
+        from cryptography.hazmat.primitives import serialization
+        import datetime
+        
+        logger.info(f"Generating self-signed SSL certificate...")
+        logger.info(f"Certificate path: {cert_path}")
+        logger.info(f"Key path: {key_path}")
+        
+        # Generate private key
+        private_key = rsa.generate_private_key(
+            public_exponent=65537,
+            key_size=2048,
+        )
+        
+        # Create certificate
+        subject = issuer = x509.Name([
+            x509.NameAttribute(NameOID.COUNTRY_NAME, "US"),
+            x509.NameAttribute(NameOID.STATE_OR_PROVINCE_NAME, "State"),
+            x509.NameAttribute(NameOID.LOCALITY_NAME, "City"),
+            x509.NameAttribute(NameOID.ORGANIZATION_NAME, "AISBF"),
+            x509.NameAttribute(NameOID.COMMON_NAME, "localhost"),
+        ])
+        
+        cert = x509.CertificateBuilder().subject_name(
+            subject
+        ).issuer_name(
+            issuer
+        ).public_key(
+            private_key.public_key()
+        ).serial_number(
+            x509.random_serial_number()
+        ).not_valid_before(
+            datetime.datetime.utcnow()
+        ).not_valid_after(
+            datetime.datetime.utcnow() + datetime.timedelta(days=365)
+        ).add_extension(
+            x509.SubjectAlternativeName([
+                x509.DNSName("localhost"),
+                x509.DNSName("127.0.0.1"),
+            ]),
+            critical=False,
+        ).sign(private_key, hashes.SHA256())
+        
+        # Ensure directories exist
+        Path(cert_path).parent.mkdir(parents=True, exist_ok=True)
+        Path(key_path).parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write certificate to file
+        with open(cert_path, "wb") as f:
+            f.write(cert.public_bytes(serialization.Encoding.PEM))
+        
+        # Write private key to file
+        with open(key_path, "wb") as f:
+            f.write(private_key.private_bytes(
+                encoding=serialization.Encoding.PEM,
+                format=serialization.PrivateFormat.TraditionalOpenSSL,
+                encryption_algorithm=serialization.NoEncryption()
+            ))
+        
+        logger.info(f"Successfully generated self-signed SSL certificate")
+        logger.info(f"Certificate valid for 365 days")
+        return True
+        
+    except ImportError:
+        logger.error("cryptography library not installed. Cannot generate self-signed certificate.")
+        logger.error("Install with: pip install cryptography")
+        return False
+    except Exception as e:
+        logger.error(f"Error generating self-signed certificate: {e}", exc_info=True)
+        return False
+
+
+def check_certificate_expiry(cert_path: str) -> Optional[int]:
+    """
+    Check how many days until certificate expires.
+    
+    Args:
+        cert_path: Path to certificate file
+    
+    Returns:
+        Number of days until expiry, or None if cannot be determined
+    """
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    
+    try:
+        from cryptography import x509
+        from cryptography.hazmat.backends import default_backend
+        import datetime
+        
+        if not Path(cert_path).exists():
+            return None
+        
+        with open(cert_path, 'rb') as f:
+            cert_data = f.read()
+        
+        cert = x509.load_pem_x509_certificate(cert_data, default_backend())
+        expiry_date = cert.not_valid_after
+        days_until_expiry = (expiry_date - datetime.datetime.utcnow()).days
+        
+        logger.info(f"Certificate expires in {days_until_expiry} days")
+        return days_until_expiry
+        
+    except Exception as e:
+        logger.error(f"Error checking certificate expiry: {e}")
+        return None
+
+
+def generate_letsencrypt_certificate(domain: str, cert_path: str, key_path: str, email: Optional[str] = None) -> bool:
+    """
+    Generate Let's Encrypt SSL certificate using certbot.
+    
+    Args:
+        domain: Public domain name
+        cert_path: Path where certificate should be saved
+        key_path: Path where private key should be saved
+        email: Optional email for Let's Encrypt notifications
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    import logging
+    import subprocess
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"Generating Let's Encrypt certificate for domain: {domain}")
+        
+        # Check if certbot is installed
+        try:
+            subprocess.run(['certbot', '--version'], capture_output=True, check=True)
+        except (subprocess.CalledProcessError, FileNotFoundError):
+            logger.error("certbot not found. Please install certbot:")
+            logger.error("  Ubuntu/Debian: sudo apt-get install certbot")
+            logger.error("  CentOS/RHEL: sudo yum install certbot")
+            logger.error("  macOS: brew install certbot")
+            return False
+        
+        # Prepare certbot command
+        config_dir = Path.home() / '.aisbf' / 'letsencrypt'
+        config_dir.mkdir(parents=True, exist_ok=True)
+        
+        cmd = [
+            'certbot', 'certonly',
+            '--standalone',
+            '--non-interactive',
+            '--agree-tos',
+            '--domain', domain,
+            '--config-dir', str(config_dir),
+            '--work-dir', str(config_dir / 'work'),
+            '--logs-dir', str(config_dir / 'logs'),
+        ]
+        
+        if email:
+            cmd.extend(['--email', email])
+        else:
+            cmd.append('--register-unsafely-without-email')
+        
+        logger.info(f"Running certbot command...")
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"certbot failed: {result.stderr}")
+            return False
+        
+        # Copy certificates to specified paths
+        le_cert = config_dir / 'live' / domain / 'fullchain.pem'
+        le_key = config_dir / 'live' / domain / 'privkey.pem'
+        
+        if le_cert.exists() and le_key.exists():
+            import shutil
+            shutil.copy2(le_cert, cert_path)
+            shutil.copy2(le_key, key_path)
+            logger.info(f"Let's Encrypt certificate generated successfully")
+            logger.info(f"Certificate valid for 90 days")
+            return True
+        else:
+            logger.error(f"Certificate files not found after certbot execution")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error generating Let's Encrypt certificate: {e}", exc_info=True)
+        return False
+
+
+def renew_letsencrypt_certificate(domain: str, cert_path: str, key_path: str) -> bool:
+    """
+    Renew Let's Encrypt SSL certificate.
+    
+    Args:
+        domain: Public domain name
+        cert_path: Path where certificate should be saved
+        key_path: Path where private key should be saved
+    
+    Returns:
+        True if successful, False otherwise
+    """
+    import logging
+    import subprocess
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    
+    try:
+        logger.info(f"Renewing Let's Encrypt certificate for domain: {domain}")
+        
+        config_dir = Path.home() / '.aisbf' / 'letsencrypt'
+        
+        cmd = [
+            'certbot', 'renew',
+            '--config-dir', str(config_dir),
+            '--work-dir', str(config_dir / 'work'),
+            '--logs-dir', str(config_dir / 'logs'),
+            '--non-interactive',
+        ]
+        
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        
+        if result.returncode != 0:
+            logger.error(f"certbot renew failed: {result.stderr}")
+            return False
+        
+        # Copy renewed certificates
+        le_cert = config_dir / 'live' / domain / 'fullchain.pem'
+        le_key = config_dir / 'live' / domain / 'privkey.pem'
+        
+        if le_cert.exists() and le_key.exists():
+            import shutil
+            shutil.copy2(le_cert, cert_path)
+            shutil.copy2(le_key, key_path)
+            logger.info(f"Let's Encrypt certificate renewed successfully")
+            return True
+        else:
+            logger.error(f"Renewed certificate files not found")
+            return False
+            
+    except Exception as e:
+        logger.error(f"Error renewing Let's Encrypt certificate: {e}", exc_info=True)
+        return False
+
+
+def ensure_ssl_certificates(cert_path: Optional[str] = None, key_path: Optional[str] = None,
+                           public_domain: Optional[str] = None, email: Optional[str] = None) -> tuple:
+    """
+    Ensure SSL certificates exist, generating them if necessary.
+    Uses Let's Encrypt if public_domain is provided, otherwise self-signed.
+    Also checks expiry and renews if needed.
+    
+    Args:
+        cert_path: Path to certificate file (None for default)
+        key_path: Path to key file (None for default)
+        public_domain: Public domain for Let's Encrypt (None for self-signed)
+        email: Email for Let's Encrypt notifications (optional)
+    
+    Returns:
+        Tuple of (cert_path, key_path) with resolved paths
+    """
+    import logging
+    from pathlib import Path
+    logger = logging.getLogger(__name__)
+    
+    # Use default paths if not specified
+    config_dir = Path.home() / '.aisbf'
+    if not cert_path:
+        cert_path = str(config_dir / 'cert.pem')
+    if not key_path:
+        key_path = str(config_dir / 'key.pem')
+    
+    # Expand user paths
+    cert_path = str(Path(cert_path).expanduser())
+    key_path = str(Path(key_path).expanduser())
+    
+    # Check if certificates exist
+    cert_exists = Path(cert_path).exists()
+    key_exists = Path(key_path).exists()
+    
+    # Check certificate expiry if it exists
+    needs_renewal = False
+    if cert_exists:
+        days_until_expiry = check_certificate_expiry(cert_path)
+        if days_until_expiry is not None and days_until_expiry < 30:
+            logger.warning(f"Certificate expires in {days_until_expiry} days, renewal needed")
+            needs_renewal = True
+    
+    # Generate or renew certificate
+    if not cert_exists or not key_exists or needs_renewal:
+        if public_domain:
+            # Try Let's Encrypt
+            logger.info(f"Using Let's Encrypt for domain: {public_domain}")
+            
+            if needs_renewal:
+                success = renew_letsencrypt_certificate(public_domain, cert_path, key_path)
+            else:
+                success = generate_letsencrypt_certificate(public_domain, cert_path, key_path, email)
+            
+            if not success:
+                logger.warning(f"Let's Encrypt failed, falling back to self-signed certificate")
+                if not generate_self_signed_certificate(cert_path, key_path):
+                    raise FileNotFoundError(f"Failed to generate SSL certificates")
+        else:
+            # Generate self-signed certificate
+            logger.info(f"Generating self-signed SSL certificate...")
+            if not generate_self_signed_certificate(cert_path, key_path):
+                raise FileNotFoundError(f"Failed to generate self-signed SSL certificate")
+    else:
+        logger.info(f"Using existing SSL certificate: {cert_path}")
+        logger.info(f"Using existing SSL key: {key_path}")
+    
+    return cert_path, key_path

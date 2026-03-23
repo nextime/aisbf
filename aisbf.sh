@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/bin/bash 
 ########################################################
 # Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
 #
@@ -91,15 +91,22 @@ ensure_venv() {
     fi
 }
 
-# Function to update venv packages silently
+# Function to update venv packages (only install missing ones, no forced upgrades)
 update_venv() {
-    # Update requirements if requirements.txt exists
+    # Only update if requirements file exists
     if [ -f "$SHARE_DIR/requirements.txt" ]; then
-        "$VENV_DIR/bin/pip" install --upgrade -r "$SHARE_DIR/requirements.txt" -q 2>/dev/null
+        # Check if there are any new packages to install (not already satisfied)
+        "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt" 2>&1 | grep -q "Requirement already satisfied"
+        ALREADY_SATISFIED=$?
+        
+        if [ $ALREADY_SATISFIED -ne 0 ]; then
+            echo "Installing new requirements (this will take a while!) ... "
+            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            echo "[OK]"
+        else
+            echo "Virtual env already up to date"
+        fi
     fi
-    
-    # Update aisbf package silently
-    "$VENV_DIR/bin/pip" install --upgrade aisbf -q 2>/dev/null
 }
 
 # Function to start the server
@@ -121,14 +128,19 @@ start_server() {
     
     echo "Starting AISBF on port $PORT..."
     
-    # Start the proxy server with logging
-    # Redirect stderr to suppress BrokenPipeError during shutdown
-    uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | while IFS= read -r line; do
-        # Filter out BrokenPipeError logging errors
-        if [[ "$line" != *"--- Logging error ---"* ]] && [[ "$line" != *"BrokenPipeError"* ]] && [[ "$line" != *"Call stack:"* ]] && [[ "$line" != *"File "*"/python"* ]] && [[ "$line" != *"Message:"* ]] && [[ "$line" != *"Arguments:"* ]]; then
-            echo "$line" | tee -a "$LOG_DIR/aisbf_stdout.log"
-        fi
-    done
+    # Check if debug mode is enabled
+    if [ "$DEBUG" = "true" ]; then
+        echo "Debug mode enabled - showing all debug messages"
+        export AISBF_DEBUG=true
+    fi
+    
+    # Start the proxy server - runs in foreground
+    # Use exec to replace the shell process so signals are properly handled
+    if [ "$DEBUG" = "true" ]; then
+        exec uvicorn main:app --host 127.0.0.1 --port $PORT --log-level debug 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
+    else
+        exec uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v -E "(--- Logging error ---|BrokenPipeError|Call stack:|Message:|Arguments:)" | tee -a "$LOG_DIR/aisbf_stdout.log"
+    fi
 }
 
 # Function to start as daemon
@@ -156,9 +168,19 @@ start_daemon() {
     
     echo "Starting AISBF on port $PORT in background..."
     
+    # Check if debug mode is enabled
+    if [ "$DEBUG" = "true" ]; then
+        echo "Debug mode enabled - showing all debug messages"
+        export AISBF_DEBUG=true
+    fi
+    
     # Start in background with nohup and logging
     # Filter out BrokenPipeError logging errors
-    nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+    if [ "$DEBUG" = "true" ]; then
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT --log-level debug 2>&1" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+    else
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+    fi
     PID=$!
     echo $PID > "$PIDFILE"
     echo "AISBF started in background (PID: $PID)"
@@ -200,8 +222,59 @@ stop_daemon() {
     fi
 }
 
+# Function to show help
+show_help() {
+    echo "AISBF - AI Service Broker Framework"
+    echo ""
+    echo "Usage: aisbf.sh [OPTIONS] [COMMAND]"
+    echo ""
+    echo "Options:"
+    echo "  --debug     Enable debug mode with verbose logging"
+    echo "  -h, --help  Show this help message"
+    echo ""
+    echo "Commands:"
+    echo "  daemon   Start AISBF in background (daemon mode)"
+    echo "  status   Check if AISBF is running"
+    echo "  stop     Stop the AISBF daemon"
+    echo ""
+    echo "Examples:"
+    echo "  aisbf.sh                  # Start in foreground"
+    echo "  aisbf.sh --debug          # Start with debug logging"
+    echo "  aisbf.sh daemon           # Start in background"
+    echo "  aisbf.sh --debug daemon   # Start in background with debug"
+    echo "  aisbf.sh status           # Check status"
+    echo "  aisbf.sh stop             # Stop the server"
+}
+
+# Parse command line arguments
+DEBUG="false"
+COMMAND=""
+
+while [[ $# -gt 0 ]]; do
+    case $1 in
+        --debug|-d)
+            DEBUG="true"
+            shift
+            ;;
+        -h|--help)
+            show_help
+            exit 0
+            ;;
+        daemon|status|stop)
+            COMMAND="$1"
+            shift
+            ;;
+        *)
+            echo "Unknown option: $1"
+            echo ""
+            show_help
+            exit 1
+            ;;
+    esac
+done
+
 # Main command handling
-case "$1" in
+case "$COMMAND" in
     daemon)
         start_daemon
         ;;

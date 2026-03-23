@@ -176,6 +176,27 @@
           ]
         }
       ]
+    },
+    "simple-gemini": {
+      "_comment": "SIMPLE FORMAT: Specify provider_id only, models will be loaded from providers.json automatically",
+      "model_name": "simple-gemini",
+      "notifyerrors": false,
+      "providers": [
+        {
+          "provider_id": "gemini"
+        }
+      ]
+    },
+    "simple-openai": {
+      "_comment": "SIMPLE FORMAT: Provider with custom weight, models loaded from providers.json",
+      "model_name": "simple-openai",
+      "notifyerrors": false,
+      "providers": [
+        {
+          "provider_id": "openai",
+          "weight": 2
+        }
+      ]
     }
   }
 }

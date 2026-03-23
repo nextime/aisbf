@@ -66,6 +66,7 @@ class ProviderConfig(BaseModel):
     default_condense_method: Optional[Union[str, List[str]]] = None
 
 class RotationConfig(BaseModel):
+    model_name: str
     providers: List[Dict]
     notifyerrors: bool = False
     # Default settings for models in this rotation
@@ -104,12 +105,16 @@ class Config:
         if custom_dir:
             self._custom_config_dir = Path(custom_dir)
         
+        # Track loaded file paths for summary
+        self._loaded_files = {}
+        
         self._ensure_config_directory()
         self._load_providers()
         self._load_rotations()
         self._load_autoselect()
         self._load_condensation()
         self._initialize_error_tracking()
+        self._log_configuration_summary()
 
     def _get_config_source_dir(self):
         """Get the directory containing default config files"""
@@ -187,6 +192,7 @@ class Config:
         with open(providers_path) as f:
             data = json.load(f)
             self.providers = {k: ProviderConfig(**v) for k, v in data['providers'].items()}
+            self._loaded_files['providers'] = str(providers_path.absolute())
             logger.info(f"Loaded {len(self.providers)} providers: {list(self.providers.keys())}")
             for provider_id, provider_config in self.providers.items():
                 logger.info(f"  - {provider_id}: type={provider_config.type}, endpoint={provider_config.endpoint}")
@@ -214,6 +220,7 @@ class Config:
         logger.info(f"Loading rotations from: {rotations_path}")
         with open(rotations_path) as f:
             data = json.load(f)
+            self._loaded_files['rotations'] = str(rotations_path.absolute())
             
             # Extract global notifyerrors setting (top-level, outside rotations)
             self.global_notifyerrors = data.get('notifyerrors', False)
@@ -254,18 +261,31 @@ class Config:
             logger.info(f"=== Config._load_rotations END ===")
 
     def _load_autoselect(self):
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_autoselect START ===")
+        
         autoselect_path = Path.home() / '.aisbf' / 'autoselect.json'
+        logger.info(f"Looking for autoselect at: {autoselect_path}")
+        
         if not autoselect_path.exists():
+            logger.info(f"User config not found, falling back to source config")
             # Fallback to source config if user config doesn't exist
             try:
                 source_dir = self._get_config_source_dir()
                 autoselect_path = source_dir / 'autoselect.json'
+                logger.info(f"Using source config at: {autoselect_path}")
             except FileNotFoundError:
+                logger.error("Could not find autoselect.json configuration file")
                 raise FileNotFoundError("Could not find autoselect.json configuration file")
         
+        logger.info(f"Loading autoselect from: {autoselect_path}")
         with open(autoselect_path) as f:
             data = json.load(f)
             self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
+            self._loaded_files['autoselect'] = str(autoselect_path.absolute())
+            logger.info(f"Loaded {len(self.autoselect)} autoselect configurations: {list(self.autoselect.keys())}")
+            logger.info(f"=== Config._load_autoselect END ===")
     
     def _load_condensation(self):
         """Load condensation configuration from providers.json"""
@@ -274,20 +294,26 @@ class Config:
         logger.info(f"=== Config._load_condensation START ===")
         
         providers_path = Path.home() / '.aisbf' / 'providers.json'
+        logger.info(f"Looking for condensation config in: {providers_path}")
+        
         if not providers_path.exists():
+            logger.info(f"User config not found, falling back to source config")
             # Fallback to source config if user config doesn't exist
             try:
                 source_dir = self._get_config_source_dir()
                 providers_path = source_dir / 'providers.json'
+                logger.info(f"Using source config at: {providers_path}")
             except FileNotFoundError:
                 logger.warning("Could not find providers.json for condensation config")
                 self.condensation = CondensationConfig()
                 return
         
+        logger.info(f"Loading condensation config from: {providers_path}")
         with open(providers_path) as f:
             data = json.load(f)
             condensation_data = data.get('condensation', {})
             self.condensation = CondensationConfig(**condensation_data)
+            self._loaded_files['condensation'] = str(providers_path.absolute())
             logger.info(f"Loaded condensation config: provider_id={self.condensation.provider_id}, model={self.condensation.model}, enabled={self.condensation.enabled}")
             logger.info(f"=== Config._load_condensation END ===")
 
@@ -299,6 +325,31 @@ class Config:
                 'last_failure': None,
                 'disabled_until': None
             }
+    
+    def _log_configuration_summary(self):
+        """Log a summary of all loaded configuration files"""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("=== CONFIGURATION FILES LOADED ===")
+        logger.info("=" * 80)
+        
+        if 'providers' in self._loaded_files:
+            logger.info(f"Providers:    {self._loaded_files['providers']}")
+        
+        if 'rotations' in self._loaded_files:
+            logger.info(f"Rotations:    {self._loaded_files['rotations']}")
+        
+        if 'autoselect' in self._loaded_files:
+            logger.info(f"Autoselect:   {self._loaded_files['autoselect']}")
+        
+        if 'condensation' in self._loaded_files:
+            logger.info(f"Condensation: {self._loaded_files['condensation']}")
+        
+        logger.info("=" * 80)
+        logger.info("")
 
     def get_provider(self, provider_id: str) -> ProviderConfig:
         import logging

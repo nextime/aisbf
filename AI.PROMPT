@@ -383,7 +383,9 @@ Kiro Gateway is a third-party proxy gateway that provides OpenAI and Anthropic-c
 
 **Configuration:**
 
-In `config/providers.json`:
+**IMPORTANT:** Kiro providers use a different configuration structure than other providers. Instead of an `api_key` field, they use a `kiro_config` object with authentication settings specific to Kiro/Amazon Q Developer.
+
+**Standard Provider Configuration (Google, OpenAI, Anthropic, etc.):**
 ```json
 {
   "gemini": {
@@ -405,18 +407,32 @@ In `config/providers.json`:
         "context_size": 1000000
       }
     ]
-  },
+  }
+}
+```
+
+**Kiro Provider Configuration (uses kiro_config instead of api_key):**
+```json
+{
   "kiro": {
     "id": "kiro",
-    "name": "Kiro Gateway (Amazon Q Developer)",
-    "endpoint": "http://localhost:8000/v1",
+    "name": "Kiro (Amazon Q Developer)",
+    "endpoint": "https://q.us-east-1.amazonaws.com",
     "type": "kiro",
-    "api_key_required": true,
-    "api_key": "YOUR_KIRO_API_KEY",
+    "api_key_required": false,
     "rate_limit": 0,
+    "kiro_config": {
+      "region": "us-east-1",
+      "creds_file": "~/.config/Code/User/globalStorage/amazon.q/credentials.json",
+      "sqlite_db": "",
+      "refresh_token": "",
+      "profile_arn": "",
+      "client_id": "",
+      "client_secret": ""
+    },
     "models": [
       {
-        "name": "claude-sonnet-4-5",
+        "name": "anthropic.claude-3-5-sonnet-20241022-v2:0",
         "rate_limit": 0,
         "max_request_tokens": 200000,
         "context_size": 200000
@@ -425,6 +441,20 @@ In `config/providers.json`:
   }
 }
 ```
+
+**Kiro Configuration Fields (kiro_config):**
+- `region`: AWS region (default: "us-east-1")
+- `creds_file`: Path to Kiro IDE credentials JSON file (Option 1)
+- `sqlite_db`: Path to kiro-cli SQLite database (Option 2)
+- `refresh_token`: Direct refresh token for authentication (Option 3)
+- `profile_arn`: AWS CodeWhisperer profile ARN (optional)
+- `client_id`: OAuth client ID for AWS SSO OIDC (used with refresh_token)
+- `client_secret`: OAuth client secret for AWS SSO OIDC (used with refresh_token)
+
+Choose one authentication method:
+1. **Kiro IDE credentials**: Set `creds_file` to the path of your Kiro IDE credentials
+2. **kiro-cli database**: Set `sqlite_db` to the path of your kiro-cli SQLite database
+3. **Direct credentials**: Set `refresh_token` and optionally `client_id`/`client_secret` for AWS SSO OIDC
 
 In `config/rotations.json` (API keys are now referenced from providers.json):
 ```json
@@ -589,6 +619,25 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
 
 ### Recent Updates
+
+**2026-03-23 - Proxy-Awareness Implementation**
+- Added ProxyHeadersMiddleware to handle reverse proxy deployments
+- Implemented automatic detection of proxy headers (X-Forwarded-Proto, X-Forwarded-Host, X-Forwarded-Port, X-Forwarded-Prefix, X-Forwarded-For)
+- Updated all RedirectResponse calls to use proxy-aware url_for() function
+- Updated templates to use proxy-aware URL generation
+- Added comprehensive nginx proxy configuration examples to DOCUMENTATION.md
+- Application now fully supports deployment behind reverse proxies with subpaths
+- Dashboard URLs, redirects, and API responses automatically adjust based on proxy configuration
+
+**2026-03-23 - Kiro Provider Dashboard Support**
+- Updated providers.html dashboard to show kiro-specific configuration fields
+- Kiro providers now display `kiro_config` options (region, creds_file, sqlite_db, refresh_token, profile_arn, client_id, client_secret) instead of standard api_key fields
+- Added `updateProviderType()` function to handle switching between kiro and other provider types
+- Added `updateKiroConfig()` function to manage kiro-specific configuration fields
+- Updated `addProvider()` function to ask for provider type and set appropriate defaults for kiro providers
+- Dashboard automatically initializes kiro_config when provider type is changed to "kiro"
+- Dashboard automatically removes kiro_config when provider type is changed from "kiro" to another type
+- Updated AI.PROMPT documentation to clarify kiro provider configuration differences
 
 **2026-03-22 - Configuration Refactoring**
 - Centralized API key storage in providers.json
@@ -842,3 +891,117 @@ When making changes that affect the project structure or functionality:
 ### Version Control
 
 AI.PROMPT should be committed to version control along with other project files to ensure that documentation stays synchronized with the codebase.
+
+## Proxy-Awareness and Reverse Proxy Support
+
+### Overview
+
+AISBF is fully proxy-aware and can be deployed behind reverse proxies like nginx, Apache, or Caddy. The application automatically detects and respects standard proxy headers to ensure correct URL generation and routing.
+
+### Implementation
+
+**Proxy Headers Middleware** ([`main.py`](main.py:349-408)):
+- `ProxyHeadersMiddleware` class handles proxy header detection
+- Automatically updates request scope with proxy information
+- Processes standard proxy headers before other middleware
+- Must be added before other middleware to ensure proper request scope modification
+
+**Supported Proxy Headers**:
+- `X-Forwarded-Proto`: Original protocol (http/https)
+- `X-Forwarded-Host`: Original hostname
+- `X-Forwarded-Port`: Original port number
+- `X-Forwarded-Prefix` or `X-Script-Name`: URL subpath/prefix
+- `X-Forwarded-For`: Original client IP address
+
+**Helper Functions** ([`main.py`](main.py:410-445)):
+- `get_base_url(request)`: Returns full base URL respecting proxy configuration
+- `url_for(request, path)`: Generates proxy-aware URLs for any path
+- `setup_template_globals()`: Configures Jinja2 templates with proxy-aware URL functions
+
+### URL Generation
+
+**In Python Code**:
+```python
+# Use url_for() for all redirects
+return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+
+# Get base URL
+base_url = get_base_url(request)  # e.g., "https://example.com:8443/aisbf"
+```
+
+**In Jinja2 Templates**:
+```html
+<!-- Use url_for() function in templates -->
+<a href="{{ url_for(request, '/dashboard/providers') }}">Providers</a>
+
+<!-- For JavaScript fetch calls -->
+fetch('{{ url_for(request, "/dashboard/restart") }}', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'}
+})
+```
+
+### Deployment Scenarios
+
+**Scenario 1: Root Path Deployment**
+- URL: `https://aisbf.example.com/`
+- No special configuration needed
+- Proxy sets: `X-Forwarded-Proto: https`, `X-Forwarded-Host: aisbf.example.com`
+
+**Scenario 2: Subpath Deployment**
+- URL: `https://example.com/aisbf/`
+- Proxy must set: `X-Forwarded-Prefix: /aisbf`
+- AISBF automatically adjusts all URLs to include `/aisbf` prefix
+
+**Scenario 3: Custom Port**
+- URL: `https://example.com:8443/`
+- Proxy sets: `X-Forwarded-Port: 8443`
+- URLs include port number when non-standard
+
+### Nginx Configuration
+
+See [`DOCUMENTATION.md`](DOCUMENTATION.md) "Proxy Deployment" section for complete nginx configuration examples including:
+- Simple reverse proxy (root path)
+- Reverse proxy with subpath
+- Load balancing multiple instances
+- API-only deployment with rate limiting
+
+### Testing Proxy Configuration
+
+After deploying behind a proxy:
+1. Access the dashboard and verify all links work correctly
+2. Test redirects (login, logout) work properly
+3. Verify the restart button uses correct URL
+4. Test API endpoints through the proxy
+5. Check that streaming responses work correctly
+
+### Common Issues and Solutions
+
+**Issue**: Dashboard links return 404 errors
+**Solution**: Ensure `X-Forwarded-Prefix` header is set correctly in nginx
+
+**Issue**: Redirect loops after login
+**Solution**: Verify `X-Forwarded-Proto` is set to `https` for HTTPS deployments
+
+**Issue**: URLs missing subpath prefix
+**Solution**: Check that `X-Forwarded-Prefix` or `X-Script-Name` header is configured
+
+**Issue**: Streaming responses not working
+**Solution**: Ensure `proxy_buffering off` is set in nginx configuration
+
+### Files Modified for Proxy-Awareness
+
+- [`main.py`](main.py): Added ProxyHeadersMiddleware, url_for(), get_base_url() functions
+- [`templates/base.html`](templates/base.html): Updated all URLs to use url_for() function
+- All dashboard route handlers in [`main.py`](main.py): Updated RedirectResponse calls to use url_for()
+- [`DOCUMENTATION.md`](DOCUMENTATION.md): Added comprehensive nginx proxy configuration examples
+
+### Security Considerations
+
+When deploying behind a proxy:
+- AISBF should bind to localhost only (default: `127.0.0.1:17765`)
+- Proxy should handle SSL/TLS termination
+- Enable authentication in AISBF configuration
+- Configure rate limiting in the proxy
+- Set security headers in proxy configuration
+- Monitor access logs for suspicious activity

@@ -19,6 +19,7 @@
     "password": "8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918"
   },
   "internal_model": {
-    "model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+    "condensation_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3",
+    "autoselect_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
   }
 }

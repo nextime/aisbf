@@ -31,6 +31,8 @@ from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.database import initialize_database
 from starlette.middleware.sessions import SessionMiddleware
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.datastructures import Headers
 from itsdangerous import URLSafeTimedSerializer
 import time
 import logging
@@ -39,11 +41,14 @@ import os
 import argparse
 import secrets
 import hashlib
+import asyncio
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 import json
+import markdown
+from urllib.parse import urljoin
 
 # Global variable to store custom config directory
 _custom_config_dir = None
@@ -346,31 +351,410 @@ def setup_logging():
 # Configure logging
 logger = setup_logging()
 
+class ProxyHeadersMiddleware(BaseHTTPMiddleware):
+    """
+    Middleware to handle proxy headers and make the application proxy-aware.
+    
+    Supports standard proxy headers:
+    - X-Forwarded-Proto: Original protocol (http/https)
+    - X-Forwarded-Host: Original host
+    - X-Forwarded-Port: Original port
+    - X-Forwarded-Prefix or X-Script-Name: URL prefix/subpath
+    - X-Forwarded-For: Client IP address
+    """
+    
+    async def dispatch(self, request: Request, call_next):
+        # Get proxy headers
+        forwarded_proto = request.headers.get("X-Forwarded-Proto")
+        forwarded_host = request.headers.get("X-Forwarded-Host")
+        forwarded_port = request.headers.get("X-Forwarded-Port")
+        forwarded_prefix = request.headers.get("X-Forwarded-Prefix") or request.headers.get("X-Script-Name")
+        forwarded_for = request.headers.get("X-Forwarded-For")
+        
+        # Update request scope with proxy information
+        if forwarded_proto:
+            request.scope["scheme"] = forwarded_proto
+        
+        if forwarded_host:
+            # Handle host:port format
+            if ":" in forwarded_host and not forwarded_port:
+                host_parts = forwarded_host.split(":", 1)
+                request.scope["server"] = (host_parts[0], int(host_parts[1]))
+            else:
+                port = int(forwarded_port) if forwarded_port else (443 if forwarded_proto == "https" else 80)
+                request.scope["server"] = (forwarded_host, port)
+        elif forwarded_port:
+            # Only port was forwarded, keep existing host
+            current_host = request.scope.get("server", ("localhost", 80))[0]
+            request.scope["server"] = (current_host, int(forwarded_port))
+        
+        # Handle URL prefix/subpath
+        if forwarded_prefix:
+            # Remove trailing slash from prefix
+            forwarded_prefix = forwarded_prefix.rstrip("/")
+            request.scope["root_path"] = forwarded_prefix
+            
+            # Update path to remove prefix if present
+            original_path = request.scope.get("path", "")
+            if original_path.startswith(forwarded_prefix):
+                request.scope["path"] = original_path[len(forwarded_prefix):] or "/"
+        
+        # Store client IP from X-Forwarded-For
+        if forwarded_for:
+            # X-Forwarded-For can contain multiple IPs, take the first one (original client)
+            client_ip = forwarded_for.split(",")[0].strip()
+            request.scope["client"] = (client_ip, request.scope.get("client", ("", 0))[1])
+        
+        response = await call_next(request)
+        return response
+
+def get_base_url(request: Request) -> str:
+    """
+    Get the base URL for the application, respecting proxy headers.
+    
+    Returns the full base URL including scheme, host, port, and prefix.
+    Example: https://example.com:8443/aisbf
+    """
+    scheme = request.scope.get("scheme", "http")
+    server = request.scope.get("server", ("localhost", 80))
+    host = server[0]
+    port = server[1]
+    root_path = request.scope.get("root_path", "")
+    
+    # Don't include port in URL if it's the default for the scheme
+    if (scheme == "http" and port == 80) or (scheme == "https" and port == 443):
+        base_url = f"{scheme}://{host}{root_path}"
+    else:
+        base_url = f"{scheme}://{host}:{port}{root_path}"
+    
+    return base_url
+
+def url_for(request: Request, path: str) -> str:
+    """
+    Generate a proxy-aware URL for the given path.
+    
+    Args:
+        request: The current request object
+        path: The path to generate URL for (should start with /)
+    
+    Returns:
+        Full URL respecting proxy configuration
+    """
+    base_url = get_base_url(request)
+    
+    # Ensure path starts with /
+    if not path.startswith("/"):
+        path = "/" + path
+    
+    return f"{base_url}{path}"
+
 # Note: config will be imported after parsing CLI args if --config is provided
 # For now, we'll delay the import and initialization
 app = FastAPI(title="AI Proxy Server")
 
-# Initialize Jinja2 templates
+# Add proxy headers middleware (must be added before other middleware)
+app.add_middleware(ProxyHeadersMiddleware)
+
+# Initialize Jinja2 templates with custom globals for proxy-aware URLs
 templates = Jinja2Templates(directory="templates")
 
-# Add session middleware (will be configured with secret key in main())
-# Placeholder - will be added in main() after we have a secret key
-session_secret_key = None
+# Add custom template globals for proxy-aware URL generation
+def setup_template_globals():
+    """Setup Jinja2 template globals for proxy-aware URLs"""
+    templates.env.globals['url_for'] = url_for
+    templates.env.globals['get_base_url'] = get_base_url
 
-# These will be initialized in main() after config is loaded
+# Call setup after templates are initialized
+setup_template_globals()
+
+# Add session middleware at module level with a temporary secret key
+# This is needed for uvicorn import (when main() doesn't run)
+_default_session_secret = secrets.token_urlsafe(32)
+app.add_middleware(SessionMiddleware, secret_key=_default_session_secret)
+
+# These will be initialized in startup event or main() after config is loaded
 request_handler = None
 rotation_handler = None
 autoselect_handler = None
 server_config = None
 config = None
+_initialized = False
+
+# Model cache for dynamically fetched provider models
+_model_cache = {}
+_model_cache_timestamps = {}
+_cache_refresh_interval = 4 * 3600  # 4 hours in seconds
+_cache_refresh_task = None
+
+def initialize_app(custom_config_dir=None):
+    """Initialize app globals. Called by startup event or main()."""
+    global config, request_handler, rotation_handler, autoselect_handler, server_config, _initialized
+    
+    if _initialized:
+        return
+    
+    # Set custom config directory if provided
+    if custom_config_dir:
+        set_config_dir(custom_config_dir)
+        logger.info(f"Using custom config directory: {custom_config_dir}")
+    
+    # Import config
+    from aisbf.config import config as cfg
+    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+    
+    config = cfg
+    request_handler = RequestHandler()
+    rotation_handler = RotationHandler()
+    autoselect_handler = AutoselectHandler()
+    
+    # Load server configuration
+    server_config = load_server_config(custom_config_dir)
+    
+    # Load dashboard config
+    aisbf_config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    if not aisbf_config_path.exists():
+        if custom_config_dir:
+            aisbf_config_path = Path(custom_config_dir) / 'aisbf.json'
+        else:
+            # Try installed location first
+            installed_path = Path(__file__).parent / 'aisbf.json'
+            if installed_path.exists():
+                aisbf_config_path = installed_path
+            else:
+                # Fall back to config subdirectory
+                aisbf_config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+    
+    if aisbf_config_path.exists():
+        with open(aisbf_config_path) as f:
+            aisbf_config = json.load(f)
+            server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
+    else:
+        # Default with hashed password for 'admin'
+        server_config['dashboard_config'] = {
+            'username': 'admin', 
+            'password': '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
+        }
+    
+    _initialized = True
+    logger.info("App initialization complete")
+
+async def fetch_provider_models(provider_id: str) -> list:
+    """Fetch models from provider API and cache them"""
+    global _model_cache, _model_cache_timestamps
+    
+    try:
+        logger.debug(f"Fetching models from provider: {provider_id}")
+        # Create a dummy request object for the handler
+        from starlette.requests import Request
+        from starlette.datastructures import Headers
+        
+        scope = {
+            "type": "http",
+            "method": "GET",
+            "headers": [],
+            "query_string": b"",
+            "path": f"/api/{provider_id}/models",
+        }
+        dummy_request = Request(scope)
+        
+        # Fetch models from provider API
+        models = await request_handler.handle_model_list(dummy_request, provider_id)
+        
+        # Cache the results
+        _model_cache[provider_id] = models
+        _model_cache_timestamps[provider_id] = time.time()
+        
+        logger.info(f"Cached {len(models)} models from provider: {provider_id}")
+        return models
+    except Exception as e:
+        logger.warning(f"Failed to fetch models from provider {provider_id}: {e}")
+        return []
+
+async def refresh_model_cache():
+    """Background task to refresh model cache periodically"""
+    global _model_cache, _model_cache_timestamps
+    
+    while True:
+        try:
+            await asyncio.sleep(_cache_refresh_interval)
+            logger.info("Starting periodic model cache refresh...")
+            
+            # Refresh cache for all providers without local model config
+            for provider_id, provider_config in config.providers.items():
+                if not (hasattr(provider_config, 'models') and provider_config.models):
+                    await fetch_provider_models(provider_id)
+            
+            logger.info("Model cache refresh complete")
+        except Exception as e:
+            logger.error(f"Error in model cache refresh task: {e}")
+
+async def get_provider_models(provider_id: str, provider_config) -> list:
+    """Get models for a provider from local config or cache"""
+    global _model_cache, _model_cache_timestamps
+    
+    # Check if provider requires API key and if it's configured
+    api_key_required = getattr(provider_config, 'api_key_required', False)
+    api_key = getattr(provider_config, 'api_key', None)
+    
+    # If API key is required but not configured or is placeholder, skip this provider
+    if api_key_required:
+        if not api_key or api_key.startswith('YOUR_'):
+            logger.debug(f"Skipping provider {provider_id}: API key required but not configured")
+            return []
+    
+    # If provider has local model config, use it
+    if hasattr(provider_config, 'models') and provider_config.models:
+        models = []
+        for model in provider_config.models:
+            model_id = f"{provider_id}/{model.name}"
+            models.append({
+                'id': model_id,
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': provider_config.name,
+                'provider': provider_id,
+                'type': 'provider',
+                'model_name': model.name,
+                'context_size': getattr(model, 'context_size', None),
+                'capabilities': getattr(model, 'capabilities', []),
+                'source': 'local_config'
+            })
+        return models
+    
+    # Check if we have cached models
+    if provider_id in _model_cache:
+        cache_age = time.time() - _model_cache_timestamps.get(provider_id, 0)
+        if cache_age < _cache_refresh_interval:
+            # Cache is still fresh, use it
+            cached_models = _model_cache[provider_id]
+            if cached_models:  # Only return if we have actual models
+                # Add provider prefix to model IDs
+                models = []
+                for model in cached_models:
+                    model_copy = model.copy()
+                    model_copy['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    model_copy['provider'] = provider_id
+                    model_copy['type'] = 'provider'
+                    model_copy['source'] = 'api_cache'
+                    models.append(model_copy)
+                return models
+    
+    # No local config and no cache, try to fetch from API (only if API key is valid or not required)
+    if not api_key_required or (api_key and not api_key.startswith('YOUR_')):
+        try:
+            fetched_models = await fetch_provider_models(provider_id)
+            if fetched_models:
+                # Add provider prefix to model IDs
+                models = []
+                for model in fetched_models:
+                    model_copy = model.copy()
+                    model_copy['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    model_copy['provider'] = provider_id
+                    model_copy['type'] = 'provider'
+                    model_copy['source'] = 'api_cache'
+                    models.append(model_copy)
+                return models
+        except Exception as e:
+            logger.debug(f"Failed to fetch models for provider {provider_id}: {e}")
+    
+    # No models available - return empty list (don't show generic fallback)
+    return []
+
+@app.on_event("startup")
+async def startup_event():
+    """Initialize app on startup (for uvicorn import case)."""
+    global config, server_config, _cache_refresh_task
+    if not _initialized:
+        # Use environment variable for config dir if set
+        custom_config_dir = get_config_dir()
+        initialize_app(custom_config_dir)
+    
+    # Log configuration files loaded
+    if config and hasattr(config, '_loaded_files'):
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("=== CONFIGURATION FILES LOADED ===")
+        logger.info("=" * 80)
+        
+        if 'providers' in config._loaded_files:
+            logger.info(f"Providers:    {config._loaded_files['providers']}")
+        
+        if 'rotations' in config._loaded_files:
+            logger.info(f"Rotations:    {config._loaded_files['rotations']}")
+        
+        if 'autoselect' in config._loaded_files:
+            logger.info(f"Autoselect:   {config._loaded_files['autoselect']}")
+        
+        if 'condensation' in config._loaded_files:
+            logger.info(f"Condensation: {config._loaded_files['condensation']}")
+        
+        logger.info("=" * 80)
+        logger.info("")
+    
+    # Start background task for model cache refresh
+    if _cache_refresh_task is None:
+        _cache_refresh_task = asyncio.create_task(refresh_model_cache())
+        logger.info(f"Started model cache refresh task (interval: {_cache_refresh_interval/3600} hours)")
+    
+    # In debug mode, validate provider configurations
+    AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
+    if AISBF_DEBUG and config:
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("=== PROVIDER CONFIGURATION VALIDATION (DEBUG MODE) ===")
+        logger.info("=" * 80)
+        
+        for provider_id, provider_config in config.providers.items():
+            logger.info(f"")
+            logger.info(f"Provider: {provider_id}")
+            logger.info(f"  Type: {provider_config.type}")
+            logger.info(f"  Endpoint: {provider_config.endpoint}")
+            logger.info(f"  API Key Required: {provider_config.api_key_required}")
+            
+            # Check if API key is configured
+            if provider_config.api_key_required:
+                if provider_config.api_key:
+                    logger.info(f"  API Key: Configured ✓")
+                    logger.info(f"  Status: Ready to use")
+                else:
+                    logger.warning(f"  API Key: NOT CONFIGURED ✗")
+                    logger.warning(f"  Status: WILL BE SKIPPED - API key required but not provided")
+                    logger.warning(f"  Action: Add api_key to provider configuration in providers.json")
+            else:
+                logger.info(f"  API Key: Not required")
+                logger.info(f"  Status: Ready to use")
+            
+            # Show model count if available
+            if provider_config.models:
+                logger.info(f"  Models Configured: {len(provider_config.models)}")
+                for model in provider_config.models[:3]:  # Show first 3 models
+                    logger.info(f"    - {model.name}")
+                if len(provider_config.models) > 3:
+                    logger.info(f"    ... and {len(provider_config.models) - 3} more")
+            else:
+                logger.info(f"  Models Configured: None (will use provider's default models)")
+        
+        logger.info("")
+        logger.info("=" * 80)
+        logger.info("")
+    
+    logger.info(f"=== AISBF Server Started ===")
+    logger.info(f"Available providers: {list(config.providers.keys()) if config else []}")
+    logger.info(f"Available rotations: {list(config.rotations.keys()) if config else []}")
+    logger.info(f"Available autoselect: {list(config.autoselect.keys()) if config else []}")
 
 # Authentication middleware
 @app.middleware("http")
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
-    if server_config.get('auth_enabled', False):
+    if server_config and server_config.get('auth_enabled', False):
         # Skip auth for root endpoint and dashboard routes
         if request.url.path == "/" or request.url.path.startswith("/dashboard"):
+            response = await call_next(request)
+            return response
+        
+        # Skip auth for public models endpoints (GET only)
+        if request.method == "GET" and request.url.path in ["/api/models", "/api/v1/models"]:
             response = await call_next(request)
             return response
         
@@ -447,12 +831,12 @@ app.add_middleware(
 @app.get("/dashboard/login", response_class=HTMLResponse)
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
-    return templates.TemplateResponse("dashboard/login.html", {"request": request})
+    return templates.TemplateResponse("dashboard/login.html", {"request": request, "session": request.session})
 
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle dashboard login"""
-    dashboard_config = server_config.get('dashboard_config', {})
+    dashboard_config = server_config.get('dashboard_config', {}) if server_config else {}
     stored_username = dashboard_config.get('username', 'admin')
     stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
     
@@ -463,19 +847,19 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
     if username == stored_username and password_hash == stored_password_hash:
         request.session['logged_in'] = True
         request.session['username'] = username
-        return RedirectResponse(url="/dashboard", status_code=303)
-    return templates.TemplateResponse("dashboard/login.html", {"request": request, "error": "Invalid credentials"})
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+    return templates.TemplateResponse("dashboard/login.html", {"request": request, "session": request.session, "error": "Invalid credentials"})
 
 @app.get("/dashboard/logout")
 async def dashboard_logout(request: Request):
     """Handle dashboard logout"""
     request.session.clear()
-    return RedirectResponse(url="/dashboard/login", status_code=303)
+    return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
 def require_dashboard_auth(request: Request):
     """Check if user is logged in to dashboard"""
     if not request.session.get('logged_in'):
-        return RedirectResponse(url="/dashboard/login", status_code=303)
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
     return None
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -507,13 +891,23 @@ async def dashboard_providers(request: Request):
         config_path = Path(__file__).parent / 'config' / 'providers.json'
     
     with open(config_path) as f:
-        config_content = f.read()
+        full_config = json.load(f)
     
-    return templates.TemplateResponse("dashboard/edit_config.html", {
+    # Extract just the providers object (handle both nested and flat structures)
+    if 'providers' in full_config and isinstance(full_config['providers'], dict):
+        providers_data = full_config['providers']
+    else:
+        # Fallback for flat structure (backward compatibility)
+        providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+    
+    # Check for success parameter
+    success = request.query_params.get('success')
+    
+    return templates.TemplateResponse("dashboard/providers.html", {
         "request": request,
         "session": request.session,
-        "title": "Providers Configuration",
-        "config_content": config_content
+        "providers_json": json.dumps(providers_data),
+        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
     })
 
 @app.post("/dashboard/providers")
@@ -525,27 +919,58 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
     
     try:
         # Validate JSON
-        json.loads(config)
+        providers_data = json.loads(config)
         
-        # Save to file
+        # Apply defaults: if condense_method is set but condense_context is not, default to 80
+        for provider_key, provider in providers_data.items():
+            if 'models' in provider and isinstance(provider['models'], list):
+                for model in provider['models']:
+                    if 'condense_method' in model and model.get('condense_method'):
+                        if 'condense_context' not in model or model.get('condense_context') is None:
+                            model['condense_context'] = 80
+        
+        # Load existing config to preserve structure
         config_path = Path.home() / '.aisbf' / 'providers.json'
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w') as f:
-            f.write(config)
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'providers.json'
         
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        # Read existing config to preserve condensation settings
+        with open(config_path) as f:
+            full_config = json.load(f)
+        
+        # Update providers section while preserving other keys
+        full_config['providers'] = providers_data
+        
+        # Save to file with full structure
+        save_path = Path.home() / '.aisbf' / 'providers.json'
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(save_path, 'w') as f:
+            json.dump(full_config, f, indent=2)
+        
+        return templates.TemplateResponse("dashboard/providers.html", {
             "request": request,
             "session": request.session,
-            "title": "Providers Configuration",
-            "config_content": config,
+            "providers_json": json.dumps(providers_data),
             "success": "Configuration saved successfully! Restart server for changes to take effect."
         })
     except json.JSONDecodeError as e:
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        # Reload current config on error
+        config_path = Path.home() / '.aisbf' / 'providers.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'providers.json'
+        with open(config_path) as f:
+            full_config = json.load(f)
+        
+        # Extract providers
+        if 'providers' in full_config and isinstance(full_config['providers'], dict):
+            providers_data = full_config['providers']
+        else:
+            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+        
+        return templates.TemplateResponse("dashboard/providers.html", {
             "request": request,
             "session": request.session,
-            "title": "Providers Configuration",
-            "config_content": config,
+            "providers_json": json.dumps(providers_data),
             "error": f"Invalid JSON: {str(e)}"
         })
 
@@ -561,13 +986,20 @@ async def dashboard_rotations(request: Request):
         config_path = Path(__file__).parent / 'config' / 'rotations.json'
     
     with open(config_path) as f:
-        config_content = f.read()
+        rotations_data = json.load(f)
     
-    return templates.TemplateResponse("dashboard/edit_config.html", {
+    # Get available providers
+    available_providers = list(config.providers.keys()) if config else []
+    
+    # Check for success parameter
+    success = request.query_params.get('success')
+    
+    return templates.TemplateResponse("dashboard/rotations.html", {
         "request": request,
         "session": request.session,
-        "title": "Rotations Configuration",
-        "config_content": config_content
+        "rotations_json": json.dumps(rotations_data),
+        "available_providers": json.dumps(available_providers),
+        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
     })
 
 @app.post("/dashboard/rotations")
@@ -578,25 +1010,48 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         return auth_check
     
     try:
-        json.loads(config)
+        rotations_data = json.loads(config)
+        
+        # Apply defaults: if condense_method is set but condense_context is not, default to 80
+        if 'rotations' in rotations_data:
+            for rotation_key, rotation in rotations_data['rotations'].items():
+                if 'providers' in rotation and isinstance(rotation['providers'], list):
+                    for provider in rotation['providers']:
+                        if 'models' in provider and isinstance(provider['models'], list):
+                            for model in provider['models']:
+                                if 'condense_method' in model and model.get('condense_method'):
+                                    if 'condense_context' not in model or model.get('condense_context') is None:
+                                        model['condense_context'] = 80
+        
         config_path = Path.home() / '.aisbf' / 'rotations.json'
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, 'w') as f:
-            f.write(config)
+            json.dump(rotations_data, f, indent=2)
         
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        available_providers = list(config.providers.keys()) if config else []
+        
+        return templates.TemplateResponse("dashboard/rotations.html", {
             "request": request,
             "session": request.session,
-            "title": "Rotations Configuration",
-            "config_content": config,
+            "rotations_json": json.dumps(rotations_data),
+            "available_providers": json.dumps(available_providers),
             "success": "Configuration saved successfully! Restart server for changes to take effect."
         })
     except json.JSONDecodeError as e:
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        # Reload current config on error
+        config_path = Path.home() / '.aisbf' / 'rotations.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'rotations.json'
+        with open(config_path) as f:
+            rotations_data = json.load(f)
+        
+        available_providers = list(config.providers.keys()) if config else []
+        
+        return templates.TemplateResponse("dashboard/rotations.html", {
             "request": request,
             "session": request.session,
-            "title": "Rotations Configuration",
-            "config_content": config,
+            "rotations_json": json.dumps(rotations_data),
+            "available_providers": json.dumps(available_providers),
             "error": f"Invalid JSON: {str(e)}"
         })
 
@@ -612,13 +1067,52 @@ async def dashboard_autoselect(request: Request):
         config_path = Path(__file__).parent / 'config' / 'autoselect.json'
     
     with open(config_path) as f:
-        config_content = f.read()
+        autoselect_data = json.load(f)
     
-    return templates.TemplateResponse("dashboard/edit_config.html", {
+    # Get available rotations
+    available_rotations = list(config.rotations.keys()) if config else []
+    
+    # Get available provider models
+    available_models = []
+    
+    # Add rotation IDs
+    for rotation_id in available_rotations:
+        available_models.append({
+            'id': rotation_id,
+            'name': f'{rotation_id} (rotation)',
+            'type': 'rotation'
+        })
+    
+    # Add provider models
+    providers_path = Path.home() / '.aisbf' / 'providers.json'
+    if not providers_path.exists():
+        providers_path = Path(__file__).parent / 'config' / 'providers.json'
+    
+    if providers_path.exists():
+        with open(providers_path) as f:
+            providers_config = json.load(f)
+            providers_data = providers_config.get('providers', {})
+            
+            for provider_id, provider in providers_data.items():
+                if 'models' in provider and isinstance(provider['models'], list):
+                    for model in provider['models']:
+                        model_id = f"{provider_id}/{model['name']}"
+                        available_models.append({
+                            'id': model_id,
+                            'name': f"{model_id} (provider model)",
+                            'type': 'provider'
+                        })
+    
+    # Check for success parameter
+    success = request.query_params.get('success')
+    
+    return templates.TemplateResponse("dashboard/autoselect.html", {
         "request": request,
         "session": request.session,
-        "title": "Autoselect Configuration",
-        "config_content": config_content
+        "autoselect_json": json.dumps(autoselect_data),
+        "available_rotations": json.dumps(available_rotations),
+        "available_models": json.dumps(available_models),
+        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
     })
 
 @app.post("/dashboard/autoselect")
@@ -629,53 +1123,120 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         return auth_check
     
     try:
-        json.loads(config)
+        autoselect_data = json.loads(config)
         config_path = Path.home() / '.aisbf' / 'autoselect.json'
         config_path.parent.mkdir(parents=True, exist_ok=True)
         with open(config_path, 'w') as f:
-            f.write(config)
+            json.dump(autoselect_data, f, indent=2)
         
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        available_rotations = list(config.rotations.keys()) if config else []
+        
+        return templates.TemplateResponse("dashboard/autoselect.html", {
             "request": request,
             "session": request.session,
-            "title": "Autoselect Configuration",
-            "config_content": config,
+            "autoselect_json": json.dumps(autoselect_data),
+            "available_rotations": json.dumps(available_rotations),
             "success": "Configuration saved successfully! Restart server for changes to take effect."
         })
     except json.JSONDecodeError as e:
-        return templates.TemplateResponse("dashboard/edit_config.html", {
+        # Reload current config on error
+        config_path = Path.home() / '.aisbf' / 'autoselect.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'autoselect.json'
+        with open(config_path) as f:
+            autoselect_data = json.load(f)
+        
+        available_rotations = list(config.rotations.keys()) if config else []
+        
+        return templates.TemplateResponse("dashboard/autoselect.html", {
             "request": request,
             "session": request.session,
-            "title": "Autoselect Configuration",
-            "config_content": config,
+            "autoselect_json": json.dumps(autoselect_data),
+            "available_rotations": json.dumps(available_rotations),
             "error": f"Invalid JSON: {str(e)}"
         })
 
-@app.get("/dashboard/condensation", response_class=HTMLResponse)
-async def dashboard_condensation(request: Request):
-    """Edit condensation prompts"""
+@app.get("/dashboard/prompts", response_class=HTMLResponse)
+async def dashboard_prompts(request: Request):
+    """Edit prompt templates"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
     
-    # Load condensation_conversational.md
-    config_path = Path.home() / '.aisbf' / 'condensation_conversational.md'
-    if not config_path.exists():
-        config_path = Path(__file__).parent / 'config' / 'condensation_conversational.md'
+    # Define available prompts
+    prompt_files = [
+        {'key': 'condensation_conversational', 'name': 'Condensation - Conversational', 'filename': 'condensation_conversational.md'},
+        {'key': 'condensation_semantic', 'name': 'Condensation - Semantic', 'filename': 'condensation_semantic.md'},
+        {'key': 'autoselect', 'name': 'Autoselect - Model Selection', 'filename': 'autoselect.md'},
+    ]
     
-    with open(config_path) as f:
-        config_content = f.read()
+    prompts_data = []
+    for prompt_file in prompt_files:
+        config_path = Path.home() / '.aisbf' / prompt_file['filename']
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / prompt_file['filename']
+        
+        if config_path.exists():
+            with open(config_path) as f:
+                content = f.read()
+            prompts_data.append({
+                'key': prompt_file['key'],
+                'name': prompt_file['name'],
+                'filename': prompt_file['filename'],
+                'content': content
+            })
     
-    return templates.TemplateResponse("dashboard/edit_config.html", {
+    # Check for success parameter
+    success = request.query_params.get('success')
+    
+    return templates.TemplateResponse("dashboard/prompts.html", {
         "request": request,
         "session": request.session,
-        "title": "Condensation Prompts (Conversational)",
-        "config_content": config_content
+        "prompts": prompt_files,
+        "prompts_data": json.dumps(prompts_data),
+        "success": "Prompt saved successfully!" if success else None
     })
+
+@app.post("/dashboard/prompts")
+async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), prompt_content: str = Form(...)):
+    """Save prompt template"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Map prompt keys to filenames
+    prompt_map = {
+        'condensation_conversational': 'condensation_conversational.md',
+        'condensation_semantic': 'condensation_semantic.md',
+        'autoselect': 'autoselect.md',
+    }
+    
+    if prompt_key not in prompt_map:
+        return templates.TemplateResponse("dashboard/prompts.html", {
+            "request": request,
+            "session": request.session,
+            "prompts": [],
+            "prompts_data": "[]",
+            "error": "Invalid prompt key"
+        })
+    
+    filename = prompt_map[prompt_key]
+    config_path = Path.home() / '.aisbf' / filename
+    config_path.parent.mkdir(parents=True, exist_ok=True)
+    
+    with open(config_path, 'w') as f:
+        f.write(prompt_content)
+    
+    return RedirectResponse(url=url_for(request, "/dashboard/prompts?success=1"), status_code=303)
+
+@app.get("/dashboard/condensation", response_class=HTMLResponse)
+async def dashboard_condensation(request: Request):
+    """Redirect to prompts page for backward compatibility"""
+    return RedirectResponse(url=url_for(request, "/dashboard/prompts"), status_code=303)
 
 @app.post("/dashboard/condensation")
 async def dashboard_condensation_save(request: Request, config: str = Form(...)):
-    """Save condensation prompts"""
+    """Save condensation prompts - backward compatibility"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -685,13 +1246,7 @@ async def dashboard_condensation_save(request: Request, config: str = Form(...))
     with open(config_path, 'w') as f:
         f.write(config)
     
-    return templates.TemplateResponse("dashboard/edit_config.html", {
-        "request": request,
-        "session": request.session,
-        "title": "Condensation Prompts (Conversational)",
-        "config_content": config,
-        "success": "Prompts saved successfully!"
-    })
+    return RedirectResponse(url=url_for(request, "/dashboard/prompts?success=1"), status_code=303)
 
 @app.get("/dashboard/settings", response_class=HTMLResponse)
 async def dashboard_settings(request: Request):
@@ -724,7 +1279,8 @@ async def dashboard_settings_save(
     auth_tokens: str = Form(""),
     dashboard_username: str = Form(...),
     dashboard_password: str = Form(""),
-    internal_model_id: str = Form(...)
+    condensation_model_id: str = Form(...),
+    autoselect_model_id: str = Form(...)
 ):
     """Save server settings"""
     auth_check = require_dashboard_auth(request)
@@ -749,7 +1305,8 @@ async def dashboard_settings_save(
     if dashboard_password:  # Only update if provided - hash the password
         password_hash = hashlib.sha256(dashboard_password.encode()).hexdigest()
         aisbf_config['dashboard']['password'] = password_hash
-    aisbf_config['internal_model']['model_id'] = internal_model_id
+    aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
+    aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
     
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
@@ -788,6 +1345,93 @@ async def dashboard_restart(request: Request):
     
     return JSONResponse({"message": "Server is restarting..."})
 
+@app.get("/dashboard/docs", response_class=HTMLResponse)
+async def dashboard_docs(request: Request):
+    """Display documentation"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Try to find DOCUMENTATION.md
+    doc_path = Path(__file__).parent / 'DOCUMENTATION.md'
+    if not doc_path.exists():
+        doc_path = Path.home() / '.aisbf' / 'DOCUMENTATION.md'
+    
+    if doc_path.exists():
+        with open(doc_path, encoding='utf-8') as f:
+            markdown_content = f.read()
+            # Convert markdown to HTML with extensions for better formatting
+            html_content = markdown.markdown(
+                markdown_content,
+                extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists']
+            )
+    else:
+        html_content = "<p>Documentation file not found.</p>"
+    
+    return templates.TemplateResponse("dashboard/docs.html", {
+        "request": request,
+        "session": request.session,
+        "content": html_content,
+        "title": "Documentation"
+    })
+
+@app.get("/dashboard/about", response_class=HTMLResponse)
+async def dashboard_about(request: Request):
+    """Display README/About"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Try to find README.md
+    readme_path = Path(__file__).parent / 'README.md'
+    if not readme_path.exists():
+        readme_path = Path.home() / '.aisbf' / 'README.md'
+    
+    if readme_path.exists():
+        with open(readme_path, encoding='utf-8') as f:
+            markdown_content = f.read()
+            # Convert markdown to HTML with extensions for better formatting
+            html_content = markdown.markdown(
+                markdown_content,
+                extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists']
+            )
+    else:
+        html_content = "<p>README file not found.</p>"
+    
+    return templates.TemplateResponse("dashboard/docs.html", {
+        "request": request,
+        "session": request.session,
+        "content": html_content,
+        "title": "About"
+    })
+
+@app.get("/dashboard/license", response_class=HTMLResponse)
+async def dashboard_license(request: Request):
+    """Display License"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Try to find LICENSE.txt
+    license_path = Path(__file__).parent / 'LICENSE.txt'
+    if not license_path.exists():
+        license_path = Path.home() / '.aisbf' / 'LICENSE.txt'
+    
+    if license_path.exists():
+        with open(license_path, encoding='utf-8') as f:
+            content = f.read()
+            # Convert to HTML with pre tags to preserve formatting
+            html_content = f"<pre style='white-space: pre-wrap; word-wrap: break-word; background: #0f3460; padding: 20px; border-radius: 6px; color: #e0e0e0; font-family: inherit;'>{content}</pre>"
+    else:
+        html_content = "<p>License file not found.</p>"
+    
+    return templates.TemplateResponse("dashboard/docs.html", {
+        "request": request,
+        "session": request.session,
+        "content": html_content,
+        "title": "License"
+    })
+
 def parse_provider_from_model(model: str) -> tuple[str, str]:
     """
     Parse provider and model from model field.
@@ -814,6 +1458,58 @@ async def root():
         "autoselect": list(config.autoselect.keys())
     }
 
+
+@app.get("/health")
+async def health():
+    return {"status": "ok"}
+
+
+@app.get("/api/v1/models/{model_id}")
+async def v1_get_model(model_id: str, request: Request):
+    """Get a specific model by ID (OpenAI-compatible endpoint)"""
+    # First try to find in all models
+    all_models_response = await v1_list_all_models(request)
+    all_models = all_models_response.get("data", [])
+    
+    for model in all_models:
+        if model.get("id") == model_id:
+            return model
+    
+    from fastapi import HTTPException
+    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+
+
+@app.post("/api/v1/completions")
+async def v1_completions(request: Request):
+    """
+    Legacy text completions endpoint (OpenAI-compatible)
+    Maps to chat/completions for compatibility
+    """
+    # Get the request body
+    body = await request.body()
+    import json
+    data = json.loads(body) if body else {}
+    
+    # Convert completion request to chat completion
+    prompt = data.get("prompt", "")
+    model = data.get("model", "")
+    max_tokens = data.get("max_tokens", 2048)
+    temperature = data.get("temperature", 1.0)
+    
+    # Build chat messages from prompt
+    messages = [{"role": "user", "content": prompt}]
+    
+    # Create a new request for chat/completions
+    chat_request = {
+        "model": model,
+        "messages": messages,
+        "max_tokens": max_tokens,
+        "temperature": temperature
+    }
+    
+    # Call chat completions handler
+    return await v1_chat_completions(chat_request, request)
+
 # Standard OpenAI-compatible v1 endpoints
 @app.post("/api/v1/chat/completions")
 async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
@@ -827,85 +1523,152 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model' (e.g., 'openai/gpt-4')"
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
         )
     
     logger.info(f"Parsed provider: {provider_id}, model: {actual_model}")
     
     # Update body with actual model name
     body_dict = body.model_dump()
-    body_dict['model'] = actual_model
     
-    # Check if it's an autoselect
-    if provider_id in config.autoselect:
+    # PATH 3: Check if it's an autoselect (format: autoselect/{name})
+    if provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        body_dict['model'] = actual_model
         if body.stream:
-            return await autoselect_handler.handle_autoselect_streaming_request(provider_id, body_dict)
+            return await autoselect_handler.handle_autoselect_streaming_request(actual_model, body_dict)
         else:
-            return await autoselect_handler.handle_autoselect_request(provider_id, body_dict)
+            return await autoselect_handler.handle_autoselect_request(actual_model, body_dict)
     
-    # Check if it's a rotation
-    if provider_id in config.rotations:
-        return await rotation_handler.handle_rotation_request(provider_id, body_dict)
+    # PATH 2: Check if it's a rotation (format: rotation/{name})
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        body_dict['model'] = actual_model
+        return await rotation_handler.handle_rotation_request(actual_model, body_dict)
     
-    # Check if it's a provider
+    # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
         raise HTTPException(
             status_code=400,
-            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+            detail=f"Provider '{provider_id}' not found. Available providers: {list(config.providers.keys())}, or use 'rotation/name' or 'autoselect/name'"
         )
     
     # Handle as direct provider request
+    body_dict['model'] = actual_model
     if body.stream:
         return await request_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
     else:
         return await request_handler.handle_chat_completion(request, provider_id, body_dict)
 
+@app.get("/api/models")
+async def list_all_models(request: Request):
+    """List all available models from all providers (public endpoint)"""
+    logger.info("=== LIST ALL MODELS REQUEST ===")
+    
+    all_models = []
+    
+    # PATH 1: Add provider models (from local config or cached API results)
+    for provider_id, provider_config in config.providers.items():
+        try:
+            provider_models = await get_provider_models(provider_id, provider_config)
+            all_models.extend(provider_models)
+        except Exception as e:
+            logger.warning(f"Error listing models for provider {provider_id}: {e}")
+    
+    # PATH 2: Add rotations as rotation/{rotation_name}
+    for rotation_id, rotation_config in config.rotations.items():
+        try:
+            all_models.append({
+                'id': f"rotation/{rotation_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-rotation',
+                'type': 'rotation',
+                'rotation_id': rotation_id,
+                'model_name': rotation_config.model_name
+            })
+        except Exception as e:
+            logger.warning(f"Error listing rotation {rotation_id}: {e}")
+    
+    # PATH 3: Add autoselect as autoselect/{autoselect_name}
+    for autoselect_id, autoselect_config in config.autoselect.items():
+        try:
+            all_models.append({
+                'id': f"autoselect/{autoselect_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-autoselect',
+                'type': 'autoselect',
+                'autoselect_id': autoselect_id,
+                'model_name': autoselect_config.model_name,
+                'description': autoselect_config.description
+            })
+        except Exception as e:
+            logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
+    
+    logger.info(f"Returning {len(all_models)} total models")
+    return {"object": "list", "data": all_models}
+
 @app.get("/api/v1/models")
 async def v1_list_all_models(request: Request):
-    """List all available models from all providers"""
+    """List all available models from all providers (OpenAI-compatible endpoint)"""
     logger.info("=== V1 LIST ALL MODELS REQUEST ===")
     
     all_models = []
     
-    # Add provider models
-    for provider_id in config.providers.keys():
+    # PATH 1: Add provider models (from local config or cached API results)
+    for provider_id, provider_config in config.providers.items():
         try:
-            models = await request_handler.handle_model_list(request, provider_id)
-            for model in models:
-                # Prepend provider to model ID
-                model['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
-                model['provider'] = provider_id
-                all_models.append(model)
+            provider_models = await get_provider_models(provider_id, provider_config)
+            all_models.extend(provider_models)
         except Exception as e:
             logger.warning(f"Error listing models for provider {provider_id}: {e}")
     
-    # Add rotation models
-    for rotation_id in config.rotations.keys():
+    # PATH 2: Add rotations as rotation/{rotation_name}
+    for rotation_id, rotation_config in config.rotations.items():
         try:
-            models = await rotation_handler.handle_rotation_model_list(rotation_id)
-            for model in models:
-                model['id'] = f"{rotation_id}/{model.get('name', '')}"
-                model['type'] = 'rotation'
-                all_models.append(model)
+            all_models.append({
+                'id': f"rotation/{rotation_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-rotation',
+                'type': 'rotation',
+                'rotation_id': rotation_id,
+                'model_name': rotation_config.model_name
+            })
         except Exception as e:
-            logger.warning(f"Error listing models for rotation {rotation_id}: {e}")
+            logger.warning(f"Error listing rotation {rotation_id}: {e}")
     
-    # Add autoselect models
-    for autoselect_id in config.autoselect.keys():
+    # PATH 3: Add autoselect as autoselect/{autoselect_name}
+    for autoselect_id, autoselect_config in config.autoselect.items():
         try:
-            models = await autoselect_handler.handle_autoselect_model_list(autoselect_id)
-            for model in models:
-                model['id'] = f"{autoselect_id}/{model.get('name', model.get('id', ''))}"
-                model['type'] = 'autoselect'
-                all_models.append(model)
+            all_models.append({
+                'id': f"autoselect/{autoselect_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-autoselect',
+                'type': 'autoselect',
+                'autoselect_id': autoselect_id,
+                'model_name': autoselect_config.model_name,
+                'description': autoselect_config.description
+            })
         except Exception as e:
-            logger.warning(f"Error listing models for autoselect {autoselect_id}: {e}")
+            logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
     
+    logger.info(f"Returning {len(all_models)} total models")
     return {"object": "list", "data": all_models}
 
 @app.post("/api/v1/audio/transcriptions")
 async def v1_audio_transcriptions(request: Request):
-    """Standard audio transcription endpoint"""
+    """Standard audio transcription endpoint (supports all three proxy paths)"""
     logger.info("=== V1 AUDIO TRANSCRIPTION REQUEST ===")
     
     form = await request.form()
@@ -916,7 +1679,46 @@ async def v1_audio_transcriptions(request: Request):
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model' (e.g., 'openai/whisper-1')"
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
     # Create new form data with updated model
@@ -932,7 +1734,7 @@ async def v1_audio_transcriptions(request: Request):
 
 @app.post("/api/v1/audio/speech")
 async def v1_audio_speech(request: Request, body: dict):
-    """Standard text-to-speech endpoint"""
+    """Standard text-to-speech endpoint (supports all three proxy paths)"""
     logger.info("=== V1 TEXT-TO-SPEECH REQUEST ===")
     
     model = body.get('model', '')
@@ -941,7 +1743,46 @@ async def v1_audio_speech(request: Request, body: dict):
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model' (e.g., 'openai/tts-1')"
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
     body['model'] = actual_model
@@ -949,7 +1790,7 @@ async def v1_audio_speech(request: Request, body: dict):
 
 @app.post("/api/v1/images/generations")
 async def v1_image_generations(request: Request, body: dict):
-    """Standard image generation endpoint"""
+    """Standard image generation endpoint (supports all three proxy paths)"""
     logger.info("=== V1 IMAGE GENERATION REQUEST ===")
     
     model = body.get('model', '')
@@ -958,7 +1799,46 @@ async def v1_image_generations(request: Request, body: dict):
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model' (e.g., 'openai/dall-e-3')"
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
     body['model'] = actual_model
@@ -966,7 +1846,7 @@ async def v1_image_generations(request: Request, body: dict):
 
 @app.post("/api/v1/embeddings")
 async def v1_embeddings(request: Request, body: dict):
-    """Standard embeddings endpoint"""
+    """Standard embeddings endpoint (supports all three proxy paths)"""
     logger.info("=== V1 EMBEDDINGS REQUEST ===")
     
     model = body.get('model', '')
@@ -975,7 +1855,46 @@ async def v1_embeddings(request: Request, body: dict):
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model' (e.g., 'openai/text-embedding-ada-002')"
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
     body['model'] = actual_model
@@ -1254,63 +2173,247 @@ async def list_models(request: Request, provider_id: str):
         logger.error(f"Error handling list_models: {str(e)}", exc_info=True)
         raise
 
-# Audio endpoints
-@app.post("/api/{provider_id}/audio/transcriptions")
-async def audio_transcriptions(provider_id: str, request: Request):
-    """Handle audio transcription requests"""
-    logger.info(f"=== AUDIO TRANSCRIPTION REQUEST ===")
-    logger.info(f"Provider ID: {provider_id}")
+# Audio endpoints (model specified in request as provider/model, rotation/name, or autoselect/name)
+@app.post("/api/audio/transcriptions")
+async def audio_transcriptions(request: Request):
+    """Handle audio transcription requests (supports all three proxy paths)"""
+    logger.info("=== AUDIO TRANSCRIPTION REQUEST ===")
     
-    # Get form data (audio file upload)
     form = await request.form()
+    model = form.get('model', '')
     
-    try:
-        result = await request_handler.handle_audio_transcription(request, provider_id, form)
-        return result
-    except Exception as e:
-        logger.error(f"Error handling audio transcription: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        # Select a provider from the rotation using weighted random selection
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        # Use the fallback model from autoselect config
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        # Parse the fallback to get provider and model
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            # Fallback is a rotation, select from it
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    # Validate provider exists
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
+    
+    # Create new form data with updated model
+    from starlette.datastructures import FormData
+    updated_form = FormData()
+    for key, value in form.items():
+        if key == 'model':
+            updated_form[key] = actual_model
+        else:
+            updated_form[key] = value
+    
+    return await request_handler.handle_audio_transcription(request, provider_id, updated_form)
 
-@app.post("/api/{provider_id}/audio/speech")
-async def audio_speech(provider_id: str, request: Request, body: dict):
-    """Handle text-to-speech requests"""
-    logger.info(f"=== TEXT-TO-SPEECH REQUEST ===")
-    logger.info(f"Provider ID: {provider_id}")
+@app.post("/api/audio/speech")
+async def audio_speech(request: Request, body: dict):
+    """Handle text-to-speech requests (supports all three proxy paths)"""
+    logger.info("=== TEXT-TO-SPEECH REQUEST ===")
     
-    try:
-        result = await request_handler.handle_text_to_speech(request, provider_id, body)
-        return result
-    except Exception as e:
-        logger.error(f"Error handling text-to-speech: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_text_to_speech(request, provider_id, body)
 
-# Image endpoints
-@app.post("/api/{provider_id}/images/generations")
-async def image_generations(provider_id: str, request: Request, body: dict):
-    """Handle image generation requests"""
-    logger.info(f"=== IMAGE GENERATION REQUEST ===")
-    logger.info(f"Provider ID: {provider_id}")
+# Image endpoints (supports all three proxy paths)
+@app.post("/api/images/generations")
+async def image_generations(request: Request, body: dict):
+    """Handle image generation requests (supports all three proxy paths)"""
+    logger.info("=== IMAGE GENERATION REQUEST ===")
     
-    try:
-        result = await request_handler.handle_image_generation(request, provider_id, body)
-        return result
-    except Exception as e:
-        logger.error(f"Error handling image generation: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_image_generation(request, provider_id, body)
 
-# Embeddings endpoint
-@app.post("/api/{provider_id}/embeddings")
-async def embeddings(provider_id: str, request: Request, body: dict):
-    """Handle embeddings requests"""
-    logger.info(f"=== EMBEDDINGS REQUEST ===")
-    logger.info(f"Provider ID: {provider_id}")
+# Embeddings endpoint (supports all three proxy paths)
+@app.post("/api/embeddings")
+async def embeddings(request: Request, body: dict):
+    """Handle embeddings requests (supports all three proxy paths)"""
+    logger.info("=== EMBEDDINGS REQUEST ===")
     
-    try:
-        result = await request_handler.handle_embeddings(request, provider_id, body)
-        return result
-    except Exception as e:
-        logger.error(f"Error handling embeddings: {str(e)}", exc_info=True)
-        raise HTTPException(status_code=500, detail=str(e))
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    # Handle rotation
+    if provider_id == "rotation":
+        if actual_model not in config.rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+            )
+        selected_provider, selected_model = rotation_handler._select_provider_and_model(actual_model)
+        provider_id = selected_provider
+        actual_model = selected_model
+    
+    # Handle autoselect
+    elif provider_id == "autoselect":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        autoselect_config = config.autoselect[actual_model]
+        fallback = autoselect_config.fallback
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        else:
+            if fallback in config.rotations:
+                selected_provider, selected_model = rotation_handler._select_provider_and_model(fallback)
+                provider_id = selected_provider
+                actual_model = selected_model
+            else:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid fallback configuration for autoselect '{actual_model}'"
+                )
+    
+    if provider_id not in config.providers:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
+    
+    body['model'] = actual_model
+    return await request_handler.handle_embeddings(request, provider_id, body)
 
 # Content proxy endpoint
 @app.get("/api/proxy/{content_id}")
@@ -1382,42 +2485,11 @@ Examples:
     global _original_argv
     _original_argv = sys.argv.copy()
     
-    # Set custom config directory if provided
-    if args.config:
-        set_config_dir(args.config)
-        logger.info(f"Using custom config directory: {args.config}")
+    # Initialize app (this sets config, handlers, server_config)
+    initialize_app(args.config)
     
-    # Import config after setting custom directory
-    global config, request_handler, rotation_handler, autoselect_handler, server_config
-    from aisbf.config import config
-    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
-    
-    # Initialize handlers
-    request_handler = RequestHandler()
-    rotation_handler = RotationHandler()
-    autoselect_handler = AutoselectHandler()
-    
-    # Load server configuration
-    server_config = load_server_config(args.config)
-    
-    # Add session middleware for dashboard
-    secret_key = secrets.token_urlsafe(32)
-    app.add_middleware(SessionMiddleware, secret_key=secret_key)
-    
-    # Load dashboard config
-    aisbf_config_path = Path.home() / '.aisbf' / 'aisbf.json'
-    if not aisbf_config_path.exists():
-        if args.config:
-            aisbf_config_path = Path(args.config) / 'aisbf.json'
-        else:
-            aisbf_config_path = Path(__file__).parent / 'config' / 'aisbf.json'
-    
-    if aisbf_config_path.exists():
-        with open(aisbf_config_path) as f:
-            aisbf_config = json.load(f)
-            server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
-    else:
-        server_config['dashboard_config'] = {'username': 'admin', 'password': 'admin'}
+    # Get the now-initialized server_config
+    global server_config
     
     # CLI arguments take precedence over config file
     host = args.host if args.host else server_config['host']
