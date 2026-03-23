@@ -643,6 +643,118 @@ for i in range(100):
     )
 ```
 
+## MCP Server (Model Context Protocol)
+
+AISBF includes an MCP server that allows remote agents to configure the system and make model requests. MCP is disabled by default and must be enabled in the configuration.
+
+### Enabling MCP
+
+Add to your `aisbf.json` config:
+```json
+{
+  "mcp": {
+    "enabled": true,
+    "autoselect_tokens": ["your-autoselect-token"],
+    "fullconfig_tokens": ["your-fullconfig-token"]
+  }
+}
+```
+
+Or use the dashboard settings page.
+
+### Authentication Levels
+
+- **Autoselect Tokens**: Access to autoselection/autorotation settings + standard APIs
+- **Fullconfig Tokens**: Access to full system configuration + standard APIs
+
+### MCP Endpoints
+
+#### SSE Endpoint (Streaming)
+```bash
+# Initialize connection
+curl -N http://localhost:17765/mcp \
+  -H "Authorization: Bearer your-token"
+```
+
+#### HTTP POST Endpoint
+```bash
+# List available tools
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/list",
+    "params": {}
+  }'
+
+# Call a tool
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "list_models",
+      "arguments": {}
+    }
+  }'
+```
+
+#### Direct Tool Calls
+```bash
+# List available tools
+curl http://localhost:17765/mcp/tools \
+  -H "Authorization: Bearer your-token"
+
+# Call a tool directly
+curl -X POST http://localhost:17765/mcp/tools/call \
+  -H "Authorization: Bearer your-token" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "list_models",
+    "arguments": {}
+  }'
+```
+
+### Available Tools
+
+**Common tools (all authenticated clients):**
+- `list_models` - List all available models
+- `list_rotations` - List all rotation configurations
+- `list_autoselect` - List all autoselect configurations
+- `chat_completion` - Make chat completion requests
+
+**Autoselect-level tools:**
+- `get_autoselect_config` - Get autoselect configuration
+- `get_rotation_config` - Get rotation configuration
+- `get_autoselect_settings` - Get autoselect settings
+- `get_rotation_settings` - Get rotation settings
+
+**Fullconfig-level tools:**
+- `get_providers_config` - Get providers configuration
+- `set_autoselect_config` - Set autoselect configuration
+- `set_rotation_config` - Set rotation configuration
+- `set_provider_config` - Set provider configuration
+- `get_server_config` - Get server configuration
+- `set_server_config` - Set server configuration
+- `delete_autoselect_config` - Delete autoselect configuration
+- `delete_rotation_config` - Delete rotation configuration
+- `delete_provider_config` - Delete provider configuration
+
+### Example: Using MCP with Claude Code
+
+```bash
+# Set the MCP server URL
+global MCP_SERVER_URL "http://localhost:17765/mcp"
+global MCP_AUTH_TOKEN "your-fullconfig-token"
+
+# Or configure in your AI tool's MCP settings
+```
+
 ## Dashboard Access
 
 Access the web dashboard at:

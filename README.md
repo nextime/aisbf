@@ -18,6 +18,7 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
+- **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
 
 ## Author
 

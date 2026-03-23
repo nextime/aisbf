@@ -84,6 +84,28 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <textarea id="auth_tokens" name="auth_tokens" style="min-height: 100px;">{{ '\n'.join(config.auth.tokens) }}</textarea>
     </div>
     
+    <h3 style="margin: 30px 0 20px;">MCP Server</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="mcp_enabled" {% if config.mcp.enabled %}checked{% endif %}>
+            Enable MCP Server
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Model Context Protocol server for remote agent configuration</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="autoselect_tokens">Autoselect Tokens (one per line)</label>
+        <textarea id="autoselect_tokens" name="autoselect_tokens" style="min-height: 80px;" placeholder="Tokens for autoselection/autorotation access">{{ '\n'.join(config.mcp.autoselect_tokens) if config.mcp.autoselect_tokens else '' }}</textarea>
+        <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to autoselection and autorotation settings + standard APIs</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="fullconfig_tokens">Full Config Tokens (one per line)</label>
+        <textarea id="fullconfig_tokens" name="fullconfig_tokens" style="min-height: 80px;" placeholder="Tokens for full configuration access">{{ '\n'.join(config.mcp.fullconfig_tokens) if config.mcp.fullconfig_tokens else '' }}</textarea>
+        <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to full system configuration + standard APIs</small>
+    </div>
+    
     <h3 style="margin: 30px 0 20px;">Dashboard</h3>
     
     <div class="form-group">

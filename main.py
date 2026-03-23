@@ -1264,6 +1264,14 @@ async def dashboard_settings(request: Request):
     with open(config_path) as f:
         aisbf_config = json.load(f)
     
+    # Ensure MCP config exists with defaults
+    if 'mcp' not in aisbf_config:
+        aisbf_config['mcp'] = {
+            'enabled': False,
+            'autoselect_tokens': [],
+            'fullconfig_tokens': []
+        }
+    
     return templates.TemplateResponse("dashboard/settings.html", {
         "request": request,
         "session": request.session,
@@ -1281,7 +1289,10 @@ async def dashboard_settings_save(
     dashboard_username: str = Form(...),
     dashboard_password: str = Form(""),
     condensation_model_id: str = Form(...),
-    autoselect_model_id: str = Form(...)
+    autoselect_model_id: str = Form(...),
+    mcp_enabled: bool = Form(False),
+    autoselect_tokens: str = Form(""),
+    fullconfig_tokens: str = Form("")
 ):
     """Save server settings"""
     auth_check = require_dashboard_auth(request)
@@ -1308,6 +1319,13 @@ async def dashboard_settings_save(
         aisbf_config['dashboard']['password'] = password_hash
     aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
     aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
+    
+    # Update MCP config
+    if 'mcp' not in aisbf_config:
+        aisbf_config['mcp'] = {}
+    aisbf_config['mcp']['enabled'] = mcp_enabled
+    aisbf_config['mcp']['autoselect_tokens'] = [t.strip() for t in autoselect_tokens.split('\n') if t.strip()]
+    aisbf_config['mcp']['fullconfig_tokens'] = [t.strip() for t in fullconfig_tokens.split('\n') if t.strip()]
     
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
