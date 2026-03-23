@@ -174,8 +174,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         <div class="form-group">
             <label for="tor_hidden_service_dir">Hidden Service Directory</label>
-            <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service">
-            <small style="color: #666; display: block; margin-top: 5px;">Directory for persistent hidden service. Leave blank for ephemeral (temporary) service.</small>
+            <div style="display: flex; gap: 10px; align-items: flex-start;">
+                <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service" style="flex: 1;">
+                <button type="button" onclick="createPersistentService()" class="btn btn-secondary" style="white-space: nowrap;">Create Persistent</button>
+            </div>
+            <small style="color: #666; display: block; margin-top: 5px;">Directory for persistent hidden service. Leave blank for ephemeral (temporary) service. Click "Create Persistent" to use default directory.</small>
         </div>
         
         <div class="form-group">
@@ -224,6 +227,26 @@ function toggleTorFields() {
     } else {
         torFields.style.display = 'none';
     }
+}
+
+function createPersistentService() {
+    const dirInput = document.getElementById('tor_hidden_service_dir');
+    const defaultDir = '~/.aisbf/tor_hidden_service';
+    
+    if (dirInput.value && dirInput.value.trim() !== '') {
+        if (!confirm('This will replace the current directory path. Continue?')) {
+            return;
+        }
+    }
+    
+    dirInput.value = defaultDir;
+    dirInput.focus();
+    
+    // Visual feedback
+    dirInput.style.backgroundColor = '#1a4d2e';
+    setTimeout(() => {
+        dirInput.style.backgroundColor = '';
+    }, 500);
 }
 
 async function checkTorStatus() {
