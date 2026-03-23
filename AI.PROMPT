@@ -363,6 +363,7 @@ Settings can be specified at three levels with the following priority:
 - `default_context_size`: Context window size
 - `default_condense_context`: Context condensation threshold
 - `default_condense_method`: Context condensation method
+- `default_error_cooldown`: Cooldown period in seconds after 3 consecutive failures (default: 300)
 
 ### Kiro Gateway Integration
 
@@ -619,6 +620,16 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
 
 ### Recent Updates
+
+**2026-03-23 - Configurable Error Cooldown Implementation**
+- Added `error_cooldown` field to Model class in models.py for model-specific cooldown configuration
+- Added `default_error_cooldown` field to ProviderConfig in config.py for provider-level defaults
+- Added `default_error_cooldown` field to RotationConfig in config.py for rotation-level defaults
+- Updated BaseProviderHandler.record_failure() to use cascading cooldown configuration (model > provider > system default of 300 seconds)
+- Updated DOCUMENTATION.md with comprehensive error_cooldown configuration examples
+- Updated AI.PROMPT with error_cooldown in supported default fields
+- Providers can now have customizable cooldown periods after 3 consecutive failures instead of hardcoded 5 minutes
+- Configuration follows the same cascading pattern as other settings (context_size, rate_limit, etc.)
 
 **2026-03-23 - Proxy-Awareness Implementation**
 - Added ProxyHeadersMiddleware to handle reverse proxy deployments

@@ -34,6 +34,7 @@ class ProviderModelConfig(BaseModel):
     name: str
     rate_limit: Optional[float] = None
     max_request_tokens: Optional[int] = None
+    error_cooldown: Optional[int] = None  # Cooldown period in seconds after 3 consecutive failures
 
 
 class CondensationConfig(BaseModel):
@@ -64,6 +65,7 @@ class ProviderConfig(BaseModel):
     default_context_size: Optional[int] = None
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
+    default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
 
 class RotationConfig(BaseModel):
     model_name: str
@@ -78,6 +80,7 @@ class RotationConfig(BaseModel):
     default_context_size: Optional[int] = None
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
+    default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
 
 class AutoselectModelInfo(BaseModel):
     model_id: str

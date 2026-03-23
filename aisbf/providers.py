@@ -392,14 +392,24 @@ class BaseProviderHandler:
         logger.warning(f"Last failure time: {self.error_tracking['last_failure']}")
         
         if self.error_tracking['failures'] >= 3:
-            self.error_tracking['disabled_until'] = time.time() + 300  # 5 minutes
+            # Get cooldown period from provider config, default to 300 seconds (5 minutes)
+            provider_config = config.providers.get(self.provider_id)
+            cooldown_seconds = 300  # System default
+            
+            if provider_config and hasattr(provider_config, 'default_error_cooldown') and provider_config.default_error_cooldown is not None:
+                cooldown_seconds = provider_config.default_error_cooldown
+                logger.info(f"Using provider-configured cooldown: {cooldown_seconds} seconds")
+            else:
+                logger.info(f"Using system default cooldown: {cooldown_seconds} seconds")
+            
+            self.error_tracking['disabled_until'] = time.time() + cooldown_seconds
             disabled_until_time = self.error_tracking['disabled_until']
             cooldown_remaining = int(disabled_until_time - time.time())
             logger.error(f"!!! PROVIDER DISABLED !!!")
             logger.error(f"Provider: {self.provider_id}")
             logger.error(f"Reason: 3 consecutive failures reached")
             logger.error(f"Disabled until: {disabled_until_time}")
-            logger.error(f"Cooldown period: {cooldown_remaining} seconds (5 minutes)")
+            logger.error(f"Cooldown period: {cooldown_remaining} seconds ({cooldown_seconds / 60:.1f} minutes)")
             logger.error(f"Provider will be automatically re-enabled after cooldown")
         else:
             remaining_failures = 3 - failure_count

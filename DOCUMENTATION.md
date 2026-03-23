@@ -374,10 +374,66 @@ The final chunk includes effective_context:
 ### Error Tracking
 - Tracks failures per provider
 - Disables providers after 3 consecutive failures
-- 5-minute cooldown period for disabled providers
+- Configurable cooldown period for disabled providers (default: 5 minutes)
+- Automatic re-enabling after cooldown period expires
+
+### Configurable Error Cooldown
+
+The cooldown period after 3 consecutive failures can be configured at multiple levels with cascading defaults:
+
+**Configuration Levels (in order of precedence):**
+1. **Model-specific**: Set `error_cooldown` in individual model configuration
+2. **Provider default**: Set `default_error_cooldown` in provider configuration
+3. **System default**: 300 seconds (5 minutes) if not configured
+
+**Example Provider Configuration:**
+```json
+{
+  "providers": {
+    "openai": {
+      "id": "openai",
+      "name": "OpenAI",
+      "endpoint": "https://api.openai.com/v1",
+      "type": "openai",
+      "api_key_required": true,
+      "default_error_cooldown": 600,
+      "models": [
+        {
+          "name": "gpt-4",
+          "error_cooldown": 900
+        },
+        {
+          "name": "gpt-3.5-turbo",
+          "error_cooldown": 300
+        }
+      ]
+    }
+  }
+}
+```
+
+In this example:
+- `gpt-4` will have a 900-second (15-minute) cooldown after failures
+- `gpt-3.5-turbo` will have a 300-second (5-minute) cooldown
+- Any other OpenAI models will use the provider default of 600 seconds (10 minutes)
+- Providers without configuration will use the system default of 300 seconds
+
+**Rotation Configuration:**
+```json
+{
+  "rotations": {
+    "balanced": {
+      "model_name": "balanced",
+      "default_error_cooldown": 450,
+      "providers": [...]
+    }
+  }
+}
+```
 
 ### Rate Limiting
 - Automatic provider disabling when rate limited
+- Intelligent parsing of 429 responses to determine wait time
 - Graceful error handling
 - Configurable retry behavior
 

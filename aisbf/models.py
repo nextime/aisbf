@@ -66,6 +66,7 @@ class Model(BaseModel):
     context_size: Optional[int] = None  # Max context size in tokens for the model
     condense_context: Optional[int] = None  # Percentage (0-100) at which to condense context
     condense_method: Optional[Union[str, List[str]]] = None  # Method(s) for condensation: "hierarchical", "conversational", "semantic", "algorithmic"
+    error_cooldown: Optional[int] = None  # Cooldown period in seconds after 3 consecutive failures (default: 300)
 
 class Provider(BaseModel):
     id: str
