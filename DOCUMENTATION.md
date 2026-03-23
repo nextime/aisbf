@@ -153,6 +153,13 @@ AISBF supports the following AI providers:
 - No API key required
 - Local model hosting support
 
+### Kiro (Amazon Q Developer / AWS CodeWhisperer)
+- Native integration with Kiro authentication
+- Supports IDE credentials and CLI authentication
+- Access to Claude models through Kiro
+- No separate API key required (uses Kiro credentials)
+- Supports streaming, tool calling, and extended thinking
+
 ## Rotation Models
 
 AISBF supports provider rotation with weighted model selection, allowing intelligent load balancing across multiple AI providers:

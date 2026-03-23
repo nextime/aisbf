@@ -77,6 +77,7 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - OpenAI and openai-compatible endpoints (openai)
 - Anthropic (anthropic)
 - Ollama (direct HTTP)
+- Kiro (Amazon Q Developer / AWS CodeWhisperer)
 ## Configuration
 
 ### SSL/TLS Configuration
