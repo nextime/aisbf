@@ -92,7 +92,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="header">
         <div class="container">
             <h1>AISBF Dashboard</h1>
-            {% if session.logged_in %}
+            {% if request.session.logged_in %}
             <div class="header-actions">
                 <button onclick="restartServer()" class="btn btn-warning">Restart Server</button>
                 <a href="{{ url_for(request, '/dashboard/logout') }}" class="btn btn-secondary">Logout</a>
@@ -101,7 +101,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
     
-    {% if session.logged_in %}
+    {% if request.session.logged_in %}
     <div class="container">
         <div class="nav">
             <a href="{{ url_for(request, '/dashboard') }}" {% if request.path == '/dashboard' %}class="active"{% endif %}>Overview</a>
