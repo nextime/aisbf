@@ -367,7 +367,7 @@ Settings can be specified at three levels with the following priority:
 ### Kiro Gateway Integration
 
 **Overview:**
-Kiro Gateway is a third-party proxy gateway that provides OpenAI and Anthropic-compatible APIs for Kiro (Amazon Q Developer / AWS CodeWhisperer). It's located in the `vendor/kiro-gateway` directory and has been integrated as a provider type in AISBF.
+Kiro Gateway is a third-party proxy gateway that provides OpenAI and Anthropic-compatible APIs for Kiro (Amazon Q Developer / AWS CodeWhisperer). It's available as a separate GitHub project and has been integrated as a provider type in AISBF.
 
 **What is Kiro Gateway:**
 - Proxy gateway for accessing Claude models through Kiro IDE/CLI credentials
