@@ -4,7 +4,7 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, and Ollama
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
 - **Streaming Support**: Full support for streaming responses from all providers
