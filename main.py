@@ -613,9 +613,17 @@ def validate_kiro_credentials(provider_id: str, provider_config) -> bool:
     
     kiro_config = provider_config.kiro_config
     
+    # Handle both dict and object access patterns
+    def get_config_value(config, key):
+        """Get value from config whether it's a dict or object"""
+        if isinstance(config, dict):
+            return config.get(key)
+        return getattr(config, key, None)
+    
     # Check for credentials file (kiro IDE)
-    if hasattr(kiro_config, 'creds_file') and kiro_config.creds_file:
-        creds_file = Path(kiro_config.creds_file).expanduser()
+    creds_file_path = get_config_value(kiro_config, 'creds_file')
+    if creds_file_path:
+        creds_file = Path(creds_file_path).expanduser()
         if not creds_file.exists():
             logger.debug(f"Provider {provider_id}: Credentials file not found: {creds_file}")
             return False
@@ -637,8 +645,9 @@ def validate_kiro_credentials(provider_id: str, provider_config) -> bool:
             return False
     
     # Check for SQLite database (kiro-cli)
-    if hasattr(kiro_config, 'sqlite_db') and kiro_config.sqlite_db:
-        sqlite_db = Path(kiro_config.sqlite_db).expanduser()
+    sqlite_db_path = get_config_value(kiro_config, 'sqlite_db')
+    if sqlite_db_path:
+        sqlite_db = Path(sqlite_db_path).expanduser()
         if not sqlite_db.exists():
             logger.debug(f"Provider {provider_id}: SQLite database not found: {sqlite_db}")
             return False
