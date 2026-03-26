@@ -213,6 +213,19 @@ class ContextManager:
             # Initialize thread lock for model access
             self._internal_model_lock = threading.Lock()
             
+            # Warm up the model with a simple inference
+            try:
+                logger.info("Warming up internal condensation model...")
+                with self._internal_model_lock:
+                    inputs = self._internal_tokenizer("Warm up", return_tensors="pt")
+                    device = next(self._internal_model.parameters()).device
+                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                    with torch.no_grad():
+                        _ = self._internal_model.generate(**inputs, max_new_tokens=1)
+                logger.info("Model warm-up completed")
+            except Exception as e:
+                logger.warning(f"Model warm-up failed: {e}")
+            
             logger.info("=== INTERNAL CONDENSATION MODEL READY ===")
         except ImportError as e:
             logger.error(f"Failed to import required libraries for internal model: {e}")
@@ -319,11 +332,13 @@ class ContextManager:
         Returns:
             Condensed list of messages
         """
+        import time
         logger = logging.getLogger(__name__)
         logger.info(f"=== CONTEXT CONDENSATION START ===")
         logger.info(f"Original messages count: {len(messages)}")
         logger.info(f"Condensation methods: {self.condense_method}")
         
+        start_time = time.time()
         condensed_messages = messages.copy()
         
         # Apply each condensation method in sequence
@@ -338,6 +353,14 @@ class ContextManager:
                 condensed_messages = await self._semantic_condense(condensed_messages, model, current_query)
             elif method == "algorithmic":
                 condensed_messages = self._algorithmic_condense(condensed_messages, model)
+            elif method == "sliding_window":
+                condensed_messages = self._sliding_window_condense(condensed_messages, model)
+            elif method == "importance_based":
+                condensed_messages = self._importance_based_condense(condensed_messages, model)
+            elif method == "entity_aware":
+                condensed_messages = self._entity_aware_condense(condensed_messages, model)
+            elif method == "code_aware":
+                condensed_messages = self._code_aware_condense(condensed_messages, model)
             else:
                 logger.warning(f"Unknown condensation method: {method}")
         
@@ -347,10 +370,13 @@ class ContextManager:
         reduction = original_tokens - condensed_tokens
         reduction_pct = (reduction / original_tokens * 100) if original_tokens > 0 else 0
         
+        duration = time.time() - start_time
+        
         logger.info(f"=== CONTEXT CONDENSATION END ===")
         logger.info(f"Original tokens: {original_tokens}")
         logger.info(f"Condensed tokens: {condensed_tokens}")
         logger.info(f"Reduction: {reduction} tokens ({reduction_pct:.1f}%)")
+        logger.info(f"Duration: {duration:.2f}s")
         logger.info(f"Final messages count: {len(condensed_messages)}")
         
         return condensed_messages
@@ -360,7 +386,7 @@ class ContextManager:
         HIERARCHICAL CONTEXT ENGINEERING
         Separate context into 'Persistent' (long-term facts) and 'Transient' (immediate task).
         Uses "Step-Back Prompting" to identify core principles before answering.
-        
+
         Structure:
         - PERSISTENT STATE (Architecture): System messages and early context
         - RECENT HISTORY (Summarized): Middle messages
@@ -369,35 +395,64 @@ class ContextManager:
         """
         logger = logging.getLogger(__name__)
         logger.info(f"Hierarchical condensation: {len(messages)} messages")
-        
-        if len(messages) <= 2:
+
+        if len(messages) <= 4:
             # Not enough messages to condense
             return messages
-        
+
         # Separate messages into categories
         system_messages = [m for m in messages if m.get('role') == 'system']
-        user_messages = [m for m in messages if m.get('role') == 'user']
-        assistant_messages = [m for m in messages if m.get('role') == 'assistant']
-        
-        # Keep all system messages (persistent state)
+        all_conversation = [m for m in messages if m.get('role') != 'system']
+
+        if len(all_conversation) <= 6:
+            # Keep all conversation messages if not too many
+            return messages
+
+        # PERSISTENT STATE: System messages + first 2 conversation exchanges (establish context)
         persistent = system_messages.copy()
-        
-        # Keep recent messages (high fidelity - last 3 exchanges)
-        recent_count = min(6, len(user_messages) + len(assistant_messages))
-        recent_messages = []
-        
-        # Get last few messages in order
-        all_messages_except_system = [m for m in messages if m.get('role') != 'system']
-        recent_messages = all_messages_except_system[-recent_count:]
-        
-        # Middle messages to potentially summarize
-        middle_messages = all_messages_except_system[:-recent_count]
-        
-        # For hierarchical, we keep persistent + recent, and summarize middle if needed
-        condensed = persistent + middle_messages + recent_messages
-        
-        logger.info(f"Hierarchical: {len(persistent)} persistent, {len(middle_messages)} middle, {len(recent_messages)} recent")
-        
+        persistent_cutoff = min(4, len(all_conversation))  # First 2 exchanges (4 messages)
+        persistent.extend(all_conversation[:persistent_cutoff])
+
+        # ACTIVE CODE: Last 4 messages (2 exchanges) - high fidelity recent context
+        active_cutoff = 4
+        active_messages = all_conversation[-active_cutoff:] if len(all_conversation) > active_cutoff else all_conversation
+
+        # MIDDLE SECTION: Messages between persistent and active - candidates for summarization
+        middle_messages = all_conversation[persistent_cutoff:-active_cutoff] if len(all_conversation) > (persistent_cutoff + active_cutoff) else []
+
+        # If middle section is large, create a hierarchical summary
+        condensed_middle = []
+        if middle_messages:
+            # Group middle messages into logical chunks (every 6 messages = 3 exchanges)
+            chunk_size = 6
+            chunks = [middle_messages[i:i + chunk_size] for i in range(0, len(middle_messages), chunk_size)]
+
+            for i, chunk in enumerate(chunks):
+                if i == len(chunks) - 1 and len(chunk) <= 2:
+                    # Last small chunk - keep as is
+                    condensed_middle.extend(chunk)
+                else:
+                    # Create hierarchical summary for chunk
+                    chunk_text = ""
+                    for msg in chunk:
+                        role = msg.get('role', 'unknown')
+                        content = msg.get('content', '')
+                        if content:
+                            chunk_text += f"{role}: {content}\n"
+
+                    # Create summary message with hierarchical context
+                    summary_content = f"[HIERARCHICAL CONTEXT - Phase {i+1}]\nKey developments: {chunk_text[:200]}{'...' if len(chunk_text) > 200 else ''}"
+
+                    condensed_middle.append({
+                        "role": "system",
+                        "content": summary_content
+                    })
+
+        # Combine all sections: persistent + condensed middle + active
+        condensed = persistent + condensed_middle + active_messages
+
+        logger.info(f"Hierarchical: {len(persistent)} persistent, {len(condensed_middle)} summarized middle, {len(active_messages)} active")
+
         return condensed
     
     def _load_system_prompt(self, method: str) -> str:
@@ -435,19 +490,6 @@ class ContextManager:
         logger = logging.getLogger(__name__)
         logger.info(f"Conversational condensation: {len(messages)} messages")
         
-        # Check if using internal model
-        if self._use_internal_model:
-            logger.info("Using internal model for conversational condensation")
-        else:
-            # Use dedicated condensation handler if available, otherwise fallback to provider_handler
-            handler = self.condensation_handler if self.condensation_handler else self.provider_handler
-            if not handler:
-                logger.warning("No provider handler available for conversational condensation, skipping")
-                return messages
-            
-            # Use dedicated condensation model if configured, otherwise use same model
-            condense_model = self.condensation_model if self.condensation_model else model
-        
         if len(messages) <= 4:
             # Not enough messages to condense
             return messages
@@ -475,69 +517,58 @@ class ContextManager:
             if content:
                 conversation_text += f"{role}: {content}\n"
         
+        # Build summary prompt
+        summary_prompt = f"{system_prompt}\n\nConversation to summarize:\n{conversation_text}"
+        
         try:
-            # If using rotation handler, call rotation handler's method
-            if self._rotation_handler and not self.condensation_model:
-                # Create a minimal request for condensation
+            summary_content = None
+            
+            if self._use_internal_model:
+                logger.info("Using internal model for conversational summarization")
+                summary_content = await self._run_internal_model_condensation(summary_prompt)
+            elif self._rotation_handler and not self.condensation_model:
+                # Use rotation handler
                 condensation_request = {
                     "messages": [{"role": "user", "content": summary_prompt}],
                     "temperature": 0.3,
                     "max_tokens": 1000,
                     "stream": False
                 }
-                # Call rotation handler to get condensation
                 response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
-                # Extract summary content
                 if isinstance(response, dict):
                     summary_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    
-                    if summary_content:
-                        # Create summary message
-                        summary_message = {
-                            "role": "system",
-                            "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
-                        }
-                        
-                        # Build condensed messages: system + summary + recent
-                        condensed = system_messages + [summary_message] + recent_messages
-                        
-                        # Update stored summary
-                        self.conversation_summary = summary_content
-                        self.summary_token_count = count_messages_tokens([summary_message], model)
-                        
-                        logger.info(f"Conversational: Created summary via rotation ({len(summary_content)} chars)")
-                        return condensed
             else:
-                # Request summary from the model directly
-                summary_messages = [{"role": "user", "content": summary_prompt}]
-                summary_response = await handler.handle_request(
-                    model=condense_model,
-                    messages=summary_messages,
-                    max_tokens=1000,
-                    temperature=0.3,
-                    stream=False
-                )
+                # Use dedicated condensation handler if available, otherwise fallback to provider_handler
+                handler = self.condensation_handler if self.condensation_handler else self.provider_handler
+                if handler:
+                    condense_model = self.condensation_model if self.condensation_model else model
+                    summary_messages = [{"role": "user", "content": summary_prompt}]
+                    summary_response = await handler.handle_request(
+                        model=condense_model,
+                        messages=summary_messages,
+                        max_tokens=1000,
+                        temperature=0.3,
+                        stream=False
+                    )
+                    if isinstance(summary_response, dict):
+                        summary_content = summary_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+            if summary_content:
+                # Create summary message
+                summary_message = {
+                    "role": "system",
+                    "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
+                }
                 
-                # Extract summary content
-                if isinstance(summary_response, dict):
-                    summary_content = summary_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    
-                    if summary_content:
-                        # Create summary message
-                        summary_message = {
-                            "role": "system",
-                            "content": f"[CONVERSATION SUMMARY]\n{summary_content}"
-                        }
-                        
-                        # Build condensed messages: system + summary + recent
-                        condensed = system_messages + [summary_message] + recent_messages
-                        
-                        # Update stored summary
-                        self.conversation_summary = summary_content
-                        self.summary_token_count = count_messages_tokens([summary_message], model)
-                        
-                        logger.info(f"Conversational: Created summary ({len(summary_content)} chars)")
-                        return condensed
+                # Build condensed messages: system + summary + recent
+                condensed = system_messages + [summary_message] + recent_messages
+                
+                # Update stored summary
+                self.conversation_summary = summary_content
+                self.summary_token_count = count_messages_tokens([summary_message], model)
+                
+                logger.info(f"Conversational: Created summary ({len(summary_content)} chars)")
+                return condensed
             
         except Exception as e:
             logger.error(f"Error during conversational condensation: {e}")
@@ -558,15 +589,6 @@ class ContextManager:
         """
         logger = logging.getLogger(__name__)
         logger.info(f"Semantic condensation: {len(messages)} messages")
-        
-        # Use dedicated condensation handler if available, otherwise fallback to provider_handler
-        handler = self.condensation_handler if self.condensation_handler else self.provider_handler
-        if not handler:
-            logger.warning("No provider handler available for semantic condensation, skipping")
-            return messages
-        
-        # Use dedicated condensation model if configured, otherwise use same model
-        condense_model = self.condensation_model if self.condensation_model else model
         
         if len(messages) <= 2:
             return messages
@@ -607,68 +629,54 @@ Conversation History:
 Provide only the relevant information in a concise format."""
         
         try:
-            # If using rotation handler, call rotation handler's method
-            if self._rotation_handler and not self.condensation_model:
-                # Create a minimal request for condensation
+            pruned_content = None
+            
+            if self._use_internal_model:
+                logger.info("Using internal model for semantic pruning")
+                pruned_content = await self._run_internal_model_condensation(prune_prompt)
+            elif self._rotation_handler and not self.condensation_model:
+                # Use rotation handler
                 condensation_request = {
                     "messages": [{"role": "user", "content": prune_prompt}],
                     "temperature": 0.2,
                     "max_tokens": 2000,
                     "stream": False
                 }
-                # Call rotation handler to get condensation
                 response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
-                # Extract pruned content
                 if isinstance(response, dict):
                     pruned_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    
-                    if pruned_content:
-                        # Create pruned context message
-                        pruned_message = {
-                            "role": "system",
-                            "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
-                        }
-                        
-                        # Build condensed messages: system + pruned + last user message
-                        last_message = messages[-1] if messages else None
-                        if last_message and last_message.get('role') != 'system':
-                            condensed = system_messages + [pruned_message, last_message]
-                        else:
-                            condensed = system_messages + [pruned_message]
-                        
-                        logger.info(f"Semantic: Pruned to relevant context via rotation ({len(pruned_content)} chars)")
-                        return condensed
             else:
-                # Request pruned context from the model directly
-                prune_messages = [{"role": "user", "content": prune_prompt}]
-                prune_response = await handler.handle_request(
-                    model=condense_model,
-                    messages=prune_messages,
-                    max_tokens=2000,
-                    temperature=0.2,
-                    stream=False
-                )
+                # Use dedicated condensation handler if available, otherwise fallback to provider_handler
+                handler = self.condensation_handler if self.condensation_handler else self.provider_handler
+                if handler:
+                    condense_model = self.condensation_model if self.condensation_model else model
+                    prune_messages = [{"role": "user", "content": prune_prompt}]
+                    prune_response = await handler.handle_request(
+                        model=condense_model,
+                        messages=prune_messages,
+                        max_tokens=2000,
+                        temperature=0.2,
+                        stream=False
+                    )
+                    if isinstance(prune_response, dict):
+                        pruned_content = prune_response.get('choices', [{}])[0].get('message', {}).get('content', '')
+
+            if pruned_content:
+                # Create pruned context message
+                pruned_message = {
+                    "role": "system",
+                    "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
+                }
                 
-                # Extract pruned content
-                if isinstance(prune_response, dict):
-                    pruned_content = prune_response.get('choices', [{}])[0].get('message', {}).get('content', '')
-                    
-                    if pruned_content:
-                        # Create pruned context message
-                        pruned_message = {
-                            "role": "system",
-                            "content": f"[RELEVANT CONTEXT]\n{pruned_content}"
-                        }
-                        
-                        # Build condensed messages: system + pruned + last user message
-                        last_message = messages[-1] if messages else None
-                        if last_message and last_message.get('role') != 'system':
-                            condensed = system_messages + [pruned_message, last_message]
-                        else:
-                            condensed = system_messages + [pruned_message]
-                    
-                    logger.info(f"Semantic: Pruned to relevant context ({len(pruned_content)} chars)")
-                    return condensed
+                # Build condensed messages: system + pruned + last user message
+                last_message = messages[-1] if messages else None
+                if last_message and last_message.get('role') != 'system':
+                    condensed = system_messages + [pruned_message, last_message]
+                else:
+                    condensed = system_messages + [pruned_message]
+                
+                logger.info(f"Semantic: Pruned to relevant context ({len(pruned_content)} chars)")
+                return condensed
             
         except Exception as e:
             logger.error(f"Error during semantic condensation: {e}")
@@ -704,10 +712,20 @@ Provide only the relevant information in a concise format."""
                 prev_content = str(condensed[-1].get('content', ''))
                 curr_content = str(content)
                 
-                # If very similar, skip
+                # If identical, skip
                 if prev_content == curr_content:
                     logger.debug(f"Skipping duplicate message from {role}")
                     continue
+                
+                # Check for high similarity (potential duplicate)
+                try:
+                    import difflib
+                    similarity = difflib.SequenceMatcher(None, prev_content, curr_content).ratio()
+                    if similarity > 0.85:
+                        logger.debug(f"Skipping similar message from {role} (similarity: {similarity:.2f})")
+                        continue
+                except ImportError:
+                    pass  # difflib is standard library, but in case
             
             # Remove excessive whitespace
             if isinstance(content, str):
@@ -719,6 +737,226 @@ Provide only the relevant information in a concise format."""
             })
         
         logger.info(f"Algorithmic: Reduced from {len(messages)} to {len(condensed)} messages")
+        
+        return condensed
+    
+    def _sliding_window_condense(self, messages: List[Dict], model: str) -> List[Dict]:
+        """
+        SLIDING WINDOW WITH OVERLAP
+        Keep recent messages with overlapping context from older parts.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Sliding window condensation: {len(messages)} messages")
+        
+        if len(messages) <= 6:
+            return messages
+        
+        # Parameters
+        window_size = 4  # messages to keep in recent window
+        overlap_size = 2  # messages to keep from older windows
+        
+        # Keep all system messages
+        system_messages = [m for m in messages if m.get('role') == 'system']
+        conversation = [m for m in messages if m.get('role') != 'system']
+        
+        if len(conversation) <= window_size:
+            return messages
+        
+        # Recent window
+        recent = conversation[-window_size:]
+        
+        # Older parts with overlap
+        older = conversation[:-window_size]
+        
+        # Take overlapping messages from older parts
+        overlap = []
+        if older:
+            # Take last overlap_size from older
+            overlap = older[-overlap_size:] if len(older) >= overlap_size else older
+        
+        # Combine
+        condensed_conversation = overlap + recent
+        condensed = system_messages + condensed_conversation
+        
+        logger.info(f"Sliding window: {len(overlap)} overlap + {len(recent)} recent = {len(condensed_conversation)} conversation messages")
+        
+        return condensed
+    
+    def _importance_based_condense(self, messages: List[Dict], model: str) -> List[Dict]:
+        """
+        IMPORTANCE-BASED PRUNING
+        Keep messages based on importance scores.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Importance-based condensation: {len(messages)} messages")
+        
+        if len(messages) <= 4:
+            return messages
+        
+        system_messages = [m for m in messages if m.get('role') == 'system']
+        conversation = [m for m in messages if m.get('role') != 'system']
+        
+        if not conversation:
+            return messages
+        
+        # Score messages by importance
+        scored = []
+        for i, msg in enumerate(conversation):
+            role = msg.get('role', '')
+            content = str(msg.get('content', ''))
+            
+            score = 0
+            
+            # Role-based scoring
+            if role == 'user':
+                score += 2  # User messages more important
+            elif role == 'assistant':
+                score += 1
+            
+            # Length-based (longer messages more important)
+            content_length = len(content)
+            if content_length > 100:
+                score += 1
+            if content_length > 500:
+                score += 1
+            
+            # Question detection
+            if '?' in content:
+                score += 1
+            
+            # Recency bonus
+            recency_bonus = (i / len(conversation)) * 2  # More recent = higher score
+            score += recency_bonus
+            
+            scored.append((score, msg))
+        
+        # Sort by score descending
+        scored.sort(key=lambda x: x[0], reverse=True)
+        
+        # Keep top messages, but maintain order
+        keep_count = max(4, len(conversation) // 2)  # Keep at least half, minimum 4
+        top_scored = scored[:keep_count]
+        
+        # Sort back by original order
+        top_scored.sort(key=lambda x: conversation.index(x[1]))
+        
+        kept_messages = [msg for score, msg in top_scored]
+        
+        condensed = system_messages + kept_messages
+        
+        logger.info(f"Importance-based: Kept {len(kept_messages)}/{len(conversation)} conversation messages")
+        
+        return condensed
+    
+    def _entity_aware_condense(self, messages: List[Dict], model: str) -> List[Dict]:
+        """
+        ENTITY-AWARE CONDENSATION
+        Preserve messages that mention key entities.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Entity-aware condensation: {len(messages)} messages")
+        
+        if len(messages) <= 4:
+            return messages
+        
+        system_messages = [m for m in messages if m.get('role') == 'system']
+        conversation = [m for m in messages if m.get('role') != 'system']
+        
+        if not conversation:
+            return messages
+        
+        # Simple entity extraction: capitalized words, numbers, emails, etc.
+        import re
+        
+        entities = set()
+        for msg in conversation:
+            content = str(msg.get('content', ''))
+            # Find capitalized words (potential names)
+            caps = re.findall(r'\b[A-Z][a-z]+\b', content)
+            entities.update(caps)
+            # Find numbers
+            nums = re.findall(r'\b\d+\b', content)
+            entities.update(nums)
+            # Find emails
+            emails = re.findall(r'\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Z|a-z]{2,}\b', content)
+            entities.update(emails)
+        
+        # Keep messages that mention entities or are recent
+        kept = []
+        for i, msg in enumerate(conversation):
+            content = str(msg.get('content', ''))
+            
+            # Keep if mentions entities
+            mentions_entity = any(entity in content for entity in entities)
+            
+            # Keep if recent (last 3 messages)
+            is_recent = i >= len(conversation) - 3
+            
+            # Keep if system-like or important
+            is_important = '?' in content or len(content) > 200
+            
+            if mentions_entity or is_recent or is_important:
+                kept.append(msg)
+        
+        # If too few kept, add more recent ones
+        if len(kept) < 4 and len(conversation) > 4:
+            for msg in reversed(conversation):
+                if msg not in kept:
+                    kept.insert(0, msg)
+                    if len(kept) >= 4:
+                        break
+        
+        condensed = system_messages + kept
+        
+        logger.info(f"Entity-aware: Kept {len(kept)}/{len(conversation)} conversation messages, {len(entities)} entities found")
+        
+        return condensed
+    
+    def _code_aware_condense(self, messages: List[Dict], model: str) -> List[Dict]:
+        """
+        CODE-AWARE CONDENSATION
+        Preserve messages containing code blocks.
+        """
+        logger = logging.getLogger(__name__)
+        logger.info(f"Code-aware condensation: {len(messages)} messages")
+        
+        if len(messages) <= 4:
+            return messages
+        
+        system_messages = [m for m in messages if m.get('role') == 'system']
+        conversation = [m for m in messages if m.get('role') != 'system']
+        
+        if not conversation:
+            return messages
+        
+        # Identify messages with code blocks
+        code_messages = []
+        non_code_messages = []
+        
+        for msg in conversation:
+            content = str(msg.get('content', ''))
+            
+            # Check for code blocks (``` or indented code)
+            has_code = '```' in content or '\n    ' in content or '\n\t' in content
+            
+            if has_code:
+                code_messages.append(msg)
+            else:
+                non_code_messages.append(msg)
+        
+        # Keep all code messages, plus some recent non-code
+        kept = code_messages.copy()
+        
+        # Add recent non-code messages
+        recent_non_code = non_code_messages[-4:] if len(non_code_messages) > 4 else non_code_messages
+        kept.extend(recent_non_code)
+        
+        # Remove duplicates (if any code message is also recent)
+        kept = list(dict.fromkeys(kept))  # preserve order
+        
+        condensed = system_messages + kept
+        
+        logger.info(f"Code-aware: {len(code_messages)} code messages, {len(recent_non_code)} recent non-code, total {len(kept)} kept")
         
         return condensed
 

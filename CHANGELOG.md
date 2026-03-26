@@ -29,6 +29,21 @@
   - Automatic cache initialization on startup
   - Skip caching for streaming requests
   - Comprehensive test suite with 6 test scenarios
+- **Enhanced Context Condensation**: 8 condensation methods for intelligent token reduction
+  - Hierarchical: Separates context into persistent, middle (summarized), and active sections
+  - Conversational: Summarizes old messages using LLM or internal model
+  - Semantic: Prunes irrelevant context based on current query
+  - Algorithmic: Removes duplicates and similar messages using difflib similarity detection
+  - Sliding Window: Keeps recent messages with overlapping context from older parts
+  - Importance-Based: Scores messages by importance (role, length, questions, recency)
+  - Entity-Aware: Preserves messages mentioning key entities (capitalized words, numbers, emails)
+  - Code-Aware: Preserves messages containing code blocks
+  - Internal model improvements with warm-up functionality
+  - Condensation analytics tracking (effectiveness %, latency)
+  - Per-model condensation thresholds
+  - Adaptive condensation based on context size
+  - Condensation method chaining
+  - Condensation bypass for short contexts
 
 ### Fixed
 - Model class now supports OpenRouter metadata fields preventing crashes in models list API

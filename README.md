@@ -34,6 +34,7 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Context Management**: Automatic context condensation when approaching model limits with multiple condensation methods
 - **Provider-Level Defaults**: Set default condensation settings at provider level with cascading fallback logic
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
+- **Enhanced Context Condensation**: 8 condensation methods including hierarchical, conversational, semantic, algorithmic, sliding window, importance-based, entity-aware, and code-aware condensation
 - **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing

@@ -790,8 +790,9 @@ Context management automatically monitors and condenses conversation context:
 
 1. **Effective Context Tracking**: Calculates and reports total tokens used (effective_context) for every request
 2. **Automatic Condensation**: When context exceeds configured percentage of model's context_size, triggers condensation
-3. **Multiple Condensation Methods**: Supports hierarchical, conversational, semantic, and algoritmic condensation
+3. **Multiple Condensation Methods**: Supports 8 condensation methods including hierarchical, conversational, semantic, algorithmic, sliding window, importance-based, entity-aware, and code-aware condensation
 4. **Method Chaining**: Multiple condensation methods can be applied in sequence for optimal results
+5. **Condensation Analytics**: Tracks effectiveness (token reduction %) and latency for each condensation operation
 
 ### Context Configuration
 
