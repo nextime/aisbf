@@ -74,8 +74,24 @@ def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) ->
     return f"fp_{hash_value}"
 
 class RequestHandler:
-    def __init__(self):
+    def __init__(self, user_id=None):
+        self.user_id = user_id
         self.config = config
+        # Load user-specific configs if user_id is provided
+        if user_id:
+            self._load_user_configs()
+        else:
+            self.user_providers = {}
+            self.user_rotations = {}
+            self.user_autoselects = {}
+
+    def _load_user_configs(self):
+        """Load user-specific configurations from database"""
+        from .database import get_database
+        db = get_database()
+        self.user_providers = db.get_user_providers(self.user_id)
+        self.user_rotations = db.get_user_rotations(self.user_id)
+        self.user_autoselects = db.get_user_autoselects(self.user_id)
 
     async def _handle_chunked_request(
         self,
@@ -210,9 +226,17 @@ class RequestHandler:
         logger = logging.getLogger(__name__)
         logger.info(f"=== RequestHandler.handle_chat_completion START ===")
         logger.info(f"Provider ID: {provider_id}")
+        logger.info(f"User ID: {self.user_id}")
         logger.info(f"Request data: {request_data}")
-        
-        provider_config = self.config.get_provider(provider_id)
+
+        # Check for user-specific provider config first
+        if self.user_id and provider_id in self.user_providers:
+            provider_config = self.user_providers[provider_id]
+            logger.info(f"Using user-specific provider config for {provider_id}")
+        else:
+            provider_config = self.config.get_provider(provider_id)
+            logger.info(f"Using global provider config for {provider_id}")
+
         logger.info(f"Provider config: {provider_config}")
         logger.info(f"Provider type: {provider_config.type}")
         logger.info(f"Provider endpoint: {provider_config.endpoint}")
@@ -338,7 +362,11 @@ class RequestHandler:
             raise HTTPException(status_code=500, detail=str(e))
 
     async def handle_streaming_chat_completion(self, request: Request, provider_id: str, request_data: Dict):
-        provider_config = self.config.get_provider(provider_id)
+        # Check for user-specific provider config first
+        if self.user_id and provider_id in self.user_providers:
+            provider_config = self.user_providers[provider_id]
+        else:
+            provider_config = self.config.get_provider(provider_id)
 
         if provider_config.api_key_required:
             api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
@@ -1214,8 +1242,24 @@ class RequestHandler:
             raise HTTPException(status_code=500, detail=f"Error fetching content: {str(e)}")
 
 class RotationHandler:
-    def __init__(self):
+    def __init__(self, user_id=None):
+        self.user_id = user_id
         self.config = config
+        # Load user-specific configs if user_id is provided
+        if user_id:
+            self._load_user_configs()
+        else:
+            self.user_providers = {}
+            self.user_rotations = {}
+            self.user_autoselects = {}
+
+    def _load_user_configs(self):
+        """Load user-specific configurations from database"""
+        from .database import get_database
+        db = get_database()
+        self.user_providers = db.get_user_providers(self.user_id)
+        self.user_rotations = db.get_user_rotations(self.user_id)
+        self.user_autoselects = db.get_user_autoselects(self.user_id)
 
     def _get_provider_type(self, provider_id: str) -> str:
         """Get the provider type from configuration"""
@@ -1435,7 +1479,7 @@ class RotationHandler:
     async def handle_rotation_request(self, rotation_id: str, request_data: Dict):
         """
         Handle a rotation request.
-        
+
         For streaming requests, returns a StreamingResponse with proper handling
         based on the selected provider's type (google vs others).
         For non-streaming requests, returns the response dict directly.
@@ -1445,8 +1489,16 @@ class RotationHandler:
         logger = logging.getLogger(__name__)
         logger.info(f"=== RotationHandler.handle_rotation_request START ===")
         logger.info(f"Rotation ID: {rotation_id}")
-        
-        rotation_config = self.config.get_rotation(rotation_id)
+        logger.info(f"User ID: {self.user_id}")
+
+        # Check for user-specific rotation config first
+        if self.user_id and rotation_id in self.user_rotations:
+            rotation_config = self.user_rotations[rotation_id]
+            logger.info(f"Using user-specific rotation config for {rotation_id}")
+        else:
+            rotation_config = self.config.get_rotation(rotation_id)
+            logger.info(f"Using global rotation config for {rotation_id}")
+
         if not rotation_config:
             logger.error(f"Rotation {rotation_id} not found")
             raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found")
@@ -1476,11 +1528,17 @@ class RotationHandler:
             logger.info(f"")
             logger.info(f"--- Processing provider: {provider_id} ---")
             
-            # Check if provider exists in configuration
-            provider_config = self.config.get_provider(provider_id)
+            # Check if provider exists in configuration (user-specific first, then global)
+            if self.user_id and provider_id in self.user_providers:
+                provider_config = self.user_providers[provider_id]
+                logger.info(f"  [USER] Using user-specific provider config for {provider_id}")
+            else:
+                provider_config = self.config.get_provider(provider_id)
+                logger.info(f"  [GLOBAL] Using global provider config for {provider_id}")
+
             if not provider_config:
                 logger.error(f"  [ERROR] Provider {provider_id} not found in providers configuration")
-                logger.error(f"  Available providers: {list(self.config.providers.keys())}")
+                logger.error(f"  Available providers: {list(self.config.providers.keys()) if not self.user_id else list(self.user_providers.keys())}")
                 logger.error(f"  Skipping this provider")
                 skipped_providers.append(provider_id)
                 continue
@@ -2760,12 +2818,28 @@ class RotationHandler:
         return capabilities
 
 class AutoselectHandler:
-    def __init__(self):
+    def __init__(self, user_id=None):
+        self.user_id = user_id
         self.config = config
         self._skill_file_content = None
         self._internal_model = None
         self._internal_tokenizer = None
         self._internal_model_lock = None
+        # Load user-specific configs if user_id is provided
+        if user_id:
+            self._load_user_configs()
+        else:
+            self.user_providers = {}
+            self.user_rotations = {}
+            self.user_autoselects = {}
+
+    def _load_user_configs(self):
+        """Load user-specific configurations from database"""
+        from .database import get_database
+        db = get_database()
+        self.user_providers = db.get_user_providers(self.user_id)
+        self.user_rotations = db.get_user_rotations(self.user_id)
+        self.user_autoselects = db.get_user_autoselects(self.user_id)
 
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""
@@ -3130,8 +3204,16 @@ class AutoselectHandler:
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT REQUEST START ===")
         logger.info(f"Autoselect ID: {autoselect_id}")
-        
-        autoselect_config = self.config.get_autoselect(autoselect_id)
+        logger.info(f"User ID: {self.user_id}")
+
+        # Check for user-specific autoselect config first
+        if self.user_id and autoselect_id in self.user_autoselects:
+            autoselect_config = self.user_autoselects[autoselect_id]
+            logger.info(f"Using user-specific autoselect config for {autoselect_id}")
+        else:
+            autoselect_config = self.config.get_autoselect(autoselect_id)
+            logger.info(f"Using global autoselect config for {autoselect_id}")
+
         if not autoselect_config:
             logger.error(f"Autoselect {autoselect_id} not found")
             raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found")

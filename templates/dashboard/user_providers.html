@@ -1,0 +1,205 @@
+{% extends "base.html" %}
+
+{% block title %}My Providers - AISBF{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>My Providers</h1>
+    <p>Manage your personal provider configurations</p>
+
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Provider Configurations</h2>
+        <div id="providers-list">
+            <!-- Providers will be loaded here -->
+        </div>
+        <button class="btn btn-primary" onclick="showAddProviderModal()">Add New Provider</button>
+    </div>
+</div>
+
+<!-- Modal for adding/editing providers -->
+<div id="provider-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-title">Add Provider</h3>
+            <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="provider-form">
+                <div class="form-group">
+                    <label for="provider-name">Provider Name:</label>
+                    <input type="text" id="provider-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="provider-config">Provider Configuration (JSON):</label>
+                    <textarea id="provider-config" rows="20" placeholder='{"endpoint": "https://api.example.com", "api_key": "your-api-key", "models": []}'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let providers = {{ user_providers_json | safe }};
+let currentEditingIndex = -1;
+
+function renderProviders() {
+    const container = document.getElementById('providers-list');
+    container.innerHTML = '';
+
+    if (providers.length === 0) {
+        container.innerHTML = '<p class="empty-state">No providers configured yet. Click "Add New Provider" to get started.</p>';
+        return;
+    }
+
+    providers.forEach((provider, index) => {
+        const div = document.createElement('div');
+        div.className = 'provider-item';
+        div.innerHTML = `
+            <div class="provider-header">
+                <h3>${provider.provider_id}</h3>
+                <div class="provider-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="editProvider(${index})">Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteProvider('${provider.provider_id}')">Delete</button>
+                </div>
+            </div>
+            <div class="provider-details">
+                <p><strong>Created:</strong> ${new Date(provider.created_at).toLocaleString()}</p>
+                <p><strong>Last Updated:</strong> ${new Date(provider.updated_at).toLocaleString()}</p>
+                <details>
+                    <summary>Configuration (JSON)</summary>
+                    <pre>${JSON.stringify(provider.config, null, 2)}</pre>
+                </details>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function showAddProviderModal() {
+    currentEditingIndex = -1;
+    document.getElementById('modal-title').textContent = 'Add Provider';
+    document.getElementById('provider-name').value = '';
+    document.getElementById('provider-config').value = '{"endpoint": "https://api.example.com", "api_key": "your-api-key", "models": []}';
+    document.getElementById('provider-modal').style.display = 'block';
+}
+
+function editProvider(index) {
+    currentEditingIndex = index;
+    const provider = providers[index];
+    document.getElementById('modal-title').textContent = 'Edit Provider';
+    document.getElementById('provider-name').value = provider.provider_id;
+    document.getElementById('provider-name').readOnly = true;
+    document.getElementById('provider-config').value = JSON.stringify(provider.config, null, 2);
+    document.getElementById('provider-modal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('provider-modal').style.display = 'none';
+    document.getElementById('provider-name').readOnly = false;
+    currentEditingIndex = -1;
+}
+
+function deleteProvider(providerName) {
+    if (!confirm(`Are you sure you want to delete the provider "${providerName}"? This action cannot be undone.`)) return;
+
+    fetch('{{ url_for(request, "/dashboard/user/providers") }}/' + encodeURIComponent(providerName), {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    }).then(response => {
+        if (response.ok) {
+            location.reload();
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Failed to delete provider');
+            });
+        }
+    }).catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+// Handle form submission
+document.getElementById('provider-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const providerName = document.getElementById('provider-name').value.trim();
+    const configText = document.getElementById('provider-config').value.trim();
+
+    if (!providerName) {
+        alert('Provider name is required');
+        return;
+    }
+
+    if (!configText) {
+        alert('Provider configuration is required');
+        return;
+    }
+
+    let configObj;
+    try {
+        configObj = JSON.parse(configText);
+    } catch (e) {
+        alert('Invalid JSON configuration: ' + e.message);
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('provider_name', providerName);
+    formData.append('provider_config', JSON.stringify(configObj));
+
+    const url = '{{ url_for(request, "/dashboard/user/providers") }}';
+    const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        body: formData
+    }).then(response => {
+        if (response.ok) {
+            closeModal();
+            location.reload();
+        } else {
+            return response.text().then(text => {
+                throw new Error(text || 'Failed to save provider');
+            });
+        }
+    }).catch(error => {
+        alert('Error: ' + error.message);
+    });
+});
+
+renderProviders();
+</script>
+
+<style>
+.provider-item {
+    background: #1a1a2e;
+    padding: 1rem;
+    margin: 1rem 0;
+    border-radius: 8px;
+}
+
+.provider-item h3 {
+    margin-top: 0;
+}
+
+.provider-item code {
+    background: #0f3460;
+    padding: 0.2rem 0.5rem;
+    border-radius: 4px;
+}
+</style>
+{% endblock %}

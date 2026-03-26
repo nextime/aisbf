@@ -481,6 +481,43 @@ autoselect_handler = None
 server_config = None
 config = None
 _initialized = False
+
+# Cache for user-specific handlers to avoid recreating them
+_user_handlers_cache = {}
+
+def get_user_handler(handler_type: str, user_id=None):
+    """Get the appropriate handler for a user, with caching"""
+    global request_handler, rotation_handler, autoselect_handler, _user_handlers_cache
+
+    if user_id is None:
+        # Return global handlers for non-authenticated requests
+        if handler_type == 'request':
+            return request_handler
+        elif handler_type == 'rotation':
+            return rotation_handler
+        elif handler_type == 'autoselect':
+            return autoselect_handler
+        else:
+            raise ValueError(f"Unknown handler type: {handler_type}")
+
+    # Check cache first
+    cache_key = f"{handler_type}_{user_id}"
+    if cache_key in _user_handlers_cache:
+        return _user_handlers_cache[cache_key]
+
+    # Create new handler instance for this user
+    if handler_type == 'request':
+        handler = RequestHandler(user_id)
+    elif handler_type == 'rotation':
+        handler = RotationHandler(user_id)
+    elif handler_type == 'autoselect':
+        handler = AutoselectHandler(user_id)
+    else:
+        raise ValueError(f"Unknown handler type: {handler_type}")
+
+    # Cache it
+    _user_handlers_cache[cache_key] = handler
+    return handler
 tor_service = None
 
 # Model cache for dynamically fetched provider models
@@ -560,7 +597,7 @@ async def fetch_provider_models(provider_id: str) -> list:
         }
         dummy_request = Request(scope)
         
-        # Fetch models from provider API
+        # Fetch models from provider API (use global handler for model fetching)
         models = await request_handler.handle_model_list(dummy_request, provider_id)
         
         # Cache the results
@@ -917,32 +954,69 @@ async def auth_middleware(request: Request, call_next):
         if request.url.path == "/" or request.url.path.startswith("/dashboard"):
             response = await call_next(request)
             return response
-        
+
         # Skip auth for public models endpoints (GET only)
         if request.method == "GET" and request.url.path in ["/api/models", "/api/v1/models"]:
             response = await call_next(request)
             return response
-        
+
         # Check for Authorization header
         auth_header = request.headers.get('Authorization', '')
-        
+
         if not auth_header.startswith('Bearer '):
             return JSONResponse(
                 status_code=401,
                 content={"error": "Missing or invalid Authorization header. Use: Authorization: Bearer <token>"}
             )
-        
+
         token = auth_header.replace('Bearer ', '')
+
+        # First check global tokens (for backward compatibility)
         allowed_tokens = server_config.get('auth_tokens', [])
-        
-        if token not in allowed_tokens:
-            return JSONResponse(
-                status_code=403,
-                content={"error": "Invalid authentication token"}
-            )
-    
+        if token in allowed_tokens:
+            # Store global token info in request state
+            request.state.user_id = None
+            request.state.token_id = None
+            request.state.is_global_token = True
+        else:
+            # Check user API tokens
+            from aisbf.database import get_database
+            db = get_database()
+            user_auth = db.authenticate_user_token(token)
+
+            if user_auth:
+                # Store user token info in request state
+                request.state.user_id = user_auth['user_id']
+                request.state.token_id = user_auth['token_id']
+                request.state.is_global_token = False
+
+                # Record token usage for analytics
+                # We'll do this asynchronously to avoid blocking the request
+                import asyncio
+                asyncio.create_task(record_token_usage_async(user_auth['user_id'], user_auth['token_id']))
+            else:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Invalid authentication token"}
+                )
+    else:
+        # Auth not enabled, set default state
+        request.state.user_id = None
+        request.state.token_id = None
+        request.state.is_global_token = False
+
     response = await call_next(request)
     return response
+
+async def record_token_usage_async(user_id: int, token_id: int):
+    """Asynchronously record token usage"""
+    try:
+        from aisbf.database import get_database
+        db = get_database()
+        # Record with dummy values for now - will be updated when we know the actual usage
+        db.record_user_token_usage(user_id, token_id, '', '', 0)
+    except Exception as e:
+        logger.warning(f"Failed to record token usage: {e}")
 
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
@@ -1001,18 +1075,35 @@ async def dashboard_login_page(request: Request):
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
     """Handle dashboard login"""
-    dashboard_config = server_config.get('dashboard_config', {}) if server_config else {}
-    stored_username = dashboard_config.get('username', 'admin')
-    stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
+    from aisbf.database import get_database
     
     # Hash the submitted password
     password_hash = hashlib.sha256(password.encode()).hexdigest()
     
-    # Compare username and hashed password
+    # Try database authentication first
+    db = get_database()
+    user = db.authenticate_user(username, password_hash)
+    
+    if user:
+        # Database user authenticated
+        request.session['logged_in'] = True
+        request.session['username'] = username
+        request.session['role'] = user['role']
+        request.session['user_id'] = user['id']
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+    
+    # Fallback to config admin
+    dashboard_config = server_config.get('dashboard_config', {}) if server_config else {}
+    stored_username = dashboard_config.get('username', 'admin')
+    stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
+    
     if username == stored_username and password_hash == stored_password_hash:
         request.session['logged_in'] = True
         request.session['username'] = username
+        request.session['role'] = 'admin'
+        request.session['user_id'] = None  # Config admin has no user_id
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+    
     return templates.TemplateResponse("dashboard/login.html", {"request": request, "error": "Invalid credentials"})
 
 @app.get("/dashboard/logout")
@@ -1025,6 +1116,15 @@ def require_dashboard_auth(request: Request):
     """Check if user is logged in to dashboard"""
     if not request.session.get('logged_in'):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    return None
+
+def require_admin(request: Request):
+    """Check if user is admin"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    if request.session.get('role') != 'admin':
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
     return None
 
 @app.get("/dashboard", response_class=HTMLResponse)
@@ -1046,14 +1146,50 @@ async def dashboard_index(request: Request):
         })
     else:
         # User dashboard - show user stats
-        return templates.TemplateResponse("dashboard/index.html", {
+        from aisbf.database import get_database
+        db = get_database()
+        user_id = request.session.get('user_id')
+        
+        # Get user statistics
+        usage_stats = {
+            'total_tokens': 0,
+            'requests_today': 0
+        }
+        
+        if user_id:
+            # Get token usage for this user
+            token_usage = db.get_user_token_usage(user_id)
+            usage_stats['total_tokens'] = sum(row['token_count'] for row in token_usage)
+            
+            # Count requests today
+            from datetime import datetime, timedelta
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            usage_stats['requests_today'] = len([
+                row for row in token_usage
+                if datetime.fromisoformat(row['timestamp']) >= today
+            ])
+            
+            # Get user config counts
+            providers_count = len(db.get_user_providers(user_id))
+            rotations_count = len(db.get_user_rotations(user_id))
+            autoselects_count = len(db.get_user_autoselects(user_id))
+            
+            # Get recent activity (last 10)
+            recent_activity = token_usage[-10:] if token_usage else []
+        else:
+            providers_count = 0
+            rotations_count = 0
+            autoselects_count = 0
+            recent_activity = []
+        
+        return templates.TemplateResponse("dashboard/user_index.html", {
             "request": request,
             "session": request.session,
-            "user_message": "User dashboard - usage statistics and configuration management coming soon",
-            "providers_count": 0,
-            "rotations_count": 0,
-            "autoselect_count": 0,
-            "server_config": {}
+            "usage_stats": usage_stats,
+            "providers_count": providers_count,
+            "rotations_count": rotations_count,
+            "autoselects_count": autoselects_count,
+            "recent_activity": recent_activity
         })
 
 @app.get("/dashboard/providers", response_class=HTMLResponse)
@@ -1622,6 +1758,314 @@ async def dashboard_restart(request: Request):
     
     return JSONResponse({"message": "Server is restarting..."})
 
+# User-specific configuration management routes
+@app.get("/dashboard/user/providers", response_class=HTMLResponse)
+async def dashboard_user_providers(request: Request):
+    """User provider management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    # Get user-specific providers
+    user_providers = db.get_user_providers(user_id)
+
+    return templates.TemplateResponse("dashboard/user_providers.html", {
+        "request": request,
+        "session": request.session,
+        "user_providers_json": json.dumps(user_providers),
+        "user_id": user_id
+    })
+
+@app.post("/dashboard/user/providers")
+async def dashboard_user_providers_save(request: Request, provider_name: str = Form(...), provider_config: str = Form(...)):
+    """Save user-specific provider configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        # Validate JSON
+        provider_data = json.loads(provider_config)
+
+        # Save to database
+        db.save_user_provider(user_id, provider_name, provider_data)
+
+        return RedirectResponse(url=url_for(request, "/dashboard/user/providers"), status_code=303)
+    except json.JSONDecodeError as e:
+        # Reload current providers on error
+        user_providers = db.get_user_providers(user_id)
+        return templates.TemplateResponse("dashboard/user_providers.html", {
+            "request": request,
+            "session": request.session,
+            "user_providers_json": json.dumps(user_providers),
+            "user_id": user_id,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.delete("/dashboard/user/providers/{provider_name}")
+async def dashboard_user_providers_delete(request: Request, provider_name: str):
+    """Delete user-specific provider configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        db.delete_user_provider(user_id, provider_name)
+        return JSONResponse({"message": "Provider deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# User-specific rotation management routes
+@app.get("/dashboard/user/rotations", response_class=HTMLResponse)
+async def dashboard_user_rotations(request: Request):
+    """User rotation management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    # Get user-specific rotations
+    user_rotations = db.get_user_rotations(user_id)
+
+    return templates.TemplateResponse("dashboard/user_rotations.html", {
+        "request": request,
+        "session": request.session,
+        "user_rotations_json": json.dumps(user_rotations),
+        "user_id": user_id
+    })
+
+@app.post("/dashboard/user/rotations")
+async def dashboard_user_rotations_save(request: Request, rotation_name: str = Form(...), rotation_config: str = Form(...)):
+    """Save user-specific rotation configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        # Validate JSON
+        rotation_data = json.loads(rotation_config)
+
+        # Save to database
+        db.save_user_rotation(user_id, rotation_name, rotation_data)
+
+        return RedirectResponse(url=url_for(request, "/dashboard/user/rotations"), status_code=303)
+    except json.JSONDecodeError as e:
+        # Reload current rotations on error
+        user_rotations = db.get_user_rotations(user_id)
+        return templates.TemplateResponse("dashboard/user_rotations.html", {
+            "request": request,
+            "session": request.session,
+            "user_rotations_json": json.dumps(user_rotations),
+            "user_id": user_id,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.delete("/dashboard/user/rotations/{rotation_name}")
+async def dashboard_user_rotations_delete(request: Request, rotation_name: str):
+    """Delete user-specific rotation configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        db.delete_user_rotation(user_id, rotation_name)
+        return JSONResponse({"message": "Rotation deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# User-specific autoselect management routes
+@app.get("/dashboard/user/autoselects", response_class=HTMLResponse)
+async def dashboard_user_autoselects(request: Request):
+    """User autoselect management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    # Get user-specific autoselects
+    user_autoselects = db.get_user_autoselects(user_id)
+
+    return templates.TemplateResponse("dashboard/user_autoselects.html", {
+        "request": request,
+        "session": request.session,
+        "user_autoselects_json": json.dumps(user_autoselects),
+        "user_id": user_id
+    })
+
+@app.post("/dashboard/user/autoselects")
+async def dashboard_user_autoselects_save(request: Request, autoselect_name: str = Form(...), autoselect_config: str = Form(...)):
+    """Save user-specific autoselect configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        # Validate JSON
+        autoselect_data = json.loads(autoselect_config)
+
+        # Save to database
+        db.save_user_autoselect(user_id, autoselect_name, autoselect_data)
+
+        return RedirectResponse(url=url_for(request, "/dashboard/user/autoselects"), status_code=303)
+    except json.JSONDecodeError as e:
+        # Reload current autoselects on error
+        user_autoselects = db.get_user_autoselects(user_id)
+        return templates.TemplateResponse("dashboard/user_autoselects.html", {
+            "request": request,
+            "session": request.session,
+            "user_autoselects_json": json.dumps(user_autoselects),
+            "user_id": user_id,
+            "error": f"Invalid JSON: {str(e)}"
+        })
+
+@app.delete("/dashboard/user/autoselects/{autoselect_name}")
+async def dashboard_user_autoselects_delete(request: Request, autoselect_name: str):
+    """Delete user-specific autoselect configuration"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        db.delete_user_autoselect(user_id, autoselect_name)
+        return JSONResponse({"message": "Autoselect deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# User API token management routes
+@app.get("/dashboard/user/tokens", response_class=HTMLResponse)
+async def dashboard_user_tokens(request: Request):
+    """User API token management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    # Get user API tokens
+    user_tokens = db.get_user_api_tokens(user_id)
+
+    return templates.TemplateResponse("dashboard/user_tokens.html", {
+        "request": request,
+        "session": request.session,
+        "user_tokens": user_tokens,
+        "user_id": user_id
+    })
+
+@app.post("/dashboard/user/tokens")
+async def dashboard_user_tokens_create(request: Request, description: str = Form("")):
+    """Create a new user API token"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    import secrets
+
+    db = get_database()
+
+    # Generate a secure token
+    token = secrets.token_urlsafe(32)
+
+    try:
+        token_id = db.create_user_api_token(user_id, token, description.strip() or None)
+        return JSONResponse({
+            "message": "Token created successfully",
+            "token": token,
+            "token_id": token_id
+        })
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.delete("/dashboard/user/tokens/{token_id}")
+async def dashboard_user_tokens_delete(request: Request, token_id: int):
+    """Delete a user API token"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        db.delete_user_api_token(user_id, token_id)
+        return JSONResponse({"message": "Token deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.get("/dashboard/tor/status")
 async def dashboard_tor_status(request: Request):
     """Get TOR hidden service status"""
@@ -1867,10 +2311,14 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
                 detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
             )
         body_dict['model'] = actual_model
+        # Get user-specific handler
+        user_id = getattr(request.state, 'user_id', None)
+        handler = get_user_handler('autoselect', user_id)
+    
         if body.stream:
-            return await autoselect_handler.handle_autoselect_streaming_request(actual_model, body_dict)
+            return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
         else:
-            return await autoselect_handler.handle_autoselect_request(actual_model, body_dict)
+            return await handler.handle_autoselect_request(actual_model, body_dict)
     
     # PATH 2: Check if it's a rotation (format: rotation/{name})
     if provider_id == "rotation":
@@ -1880,7 +2328,10 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
                 detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
             )
         body_dict['model'] = actual_model
-        return await rotation_handler.handle_rotation_request(actual_model, body_dict)
+        # Get user-specific handler
+        user_id = getattr(request.state, 'user_id', None)
+        handler = get_user_handler('rotation', user_id)
+        return await handler.handle_rotation_request(actual_model, body_dict)
     
     # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
@@ -1899,10 +2350,14 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
     
     # Handle as direct provider request
     body_dict['model'] = actual_model
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+
     if body.stream:
-        return await request_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+        return await handler.handle_streaming_chat_completion(request, provider_id, body_dict)
     else:
-        return await request_handler.handle_chat_completion(request, provider_id, body_dict)
+        return await handler.handle_chat_completion(request, provider_id, body_dict)
 
 @app.get("/api/models")
 async def list_all_models(request: Request):
@@ -2069,6 +2524,10 @@ async def v1_audio_transcriptions(request: Request):
             detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
         )
     
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+
     # Create new form data with updated model
     from starlette.datastructures import FormData
     updated_form = FormData()
@@ -2077,8 +2536,8 @@ async def v1_audio_transcriptions(request: Request):
             updated_form[key] = actual_model
         else:
             updated_form[key] = value
-    
-    return await request_handler.handle_audio_transcription(request, provider_id, updated_form)
+
+    return await handler.handle_audio_transcription(request, provider_id, updated_form)
 
 @app.post("/api/v1/audio/speech")
 async def v1_audio_speech(request: Request, body: dict):
@@ -2142,7 +2601,10 @@ async def v1_audio_speech(request: Request, body: dict):
         )
     
     body['model'] = actual_model
-    return await request_handler.handle_text_to_speech(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_text_to_speech(request, provider_id, body)
 
 @app.post("/api/v1/images/generations")
 async def v1_image_generations(request: Request, body: dict):
@@ -2206,7 +2668,10 @@ async def v1_image_generations(request: Request, body: dict):
         )
     
     body['model'] = actual_model
-    return await request_handler.handle_image_generation(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_image_generation(request, provider_id, body)
 
 @app.post("/api/v1/embeddings")
 async def v1_embeddings(request: Request, body: dict):
@@ -2270,7 +2735,10 @@ async def v1_embeddings(request: Request, body: dict):
         )
     
     body['model'] = actual_model
-    return await request_handler.handle_embeddings(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_embeddings(request, provider_id, body)
 
 @app.get("/api/rotations")
 async def list_rotations():
@@ -2324,9 +2792,13 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     logger.debug("Handling rotation request")
 
     try:
+        # Get user-specific handler
+        user_id = getattr(request.state, 'user_id', None)
+        handler = get_user_handler('rotation', user_id)
+
         # The rotation handler handles streaming internally and returns
         # a StreamingResponse for streaming requests or a dict for non-streaming
-        result = await rotation_handler.handle_rotation_request(body.model, body_dict)
+        result = await handler.handle_rotation_request(body.model, body_dict)
         logger.debug(f"Rotation response result type: {type(result)}")
         return result
     except Exception as e:
@@ -2397,8 +2869,12 @@ async def autoselect_chat_completions(request: Request, body: ChatCompletionRequ
 
     body_dict = body.model_dump()
 
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('autoselect', user_id)
+
     # Check if the model name corresponds to an autoselect configuration
-    if body.model not in config.autoselect:
+    if body.model not in config.autoselect and (not user_id or body.model not in handler.user_autoselects):
         logger.error(f"Model '{body.model}' not found in autoselect")
         logger.error(f"Available autoselect: {list(config.autoselect.keys())}")
         raise HTTPException(
@@ -2412,10 +2888,10 @@ async def autoselect_chat_completions(request: Request, body: ChatCompletionRequ
     try:
         if body.stream:
             logger.debug("Handling streaming autoselect request")
-            return await autoselect_handler.handle_autoselect_streaming_request(body.model, body_dict)
+            return await handler.handle_autoselect_streaming_request(body.model, body_dict)
         else:
             logger.debug("Handling non-streaming autoselect request")
-            result = await autoselect_handler.handle_autoselect_request(body.model, body_dict)
+            result = await handler.handle_autoselect_request(body.model, body_dict)
             logger.debug(f"Autoselect response result: {result}")
             return result
     except Exception as e:
@@ -2457,16 +2933,20 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 
     body_dict = body.model_dump()
 
+    # Get user-specific handler based on the type
+    user_id = getattr(request.state, 'user_id', None)
+
     # Check if it's an autoselect
-    if provider_id in config.autoselect:
+    if provider_id in config.autoselect or (user_id and provider_id in get_user_handler('autoselect', user_id).user_autoselects):
         logger.debug("Handling autoselect request")
+        handler = get_user_handler('autoselect', user_id)
         try:
             if body.stream:
                 logger.debug("Handling streaming autoselect request")
-                return await autoselect_handler.handle_autoselect_streaming_request(provider_id, body_dict)
+                return await handler.handle_autoselect_streaming_request(provider_id, body_dict)
             else:
                 logger.debug("Handling non-streaming autoselect request")
-                result = await autoselect_handler.handle_autoselect_request(provider_id, body_dict)
+                result = await handler.handle_autoselect_request(provider_id, body_dict)
                 logger.debug(f"Autoselect response result: {result}")
                 return result
         except Exception as e:
@@ -2474,13 +2954,15 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
             raise
 
     # Check if it's a rotation
-    if provider_id in config.rotations:
+    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).user_rotations):
         logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation request")
-        return await rotation_handler.handle_rotation_request(provider_id, body_dict)
+        handler = get_user_handler('rotation', user_id)
+        return await handler.handle_rotation_request(provider_id, body_dict)
 
     # Check if it's a provider
-    if provider_id not in config.providers:
+    handler = get_user_handler('request', user_id)
+    if provider_id not in config.providers and (not user_id or provider_id not in handler.user_providers):
         logger.error(f"Provider ID '{provider_id}' not found in providers")
         logger.error(f"Available providers: {list(config.providers.keys())}")
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
@@ -2489,9 +2971,9 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 
     logger.info(f"Provider ID '{provider_id}' found in providers")
 
-    provider_config = config.get_provider(provider_id)
+    provider_config = handler.user_providers.get(provider_id) if user_id and provider_id in handler.user_providers else config.get_provider(provider_id)
     logger.debug(f"Provider config: {provider_config}")
-    
+
     # Validate kiro credentials before processing request
     if not validate_kiro_credentials(provider_id, provider_config):
         raise HTTPException(
@@ -2502,10 +2984,10 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     try:
         if body.stream:
             logger.debug("Handling streaming chat completion")
-            return await request_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+            return await handler.handle_streaming_chat_completion(request, provider_id, body_dict)
         else:
             logger.debug("Handling non-streaming chat completion")
-            result = await request_handler.handle_chat_completion(request, provider_id, body_dict)
+            result = await handler.handle_chat_completion(request, provider_id, body_dict)
             logger.debug(f"Response result: {result}")
             return result
     except Exception as e:
@@ -2516,11 +2998,15 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 async def list_models(request: Request, provider_id: str):
     logger.debug(f"Received list_models request for provider: {provider_id}")
 
+    # Get user-specific handler based on the type
+    user_id = getattr(request.state, 'user_id', None)
+
     # Check if it's an autoselect
-    if provider_id in config.autoselect:
+    if provider_id in config.autoselect or (user_id and provider_id in get_user_handler('autoselect', user_id).user_autoselects):
         logger.debug("Handling autoselect model list request")
+        handler = get_user_handler('autoselect', user_id)
         try:
-            result = await autoselect_handler.handle_autoselect_model_list(provider_id)
+            result = await handler.handle_autoselect_model_list(provider_id)
             logger.debug(f"Autoselect models result: {result}")
             return result
         except Exception as e:
@@ -2528,13 +3014,15 @@ async def list_models(request: Request, provider_id: str):
             raise
 
     # Check if it's a rotation
-    if provider_id in config.rotations:
+    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).user_rotations):
         logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation model list request")
-        return await rotation_handler.handle_rotation_model_list(provider_id)
+        handler = get_user_handler('rotation', user_id)
+        return await handler.handle_rotation_model_list(provider_id)
 
     # Check if it's a provider
-    if provider_id not in config.providers:
+    handler = get_user_handler('request', user_id)
+    if provider_id not in config.providers and (not user_id or provider_id not in handler.user_providers):
         logger.error(f"Provider ID '{provider_id}' not found in providers")
         logger.error(f"Available providers: {list(config.providers.keys())}")
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
@@ -2543,11 +3031,9 @@ async def list_models(request: Request, provider_id: str):
 
     logger.info(f"Provider ID '{provider_id}' found in providers")
 
-    provider_config = config.get_provider(provider_id)
-
     try:
         logger.debug("Handling model list request")
-        result = await request_handler.handle_model_list(request, provider_id)
+        result = await handler.handle_model_list(request, provider_id)
         logger.debug(f"Models result: {result}")
         return result
     except Exception as e:
@@ -2615,6 +3101,10 @@ async def audio_transcriptions(request: Request):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+
     # Create new form data with updated model
     from starlette.datastructures import FormData
     updated_form = FormData()
@@ -2623,8 +3113,8 @@ async def audio_transcriptions(request: Request):
             updated_form[key] = actual_model
         else:
             updated_form[key] = value
-    
-    return await request_handler.handle_audio_transcription(request, provider_id, updated_form)
+
+    return await handler.handle_audio_transcription(request, provider_id, updated_form)
 
 @app.post("/api/audio/speech")
 async def audio_speech(request: Request, body: dict):
@@ -2678,9 +3168,12 @@ async def audio_speech(request: Request, body: dict):
             status_code=400,
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
-    
+
     body['model'] = actual_model
-    return await request_handler.handle_text_to_speech(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_text_to_speech(request, provider_id, body)
 
 # Image endpoints (supports all three proxy paths)
 @app.post("/api/images/generations")
@@ -2735,9 +3228,12 @@ async def image_generations(request: Request, body: dict):
             status_code=400,
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
-    
+
     body['model'] = actual_model
-    return await request_handler.handle_image_generation(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_image_generation(request, provider_id, body)
 
 # Embeddings endpoint (supports all three proxy paths)
 @app.post("/api/embeddings")
@@ -2802,7 +3298,10 @@ async def embeddings(request: Request, body: dict):
         )
     
     body['model'] = actual_model
-    return await request_handler.handle_embeddings(request, provider_id, body)
+    # Get user-specific handler
+    user_id = getattr(request.state, 'user_id', None)
+    handler = get_user_handler('request', user_id)
+    return await handler.handle_embeddings(request, provider_id, body)
 
 # Content proxy endpoint
 @app.get("/api/proxy/{content_id}")
@@ -2812,6 +3311,7 @@ async def proxy_content(content_id: str):
     logger.info(f"Content ID: {content_id}")
     
     try:
+        # Get user-specific handler (use global for content proxy as it's shared)
         result = await request_handler.handle_content_proxy(content_id)
         return result
     except Exception as e:
@@ -3095,7 +3595,9 @@ async def mcp_sse(request: Request):
                 return
             
             try:
-                result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+                # Get user_id from request state if available
+                user_id = getattr(request.state, 'user_id', None)
+                result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level, user_id)
                 response = {
                     "jsonrpc": "2.0",
                     "id": request_id,
@@ -3218,7 +3720,9 @@ async def mcp_post(request: Request):
             )
         
         try:
-            result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+            # Get user_id from request state if available
+            user_id = getattr(request.state, 'user_id', None)
+            result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level, user_id)
             return {
                 "jsonrpc": "2.0",
                 "id": request_id,
@@ -3299,7 +3803,9 @@ async def mcp_call_tool(request: Request):
         )
     
     try:
-        result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level)
+        # Get user_id from request state if available
+        user_id = getattr(request.state, 'user_id', None)
+        result = await mcp_server.handle_tool_call(tool_name, arguments, auth_level, user_id)
         return {"result": result}
     except HTTPException as e:
         return JSONResponse(

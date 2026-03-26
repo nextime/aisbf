@@ -1,0 +1,140 @@
+{% extends "base.html" %}
+
+{% block title %}User Dashboard - AISBF{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>User Dashboard</h1>
+    <p>Welcome, {{ session.username }}!</p>
+
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <!-- Usage Statistics -->
+    <div class="card">
+        <h2>Usage Statistics</h2>
+        <div class="stats-grid">
+            <div class="stat-item">
+                <h3>Total Tokens Used</h3>
+                <p class="stat-value">{{ usage_stats.total_tokens|default(0) }}</p>
+            </div>
+            <div class="stat-item">
+                <h3>Requests Today</h3>
+                <p class="stat-value">{{ usage_stats.requests_today|default(0) }}</p>
+            </div>
+            <div class="stat-item">
+                <h3>Active Providers</h3>
+                <p class="stat-value">{{ providers_count|default(0) }}</p>
+            </div>
+            <div class="stat-item">
+                <h3>Active Rotations</h3>
+                <p class="stat-value">{{ rotations_count|default(0) }}</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- Quick Actions -->
+    <div class="card">
+        <h2>Quick Actions</h2>
+        <div class="button-group">
+            <a href="{{ url_for(request, '/dashboard/user/providers') }}" class="btn btn-primary">Manage Providers</a>
+            <a href="{{ url_for(request, '/dashboard/user/rotations') }}" class="btn btn-primary">Manage Rotations</a>
+            <a href="{{ url_for(request, '/dashboard/user/autoselect') }}" class="btn btn-primary">Manage Autoselect</a>
+            <a href="{{ url_for(request, '/dashboard/user/tokens') }}" class="btn btn-primary">API Tokens</a>
+        </div>
+    </div>
+
+    <!-- Recent Activity -->
+    <div class="card">
+        <h2>Recent Activity</h2>
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Timestamp</th>
+                    <th>Provider</th>
+                    <th>Model</th>
+                    <th>Tokens</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% if recent_activity %}
+                    {% for activity in recent_activity %}
+                    <tr>
+                        <td>{{ activity.timestamp }}</td>
+                        <td>{{ activity.provider_id }}</td>
+                        <td>{{ activity.model }}</td>
+                        <td>{{ activity.token_count }}</td>
+                    </tr>
+                    {% endfor %}
+                {% else %}
+                    <tr>
+                        <td colspan="4" style="text-align: center;">No recent activity</td>
+                    </tr>
+                {% endif %}
+            </tbody>
+        </table>
+    </div>
+</div>
+
+<style>
+.stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 1rem;
+    margin-top: 1rem;
+}
+
+.stat-item {
+    background: #1a1a2e;
+    padding: 1.5rem;
+    border-radius: 8px;
+    text-align: center;
+}
+
+.stat-item h3 {
+    font-size: 0.9rem;
+    color: #888;
+    margin-bottom: 0.5rem;
+}
+
+.stat-value {
+    font-size: 2rem;
+    font-weight: bold;
+    color: #16213e;
+}
+
+.button-group {
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-top: 1rem;
+}
+
+.table {
+    width: 100%;
+    margin-top: 1rem;
+    border-collapse: collapse;
+}
+
+.table th,
+.table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #333;
+}
+
+.table th {
+    background: #1a1a2e;
+    font-weight: bold;
+}
+
+.table tbody tr:hover {
+    background: #1a1a2e;
+}
+</style>
+{% endblock %}

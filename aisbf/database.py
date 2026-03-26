@@ -442,6 +442,537 @@ class DatabaseManager:
             'TPD': self.get_token_usage(provider_id, model_name, '1d')
         }
 
+    # User management methods
+    def authenticate_user(self, username: str, password_hash: str) -> Optional[Dict]:
+        """
+        Authenticate a user by username and password hash.
+
+        Args:
+            username: Username to authenticate
+            password_hash: SHA256 hash of the password
+
+        Returns:
+            User dict if authenticated, None otherwise
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, username, role, is_active
+                FROM users
+                WHERE username = ? AND password_hash = ? AND is_active = 1
+            ''', (username, password_hash))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'username': row[1],
+                    'role': row[2],
+                    'is_active': row[3]
+                }
+            return None
+
+    def create_user(self, username: str, password_hash: str, role: str = 'user', created_by: str = None) -> int:
+        """
+        Create a new user.
+
+        Args:
+            username: Username for the new user
+            password_hash: SHA256 hash of the password
+            role: User role ('admin' or 'user')
+            created_by: Username of the creator
+
+        Returns:
+            User ID of the created user
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO users (username, password_hash, role, created_by)
+                VALUES (?, ?, ?, ?)
+            ''', (username, password_hash, role, created_by))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_users(self) -> List[Dict]:
+        """
+        Get all users.
+
+        Returns:
+            List of user dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, username, role, created_by, created_at, last_login, is_active
+                FROM users
+                ORDER BY created_at DESC
+            ''')
+
+            users = []
+            for row in cursor.fetchall():
+                users.append({
+                    'id': row[0],
+                    'username': row[1],
+                    'role': row[2],
+                    'created_by': row[3],
+                    'created_at': row[4],
+                    'last_login': row[5],
+                    'is_active': row[6]
+                })
+            return users
+
+    def delete_user(self, user_id: int):
+        """
+        Delete a user and all their configurations.
+
+        Args:
+            user_id: User ID to delete
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            # Delete user configurations first (due to foreign key constraints)
+            cursor.execute('DELETE FROM user_providers WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM user_rotations WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM user_autoselects WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM user_api_tokens WHERE user_id = ?', (user_id,))
+            cursor.execute('DELETE FROM user_token_usage WHERE user_id = ?', (user_id,))
+            # Delete the user
+            cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+            conn.commit()
+
+    # User-specific provider methods
+    def save_user_provider(self, user_id: int, provider_name: str, config: Dict):
+        """
+        Save user-specific provider configuration.
+
+        Args:
+            user_id: User ID
+            provider_name: Provider name
+            config: Provider configuration dictionary
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            config_json = json.dumps(config)
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_providers (user_id, provider_id, config, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (user_id, provider_name, config_json))
+            conn.commit()
+
+    def get_user_providers(self, user_id: int) -> List[Dict]:
+        """
+        Get all user-specific providers for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of provider configurations
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT provider_id, config, created_at, updated_at
+                FROM user_providers
+                WHERE user_id = ?
+                ORDER BY provider_id
+            ''', (user_id,))
+
+            providers = []
+            for row in cursor.fetchall():
+                providers.append({
+                    'provider_id': row[0],
+                    'config': json.loads(row[1]),
+                    'created_at': row[2],
+                    'updated_at': row[3]
+                })
+            return providers
+
+    def get_user_provider(self, user_id: int, provider_name: str) -> Optional[Dict]:
+        """
+        Get a specific user provider configuration.
+
+        Args:
+            user_id: User ID
+            provider_name: Provider name
+
+        Returns:
+            Provider configuration dict or None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT config, created_at, updated_at
+                FROM user_providers
+                WHERE user_id = ? AND provider_id = ?
+            ''', (user_id, provider_name))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'config': json.loads(row[0]),
+                    'created_at': row[1],
+                    'updated_at': row[2]
+                }
+            return None
+
+    def delete_user_provider(self, user_id: int, provider_name: str):
+        """
+        Delete a user-specific provider configuration.
+
+        Args:
+            user_id: User ID
+            provider_name: Provider name
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM user_providers
+                WHERE user_id = ? AND provider_id = ?
+            ''', (user_id, provider_name))
+            conn.commit()
+
+    # User-specific rotation methods
+    def save_user_rotation(self, user_id: int, rotation_name: str, config: Dict):
+        """
+        Save user-specific rotation configuration.
+
+        Args:
+            user_id: User ID
+            rotation_name: Rotation name
+            config: Rotation configuration dictionary
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            config_json = json.dumps(config)
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_rotations (user_id, rotation_id, config, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (user_id, rotation_name, config_json))
+            conn.commit()
+
+    def get_user_rotations(self, user_id: int) -> List[Dict]:
+        """
+        Get all user-specific rotations for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of rotation configurations
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT rotation_id, config, created_at, updated_at
+                FROM user_rotations
+                WHERE user_id = ?
+                ORDER BY rotation_id
+            ''', (user_id,))
+
+            rotations = []
+            for row in cursor.fetchall():
+                rotations.append({
+                    'rotation_id': row[0],
+                    'config': json.loads(row[1]),
+                    'created_at': row[2],
+                    'updated_at': row[3]
+                })
+            return rotations
+
+    def get_user_rotation(self, user_id: int, rotation_name: str) -> Optional[Dict]:
+        """
+        Get a specific user rotation configuration.
+
+        Args:
+            user_id: User ID
+            rotation_name: Rotation name
+
+        Returns:
+            Rotation configuration dict or None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT config, created_at, updated_at
+                FROM user_rotations
+                WHERE user_id = ? AND rotation_id = ?
+            ''', (user_id, rotation_name))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'config': json.loads(row[0]),
+                    'created_at': row[1],
+                    'updated_at': row[2]
+                }
+            return None
+
+    def delete_user_rotation(self, user_id: int, rotation_name: str):
+        """
+        Delete a user-specific rotation configuration.
+
+        Args:
+            user_id: User ID
+            rotation_name: Rotation name
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM user_rotations
+                WHERE user_id = ? AND rotation_id = ?
+            ''', (user_id, rotation_name))
+            conn.commit()
+
+    # User-specific autoselect methods
+    def save_user_autoselect(self, user_id: int, autoselect_name: str, config: Dict):
+        """
+        Save user-specific autoselect configuration.
+
+        Args:
+            user_id: User ID
+            autoselect_name: Autoselect name
+            config: Autoselect configuration dictionary
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            config_json = json.dumps(config)
+            cursor.execute('''
+                INSERT OR REPLACE INTO user_autoselects (user_id, autoselect_id, config, updated_at)
+                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+            ''', (user_id, autoselect_name, config_json))
+            conn.commit()
+
+    def get_user_autoselects(self, user_id: int) -> List[Dict]:
+        """
+        Get all user-specific autoselects for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of autoselect configurations
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT autoselect_id, config, created_at, updated_at
+                FROM user_autoselects
+                WHERE user_id = ?
+                ORDER BY autoselect_id
+            ''', (user_id,))
+
+            autoselects = []
+            for row in cursor.fetchall():
+                autoselects.append({
+                    'autoselect_id': row[0],
+                    'config': json.loads(row[1]),
+                    'created_at': row[2],
+                    'updated_at': row[3]
+                })
+            return autoselects
+
+    def get_user_autoselect(self, user_id: int, autoselect_name: str) -> Optional[Dict]:
+        """
+        Get a specific user autoselect configuration.
+
+        Args:
+            user_id: User ID
+            autoselect_name: Autoselect name
+
+        Returns:
+            Autoselect configuration dict or None
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT config, created_at, updated_at
+                FROM user_autoselects
+                WHERE user_id = ? AND autoselect_id = ?
+            ''', (user_id, autoselect_name))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'config': json.loads(row[0]),
+                    'created_at': row[1],
+                    'updated_at': row[2]
+                }
+            return None
+
+    def delete_user_autoselect(self, user_id: int, autoselect_name: str):
+        """
+        Delete a user-specific autoselect configuration.
+
+        Args:
+            user_id: User ID
+            autoselect_name: Autoselect name
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM user_autoselects
+                WHERE user_id = ? AND autoselect_id = ?
+            ''', (user_id, autoselect_name))
+            conn.commit()
+
+    # User API token methods
+    def create_user_api_token(self, user_id: int, token: str, description: str = None) -> int:
+        """
+        Create a new API token for a user.
+
+        Args:
+            user_id: User ID
+            token: The token string
+            description: Optional description
+
+        Returns:
+            Token ID
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO user_api_tokens (user_id, token, description)
+                VALUES (?, ?, ?)
+            ''', (user_id, token, description))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_user_api_tokens(self, user_id: int) -> List[Dict]:
+        """
+        Get all API tokens for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of token dictionaries
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, token, description, created_at, last_used, is_active
+                FROM user_api_tokens
+                WHERE user_id = ?
+                ORDER BY created_at DESC
+            ''', (user_id,))
+
+            tokens = []
+            for row in cursor.fetchall():
+                tokens.append({
+                    'id': row[0],
+                    'token': row[1],
+                    'description': row[2],
+                    'created_at': row[3],
+                    'last_used': row[4],
+                    'is_active': row[5]
+                })
+            return tokens
+
+    def authenticate_user_token(self, token: str) -> Optional[Dict]:
+        """
+        Authenticate a user by API token.
+
+        Args:
+            token: API token string
+
+        Returns:
+            User dict if authenticated, None otherwise
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT u.id, u.username, u.role, t.id as token_id
+                FROM users u
+                JOIN user_api_tokens t ON u.id = t.user_id
+                WHERE t.token = ? AND t.is_active = 1 AND u.is_active = 1
+            ''', (token,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'user_id': row[0],
+                    'username': row[1],
+                    'role': row[2],
+                    'token_id': row[3]
+                }
+            return None
+
+    def delete_user_api_token(self, user_id: int, token_id: int):
+        """
+        Delete a user API token.
+
+        Args:
+            user_id: User ID
+            token_id: Token ID
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                DELETE FROM user_api_tokens
+                WHERE id = ? AND user_id = ?
+            ''', (token_id, user_id))
+            conn.commit()
+
+    # User token usage methods
+    def record_user_token_usage(self, user_id: int, token_id: int, provider_id: str, model_name: str, tokens_used: int):
+        """
+        Record token usage for a user API request.
+
+        Args:
+            user_id: User ID
+            token_id: API token ID
+            provider_id: Provider identifier
+            model_name: Model name
+            tokens_used: Number of tokens used
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                INSERT INTO user_token_usage (user_id, token_id, provider_id, model_name, tokens_used)
+                VALUES (?, ?, ?, ?, ?)
+            ''', (user_id, token_id, provider_id, model_name, tokens_used))
+
+            # Update last_used timestamp for the token
+            cursor.execute('''
+                UPDATE user_api_tokens
+                SET last_used = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (token_id,))
+
+            conn.commit()
+
+    def get_user_token_usage(self, user_id: int) -> List[Dict]:
+        """
+        Get token usage for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of token usage records
+        """
+        with sqlite3.connect(self.db_path) as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT provider_id, model_name, tokens_used, timestamp
+                FROM user_token_usage
+                WHERE user_id = ?
+                ORDER BY timestamp DESC
+                LIMIT 1000
+            ''', (user_id,))
+
+            usage = []
+            for row in cursor.fetchall():
+                usage.append({
+                    'provider_id': row[0],
+                    'model_name': row[1],
+                    'token_count': row[2],
+                    'timestamp': row[3]
+                })
+            return usage
+
 
 # Global database manager instance
 _db_manager: Optional[DatabaseManager] = None

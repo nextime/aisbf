@@ -297,15 +297,18 @@ AISBF includes a comprehensive SQLite database system that provides persistent t
 
 The database (`~/.aisbf/aisbf.db`) contains the following tables:
 
+#### Core Tracking Tables
 - **`context_dimensions`**: Tracks context size, condensation settings, and effective context per model
 - **`token_usage`**: Persistent token usage tracking with TPM/TPH/TPD rate limiting across restarts
 - **`model_embeddings`**: Caches model embeddings for semantic classification performance
+
+#### Multi-User Tables
 - **`users`**: User management with authentication, roles (admin/user), and metadata
-- **`user_providers`**: Isolated provider configurations per user
-- **`user_rotations`**: Isolated rotation configurations per user
-- **`user_autoselects`**: Isolated autoselect configurations per user
+- **`user_providers`**: Isolated provider configurations per user (JSON stored configurations)
+- **`user_rotations`**: Isolated rotation configurations per user (JSON stored configurations)
+- **`user_autoselects`**: Isolated autoselect configurations per user (JSON stored configurations)
 - **`user_api_tokens`**: API token management per user for MCP and API access
-- **`user_token_usage`**: Per-user token usage tracking
+- **`user_token_usage`**: Per-user token usage tracking and analytics
 
 ### Database Initialization
 
@@ -317,31 +320,56 @@ The database is automatically initialized on startup:
 
 ### Multi-User Support
 
-AISBF supports multiple users with complete isolation:
+AISBF supports multiple users with complete isolation through database-backed configurations:
 
-#### User Authentication
-- Database-first authentication with config admin fallback
-- SHA256 password hashing for security
-- Role-based access control (admin vs user roles)
-- Session-based authentication
+#### User Authentication System
+- **Database-First Authentication**: User credentials stored in SQLite database with SHA256 password hashing
+- **Config Admin Fallback**: Legacy config-based admin authentication for backward compatibility
+- **Role-Based Access Control**: Two roles - `admin` (full access) and `user` (isolated access)
+- **Session-Based Authentication**: Secure session management for dashboard access
 
-#### User Isolation
-- Each user has isolated provider, rotation, and autoselect configurations
-- Separate API tokens per user
-- Individual token usage tracking
-- User-specific dashboard access
+#### User Isolation Architecture
+Each user has completely isolated configurations stored as JSON in the database:
+
+- **Provider Configurations**: `user_providers` table stores individual API keys, endpoints, and model settings
+- **Rotation Configurations**: `user_rotations` table stores personal load balancing rules
+- **Autoselect Configurations**: `user_autoselects` table stores custom AI-assisted model selection rules
+- **API Tokens**: `user_api_tokens` table manages multiple API tokens per user
+- **Usage Tracking**: `user_token_usage` table provides per-user analytics and rate limiting
+
+#### Handler Architecture
+The system uses user-specific handler instances that load configurations from the database:
+
+```python
+# Handler instantiation with user context
+request_handler = RequestHandler(user_id=user_id)
+rotation_handler = RotationHandler(user_id=user_id)
+autoselect_handler = AutoselectHandler(user_id=user_id)
+
+# Automatic loading of user configs
+handler.user_providers = db.get_user_providers(user_id)
+handler.user_rotations = db.get_user_rotations(user_id)
+handler.user_autoselects = db.get_user_autoselects(user_id)
+```
+
+#### Configuration Priority
+When processing requests, handlers check for user-specific configurations first:
+
+1. **User-specific configs** (from database)
+2. **Global configs** (from JSON files)
+3. **System defaults**
 
 #### Admin Features
-- Create/manage users via database
-- Full system configuration access
-- User management dashboard (future feature)
+- Create and manage users via database
+- Full access to global configurations and user management
 - System-wide analytics and monitoring
+- User administration dashboard
 
-#### User Dashboard
-- Usage statistics and token tracking
-- Personal configuration management
-- API token generation and management
-- Restricted access to system settings
+#### User Dashboard Features
+- **Personal Configuration Management**: Create/edit/delete provider, rotation, and autoselect configs
+- **Usage Statistics**: Real-time token usage tracking and analytics
+- **API Token Management**: Generate, view, and delete API tokens
+- **Isolated Access**: No visibility of other users' configurations or system settings
 
 ### Persistent Tracking
 

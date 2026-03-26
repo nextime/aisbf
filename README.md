@@ -40,6 +40,8 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
 - **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
+- **Database Integration**: SQLite-based persistent storage for user configurations, token usage tracking, and context management
+- **User-Specific Configurations**: Each user can have their own providers, rotations, and autoselect configurations stored in the database
 
 ## Author
 
@@ -292,6 +294,33 @@ When context exceeds the configured percentage of `context_size`, the system aut
 **Note:** Only `conversational` and `semantic` methods require LLM calls and use prompt files from `config/`. The `hierarchical` and `algorithmic` methods are pure algorithmic transformations.
 
 See `config/providers.json` and `config/rotations.json` for configuration examples.
+
+### Multi-User Database Integration
+
+AISBF includes comprehensive multi-user support with isolated configurations stored in a SQLite database:
+
+#### User Management
+- **Admin Users**: Full access to global configurations and user management
+- **Regular Users**: Access to their own configurations and usage statistics
+- **Role-Based Access**: Secure separation between admin and user roles
+
+#### Database Features
+- **Persistent Storage**: All configurations stored in SQLite database with automatic initialization
+- **Token Usage Tracking**: Per-user API token usage statistics and analytics
+- **Configuration Isolation**: Each user has separate providers, rotations, and autoselect configurations
+- **Automatic Cleanup**: Database maintenance with configurable retention periods
+
+#### User-Specific Configurations
+Users can create and manage their own:
+- **Providers**: Custom API endpoints, models, and authentication settings
+- **Rotations**: Personal load balancing configurations across providers
+- **Autoselect**: Custom AI-powered model selection rules
+- **API Tokens**: Multiple API tokens with usage tracking and management
+
+#### Dashboard Access
+- **Admin Dashboard**: Global configuration management and user administration
+- **User Dashboard**: Personal configuration management and usage statistics
+- **API Token Management**: Create, view, and delete API tokens with usage analytics
 
 ### Content Classification and Semantic Selection
 

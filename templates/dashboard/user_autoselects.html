@@ -1,0 +1,317 @@
+{% extends "base.html" %}
+
+{% block title %}My Autoselects - AISBF{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>My Autoselects</h1>
+    <p>Manage your personal autoselect configurations</p>
+
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Autoselect Configurations</h2>
+        <div id="autoselects-list">
+            <!-- Autoselects will be loaded here -->
+        </div>
+        <button class="btn btn-primary" onclick="showAddAutoselectModal()">Add New Autoselect</button>
+    </div>
+</div>
+
+<!-- Modal for adding/editing autoselects -->
+<div id="autoselect-modal" class="modal" style="display: none;">
+    <div class="modal-content">
+        <div class="modal-header">
+            <h3 id="modal-title">Add Autoselect</h3>
+            <button class="close-btn" onclick="closeModal()">&times;</button>
+        </div>
+        <div class="modal-body">
+            <form id="autoselect-form">
+                <div class="form-group">
+                    <label for="autoselect-name">Autoselect Name:</label>
+                    <input type="text" id="autoselect-name" required>
+                </div>
+                <div class="form-group">
+                    <label for="autoselect-config">Autoselect Configuration (JSON):</label>
+                    <textarea id="autoselect-config" rows="20" placeholder='{"model_name": "autoselect-name", "description": "My autoselect config", "fallback": "provider/model"}'></textarea>
+                </div>
+                <div class="form-actions">
+                    <button type="submit" class="btn btn-primary">Save</button>
+                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+let autoselects = {{ user_autoselects_json | safe }};
+let currentEditingIndex = -1;
+
+function renderAutoselects() {
+    const container = document.getElementById('autoselects-list');
+    container.innerHTML = '';
+
+    if (autoselects.length === 0) {
+        container.innerHTML = '<p class="empty-state">No autoselects configured yet. Click "Add New Autoselect" to get started.</p>';
+        return;
+    }
+
+    autoselects.forEach((autoselect, index) => {
+        const div = document.createElement('div');
+        div.className = 'autoselect-item';
+        div.innerHTML = `
+            <div class="autoselect-header">
+                <h3>${autoselect.autoselect_id}</h3>
+                <div class="autoselect-actions">
+                    <button class="btn btn-secondary btn-sm" onclick="editAutoselect(${index})">Edit</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteAutoselect('${autoselect.autoselect_id}')">Delete</button>
+                </div>
+            </div>
+            <div class="autoselect-details">
+                <p><strong>Created:</strong> ${new Date(autoselect.created_at).toLocaleString()}</p>
+                <p><strong>Last Updated:</strong> ${new Date(autoselect.updated_at).toLocaleString()}</p>
+                <details>
+                    <summary>Configuration (JSON)</summary>
+                    <pre>${JSON.stringify(autoselect.config, null, 2)}</pre>
+                </details>
+            </div>
+        `;
+        container.appendChild(div);
+    });
+}
+
+function showAddAutoselectModal() {
+    currentEditingIndex = -1;
+    document.getElementById('modal-title').textContent = 'Add Autoselect';
+    document.getElementById('autoselect-name').value = '';
+    document.getElementById('autoselect-config').value = '{"model_name": "my-autoselect", "description": "My autoselect configuration", "fallback": "provider/model"}';
+    document.getElementById('autoselect-modal').style.display = 'block';
+}
+
+function editAutoselect(index) {
+    currentEditingIndex = index;
+    const autoselect = autoselects[index];
+    document.getElementById('modal-title').textContent = 'Edit Autoselect';
+    document.getElementById('autoselect-name').value = autoselect.autoselect_id;
+    document.getElementById('autoselect-name').readOnly = true;
+    document.getElementById('autoselect-config').value = JSON.stringify(autoselect.config, null, 2);
+    document.getElementById('autoselect-modal').style.display = 'block';
+}
+
+function closeModal() {
+    document.getElementById('autoselect-modal').style.display = 'none';
+    document.getElementById('autoselect-name').readOnly = false;
+    currentEditingIndex = -1;
+}
+
+function deleteAutoselect(autoselectName) {
+    if (!confirm(`Are you sure you want to delete the autoselect "${autoselectName}"? This action cannot be undone.`)) return;
+
+    fetch('{{ url_for(request, "/dashboard/user/autoselects") }}/' + encodeURIComponent(autoselectName), {
+        method: 'DELETE',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    }).then(response => {
+        if (response.ok) {
+            location.reload();
+        } else {
+            return response.json().then(data => {
+                throw new Error(data.error || 'Failed to delete autoselect');
+            });
+        }
+    }).catch(error => {
+        alert('Error: ' + error.message);
+    });
+}
+
+// Handle form submission
+document.getElementById('autoselect-form').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const autoselectName = document.getElementById('autoselect-name').value.trim();
+    const configText = document.getElementById('autoselect-config').value.trim();
+
+    if (!autoselectName) {
+        alert('Autoselect name is required');
+        return;
+    }
+
+    if (!configText) {
+        alert('Autoselect configuration is required');
+        return;
+    }
+
+    let configObj;
+    try {
+        configObj = JSON.parse(configText);
+    } catch (e) {
+        alert('Invalid JSON configuration: ' + e.message);
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append('autoselect_name', autoselectName);
+    formData.append('autoselect_config', JSON.stringify(configObj));
+
+    const url = '{{ url_for(request, "/dashboard/user/autoselects") }}';
+    const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
+
+    fetch(url, {
+        method: method,
+        body: formData
+    }).then(response => {
+        if (response.ok) {
+            closeModal();
+            location.reload();
+        } else {
+            return response.text().then(text => {
+                throw new Error(text || 'Failed to save autoselect');
+            });
+        }
+    }).catch(error => {
+        alert('Error: ' + error.message);
+    });
+});
+
+renderAutoselects();
+</script>
+
+<style>
+.autoselect-item {
+    background: #1a1a2e;
+    padding: 1rem;
+    margin: 1rem 0;
+    border-radius: 8px;
+}
+
+.autoselect-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 1rem;
+}
+
+.autoselect-header h3 {
+    margin: 0;
+}
+
+.autoselect-actions {
+    display: flex;
+    gap: 0.5rem;
+}
+
+.autoselect-details p {
+    margin: 0.5rem 0;
+}
+
+.autoselect-details pre {
+    background: #0f3460;
+    padding: 1rem;
+    border-radius: 4px;
+    overflow-x: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.empty-state {
+    text-align: center;
+    color: #a0a0a0;
+    padding: 2rem;
+}
+
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(0, 0, 0, 0.7);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.modal-content {
+    background: #1a1a2e;
+    border-radius: 8px;
+    width: 90%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow-y: auto;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 1rem;
+    border-bottom: 1px solid #0f3460;
+}
+
+.modal-header h3 {
+    margin: 0;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: #e0e0e0;
+    font-size: 1.5rem;
+    cursor: pointer;
+    padding: 0;
+    width: 30px;
+    height: 30px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.modal-body {
+    padding: 1rem;
+}
+
+.form-group {
+    margin-bottom: 1rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.form-group input[type="text"],
+.form-group textarea {
+    width: 100%;
+    padding: 0.5rem;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #16213e;
+    color: #e0e0e0;
+    font-family: monospace;
+    font-size: 14px;
+}
+
+.form-group textarea {
+    resize: vertical;
+    min-height: 300px;
+}
+
+.form-actions {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: flex-end;
+    margin-top: 1rem;
+}
+</style>
+{% endblock %}

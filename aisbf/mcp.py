@@ -427,7 +427,7 @@ class MCPServer:
         
         return tools
     
-    async def handle_tool_call(self, tool_name: str, arguments: Dict, auth_level: int) -> Dict:
+    async def handle_tool_call(self, tool_name: str, arguments: Dict, auth_level: int, user_id: Optional[int] = None) -> Dict:
         """
         Handle an MCP tool call.
         
@@ -476,7 +476,7 @@ class MCPServer:
             raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
         
         handler = handlers[tool_name]
-        return await handler(arguments)
+        return await handler(arguments, user_id)
     
     async def _list_models(self, args: Dict) -> Dict:
         """List all available models"""
@@ -562,18 +562,18 @@ class MCPServer:
             }
         return {"autoselect": autoselect_info}
     
-    async def _chat_completion(self, args: Dict) -> Dict:
+    async def _chat_completion(self, args: Dict, user_id: Optional[int] = None) -> Dict:
         """Handle chat completion request"""
         from .handlers import RequestHandler, RotationHandler, AutoselectHandler
         from .models import ChatCompletionRequest
         from starlette.requests import Request
-        
+
         model = args.get('model')
         messages = args.get('messages', [])
         temperature = args.get('temperature', 1.0)
         max_tokens = args.get('max_tokens', 2048)
         stream = args.get('stream', False)
-        
+
         # Parse provider from model
         if '/' in model:
             parts = model.split('/', 1)
@@ -582,7 +582,7 @@ class MCPServer:
         else:
             provider_id = model
             actual_model = model
-        
+
         # Create request data
         request_data = {
             "model": actual_model,
@@ -591,7 +591,7 @@ class MCPServer:
             "max_tokens": max_tokens,
             "stream": stream
         }
-        
+
         # Create dummy request
         scope = {
             "type": "http",
@@ -601,25 +601,26 @@ class MCPServer:
             "path": f"/api/{provider_id}/chat/completions"
         }
         dummy_request = Request(scope)
-        
-        # Route to appropriate handler
+
+        # Route to appropriate handler (with user_id support)
+        from main import get_user_handler
         if provider_id == "autoselect":
-            if actual_model not in self.config.autoselect:
+            handler = get_user_handler('autoselect', user_id)
+            if actual_model not in self.config.autoselect and (not user_id or actual_model not in handler.user_autoselects):
                 raise HTTPException(status_code=400, detail=f"Autoselect '{actual_model}' not found")
-            handler = AutoselectHandler()
             if stream:
                 return {"error": "Streaming not supported in MCP, use SSE endpoint instead"}
             else:
                 return await handler.handle_autoselect_request(actual_model, request_data)
         elif provider_id == "rotation":
-            if actual_model not in self.config.rotations:
+            handler = get_user_handler('rotation', user_id)
+            if actual_model not in self.config.rotations and (not user_id or actual_model not in handler.user_rotations):
                 raise HTTPException(status_code=400, detail=f"Rotation '{actual_model}' not found")
-            handler = RotationHandler()
             return await handler.handle_rotation_request(actual_model, request_data)
         else:
-            if provider_id not in self.config.providers:
+            handler = get_user_handler('request', user_id)
+            if provider_id not in self.config.providers and (not user_id or provider_id not in handler.user_providers):
                 raise HTTPException(status_code=400, detail=f"Provider '{provider_id}' not found")
-            handler = RequestHandler()
             if stream:
                 return {"error": "Streaming not supported in MCP, use SSE endpoint instead"}
             else:
