@@ -77,6 +77,10 @@ class ProviderConfig(BaseModel):
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
+    # Provider-native caching configuration
+    enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching)
+    cache_ttl: Optional[int] = None  # Cache TTL in seconds for Google Context Caching API
+    min_cacheable_tokens: Optional[int] = 1000  # Minimum token count for content to be cacheable
 
 class RotationConfig(BaseModel):
     model_name: str
@@ -152,6 +156,8 @@ class AISBFConfig(BaseModel):
     dashboard: Optional[Dict] = None
     internal_model: Optional[Dict] = None
     tor: Optional[Dict] = None
+    database: Optional[Dict] = None
+    cache: Optional[Dict] = None
 
 
 class AppConfig(BaseModel):
@@ -177,10 +183,10 @@ class Config:
         self._ensure_config_directory()
         self._load_providers()
         self._load_rotations()
-        self._load_autoselect()
         self._load_condensation()
         self._load_tor()
         self._load_aisbf_config()
+        self._load_autoselect()  # Load autoselect after aisbf config so cache is available
         self._initialize_error_tracking()
         self._log_configuration_summary()
 
@@ -363,80 +369,84 @@ class Config:
     def _build_model_embeddings(self):
         """
         Build and cache vectorized versions of model descriptions for semantic matching.
-        Saves embeddings to ~/.aisbf/ for persistent storage.
+        Uses the configured cache backend (Redis, file, or memory).
         """
         import logging
-        import numpy as np
         logger = logging.getLogger(__name__)
-        
-        config_dir = Path.home() / '.aisbf'
-        vector_file = config_dir / 'model_embeddings.npy'
-        meta_file = config_dir / 'model_embeddings_meta.json'
-        
+
         # Collect all model descriptions from all autoselect configs
         model_library = {}
         for autoselect_id, autoselect_config in self.autoselect.items():
             for model_info in autoselect_config.available_models:
                 model_library[model_info.model_id] = model_info.description
-        
+
         if not model_library:
             logger.info("No models to vectorize")
             self._model_embeddings = None
             self._model_embeddings_meta = []
             return
-        
-        # Check if embeddings file exists and is up-to-date
+
+        # Get cache manager
+        from .cache import get_cache_manager
+        cache_config = self.aisbf.cache if self.aisbf and self.aisbf.cache else None
+        cache_manager = get_cache_manager(cache_config)
+
+        # Cache key for embeddings
+        embeddings_key = "model_embeddings"
+
+        # Check if embeddings exist in cache and are up-to-date
         rebuild_needed = True
-        if vector_file.exists() and meta_file.exists():
-            try:
-                with open(meta_file) as f:
-                    saved_models = json.load(f)
-                if saved_models == list(model_library.keys()):
-                    logger.info(f"Loading cached model embeddings from {vector_file}")
-                    self._model_embeddings = np.load(vector_file)
-                    self._model_embeddings_meta = saved_models
-                    rebuild_needed = False
-                    logger.info(f"Loaded {len(self._model_embeddings)} model embeddings")
-            except Exception as e:
-                logger.warning(f"Could not load cached embeddings: {e}")
-        
+        cached_meta = cache_manager.get(f"{embeddings_key}_meta")
+
+        if cached_meta and cached_meta == list(model_library.keys()):
+            # Try to load from numpy file cache (always file-based for large arrays)
+            embeddings, _ = cache_manager.load_numpy_array(embeddings_key)
+            if embeddings is not None:
+                logger.info(f"Loading cached model embeddings from cache")
+                self._model_embeddings = embeddings
+                self._model_embeddings_meta = cached_meta
+                rebuild_needed = False
+                logger.info(f"Loaded {len(self._model_embeddings)} model embeddings")
+            else:
+                logger.warning("Cached embeddings metadata exists but array not found, rebuilding")
+
         if rebuild_needed:
             logger.info(f"Building model embeddings for {len(model_library)} models...")
-            
+
             try:
                 from sentence_transformers import SentenceTransformer
-                
+                import numpy as np
+
                 # Use CPU-friendly model from config
                 model_id = "sentence-transformers/all-MiniLM-L6-v2"
-                
+
                 # Check if custom model is configured in aisbf.json
                 if self.aisbf and self.aisbf.internal_model:
                     custom_model = self.aisbf.internal_model.get('semantic_vectorization')
                     if custom_model:
                         model_id = custom_model
-                
+
                 logger.info(f"Using embedding model: {model_id}")
                 embedder = SentenceTransformer(model_id)
-                
+
                 names = list(model_library.keys())
                 descriptions = list(model_library.values())
-                
+
                 logger.info(f"Vectorizing {len(names)} model descriptions on CPU...")
                 embeddings = embedder.encode(descriptions, show_progress_bar=True)
-                
-                # Save the vectors as binary file
-                np.save(vector_file, embeddings)
-                
-                # Save the names as JSON
-                with open(meta_file, 'w') as f:
-                    json.dump(names, f)
-                
+
+                # Save to numpy file cache
+                cache_manager.save_numpy_array(embeddings_key, embeddings)
+
+                # Save metadata to cache
+                cache_manager.set(f"{embeddings_key}_meta", names)
+
                 self._model_embeddings = embeddings
                 self._model_embeddings_meta = names
-                
-                logger.info(f"Saved embeddings to {vector_file} and {meta_file}")
+
+                logger.info(f"Saved embeddings to cache")
                 logger.info(f"Embedding shape: {embeddings.shape}")
-                
+
             except ImportError as e:
                 logger.warning(f"sentence-transformers not installed, skipping embeddings: {e}")
                 self._model_embeddings = None

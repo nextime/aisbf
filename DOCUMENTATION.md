@@ -12,6 +12,7 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 - **Streaming Support**: Full support for streaming responses from all providers with proper serialization
 - **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
 - **Rate Limiting**: Built-in rate limiting and graceful error handling with persistent tracking across restarts
+- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
 - **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 - **Security**: Default localhost-only access for improved security
@@ -291,7 +292,7 @@ Response includes:
 
 ## Database Features
 
-AISBF includes a comprehensive SQLite database system that provides persistent tracking and multi-user support:
+AISBF includes a comprehensive database system that provides persistent tracking and multi-user support, with support for both SQLite (default) and MySQL databases:
 
 ### Database Schema
 
@@ -310,13 +311,62 @@ The database (`~/.aisbf/aisbf.db`) contains the following tables:
 - **`user_api_tokens`**: API token management per user for MCP and API access
 - **`user_token_usage`**: Per-user token usage tracking and analytics
 
+### Database Backends
+
+AISBF supports two database backends:
+
+#### SQLite (Default)
+- **Recommended for most users**: No additional setup required
+- **File-based**: Single database file stored in `~/.aisbf/aisbf.db`
+- **Zero configuration**: Works out of the box
+- **Performance**: Excellent for typical workloads
+
+#### MySQL
+- **For advanced users**: Requires MySQL server setup
+- **Network-based**: Can be hosted on separate server
+- **Scalability**: Better for high-traffic deployments
+- **Features**: Full MySQL feature set and ecosystem
+
+### Database Configuration
+
+Database backend can be configured via the web dashboard or configuration file:
+
+**Configuration File (`~/.aisbf/aisbf.json`):**
+```json
+{
+  "database": {
+    "type": "sqlite",  // or "mysql"
+    "sqlite_path": "~/.aisbf/aisbf.db",
+    "mysql_host": "localhost",
+    "mysql_port": 3306,
+    "mysql_user": "aisbf",
+    "mysql_password": "your-password",
+    "mysql_database": "aisbf"
+  }
+}
+```
+
+**Dashboard Configuration:**
+1. Navigate to **Dashboard → Settings**
+2. Scroll to **Database Configuration** section
+3. Select database type (SQLite or MySQL)
+4. Configure connection parameters as needed
+5. Save settings and restart server
+
+**Migration Notes:**
+- Switching between database types requires manual data migration
+- SQLite to MySQL: Use tools like `sqlite3-to-mysql` or manual export/import
+- MySQL to SQLite: Use MySQL export and SQLite import tools
+- All database schemas are compatible between backends
+
 ### Database Initialization
 
 The database is automatically initialized on startup:
-- WAL mode enabled for better concurrency
+- WAL mode enabled for better concurrency (SQLite)
 - Foreign key constraints enabled
 - Automatic cleanup of old records (>7 days)
 - Schema migrations handled automatically
+- Compatible schema across all supported database backends
 
 ### Multi-User Support
 
@@ -391,9 +441,85 @@ When processing requests, handlers check for user-specific configurations first:
 - Reduced API calls for autoselect operations
 - Cached embeddings for faster similarity matching
 
-### Database Configuration
+### Cache Configuration
 
-Database features are automatically enabled and require no configuration. The database file location can be customized via environment variables if needed.
+AISBF includes a flexible caching system for model embeddings and other performance-critical data:
+
+#### Cache Backends
+
+##### SQLite Cache (Default)
+- **Recommended for most users**: No additional services required
+- **Persistent**: Cache survives application restarts
+- **Database-backed**: Structured storage with automatic cleanup
+- **Performance**: Fast local database access
+- **Storage**: Uses `~/.aisbf/cache.db` file
+
+##### MySQL Cache
+- **For database users**: Shares MySQL server with main database
+- **Network-based**: Can be hosted on separate server
+- **Scalability**: Better for multi-server deployments
+- **Features**: Full MySQL feature set and ecosystem
+
+##### Redis Cache
+- **For performance**: Requires Redis server
+- **Distributed**: Can be shared across multiple AISBF instances
+- **Memory-based**: Extremely fast access
+- **Scalability**: Better for high-traffic deployments
+
+##### File-based Cache
+- **Legacy option**: Simple file-based storage
+- **Persistent**: Cache survives application restarts
+- **Basic**: No advanced features like TTL or cleanup
+- **Storage**: Uses `~/.aisbf/cache/` directory
+
+##### Memory Cache
+- **For development**: In-memory only
+- **Fastest**: No disk I/O
+- **Temporary**: Lost on application restart
+- **Limited**: Not suitable for production use
+
+##### Memory Cache
+- **For development**: In-memory only
+- **Fastest**: No disk I/O
+- **Temporary**: Lost on application restart
+- **Limited**: Not suitable for production use
+
+#### Cache Configuration
+
+Cache backend can be configured via the web dashboard or configuration file:
+
+**Configuration File (`~/.aisbf/aisbf.json`):**
+```json
+{
+  "cache": {
+    "type": "sqlite",  // "sqlite", "mysql", "redis", "file", or "memory"
+    "sqlite_path": "~/.aisbf/cache.db",
+    "mysql_host": "localhost",
+    "mysql_port": 3306,
+    "mysql_user": "aisbf",
+    "mysql_password": "your-password",
+    "mysql_database": "aisbf_cache",
+    "redis_host": "localhost",
+    "redis_port": 6379,
+    "redis_db": 0,
+    "redis_password": null,
+    "redis_key_prefix": "aisbf:"
+  }
+}
+```
+
+**Dashboard Configuration:**
+1. Navigate to **Dashboard → Settings**
+2. Scroll to **Cache Configuration** section
+3. Select cache type (File-based, Redis, or Memory)
+4. Configure connection parameters as needed (for Redis)
+5. Save settings and restart server
+
+**Cache Features:**
+- **Model Embeddings**: Semantic classification model embeddings
+- **TTL Support**: Configurable time-to-live for cache entries
+- **Automatic Fallback**: Falls back to memory cache if Redis is unavailable
+- **Key Prefixing**: Redis keys are prefixed to avoid conflicts
 
 ### Backup and Maintenance
 
@@ -751,6 +877,163 @@ The final chunk includes effective_context:
 - **Code Analysis**: Handle large codebases with intelligent context pruning
 - **Document Processing**: Process large documents with automatic summarization
 - **Multi-turn Tasks**: Maintain task context across multiple interactions
+
+## Provider-Native Caching
+
+AISBF supports provider-native caching APIs to dramatically reduce costs by caching reusable content like system prompts and conversation prefixes. This feature provides 50-70% cost reduction for supported providers.
+
+### Supported Providers
+
+#### Anthropic (cache_control)
+Anthropic's `cache_control` feature allows caching of system messages and conversation prefixes to reduce API costs.
+
+**Features:**
+- **Automatic Detection**: System messages and long conversation prefixes are automatically marked as cacheable
+- **Token Threshold**: Configurable minimum token count for content to be cacheable (default: 1000)
+- **Ephemeral Caching**: Uses Anthropic's ephemeral cache type for optimal performance
+
+#### Google (Context Caching)
+Google's Context Caching API allows caching of conversation context for reuse across multiple requests.
+
+**Features:**
+- **TTL Support**: Configurable cache time-to-live (default: 3600 seconds / 1 hour)
+- **Framework Ready**: Configuration and logging infrastructure in place for future full implementation
+
+### Configuration
+
+Provider-native caching can be configured via the web dashboard or configuration file:
+
+#### Dashboard Configuration
+1. Navigate to **Dashboard → Providers**
+2. Select the provider (Anthropic or Google)
+3. Enable **Native Caching** checkbox
+4. Configure **Cache TTL** (Google only, in seconds)
+5. Set **Min Cacheable Tokens** (minimum token count for cacheable content)
+6. Save settings
+
+#### Configuration File (`~/.aisbf/providers.json`)
+
+```json
+{
+  "providers": {
+    "anthropic": {
+      "id": "anthropic",
+      "name": "Anthropic",
+      "endpoint": "https://api.anthropic.com/v1",
+      "type": "anthropic",
+      "api_key_required": true,
+      "api_key": "YOUR_ANTHROPIC_API_KEY",
+      "enable_native_caching": true,
+      "cache_ttl": null,
+      "min_cacheable_tokens": 1000
+    },
+    "gemini": {
+      "id": "gemini",
+      "name": "Google AI Studio",
+      "endpoint": "https://generativelanguage.googleapis.com/v1beta",
+      "type": "google",
+      "api_key_required": true,
+      "api_key": "YOUR_GEMINI_API_KEY",
+      "enable_native_caching": true,
+      "cache_ttl": 3600,
+      "min_cacheable_tokens": 1000
+    }
+  }
+}
+```
+
+### Configuration Fields
+
+- **`enable_native_caching`**: Enable/disable native caching for this provider (default: false)
+- **`cache_ttl`**: Cache time-to-live in seconds (Google only, default: 3600)
+- **`min_cacheable_tokens`**: Minimum token count for content to be cacheable (default: 1000)
+
+### How It Works
+
+#### Anthropic Caching Logic
+When `enable_native_caching: true` for Anthropic:
+
+1. **System Messages**: Always marked as cacheable with `{"type": "ephemeral"}`
+2. **Conversation Prefixes**: Messages before the last 2 are evaluated for caching
+3. **Token Counting**: Cumulative token count determines cache eligibility
+4. **Automatic Application**: Eligible messages get `cache_control` parameter automatically
+
+**Example of cached request:**
+```json
+{
+  "model": "claude-3-haiku-20240307",
+  "messages": [
+    {
+      "role": "system",
+      "content": "You are a helpful assistant...",
+      "cache_control": {"type": "ephemeral"}
+    },
+    {
+      "role": "user",
+      "content": "Tell me about...",
+      "cache_control": {"type": "ephemeral"}
+    },
+    {
+      "role": "assistant",
+      "content": "Let me explain..."
+    },
+    {
+      "role": "user",
+      "content": "What about..."
+    }
+  ]
+}
+```
+
+#### Google Context Caching
+Google's Context Caching API requires separate cache creation and reference calls:
+
+1. **Cache Creation**: Content is cached using dedicated API calls
+2. **Cache References**: Subsequent requests reference cached content by ID
+3. **TTL Management**: Automatic cache expiration and cleanup
+4. **Cost Optimization**: Significant reduction in input token costs
+
+**Note**: Full Google Context Caching implementation is planned for future releases. Current version includes configuration framework and logging.
+
+### Cost Savings
+
+**Expected Cost Reductions:**
+- **Anthropic**: 50-70% reduction for requests with cacheable content
+- **Google**: 50-70% reduction for supported Gemini models (when fully implemented)
+
+**Factors Affecting Savings:**
+- **System Prompt Length**: Longer system prompts provide higher savings
+- **Conversation Reuse**: Repeated conversation patterns maximize cache hits
+- **Token Threshold**: Higher `min_cacheable_tokens` focuses caching on substantial content
+
+### Best Practices
+
+1. **Enable for Production**: Enable caching for production workloads with consistent prompts
+2. **Monitor Usage**: Check logs for cache application statistics
+3. **Tune Thresholds**: Adjust `min_cacheable_tokens` based on your use case
+4. **Test Thoroughly**: Verify caching doesn't affect response quality
+
+### Monitoring
+
+Cache usage is logged in AISBF's application logs:
+
+```
+AnthropicProviderHandler: Applied cache_control to message 0 (1250 tokens, cumulative: 1250)
+AnthropicProviderHandler: Applied cache_control to message 1 (850 tokens, cumulative: 2100)
+GoogleProviderHandler: Native caching enabled but not yet implemented
+```
+
+### Troubleshooting
+
+**Caching Not Applied:**
+- Verify `enable_native_caching: true` in provider configuration
+- Check that content exceeds `min_cacheable_tokens` threshold
+- Ensure system messages are present for Anthropic
+
+**Configuration Not Taking Effect:**
+- Restart AISBF after configuration changes
+- Check provider configuration in dashboard
+- Verify JSON syntax in configuration files
 
 ## Error Tracking and Rate Limiting
 

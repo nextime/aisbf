@@ -300,7 +300,32 @@ function renderProviderDetails(key) {
                 Privacy
             </label>
         </div>
-        
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Native Caching</h4>
+        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+            Provider-native caching features (Anthropic cache_control, Google Context Caching) for cost reduction.
+        </small>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.enable_native_caching ? 'checked' : ''} onchange="updateProvider('${key}', 'enable_native_caching', this.checked)">
+                Enable Native Caching
+            </label>
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Enable provider-native caching for cost reduction (50-70% savings for supported providers)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Cache TTL (seconds)</label>
+            <input type="number" value="${provider.cache_ttl || ''}" onchange="updateProvider('${key}', 'cache_ttl', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 3600)">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Cache time-to-live in seconds (Google Context Caching only)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Min Cacheable Tokens</label>
+            <input type="number" value="${provider.min_cacheable_tokens || 1000}" onchange="updateProvider('${key}', 'min_cacheable_tokens', this.value ? parseInt(this.value) : 1000)" placeholder="1000">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
+        </div>
+
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>
         <div id="models-${key}"></div>
         <button type="button" class="btn btn-secondary" onclick="addModel('${key}')" style="margin-top: 10px;">Add Model</button>

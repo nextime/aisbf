@@ -449,8 +449,8 @@ class GoogleProviderHandler(BaseProviderHandler):
         self.client = genai.Client(api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
-                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                            tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -462,7 +462,7 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"GoogleProviderHandler: Messages: {messages}")
             else:
                 logging.info(f"GoogleProviderHandler: Messages count: {len(messages)}")
-            
+
             if tools:
                 logging.info(f"GoogleProviderHandler: Tools provided: {len(tools)} tools")
                 if AISBF_DEBUG:
@@ -472,6 +472,22 @@ class GoogleProviderHandler(BaseProviderHandler):
 
             # Apply rate limiting
             await self.apply_rate_limit()
+
+            # Check if native caching is enabled for this provider
+            provider_config = config.providers.get(self.provider_id)
+            enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
+            cache_ttl = getattr(provider_config, 'cache_ttl', None)
+
+            logging.info(f"GoogleProviderHandler: Native caching enabled: {enable_native_caching}")
+            if enable_native_caching:
+                logging.info(f"GoogleProviderHandler: Cache TTL: {cache_ttl} seconds")
+                # Note: Google Context Caching API implementation would go here
+                # For now, we log that caching is enabled but don't implement the full caching logic
+                # Full implementation would require:
+                # 1. Creating cached content using context_cache.create()
+                # 2. Storing cache references and managing TTL
+                # 3. Referencing cached content in generate_content calls
+                logging.info(f"GoogleProviderHandler: Context caching configured but not yet implemented")
 
             # Build content from messages
             content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
@@ -1202,8 +1218,8 @@ class AnthropicProviderHandler(BaseProviderHandler):
         self.client = Anthropic(api_key=api_key)
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
-                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
-                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
+                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                            tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:
         if self.is_rate_limited():
             raise Exception("Provider rate limited")
 
@@ -1218,9 +1234,45 @@ class AnthropicProviderHandler(BaseProviderHandler):
             # Apply rate limiting
             await self.apply_rate_limit()
 
+            # Check if native caching is enabled for this provider
+            provider_config = config.providers.get(self.provider_id)
+            enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
+            min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1000)
+
+            logging.info(f"AnthropicProviderHandler: Native caching enabled: {enable_native_caching}")
+            if enable_native_caching:
+                logging.info(f"AnthropicProviderHandler: Min cacheable tokens: {min_cacheable_tokens}")
+
+            # Prepare messages with cache_control if enabled
+            anthropic_messages = []
+            if enable_native_caching:
+                # Count cumulative tokens for cache decision
+                cumulative_tokens = 0
+                for i, msg in enumerate(messages):
+                    # Count tokens in this message
+                    message_tokens = count_messages_tokens([msg], model)
+                    cumulative_tokens += message_tokens
+
+                    # Convert to Anthropic message format
+                    anthropic_msg = {"role": msg["role"], "content": msg["content"]}
+
+                    # Apply cache_control based on position and token count
+                    # Cache system messages and long conversation prefixes
+                    if (msg["role"] == "system" or
+                        (i < len(messages) - 2 and cumulative_tokens >= min_cacheable_tokens)):
+                        anthropic_msg["cache_control"] = {"type": "ephemeral"}
+                        logging.info(f"AnthropicProviderHandler: Applied cache_control to message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+                    else:
+                        logging.info(f"AnthropicProviderHandler: Not caching message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+
+                    anthropic_messages.append(anthropic_msg)
+            else:
+                # Standard message formatting without caching
+                anthropic_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
+
             response = self.client.messages.create(
                 model=model,
-                messages=[{"role": msg["role"], "content": msg["content"]} for msg in messages],
+                messages=anthropic_messages,
                 max_tokens=max_tokens,
                 temperature=temperature
             )

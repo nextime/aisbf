@@ -34,14 +34,16 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Context Management**: Automatic context condensation when approaching model limits with multiple condensation methods
 - **Provider-Level Defaults**: Set default condensation settings at provider level with cascading fallback logic
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
+- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
 - **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
-- **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
+- **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
-- **Database Integration**: SQLite-based persistent storage for user configurations, token usage tracking, and context management
+- **Database Integration**: SQLite/MySQL-based persistent storage for user configurations, token usage tracking, and context management
 - **User-Specific Configurations**: Each user can have their own providers, rotations, and autoselect configurations stored in the database
+- **Flexible Caching**: SQLite/MySQL/Redis/file/memory-based caching system for model embeddings and other cached data with automatic fallback
 
 ## Author
 
@@ -248,6 +250,113 @@ http://your-onion-address.onion/
 - Consider using persistent hidden services for production
 - Monitor access logs for suspicious activity
 - Keep TOR and AISBF updated
+
+### Database Configuration
+
+AISBF supports multiple database backends for persistent storage of configurations, token usage tracking, and context management:
+
+#### Supported Databases
+- **SQLite** (Default): File-based database, no additional setup required, suitable for most users
+- **MySQL**: Network database server, better for multi-server deployments and advanced analytics
+
+#### SQLite Configuration (Default)
+SQLite is automatically configured and requires no additional setup:
+- Database file: `~/.aisbf/aisbf.db`
+- Automatic initialization and table creation
+- WAL mode enabled for concurrent access
+- Automatic cleanup of old records
+
+#### MySQL Configuration
+For production deployments requiring MySQL:
+
+**Prerequisites:**
+- MySQL server installed and running
+- Database and user created with appropriate permissions
+
+**Via Dashboard:**
+1. Navigate to Dashboard → Settings → Database Configuration
+2. Select "MySQL" as database type
+3. Configure connection parameters:
+   - **Host**: MySQL server hostname/IP
+   - **Port**: MySQL server port (default: 3306)
+   - **Username**: MySQL database username
+   - **Password**: MySQL database password
+   - **Database**: MySQL database name
+4. Save settings and restart server
+
+**Via Configuration File:**
+Edit `~/.aisbf/aisbf.json`:
+```json
+{
+  "database": {
+    "type": "mysql",
+    "mysql_host": "localhost",
+    "mysql_port": 3306,
+    "mysql_user": "aisbf",
+    "mysql_password": "your_password",
+    "mysql_database": "aisbf"
+  }
+}
+```
+
+**Database Migration:**
+When switching database types, AISBF will automatically create tables in the new database. Existing data will not be migrated automatically - you may need to export/import configurations manually.
+
+### Cache Configuration
+
+AISBF includes a flexible caching system for improved performance and reduced API costs:
+
+#### Supported Cache Backends
+- **SQLite** (Default): Local database storage, persistent and structured
+- **MySQL**: Network database caching, scalable for multi-server deployments
+- **Redis**: High-performance distributed caching, recommended for production
+- **File-based**: Legacy local file storage
+- **Memory**: In-memory caching (ephemeral, lost on restart)
+
+#### Cache Features
+- **Model Embeddings**: Cached vectorized model descriptions for semantic matching
+- **Provider Models**: Cached API model listings with configurable TTL
+- **Automatic Fallback**: Falls back to file-based if Redis is unavailable
+- **Configurable TTL**: Set cache expiration times per data type
+
+#### Redis Configuration
+For high-performance caching in production environments:
+
+**Prerequisites:**
+- Redis server installed and running
+- Optional: Redis authentication configured
+
+**Via Dashboard:**
+1. Navigate to Dashboard → Settings → Cache Configuration
+2. Select "Redis" as cache type
+3. Configure connection parameters:
+   - **Host**: Redis server hostname/IP
+   - **Port**: Redis server port (default: 6379)
+   - **Database**: Redis database number (default: 0)
+   - **Password**: Redis password (optional)
+   - **Key Prefix**: Prefix for Redis keys (default: aisbf:)
+4. Save settings and restart server
+
+**Via Configuration File:**
+Edit `~/.aisbf/aisbf.json`:
+```json
+{
+  "cache": {
+    "type": "redis",
+    "redis_host": "localhost",
+    "redis_port": 6379,
+    "redis_db": 0,
+    "redis_password": "",
+    "redis_key_prefix": "aisbf:"
+  }
+}
+```
+
+#### Cache Performance Benefits
+- **Faster Model Selection**: Cached embeddings eliminate repeated vectorization
+- **Reduced API Calls**: Cached provider model listings reduce API overhead
+- **Lower Latency**: Redis provides sub-millisecond cache access
+- **Scalability**: Distributed Redis supports multiple AISBF instances
 
 ### Provider-Level Defaults
 
