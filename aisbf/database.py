@@ -25,187 +25,244 @@ Database module for persistent tracking of context dimensions and rate limiting.
 import sqlite3
 import json
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import logging
+
+try:
+    import mysql.connector
+    MYSQL_AVAILABLE = True
+except ImportError:
+    MYSQL_AVAILABLE = False
+    mysql = None
 
 logger = logging.getLogger(__name__)
 
 
 class DatabaseManager:
     """
-    Manages SQLite database for persistent tracking of context dimensions and rate limiting.
-    
-    Database is stored in ~/.aisbf/aisbf.db and is automatically
-    created if it doesn't exist.
+    Manages database for persistent tracking of context dimensions and rate limiting.
+
+    Supports both SQLite and MySQL databases.
     """
-    
-    def __init__(self, db_path: Optional[str] = None):
+
+    def __init__(self, db_config: Optional[Dict[str, Any]] = None):
         """
         Initialize the database manager.
-        
+
         Args:
-            db_path: Optional path to database file. If None, uses ~/.aisbf/aisbf.db
+            db_config: Database configuration dictionary. If None, uses default SQLite config.
         """
-        if db_path is None:
-            # Default to ~/.aisbf/aisbf.db
+        if db_config is None:
+            # Default SQLite configuration
             aisbf_dir = Path.home() / '.aisbf'
             aisbf_dir.mkdir(exist_ok=True)
-            self.db_path = aisbf_dir / 'aisbf.db'
+            self.db_config = {
+                'type': 'sqlite',
+                'sqlite_path': str(aisbf_dir / 'aisbf.db'),
+                'mysql_host': 'localhost',
+                'mysql_port': 3306,
+                'mysql_user': 'aisbf',
+                'mysql_password': '',
+                'mysql_database': 'aisbf'
+            }
         else:
-            self.db_path = Path(db_path)
-        
+            self.db_config = db_config
+
+        self.db_type = self.db_config.get('type', 'sqlite').lower()
+        self.connection = None
+
+        if self.db_type == 'mysql' and not MYSQL_AVAILABLE:
+            raise ImportError("MySQL connector not available. Install mysql-connector-python.")
+
         self._initialize_database()
-        logger.info(f"Database initialized at: {self.db_path}")
-    
+        logger.info(f"Database initialized: {self.db_type}")
+
+    def _get_connection(self):
+        """Get a database connection based on the configured type."""
+        if self.db_type == 'sqlite':
+            db_path = Path(self.db_config['sqlite_path']).expanduser()
+            return sqlite3.connect(str(db_path))
+        elif self.db_type == 'mysql':
+            return mysql.connector.connect(
+                host=self.db_config['mysql_host'],
+                port=self.db_config['mysql_port'],
+                user=self.db_config['mysql_user'],
+                password=self.db_config['mysql_password'],
+                database=self.db_config['mysql_database']
+            )
+        else:
+            raise ValueError(f"Unsupported database type: {self.db_type}")
+
     def _initialize_database(self):
         """Create database tables if they don't exist."""
-        # Enable WAL mode for better concurrent access
-        # WAL allows multiple readers and one writer simultaneously
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            
-            # Enable WAL mode for concurrent access
-            cursor.execute('PRAGMA journal_mode=WAL')
-            
-            # Set busy timeout to 5 seconds for concurrent access
-            cursor.execute('PRAGMA busy_timeout=5000')
-            
+
+            if self.db_type == 'sqlite':
+                # Enable WAL mode for better concurrent access
+                # WAL allows multiple readers and one writer simultaneously
+                cursor.execute('PRAGMA journal_mode=WAL')
+
+                # Set busy timeout to 5 seconds for concurrent access
+                cursor.execute('PRAGMA busy_timeout=5000')
+                auto_increment = 'AUTOINCREMENT'
+                timestamp_default = 'CURRENT_TIMESTAMP'
+                boolean_type = 'BOOLEAN'
+            else:  # mysql
+                auto_increment = 'AUTO_INCREMENT'
+                timestamp_default = 'CURRENT_TIMESTAMP'
+                boolean_type = 'TINYINT(1)'
+
             # Create context_dimensions table for tracking context usage
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS context_dimensions (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_id TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    provider_id VARCHAR(255) NOT NULL,
+                    model_name VARCHAR(255) NOT NULL,
                     context_size INTEGER,
                     condense_context INTEGER,
                     condense_method TEXT,
                     effective_context INTEGER DEFAULT 0,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT {timestamp_default},
                     UNIQUE(provider_id, model_name)
                 )
             ''')
-            
+
             # Create token_usage table for tracking rate limiting
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS token_usage (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_id TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    provider_id VARCHAR(255) NOT NULL,
+                    model_name VARCHAR(255) NOT NULL,
                     tokens_used INTEGER NOT NULL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    timestamp TIMESTAMP DEFAULT {timestamp_default},
                     UNIQUE(provider_id, model_name, timestamp)
                 )
             ''')
-            
+
             # Create indexes for better query performance
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_context_provider_model 
-                ON context_dimensions(provider_id, model_name)
-            ''')
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_token_provider_model 
-                ON token_usage(provider_id, model_name)
-            ''')
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_token_timestamp
-                ON token_usage(timestamp)
-            ''')
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_context_provider_model
+                    ON context_dimensions(provider_id, model_name)
+                ''')
+            except:
+                pass  # Index might already exist
+
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_token_provider_model
+                    ON token_usage(provider_id, model_name)
+                ''')
+            except:
+                pass
+
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_token_timestamp
+                    ON token_usage(timestamp)
+                ''')
+            except:
+                pass
 
             # Create model_embeddings table for caching vectorized model descriptions
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS model_embeddings (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    provider_id TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    provider_id VARCHAR(255) NOT NULL,
+                    model_name VARCHAR(255) NOT NULL,
                     description TEXT,
                     embedding TEXT,
-                    last_updated TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    last_updated TIMESTAMP DEFAULT {timestamp_default},
                     UNIQUE(provider_id, model_name)
                 )
             ''')
 
-            cursor.execute('''
-                CREATE INDEX IF NOT EXISTS idx_model_embeddings_provider_model
-                ON model_embeddings(provider_id, model_name)
-            ''')
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_model_embeddings_provider_model
+                    ON model_embeddings(provider_id, model_name)
+                ''')
+            except:
+                pass
 
             # Create users table for multi-user management
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS users (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    username TEXT UNIQUE NOT NULL,
-                    password_hash TEXT NOT NULL,
-                    role TEXT DEFAULT 'user',
-                    created_by TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_login TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'user',
+                    created_by VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    last_login TIMESTAMP NULL,
+                    is_active {boolean_type} DEFAULT 1
                 )
             ''')
 
             # User-specific configuration tables for multi-user isolation
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_providers (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
-                    provider_id TEXT NOT NULL,
+                    provider_id VARCHAR(255) NOT NULL,
                     config TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
                     FOREIGN KEY (user_id) REFERENCES users(id),
                     UNIQUE(user_id, provider_id)
                 )
             ''')
 
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_rotations (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
-                    rotation_id TEXT NOT NULL,
+                    rotation_id VARCHAR(255) NOT NULL,
                     config TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
                     FOREIGN KEY (user_id) REFERENCES users(id),
                     UNIQUE(user_id, rotation_id)
                 )
             ''')
 
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_autoselects (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
-                    autoselect_id TEXT NOT NULL,
+                    autoselect_id VARCHAR(255) NOT NULL,
                     config TEXT NOT NULL,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
                     FOREIGN KEY (user_id) REFERENCES users(id),
                     UNIQUE(user_id, autoselect_id)
                 )
             ''')
 
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_api_tokens (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
-                    token TEXT UNIQUE NOT NULL,
+                    token VARCHAR(255) UNIQUE NOT NULL,
                     description TEXT,
-                    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-                    last_used TIMESTAMP,
-                    is_active BOOLEAN DEFAULT 1,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    last_used TIMESTAMP NULL,
+                    is_active {boolean_type} DEFAULT 1,
                     FOREIGN KEY (user_id) REFERENCES users(id)
                 )
             ''')
 
-            cursor.execute('''
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_token_usage (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
                     token_id INTEGER,
-                    provider_id TEXT NOT NULL,
-                    model_name TEXT NOT NULL,
+                    provider_id VARCHAR(255) NOT NULL,
+                    model_name VARCHAR(255) NOT NULL,
                     tokens_used INTEGER NOT NULL,
-                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                    timestamp TIMESTAMP DEFAULT {timestamp_default},
                     FOREIGN KEY (user_id) REFERENCES users(id),
                     FOREIGN KEY (token_id) REFERENCES user_api_tokens(id)
                 )
@@ -224,7 +281,7 @@ class DatabaseManager:
     ):
         """
         Record or update context dimension configuration for a model.
-        
+
         Args:
             provider_id: The provider identifier
             model_name: The model name
@@ -232,18 +289,28 @@ class DatabaseManager:
             condense_context: Percentage (0-100) at which to trigger condensation
             condense_method: Condensation method(s) as string or list
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Convert condense_method to JSON string if it's a list
             condense_method_str = json.dumps(condense_method) if isinstance(condense_method, list) else condense_method
-            
-            cursor.execute('''
-                INSERT OR REPLACE INTO context_dimensions 
-                (provider_id, model_name, context_size, condense_context, condense_method, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (provider_id, model_name, context_size, condense_context, condense_method_str))
-            
+
+            if self.db_type == 'sqlite':
+                cursor.execute('''
+                    INSERT OR REPLACE INTO context_dimensions
+                    (provider_id, model_name, context_size, condense_context, condense_method, last_updated)
+                    VALUES (?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                ''', (provider_id, model_name, context_size, condense_context, condense_method_str))
+            else:  # mysql
+                cursor.execute('''
+                    INSERT INTO context_dimensions
+                    (provider_id, model_name, context_size, condense_context, condense_method, last_updated)
+                    VALUES (%s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                    context_size=VALUES(context_size), condense_context=VALUES(condense_context),
+                    condense_method=VALUES(condense_method), last_updated=CURRENT_TIMESTAMP
+                ''', (provider_id, model_name, context_size, condense_context, condense_method_str))
+
             conn.commit()
             logger.debug(f"Recorded context dimension for {provider_id}/{model_name}")
     
@@ -254,30 +321,31 @@ class DatabaseManager:
     ) -> Optional[Dict]:
         """
         Retrieve context dimension configuration for a model.
-        
+
         Args:
             provider_id: The provider identifier
             model_name: The model name
-        
+
         Returns:
             Dictionary with context configuration or None if not found
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT context_size, condense_context, condense_method, effective_context
                 FROM context_dimensions
-                WHERE provider_id = ? AND model_name = ?
+                WHERE provider_id = {placeholder} AND model_name = {placeholder}
             ''', (provider_id, model_name))
-            
+
             row = cursor.fetchone()
             if row:
-                condense_method = json.loads(row[3]) if row[3] else None
+                condense_method = json.loads(row[2]) if row[2] else None
                 return {
                     'context_size': row[0],
                     'condense_context': row[1],
                     'condense_method': condense_method,
-                    'effective_context': row[2]
+                    'effective_context': row[3]
                 }
             return None
     
@@ -289,20 +357,21 @@ class DatabaseManager:
     ):
         """
         Update the effective context value for a model.
-        
+
         Args:
             provider_id: The provider identifier
             model_name: The model name
             effective_context: Total tokens used in the request
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 UPDATE context_dimensions
-                SET effective_context = ?, last_updated = CURRENT_TIMESTAMP
-                WHERE provider_id = ? AND model_name = ?
+                SET effective_context = {placeholder}, last_updated = CURRENT_TIMESTAMP
+                WHERE provider_id = {placeholder} AND model_name = {placeholder}
             ''', (effective_context, provider_id, model_name))
-            
+
             conn.commit()
             logger.debug(f"Updated effective_context for {provider_id}/{model_name}: {effective_context}")
     
@@ -314,19 +383,20 @@ class DatabaseManager:
     ):
         """
         Record token usage for rate limiting.
-        
+
         Args:
             provider_id: The provider identifier
             model_name: The model name
             tokens_used: Number of tokens used in the request
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 INSERT INTO token_usage (provider_id, model_name, tokens_used, timestamp)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
             ''', (provider_id, model_name, tokens_used))
-            
+
             conn.commit()
             logger.debug(f"Recorded token usage for {provider_id}/{model_name}: {tokens_used}")
     
@@ -338,18 +408,18 @@ class DatabaseManager:
     ) -> int:
         """
         Get total token usage for a model within a time window.
-        
+
         Args:
             provider_id: The provider identifier
             model_name: The model name
             time_window: Time window ('1m' for minute, '1h' for hour, '1d' for day)
-        
+
         Returns:
             Total tokens used within the time window
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            
+
             # Calculate timestamp based on time window
             if time_window == '1m':
                 cutoff = datetime.now() - timedelta(minutes=1)
@@ -359,53 +429,62 @@ class DatabaseManager:
                 cutoff = datetime.now() - timedelta(days=1)
             else:
                 cutoff = datetime.now() - timedelta(minutes=1)
-            
-            cursor.execute('''
-                SELECT COALESCE(SUM(tokens_used), 0)
-                FROM token_usage
-                WHERE provider_id = ? AND model_name = ? AND timestamp >= ?
-            ''', (provider_id, model_name, cutoff.isoformat()))
-            
+
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    SELECT COALESCE(SUM(tokens_used), 0)
+                    FROM token_usage
+                    WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                ''', (provider_id, model_name, cutoff.isoformat()))
+            else:  # mysql
+                cursor.execute(f'''
+                    SELECT COALESCE(SUM(tokens_used), 0)
+                    FROM token_usage
+                    WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                ''', (provider_id, model_name, cutoff.isoformat()))
+
             result = cursor.fetchone()
             return result[0] if result else 0
     
     def cleanup_old_token_usage(self, days_to_keep: int = 7):
         """
         Clean up old token usage records to prevent database bloat.
-        
+
         Args:
             days_to_keep: Number of days of token usage to keep
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cutoff = datetime.now() - timedelta(days=days_to_keep)
-            
-            cursor.execute('''
+
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 DELETE FROM token_usage
-                WHERE timestamp < ?
+                WHERE timestamp < {placeholder}
             ''', (cutoff.isoformat(),))
-            
+
             deleted = cursor.rowcount
             conn.commit()
-            
+
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old token usage records")
     
     def get_all_context_dimensions(self) -> List[Dict]:
         """
         Get all context dimension configurations.
-        
+
         Returns:
             List of dictionaries with context configurations
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT provider_id, model_name, context_size, condense_context, condense_method, effective_context, last_updated
                 FROM context_dimensions
                 ORDER BY provider_id, model_name
             ''')
-            
+
             results = []
             for row in cursor.fetchall():
                 condense_method = json.loads(row[4]) if row[4] else None
@@ -418,7 +497,7 @@ class DatabaseManager:
                     'effective_context': row[5],
                     'last_updated': row[6]
                 })
-            
+
             return results
     
     def get_token_usage_stats(
@@ -454,12 +533,13 @@ class DatabaseManager:
         Returns:
             User dict if authenticated, None otherwise
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT id, username, role, is_active
                 FROM users
-                WHERE username = ? AND password_hash = ? AND is_active = 1
+                WHERE username = {placeholder} AND password_hash = {placeholder} AND is_active = 1
             ''', (username, password_hash))
 
             row = cursor.fetchone()
@@ -485,11 +565,12 @@ class DatabaseManager:
         Returns:
             User ID of the created user
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 INSERT INTO users (username, password_hash, role, created_by)
-                VALUES (?, ?, ?, ?)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
             ''', (username, password_hash, role, created_by))
             conn.commit()
             return cursor.lastrowid
@@ -501,7 +582,7 @@ class DatabaseManager:
         Returns:
             List of user dictionaries
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute('''
                 SELECT id, username, role, created_by, created_at, last_login, is_active
@@ -978,24 +1059,30 @@ class DatabaseManager:
 _db_manager: Optional[DatabaseManager] = None
 
 
-def get_database() -> DatabaseManager:
+def get_database(db_config: Optional[Dict[str, Any]] = None) -> DatabaseManager:
     """
     Get the global database manager instance.
-    
+
+    Args:
+        db_config: Database configuration. If None, uses default.
+
     Returns:
         The DatabaseManager instance
     """
     global _db_manager
     if _db_manager is None:
-        _db_manager = DatabaseManager()
+        _db_manager = DatabaseManager(db_config)
     return _db_manager
 
 
-def initialize_database():
+def initialize_database(db_config: Optional[Dict[str, Any]] = None):
     """
     Initialize the database and clean up old records.
     This should be called at application startup.
+
+    Args:
+        db_config: Database configuration. If None, uses default.
     """
-    db = get_database()
+    db = get_database(db_config)
     db.cleanup_old_token_usage(days_to_keep=7)
     logger.info("Database initialized and old records cleaned up")

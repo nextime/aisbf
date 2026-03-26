@@ -11,6 +11,24 @@
 - MCP (Model Context Protocol) server endpoint
 - Proxy-awareness with configurable error cooldown features
 - Kiro provider integration
+- **Database Configuration**: Support for SQLite and MySQL backends with automatic table creation and migration
+- **Flexible Caching System**: Redis, file-based, and memory caching backends for model embeddings and API responses
+- **Cache Abstraction Layer**: Unified caching interface with automatic fallback and configurable TTL
+- **Redis Cache Support**: High-performance distributed caching for production deployments
+- **Database Manager Updates**: Multi-database support with SQL syntax adaptation between SQLite and MySQL
+- **Cache Manager**: Configurable cache backends with SQLite, MySQL, Redis, file-based, and memory options with automatic fallback
+- **Response Caching (Semantic Deduplication)**: Intelligent response caching system with multiple backend support
+  - Multiple backends: In-memory LRU cache, Redis, SQLite, MySQL
+  - SHA256-based cache key generation for request deduplication
+  - TTL-based expiration (default: 600 seconds)
+  - LRU eviction for memory backend with configurable max size
+  - Cache statistics tracking (hits, misses, hit rate, evictions)
+  - Dashboard endpoints for cache statistics and clearing
+  - Granular cache control at model, provider, rotation, and autoselect levels
+  - Hierarchical configuration: Model > Provider > Rotation > Autoselect > Global
+  - Automatic cache initialization on startup
+  - Skip caching for streaming requests
+  - Comprehensive test suite with 6 test scenarios
 
 ### Fixed
 - Model class now supports OpenRouter metadata fields preventing crashes in models list API

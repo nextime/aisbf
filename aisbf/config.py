@@ -46,6 +46,8 @@ class ProviderModelConfig(BaseModel):
     # Content classification flags
     nsfw: bool = False  # Model can handle NSFW content
     privacy: bool = False  # Model can handle privacy-sensitive content
+    # Response caching control
+    enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this model (None = use provider default)
 
 
 class CondensationConfig(BaseModel):
@@ -81,6 +83,8 @@ class ProviderConfig(BaseModel):
     enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching)
     cache_ttl: Optional[int] = None  # Cache TTL in seconds for Google Context Caching API
     min_cacheable_tokens: Optional[int] = 1000  # Minimum token count for content to be cacheable
+    # Response caching control
+    enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this provider (None = use global default)
 
 class RotationConfig(BaseModel):
     model_name: str
@@ -107,6 +111,8 @@ class RotationConfig(BaseModel):
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
+    # Response caching control
+    enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this rotation (None = use global default)
 
 class AutoselectModelInfo(BaseModel):
     model_id: str
@@ -133,6 +139,30 @@ class AutoselectConfig(BaseModel):
     pricing: Optional[Dict] = None
     supported_parameters: Optional[List[str]] = None
     default_parameters: Optional[Dict] = None
+    # Response caching control
+    enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this autoselect (None = use global default)
+
+class ResponseCacheConfig(BaseModel):
+    """Configuration for response caching with semantic deduplication"""
+    enabled: bool = True
+    backend: str = "memory"  # 'redis', 'sqlite', 'mysql', or 'memory'
+    ttl: int = 600  # Default TTL in seconds (10 minutes)
+    max_memory_cache: int = 1000  # Max items for memory cache
+    # Redis configuration
+    redis_host: str = "localhost"
+    redis_port: int = 6379
+    redis_db: int = 0
+    redis_password: Optional[str] = None
+    redis_key_prefix: str = "aisbf:response:"
+    # SQLite configuration
+    sqlite_path: str = "~/.aisbf/response_cache.db"
+    # MySQL configuration
+    mysql_host: str = "localhost"
+    mysql_port: int = 3306
+    mysql_user: str = "aisbf"
+    mysql_password: str = ""
+    mysql_database: str = "aisbf_response_cache"
+
 
 class TorConfig(BaseModel):
     """Configuration for TOR hidden service"""
@@ -158,6 +188,7 @@ class AISBFConfig(BaseModel):
     tor: Optional[Dict] = None
     database: Optional[Dict] = None
     cache: Optional[Dict] = None
+    response_cache: Optional[ResponseCacheConfig] = None
 
 
 class AppConfig(BaseModel):
@@ -593,9 +624,15 @@ class Config:
         logger.info(f"Loading AISBF config from: {aisbf_path}")
         with open(aisbf_path) as f:
             data = json.load(f)
+            # Parse response_cache separately if present
+            response_cache_data = data.get('response_cache')
+            if response_cache_data:
+                data['response_cache'] = ResponseCacheConfig(**response_cache_data)
             self.aisbf = AISBFConfig(**data)
             self._loaded_files['aisbf'] = str(aisbf_path.absolute())
             logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")
+            if self.aisbf.response_cache:
+                logger.info(f"Response cache config: enabled={self.aisbf.response_cache.enabled}, backend={self.aisbf.response_cache.backend}, ttl={self.aisbf.response_cache.ttl}")
             logger.info(f"=== Config._load_aisbf_config END ===")
 
     def _initialize_error_tracking(self):

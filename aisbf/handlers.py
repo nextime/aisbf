@@ -42,6 +42,7 @@ from .utils import (
 from .context import ContextManager, get_context_config_for_model
 from .classifier import content_classifier
 from .semantic_classifier import SemanticClassifier
+from .response_cache import get_response_cache
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -92,6 +93,73 @@ class RequestHandler:
         self.user_providers = db.get_user_providers(self.user_id)
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
+
+    def _should_cache_response(self, provider_config=None, model_config=None, rotation_config=None, autoselect_config=None):
+        """
+        Determine if response caching should be enabled based on configuration hierarchy.
+        
+        Priority order (highest to lowest):
+        1. Model-level enable_response_cache setting
+        2. Provider-level enable_response_cache setting
+        3. Rotation-level enable_response_cache setting
+        4. Autoselect-level enable_response_cache setting
+        5. Global response_cache.enabled setting
+        
+        Args:
+            provider_config: Provider configuration object
+            model_config: Model configuration object or dict
+            rotation_config: Rotation configuration object
+            autoselect_config: Autoselect configuration object
+            
+        Returns:
+            bool: True if caching should be enabled, False otherwise
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check model-level setting (highest priority)
+        if model_config:
+            model_cache_setting = None
+            if isinstance(model_config, dict):
+                model_cache_setting = model_config.get('enable_response_cache')
+            else:
+                model_cache_setting = getattr(model_config, 'enable_response_cache', None)
+            
+            if model_cache_setting is not None:
+                logger.debug(f"Using model-level cache setting: {model_cache_setting}")
+                return model_cache_setting
+        
+        # Check provider-level setting
+        if provider_config:
+            provider_cache_setting = getattr(provider_config, 'enable_response_cache', None)
+            if provider_cache_setting is not None:
+                logger.debug(f"Using provider-level cache setting: {provider_cache_setting}")
+                return provider_cache_setting
+        
+        # Check rotation-level setting
+        if rotation_config:
+            rotation_cache_setting = getattr(rotation_config, 'enable_response_cache', None)
+            if rotation_cache_setting is not None:
+                logger.debug(f"Using rotation-level cache setting: {rotation_cache_setting}")
+                return rotation_cache_setting
+        
+        # Check autoselect-level setting
+        if autoselect_config:
+            autoselect_cache_setting = getattr(autoselect_config, 'enable_response_cache', None)
+            if autoselect_cache_setting is not None:
+                logger.debug(f"Using autoselect-level cache setting: {autoselect_cache_setting}")
+                return autoselect_cache_setting
+        
+        # Fall back to global setting
+        aisbf_config = self.config.get_aisbf_config()
+        if aisbf_config and aisbf_config.response_cache:
+            global_setting = aisbf_config.response_cache.enabled
+            logger.debug(f"Using global cache setting: {global_setting}")
+            return global_setting
+        
+        # Default to False if no configuration found
+        logger.debug("No cache configuration found, defaulting to False")
+        return False
 
     async def _handle_chunked_request(
         self,
@@ -237,6 +305,22 @@ class RequestHandler:
             provider_config = self.config.get_provider(provider_id)
             logger.info(f"Using global provider config for {provider_id}")
 
+        # Check response cache for non-streaming requests
+        stream = request_data.get('stream', False)
+        if not stream:
+            try:
+                aisbf_config = self.config.get_aisbf_config()
+                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                    cached_response = response_cache.get(request_data)
+                    if cached_response:
+                        logger.info(f"Cache hit for request to provider {provider_id}")
+                        return cached_response
+                    else:
+                        logger.debug(f"Cache miss for request to provider {provider_id}")
+            except Exception as cache_error:
+                logger.warning(f"Response cache check failed: {cache_error}")
+
         logger.info(f"Provider config: {provider_config}")
         logger.info(f"Provider type: {provider_config.type}")
         logger.info(f"Provider endpoint: {provider_config.endpoint}")
@@ -325,6 +409,18 @@ class RequestHandler:
                     )
                     
                     handler.record_success()
+                    
+                    # Cache the response for non-streaming chunked requests
+                    if not stream:
+                        try:
+                            aisbf_config = self.config.get_aisbf_config()
+                            if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                                response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                                response_cache.set(request_data, response)
+                                logger.debug(f"Cached chunked response for request to provider {provider_id}")
+                        except Exception as cache_error:
+                            logger.warning(f"Response cache set failed for chunked request: {cache_error}")
+                    
                     logger.info(f"=== RequestHandler.handle_chat_completion END ===")
                     return response
             
@@ -354,6 +450,18 @@ class RequestHandler:
             
             # For OpenAI-compatible providers, the response is already a response object
             # Just return it as-is without any parsing or modification
+            
+            # Cache the response for non-streaming requests
+            if not stream:
+                try:
+                    aisbf_config = self.config.get_aisbf_config()
+                    if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                        response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                        response_cache.set(request_data, response)
+                        logger.debug(f"Cached response for request to provider {provider_id}")
+                except Exception as cache_error:
+                    logger.warning(f"Response cache set failed: {cache_error}")
+            
             handler.record_success()
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
             return response
@@ -1499,6 +1607,22 @@ class RotationHandler:
             rotation_config = self.config.get_rotation(rotation_id)
             logger.info(f"Using global rotation config for {rotation_id}")
 
+        # Check response cache for non-streaming requests
+        stream = request_data.get('stream', False)
+        if not stream:
+            try:
+                aisbf_config = self.config.get_aisbf_config()
+                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                    cached_response = response_cache.get(request_data)
+                    if cached_response:
+                        logger.info(f"Cache hit for rotation request {rotation_id}")
+                        return cached_response
+                    else:
+                        logger.debug(f"Cache miss for rotation request {rotation_id}")
+            except Exception as cache_error:
+                logger.warning(f"Response cache check failed: {cache_error}")
+
         if not rotation_config:
             logger.error(f"Rotation {rotation_id} not found")
             raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found")
@@ -1995,6 +2119,16 @@ class RotationHandler:
                                 effective_context=effective_context
                             )
                         else:
+                            # Cache the response for non-streaming chunked requests
+                            try:
+                                aisbf_config = self.config.get_aisbf_config()
+                                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                                    response_cache.set(request_data, response)
+                                    logger.debug(f"Cached chunked response for rotation request {rotation_id}")
+                            except Exception as cache_error:
+                                logger.warning(f"Response cache set failed for chunked request: {cache_error}")
+                            
                             logger.info("Returning non-streaming response")
                             return response
                 
@@ -2057,6 +2191,16 @@ class RotationHandler:
                         effective_context=effective_context
                     )
                 else:
+                    # Cache the response for non-streaming requests
+                    try:
+                        aisbf_config = self.config.get_aisbf_config()
+                        if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                            response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                            response_cache.set(request_data, response)
+                            logger.debug(f"Cached response for rotation request {rotation_id}")
+                    except Exception as cache_error:
+                        logger.warning(f"Response cache set failed: {cache_error}")
+                    
                     logger.info("Returning non-streaming response")
                     return response
             except Exception as e:
@@ -3206,6 +3350,22 @@ class AutoselectHandler:
         logger.info(f"Autoselect ID: {autoselect_id}")
         logger.info(f"User ID: {self.user_id}")
 
+        # Check response cache for non-streaming requests
+        stream = request_data.get('stream', False)
+        if not stream:
+            try:
+                aisbf_config = self.config.get_aisbf_config()
+                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                    cached_response = response_cache.get(request_data)
+                    if cached_response:
+                        logger.info(f"Cache hit for autoselect request {autoselect_id}")
+                        return cached_response
+                    else:
+                        logger.debug(f"Cache miss for autoselect request {autoselect_id}")
+            except Exception as cache_error:
+                logger.warning(f"Response cache check failed: {cache_error}")
+
         # Check for user-specific autoselect config first
         if self.user_id and autoselect_id in self.user_autoselects:
             autoselect_config = self.user_autoselects[autoselect_id]
@@ -3298,6 +3458,18 @@ class AutoselectHandler:
         logger.info(f"Proxying request to rotation: {selected_model_id}")
         rotation_handler = RotationHandler()
         response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+        
+        # Cache the response for non-streaming requests
+        if not stream:
+            try:
+                aisbf_config = self.config.get_aisbf_config()
+                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
+                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                    response_cache.set(request_data, response)
+                    logger.debug(f"Cached response for autoselect request {autoselect_id}")
+            except Exception as cache_error:
+                logger.warning(f"Response cache set failed: {cache_error}")
+        
         logger.info(f"=== AUTOSELECT REQUEST END ===")
         return response
 

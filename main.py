@@ -31,6 +31,7 @@ from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.mcp import mcp_server, MCPAuthLevel, load_mcp_config
 from aisbf.database import initialize_database
+from aisbf.cache import initialize_cache
 from aisbf.tor import setup_tor_hidden_service, TorHiddenService
 from starlette.middleware.sessions import SessionMiddleware
 from starlette.middleware.base import BaseHTTPMiddleware
@@ -841,10 +842,30 @@ async def startup_event():
         
         # Initialize database
         try:
-            initialize_database()
+            db_config = config.aisbf.database if config.aisbf and config.aisbf.database else None
+            initialize_database(db_config)
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             # Continue startup even if database fails
+
+        # Initialize cache
+        try:
+            cache_config = config.aisbf.cache if config.aisbf and config.aisbf.cache else None
+            initialize_cache(cache_config)
+        except Exception as e:
+            logger.error(f"Failed to initialize cache: {e}")
+            # Continue startup even if cache fails
+
+        # Initialize response cache
+        try:
+            from aisbf.response_cache import initialize_response_cache
+            response_cache_config = config.aisbf.response_cache if config.aisbf and config.aisbf.response_cache else None
+            if response_cache_config:
+                initialize_response_cache(response_cache_config.model_dump() if hasattr(response_cache_config, 'model_dump') else response_cache_config)
+                logger.info("Response cache initialized successfully")
+        except Exception as e:
+            logger.error(f"Failed to initialize response cache: {e}")
+            # Continue startup even if response cache fails
     
     # Log configuration files loaded
     if config and hasattr(config, '_loaded_files'):
@@ -1664,6 +1685,19 @@ async def dashboard_settings_save(
     dashboard_password: str = Form(""),
     condensation_model_id: str = Form(...),
     autoselect_model_id: str = Form(...),
+    database_type: str = Form("sqlite"),
+    sqlite_path: str = Form("~/.aisbf/aisbf.db"),
+    mysql_host: str = Form("localhost"),
+    mysql_port: int = Form(3306),
+    mysql_user: str = Form("aisbf"),
+    mysql_password: str = Form(""),
+    mysql_database: str = Form("aisbf"),
+    cache_type: str = Form("file"),
+    redis_host: str = Form("localhost"),
+    redis_port: int = Form(6379),
+    redis_db: int = Form(0),
+    redis_password: str = Form(""),
+    redis_key_prefix: str = Form("aisbf:"),
     mcp_enabled: bool = Form(False),
     autoselect_tokens: str = Form(""),
     fullconfig_tokens: str = Form(""),
@@ -1701,7 +1735,30 @@ async def dashboard_settings_save(
         aisbf_config['dashboard']['password'] = password_hash
     aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
     aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
-    
+
+    # Update database config
+    if 'database' not in aisbf_config:
+        aisbf_config['database'] = {}
+    aisbf_config['database']['type'] = database_type
+    aisbf_config['database']['sqlite_path'] = sqlite_path
+    aisbf_config['database']['mysql_host'] = mysql_host
+    aisbf_config['database']['mysql_port'] = mysql_port
+    aisbf_config['database']['mysql_user'] = mysql_user
+    if mysql_password:  # Only update if provided
+        aisbf_config['database']['mysql_password'] = mysql_password
+    aisbf_config['database']['mysql_database'] = mysql_database
+
+    # Update cache config
+    if 'cache' not in aisbf_config:
+        aisbf_config['cache'] = {}
+    aisbf_config['cache']['type'] = cache_type
+    aisbf_config['cache']['redis_host'] = redis_host
+    aisbf_config['cache']['redis_port'] = redis_port
+    aisbf_config['cache']['redis_db'] = redis_db
+    if redis_password:  # Only update if provided
+        aisbf_config['cache']['redis_password'] = redis_password
+    aisbf_config['cache']['redis_key_prefix'] = redis_key_prefix
+
     # Update MCP config
     if 'mcp' not in aisbf_config:
         aisbf_config['mcp'] = {}
@@ -2089,6 +2146,49 @@ async def dashboard_tor_status(request: Request):
         }
     
     return JSONResponse(status)
+
+@app.get("/dashboard/response-cache/stats")
+async def dashboard_response_cache_stats(request: Request):
+    """Get response cache statistics"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.response_cache import get_response_cache
+    
+    try:
+        cache = get_response_cache()
+        stats = cache.get_stats()
+        return JSONResponse(stats)
+    except Exception as e:
+        logger.error(f"Error getting response cache stats: {e}")
+        return JSONResponse({
+            'enabled': False,
+            'hits': 0,
+            'misses': 0,
+            'hit_rate': 0.0,
+            'size': 0,
+            'evictions': 0,
+            'backend': 'unknown',
+            'error': str(e)
+        })
+
+@app.post("/dashboard/response-cache/clear")
+async def dashboard_response_cache_clear(request: Request):
+    """Clear response cache"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.response_cache import get_response_cache
+    
+    try:
+        cache = get_response_cache()
+        cache.clear()
+        return JSONResponse({'success': True, 'message': 'Response cache cleared'})
+    except Exception as e:
+        logger.error(f"Error clearing response cache: {e}")
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
 @app.get("/dashboard/docs", response_class=HTMLResponse)
 async def dashboard_docs(request: Request):

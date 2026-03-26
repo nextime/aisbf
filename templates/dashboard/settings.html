@@ -150,8 +150,186 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">Model used for semantic embedding and vectorization</small>
     </div>
     
-    <h3 style="margin: 30px 0 20px;">Content Classification</h3>
+    <h3 style="margin: 30px 0 20px;">Database Configuration</h3>
+
+    <div class="form-group">
+        <label for="database_type">Database Type</label>
+        <select id="database_type" name="database_type" onchange="toggleDatabaseFields()">
+            <option value="sqlite" {% if config.database and config.database.type == 'sqlite' %}selected{% endif %}>SQLite</option>
+            <option value="mysql" {% if config.database and config.database.type == 'mysql' %}selected{% endif %}>MySQL</option>
+        </select>
+        <small style="color: #666; display: block; margin-top: 5px;">Choose the database backend (SQLite is recommended for most users)</small>
+    </div>
+
+    <div id="sqlite-fields" style="display: {% if not config.database or config.database.type == 'sqlite' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="sqlite_path">SQLite Database Path</label>
+            <input type="text" id="sqlite_path" name="sqlite_path" value="{{ config.database.sqlite_path if config.database and config.database.sqlite_path else '~/.aisbf/aisbf.db' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite database file (supports ~ expansion)</small>
+        </div>
+    </div>
+
+    <div id="mysql-fields" style="display: {% if config.database and config.database.type == 'mysql' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="mysql_host">MySQL Host</label>
+            <input type="text" id="mysql_host" name="mysql_host" value="{{ config.database.mysql_host if config.database and config.database.mysql_host else 'localhost' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL server hostname or IP address</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_port">MySQL Port</label>
+            <input type="number" id="mysql_port" name="mysql_port" value="{{ config.database.mysql_port if config.database and config.database.mysql_port else 3306 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL server port (default: 3306)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_user">MySQL Username</label>
+            <input type="text" id="mysql_user" name="mysql_user" value="{{ config.database.mysql_user if config.database and config.database.mysql_user else 'aisbf' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database username</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_password">MySQL Password</label>
+            <input type="password" id="mysql_password" name="mysql_password" placeholder="Leave blank to keep current">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database password</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_database">MySQL Database Name</label>
+            <input type="text" id="mysql_database" name="mysql_database" value="{{ config.database.mysql_database if config.database and config.database.mysql_database else 'aisbf' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database name</small>
+        </div>
+    </div>
+
+    <h3 style="margin: 30px 0 20px;">Cache Configuration</h3>
+
+    <div class="form-group">
+        <label for="cache_type">Cache Type</label>
+        <select id="cache_type" name="cache_type" onchange="toggleCacheFields()">
+            <option value="sqlite" {% if config.cache and config.cache.type == 'sqlite' %}selected{% endif %}>SQLite</option>
+            <option value="mysql" {% if config.cache and config.cache.type == 'mysql' %}selected{% endif %}>MySQL</option>
+            <option value="redis" {% if config.cache and config.cache.type == 'redis' %}selected{% endif %}>Redis</option>
+            <option value="file" {% if config.cache and config.cache.type == 'file' %}selected{% endif %}>File-based</option>
+            <option value="memory" {% if not config.cache or config.cache.type == 'memory' %}selected{% endif %}>Memory</option>
+        </select>
+        <small style="color: #666; display: block; margin-top: 5px;">Choose the cache backend for model embeddings and other cached data (SQLite recommended for most users)</small>
+    </div>
+
+    <div id="sqlite-cache-fields" style="display: {% if config.cache and config.cache.type == 'sqlite' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="sqlite_path">SQLite Cache Path</label>
+            <input type="text" id="sqlite_path" name="sqlite_path" value="{{ config.cache.sqlite_path if config.cache and config.cache.sqlite_path else '~/.aisbf/cache.db' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite cache database file (supports ~ expansion)</small>
+        </div>
+    </div>
+
+    <div id="mysql-cache-fields" style="display: {% if config.cache and config.cache.type == 'mysql' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="mysql_cache_host">MySQL Host</label>
+            <input type="text" id="mysql_cache_host" name="mysql_cache_host" value="{{ config.cache.mysql_host if config.cache and config.cache.mysql_host else 'localhost' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL server hostname or IP address</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_cache_port">MySQL Port</label>
+            <input type="number" id="mysql_cache_port" name="mysql_cache_port" value="{{ config.cache.mysql_port if config.cache and config.cache.mysql_port else 3306 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL server port (default: 3306)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_cache_user">MySQL Username</label>
+            <input type="text" id="mysql_cache_user" name="mysql_cache_user" value="{{ config.cache.mysql_user if config.cache and config.cache.mysql_user else 'aisbf' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database username</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_cache_password">MySQL Password</label>
+            <input type="password" id="mysql_cache_password" name="mysql_cache_password" placeholder="Leave blank to keep current">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database password</small>
+        </div>
+
+        <div class="form-group">
+            <label for="mysql_cache_database">MySQL Database Name</label>
+            <input type="text" id="mysql_cache_database" name="mysql_cache_database" value="{{ config.cache.mysql_database if config.cache and config.cache.mysql_database else 'aisbf_cache' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">MySQL database name for cache</small>
+        </div>
+    </div>
+
+    <div id="redis-cache-fields" style="display: {% if config.cache and config.cache.type == 'redis' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="redis_host">Redis Host</label>
+            <input type="text" id="redis_host" name="redis_host" value="{{ config.cache.redis_host if config.cache and config.cache.redis_host else 'localhost' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Redis server hostname or IP address</small>
+        </div>
+
+        <div class="form-group">
+            <label for="redis_port">Redis Port</label>
+            <input type="number" id="redis_port" name="redis_port" value="{{ config.cache.redis_port if config.cache and config.cache.redis_port else 6379 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Redis server port (default: 6379)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="redis_db">Redis Database</label>
+            <input type="number" id="redis_db" name="redis_db" value="{{ config.cache.redis_db if config.cache and config.cache.redis_db else 0 }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Redis database number (default: 0)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="redis_password">Redis Password</label>
+            <input type="password" id="redis_password" name="redis_password" placeholder="Leave blank if no password">
+            <small style="color: #666; display: block; margin-top: 5px;">Redis password (optional)</small>
+        </div>
+
+        <div class="form-group">
+            <label for="redis_key_prefix">Redis Key Prefix</label>
+            <input type="text" id="redis_key_prefix" name="redis_key_prefix" value="{{ config.cache.redis_key_prefix if config.cache and config.cache.redis_key_prefix else 'aisbf:' }}">
+            <small style="color: #666; display: block; margin-top: 5px;">Prefix for Redis keys (default: aisbf:)</small>
+        </div>
+    </div>
+
+    <h3 style="margin: 30px 0 20px;">Response Cache Statistics</h3>
     
+    <div id="cache-stats" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
+        <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
+            <strong>Status:</strong>
+            <span id="cache-stats-text" style="color: #666;">Loading...</span>
+        </div>
+        <div id="cache-stats-details" style="display: none; margin-top: 10px;">
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px;">
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Hits</div>
+                    <div id="cache-hits" style="font-size: 1.2em; font-weight: bold; color: #4caf50;">0</div>
+                </div>
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Misses</div>
+                    <div id="cache-misses" style="font-size: 1.2em; font-weight: bold; color: #ff9800;">0</div>
+                </div>
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Hit Rate</div>
+                    <div id="cache-hit-rate" style="font-size: 1.2em; font-weight: bold; color: #2196f3;">0%</div>
+                </div>
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Size</div>
+                    <div id="cache-size" style="font-size: 1.2em; font-weight: bold; color: #9c27b0;">0</div>
+                </div>
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Evictions</div>
+                    <div id="cache-evictions" style="font-size: 1.2em; font-weight: bold; color: #f44336;">0</div>
+                </div>
+                <div style="background: #16213e; padding: 10px; border-radius: 4px;">
+                    <div style="color: #666; font-size: 0.9em;">Backend</div>
+                    <div id="cache-backend" style="font-size: 1.2em; font-weight: bold; color: #00bcd4;">-</div>
+                </div>
+            </div>
+            <div style="margin-top: 10px;">
+                <button type="button" onclick="clearResponseCache()" class="btn btn-secondary" style="background: #f44336; color: white; border: none; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Clear Cache</button>
+                <button type="button" onclick="refreshCacheStats()" class="btn btn-secondary" style="margin-left: 10px; padding: 8px 16px; border-radius: 4px; cursor: pointer;">Refresh</button>
+            </div>
+        </div>
+    </div>
+
+    <h3 style="margin: 30px 0 20px;">Content Classification</h3>
+
     <div class="form-group">
         <label>
             <input type="checkbox" name="classify_nsfw" {% if config.classify_nsfw %}checked{% endif %}>
@@ -159,7 +337,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Enable automatic NSFW content detection for model selection</small>
     </div>
-    
+
     <div class="form-group">
         <label>
             <input type="checkbox" name="classify_privacy" {% if config.classify_privacy %}checked{% endif %}>
@@ -167,7 +345,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Enable automatic privacy-sensitive content detection for model selection</small>
     </div>
-    
+
     <div class="form-group">
         <label>
             <input type="checkbox" name="classify_semantic" {% if config.classify_semantic %}checked{% endif %}>
@@ -265,11 +443,46 @@ function toggleSSLFields() {
 function toggleTorFields() {
     const torEnabled = document.getElementById('tor_enabled').checked;
     const torFields = document.getElementById('tor-fields');
-    
+
     if (torEnabled) {
         torFields.style.display = 'block';
     } else {
         torFields.style.display = 'none';
+    }
+}
+
+function toggleDatabaseFields() {
+    const dbType = document.getElementById('database_type').value;
+    const sqliteFields = document.getElementById('sqlite-fields');
+    const mysqlFields = document.getElementById('mysql-fields');
+
+    if (dbType === 'sqlite') {
+        sqliteFields.style.display = 'block';
+        mysqlFields.style.display = 'none';
+    } else if (dbType === 'mysql') {
+        sqliteFields.style.display = 'none';
+        mysqlFields.style.display = 'block';
+    }
+}
+
+function toggleCacheFields() {
+    const cacheType = document.getElementById('cache_type').value;
+    const redisFields = document.getElementById('redis-cache-fields');
+    const sqliteFields = document.getElementById('sqlite-cache-fields');
+    const mysqlCacheFields = document.getElementById('mysql-cache-fields');
+
+    // Hide all cache-specific fields first
+    redisFields.style.display = 'none';
+    sqliteFields.style.display = 'none';
+    mysqlCacheFields.style.display = 'none';
+
+    // Show only the relevant fields
+    if (cacheType === 'redis') {
+        redisFields.style.display = 'block';
+    } else if (cacheType === 'sqlite') {
+        sqliteFields.style.display = 'block';
+    } else if (cacheType === 'mysql') {
+        mysqlCacheFields.style.display = 'block';
     }
 }
 
@@ -328,6 +541,65 @@ document.addEventListener('DOMContentLoaded', function() {
     checkTorStatus();
     // Refresh status every 30 seconds
     setInterval(checkTorStatus, 30000);
+    
+    // Load cache statistics
+    refreshCacheStats();
+    // Refresh cache stats every 10 seconds
+    setInterval(refreshCacheStats, 10000);
 });
+
+async function refreshCacheStats() {
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}');
+        const data = await response.json();
+        
+        const statsText = document.getElementById('cache-stats-text');
+        const statsDetails = document.getElementById('cache-stats-details');
+        
+        if (data.enabled) {
+            statsText.textContent = 'Enabled';
+            statsText.style.color = '#4caf50';
+            statsDetails.style.display = 'block';
+            
+            document.getElementById('cache-hits').textContent = data.hits || 0;
+            document.getElementById('cache-misses').textContent = data.misses || 0;
+            document.getElementById('cache-hit-rate').textContent = (data.hit_rate || 0).toFixed(1) + '%';
+            document.getElementById('cache-size').textContent = data.size || 0;
+            document.getElementById('cache-evictions').textContent = data.evictions || 0;
+            document.getElementById('cache-backend').textContent = data.backend || '-';
+        } else {
+            statsText.textContent = 'Disabled';
+            statsText.style.color = '#666';
+            statsDetails.style.display = 'none';
+        }
+    } catch (error) {
+        console.error('Error fetching cache stats:', error);
+        document.getElementById('cache-stats-text').textContent = 'Error loading stats';
+        document.getElementById('cache-stats-text').style.color = '#f44336';
+    }
+}
+
+async function clearResponseCache() {
+    if (!confirm('Are you sure you want to clear the response cache? This will remove all cached responses.')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Response cache cleared successfully');
+            refreshCacheStats();
+        } else {
+            alert('Failed to clear cache: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        console.error('Error clearing cache:', error);
+        alert('Error clearing cache: ' + error.message);
+    }
+}
 </script>
 {% endblock %}
