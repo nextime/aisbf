@@ -114,6 +114,11 @@ function renderRotationDetails(rotationKey) {
         </div>
         
         <div class="form-group">
+            <label>Capabilities (comma-separated)</label>
+            <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="e.g., code_generation, t2t, reasoning">
+        </div>
+        
+        <div class="form-group">
             <label>Default Rate Limit (seconds)</label>
             <input type="number" value="${rotation.default_rate_limit || ''}" onchange="updateRotation('${rotationKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
         </div>
@@ -121,6 +126,20 @@ function renderRotationDetails(rotationKey) {
         <div class="form-group">
             <label>Default Context Size</label>
             <input type="number" value="${rotation.default_context_size || ''}" onchange="updateRotation('${rotationKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${rotation.nsfw ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'nsfw', this.checked)">
+                NSFW
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${rotation.privacy ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'privacy', this.checked)">
+                Privacy
+            </label>
         </div>
         
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Providers</h4>
@@ -257,6 +276,7 @@ function addRotation() {
     rotationsConfig.rotations[key] = {
         model_name: key,
         notifyerrors: false,
+        capabilities: [],
         providers: []
     };
     
@@ -274,6 +294,18 @@ function removeRotation(key) {
 
 function updateRotation(key, field, value) {
     rotationsConfig.rotations[key][field] = value;
+}
+
+function updateRotationCapabilities(rotationKey, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        rotationsConfig.rotations[rotationKey].capabilities = null;
+        return;
+    }
+    
+    // Split by comma and clean up
+    rotationsConfig.rotations[rotationKey].capabilities = 
+        trimmed.split(',').map(s => s.trim()).filter(s => s);
 }
 
 function addRotationProvider(rotationKey) {

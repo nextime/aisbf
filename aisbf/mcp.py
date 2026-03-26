@@ -22,6 +22,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 MCP Server for AISBF - Provides remote agent configuration capabilities.
 """
+import time
 import json
 import logging
 from typing import Dict, List, Optional, Any, Union
@@ -494,6 +495,13 @@ class MCPServer:
                 provider_models = await request_handler.handle_model_list(dummy_request, provider_id)
                 for model in provider_models:
                     model['id'] = f"{provider_id}/{model.get('id', '')}"
+                    # Ensure OpenAI-compatible required fields are present
+                    if 'object' not in model:
+                        model['object'] = 'model'
+                    if 'created' not in model:
+                        model['created'] = int(time.time())
+                    if 'owned_by' not in model:
+                        model['owned_by'] = provider_config.name
                     model['type'] = 'provider'
                     all_models.append(model)
             except Exception as e:
@@ -504,11 +512,12 @@ class MCPServer:
             all_models.append({
                 'id': f"rotation/{rotation_id}",
                 'object': 'model',
-                'created': 0,
+                'created': int(time.time()),
                 'owned_by': 'aisbf-rotation',
                 'type': 'rotation',
                 'rotation_id': rotation_id,
-                'model_name': rotation_config.model_name
+                'model_name': rotation_config.model_name,
+                'capabilities': getattr(rotation_config, 'capabilities', [])
             })
         
         # Add autoselect
@@ -516,12 +525,13 @@ class MCPServer:
             all_models.append({
                 'id': f"autoselect/{autoselect_id}",
                 'object': 'model',
-                'created': 0,
+                'created': int(time.time()),
                 'owned_by': 'aisbf-autoselect',
                 'type': 'autoselect',
                 'autoselect_id': autoselect_id,
                 'model_name': autoselect_config.model_name,
-                'description': autoselect_config.description
+                'description': autoselect_config.description,
+                'capabilities': getattr(autoselect_config, 'capabilities', [])
             })
         
         return {"models": all_models}

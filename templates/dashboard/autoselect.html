@@ -132,6 +132,49 @@ function renderAutoselectDetails(autoselectKey) {
         </div>
         
         <div class="form-group">
+            <label>Capabilities (comma-separated)</label>
+            <input type="text" value="${autoselect.capabilities ? autoselect.capabilities.join(', ') : ''}" onchange="updateAutoselectCapabilities('${autoselectKey}', this.value)" placeholder="e.g., t2t, reasoning, multimodal">
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'nsfw', this.checked)">
+                NSFW
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'privacy', this.checked)">
+                Privacy
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_nsfw', this.checked)">
+                Classify NSFW
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_nsfw setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_privacy', this.checked)">
+                Classify Privacy
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_privacy setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_semantic ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_semantic', this.checked)">
+                Classify Semantic
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_semantic setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
             <label>Description</label>
             <textarea onchange="updateAutoselect('${autoselectKey}', 'description', this.value)" style="min-height: 60px;">${autoselect.description || ''}</textarea>
         </div>
@@ -201,6 +244,20 @@ function renderAutoselectModels(autoselectKey) {
                 <textarea onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'description', this.value)" style="min-height: 80px;" required>${model.description || ''}</textarea>
                 <small style="color: #666; font-size: 12px;">Be specific about when this model should be used (e.g., "Best for programming, code generation, debugging")</small>
             </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'nsfw', this.checked)">
+                    NSFW
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'privacy', this.checked)">
+                    Privacy
+                </label>
+            </div>
         `;
         
         container.appendChild(modelDiv);
@@ -240,6 +297,18 @@ function removeAutoselect(key) {
 
 function updateAutoselect(key, field, value) {
     autoselectConfig[key][field] = value;
+}
+
+function updateAutoselectCapabilities(autoselectKey, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        autoselectConfig[autoselectKey].capabilities = null;
+        return;
+    }
+    
+    // Split by comma and clean up
+    autoselectConfig[autoselectKey].capabilities = 
+        trimmed.split(',').map(s => s.trim()).filter(s => s);
 }
 
 function addAutoselectModel(autoselectKey) {

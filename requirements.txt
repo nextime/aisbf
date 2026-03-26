@@ -13,6 +13,8 @@ langchain-text-splitters
 tiktoken
 torch
 transformers
+sentence-transformers
+rank-bm25
 jinja2
 itsdangerous
 bs4

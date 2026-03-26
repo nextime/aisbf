@@ -713,6 +713,8 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
         logger.debug(f"Skipping provider {provider_id}: Kiro credentials not available or invalid")
         return []
     
+    current_time = int(time.time())
+    
     # If provider has local model config, use it
     if hasattr(provider_config, 'models') and provider_config.models:
         models = []
@@ -721,13 +723,19 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
             models.append({
                 'id': model_id,
                 'object': 'model',
-                'created': int(time.time()),
+                'created': current_time,
                 'owned_by': provider_config.name,
                 'provider': provider_id,
                 'type': 'provider',
                 'model_name': model.name,
                 'context_size': getattr(model, 'context_size', None),
                 'capabilities': getattr(model, 'capabilities', []),
+                'description': getattr(model, 'description', None),
+                'architecture': getattr(model, 'architecture', None),
+                'pricing': getattr(model, 'pricing', None),
+                'top_provider': getattr(model, 'top_provider', None),
+                'supported_parameters': getattr(model, 'supported_parameters', None),
+                'default_parameters': getattr(model, 'default_parameters', None),
                 'source': 'local_config'
             })
         return models
@@ -739,11 +747,18 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
             # Cache is still fresh, use it
             cached_models = _model_cache[provider_id]
             if cached_models:  # Only return if we have actual models
-                # Add provider prefix to model IDs
+                # Add provider prefix to model IDs and ensure all required fields
                 models = []
                 for model in cached_models:
                     model_copy = model.copy()
                     model_copy['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    # Ensure OpenAI-compatible required fields are present
+                    if 'object' not in model_copy:
+                        model_copy['object'] = 'model'
+                    if 'created' not in model_copy:
+                        model_copy['created'] = current_time
+                    if 'owned_by' not in model_copy:
+                        model_copy['owned_by'] = provider_config.name
                     model_copy['provider'] = provider_id
                     model_copy['type'] = 'provider'
                     model_copy['source'] = 'api_cache'
@@ -755,11 +770,18 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
         try:
             fetched_models = await fetch_provider_models(provider_id)
             if fetched_models:
-                # Add provider prefix to model IDs
+                # Add provider prefix to model IDs and ensure all required fields
                 models = []
                 for model in fetched_models:
                     model_copy = model.copy()
                     model_copy['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    # Ensure OpenAI-compatible required fields are present
+                    if 'object' not in model_copy:
+                        model_copy['object'] = 'model'
+                    if 'created' not in model_copy:
+                        model_copy['created'] = current_time
+                    if 'owned_by' not in model_copy:
+                        model_copy['owned_by'] = provider_config.name
                     model_copy['provider'] = provider_id
                     model_copy['type'] = 'provider'
                     model_copy['source'] = 'api_cache'
@@ -1887,7 +1909,8 @@ async def list_all_models(request: Request):
                 'owned_by': 'aisbf-rotation',
                 'type': 'rotation',
                 'rotation_id': rotation_id,
-                'model_name': rotation_config.model_name
+                'model_name': rotation_config.model_name,
+                'capabilities': getattr(rotation_config, 'capabilities', [])
             })
         except Exception as e:
             logger.warning(f"Error listing rotation {rotation_id}: {e}")
@@ -1903,7 +1926,8 @@ async def list_all_models(request: Request):
                 'type': 'autoselect',
                 'autoselect_id': autoselect_id,
                 'model_name': autoselect_config.model_name,
-                'description': autoselect_config.description
+                'description': autoselect_config.description,
+                'capabilities': getattr(autoselect_config, 'capabilities', [])
             })
         except Exception as e:
             logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
@@ -1936,7 +1960,8 @@ async def v1_list_all_models(request: Request):
                 'owned_by': 'aisbf-rotation',
                 'type': 'rotation',
                 'rotation_id': rotation_id,
-                'model_name': rotation_config.model_name
+                'model_name': rotation_config.model_name,
+                'capabilities': getattr(rotation_config, 'capabilities', [])
             })
         except Exception as e:
             logger.warning(f"Error listing rotation {rotation_id}: {e}")
@@ -1952,7 +1977,8 @@ async def v1_list_all_models(request: Request):
                 'type': 'autoselect',
                 'autoselect_id': autoselect_id,
                 'model_name': autoselect_config.model_name,
-                'description': autoselect_config.description
+                'description': autoselect_config.description,
+                'capabilities': getattr(autoselect_config, 'capabilities', [])
             })
         except Exception as e:
             logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
@@ -2297,8 +2323,9 @@ async def list_rotation_models():
             for model in provider['models']:
                 all_models.append({
                     "id": f"{rotation_id}/{model['name']}",
-                    "name": rotation_id,  # Use rotation name as the model name for selection
+                    "name": rotation_id,
                     "object": "model",
+                    "created": int(time.time()),
                     "owned_by": provider['provider_id'],
                     "rotation_id": rotation_id,
                     "actual_model": model['name'],
@@ -2384,8 +2411,9 @@ async def list_autoselect_models():
         for model_info in autoselect_config.available_models:
             all_models.append({
                 "id": model_info.model_id,
-                "name": autoselect_id,  # Use autoselect name as the model name for selection
+                "name": autoselect_id,
                 "object": "model",
+                "created": int(time.time()),
                 "owned_by": "autoselect",
                 "autoselect_id": autoselect_id,
                 "description": model_info.description,

@@ -35,6 +35,17 @@ class ProviderModelConfig(BaseModel):
     rate_limit: Optional[float] = None
     max_request_tokens: Optional[int] = None
     error_cooldown: Optional[int] = None  # Cooldown period in seconds after 3 consecutive failures
+    # OpenRouter-style extended fields
+    description: Optional[str] = None
+    context_length: Optional[int] = None
+    architecture: Optional[Dict] = None  # modality, input_modalities, output_modalities, tokenizer, instruct_type
+    pricing: Optional[Dict] = None  # prompt, completion, input_cache_read
+    top_provider: Optional[Dict] = None  # context_length, max_completion_tokens, is_moderated
+    supported_parameters: Optional[List[str]] = None
+    default_parameters: Optional[Dict] = None
+    # Content classification flags
+    nsfw: bool = False  # Model can handle NSFW content
+    privacy: bool = False  # Model can handle privacy-sensitive content
 
 
 class CondensationConfig(BaseModel):
@@ -71,6 +82,17 @@ class RotationConfig(BaseModel):
     model_name: str
     providers: List[Dict]
     notifyerrors: bool = False
+    capabilities: Optional[List[str]] = None  # Capabilities for this rotation
+    # Content classification flags
+    nsfw: bool = False  # Model can handle NSFW content
+    privacy: bool = False  # Model can handle privacy-sensitive content
+    # OpenRouter-style extended fields
+    description: Optional[str] = None
+    context_length: Optional[int] = None
+    architecture: Optional[Dict] = None
+    pricing: Optional[Dict] = None
+    supported_parameters: Optional[List[str]] = None
+    default_parameters: Optional[Dict] = None
     # Default settings for models in this rotation
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
@@ -85,6 +107,8 @@ class RotationConfig(BaseModel):
 class AutoselectModelInfo(BaseModel):
     model_id: str
     description: str
+    nsfw: bool = False  # Model can handle NSFW content
+    privacy: bool = False  # Model can handle privacy-sensitive content
 
 class AutoselectConfig(BaseModel):
     model_name: str
@@ -92,6 +116,19 @@ class AutoselectConfig(BaseModel):
     selection_model: str = "general"
     fallback: str
     available_models: List[AutoselectModelInfo]
+    capabilities: Optional[List[str]] = None  # Capabilities for this autoselect configuration
+    # Content classification flags
+    nsfw: bool = False  # Model can handle NSFW content
+    privacy: bool = False  # Model can handle privacy-sensitive content
+    classify_nsfw: bool = False  # Enable NSFW classification for this autoselect
+    classify_privacy: bool = False  # Enable privacy classification for this autoselect
+    classify_semantic: bool = False  # Enable semantic classification for this autoselect
+    # OpenRouter-style extended fields
+    context_length: Optional[int] = None
+    architecture: Optional[Dict] = None
+    pricing: Optional[Dict] = None
+    supported_parameters: Optional[List[str]] = None
+    default_parameters: Optional[Dict] = None
 
 class TorConfig(BaseModel):
     """Configuration for TOR hidden service"""
@@ -104,6 +141,19 @@ class TorConfig(BaseModel):
     socks_port: int = 9050
     socks_host: str = "127.0.0.1"
 
+class AISBFConfig(BaseModel):
+    """Global AISBF configuration from aisbf.json"""
+    classify_nsfw: bool = False
+    classify_privacy: bool = False
+    classify_semantic: bool = False
+    server: Optional[Dict] = None
+    auth: Optional[Dict] = None
+    mcp: Optional[Dict] = None
+    dashboard: Optional[Dict] = None
+    internal_model: Optional[Dict] = None
+    tor: Optional[Dict] = None
+
+
 class AppConfig(BaseModel):
     providers: Dict[str, ProviderConfig]
     rotations: Dict[str, RotationConfig]
@@ -111,6 +161,7 @@ class AppConfig(BaseModel):
     condensation: Optional[CondensationConfig] = None
     error_tracking: Dict[str, Dict]
     tor: Optional[TorConfig] = None
+    aisbf: Optional[AISBFConfig] = None  # Global AISBF config
 
 class Config:
     def __init__(self):
@@ -129,6 +180,7 @@ class Config:
         self._load_autoselect()
         self._load_condensation()
         self._load_tor()
+        self._load_aisbf_config()
         self._initialize_error_tracking()
         self._log_configuration_summary()
 
@@ -277,6 +329,7 @@ class Config:
             logger.info(f"=== Config._load_rotations END ===")
 
     def _load_autoselect(self):
+        """Load autoselect configuration and build model embeddings for semantic matching."""
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"=== Config._load_autoselect START ===")
@@ -301,7 +354,151 @@ class Config:
             self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
             self._loaded_files['autoselect'] = str(autoselect_path.absolute())
             logger.info(f"Loaded {len(self.autoselect)} autoselect configurations: {list(self.autoselect.keys())}")
-            logger.info(f"=== Config._load_autoselect END ===")
+            
+            # Build and cache model embeddings for semantic matching
+            self._build_model_embeddings()
+            
+        logger.info(f"=== Config._load_autoselect END ===")
+    
+    def _build_model_embeddings(self):
+        """
+        Build and cache vectorized versions of model descriptions for semantic matching.
+        Saves embeddings to ~/.aisbf/ for persistent storage.
+        """
+        import logging
+        import numpy as np
+        logger = logging.getLogger(__name__)
+        
+        config_dir = Path.home() / '.aisbf'
+        vector_file = config_dir / 'model_embeddings.npy'
+        meta_file = config_dir / 'model_embeddings_meta.json'
+        
+        # Collect all model descriptions from all autoselect configs
+        model_library = {}
+        for autoselect_id, autoselect_config in self.autoselect.items():
+            for model_info in autoselect_config.available_models:
+                model_library[model_info.model_id] = model_info.description
+        
+        if not model_library:
+            logger.info("No models to vectorize")
+            self._model_embeddings = None
+            self._model_embeddings_meta = []
+            return
+        
+        # Check if embeddings file exists and is up-to-date
+        rebuild_needed = True
+        if vector_file.exists() and meta_file.exists():
+            try:
+                with open(meta_file) as f:
+                    saved_models = json.load(f)
+                if saved_models == list(model_library.keys()):
+                    logger.info(f"Loading cached model embeddings from {vector_file}")
+                    self._model_embeddings = np.load(vector_file)
+                    self._model_embeddings_meta = saved_models
+                    rebuild_needed = False
+                    logger.info(f"Loaded {len(self._model_embeddings)} model embeddings")
+            except Exception as e:
+                logger.warning(f"Could not load cached embeddings: {e}")
+        
+        if rebuild_needed:
+            logger.info(f"Building model embeddings for {len(model_library)} models...")
+            
+            try:
+                from sentence_transformers import SentenceTransformer
+                
+                # Use CPU-friendly model from config
+                model_id = "sentence-transformers/all-MiniLM-L6-v2"
+                
+                # Check if custom model is configured in aisbf.json
+                if self.aisbf and self.aisbf.internal_model:
+                    custom_model = self.aisbf.internal_model.get('semantic_vectorization')
+                    if custom_model:
+                        model_id = custom_model
+                
+                logger.info(f"Using embedding model: {model_id}")
+                embedder = SentenceTransformer(model_id)
+                
+                names = list(model_library.keys())
+                descriptions = list(model_library.values())
+                
+                logger.info(f"Vectorizing {len(names)} model descriptions on CPU...")
+                embeddings = embedder.encode(descriptions, show_progress_bar=True)
+                
+                # Save the vectors as binary file
+                np.save(vector_file, embeddings)
+                
+                # Save the names as JSON
+                with open(meta_file, 'w') as f:
+                    json.dump(names, f)
+                
+                self._model_embeddings = embeddings
+                self._model_embeddings_meta = names
+                
+                logger.info(f"Saved embeddings to {vector_file} and {meta_file}")
+                logger.info(f"Embedding shape: {embeddings.shape}")
+                
+            except ImportError as e:
+                logger.warning(f"sentence-transformers not installed, skipping embeddings: {e}")
+                self._model_embeddings = None
+                self._model_embeddings_meta = []
+            except Exception as e:
+                logger.warning(f"Failed to build model embeddings: {e}")
+                self._model_embeddings = None
+                self._model_embeddings_meta = []
+    
+    def find_similar_models(self, query: str, top_k: int = 3) -> List[str]:
+        """
+        Find the most similar models to a query based on embeddings.
+        
+        Args:
+            query: The user query/description to match against
+            top_k: Number of top matches to return
+            
+        Returns:
+            List of model_ids sorted by similarity (best match first)
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self._model_embeddings is None or self._model_embeddings_meta is None:
+            logger.debug("No embeddings available, returning empty list")
+            return []
+        
+        try:
+            from sentence_transformers import SentenceTransformer
+            import numpy as np
+            
+            # Load embedder
+            model_id = "sentence-transformers/all-MiniLM-L6-v2"
+            if self.aisbf and self.aisbf.internal_model:
+                custom_model = self.aisbf.internal_model.get('semantic_vectorization')
+                if custom_model:
+                    model_id = custom_model
+            
+            embedder = SentenceTransformer(model_id)
+            
+            # Encode query
+            query_embedding = embedder.encode([query])
+            
+            # Calculate cosine similarity
+            query_norm = query_embedding / np.linalg.norm(query_embedding, axis=1, keepdims=True)
+            embeddings_norm = self._model_embeddings / np.linalg.norm(self._model_embeddings, axis=1, keepdims=True)
+            
+            # Compute similarities
+            similarities = np.dot(query_norm, embeddings_norm.T)[0]
+            
+            # Get top_k indices
+            top_indices = np.argsort(similarities)[::-1][:top_k]
+            
+            # Return model_ids in order of similarity
+            results = [self._model_embeddings_meta[i] for i in top_indices]
+            logger.debug(f"Found similar models: {results}")
+            
+            return results
+            
+        except Exception as e:
+            logger.warning(f"Error finding similar models: {e}")
+            return []
     
     def _load_condensation(self):
         """Load condensation configuration from providers.json"""
@@ -362,6 +559,34 @@ class Config:
             self._loaded_files['tor'] = str(aisbf_path.absolute())
             logger.info(f"Loaded TOR config: enabled={self.tor.enabled}, control_port={self.tor.control_port}, hidden_service_port={self.tor.hidden_service_port}")
             logger.info(f"=== Config._load_tor END ===")
+    
+    def _load_aisbf_config(self):
+        """Load global AISBF configuration from aisbf.json"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"=== Config._load_aisbf_config START ===")
+        
+        aisbf_path = Path.home() / '.aisbf' / 'aisbf.json'
+        logger.info(f"Looking for AISBF config in: {aisbf_path}")
+        
+        if not aisbf_path.exists():
+            logger.info(f"User config not found, falling back to source config")
+            try:
+                source_dir = self._get_config_source_dir()
+                aisbf_path = source_dir / 'aisbf.json'
+                logger.info(f"Using source config at: {aisbf_path}")
+            except FileNotFoundError:
+                logger.warning("Could not find aisbf.json for AISBF config")
+                self.aisbf = AISBFConfig()
+                return
+        
+        logger.info(f"Loading AISBF config from: {aisbf_path}")
+        with open(aisbf_path) as f:
+            data = json.load(f)
+            self.aisbf = AISBFConfig(**data)
+            self._loaded_files['aisbf'] = str(aisbf_path.absolute())
+            logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")
+            logger.info(f"=== Config._load_aisbf_config END ===")
 
     def _initialize_error_tracking(self):
         self.error_tracking = {}
@@ -420,5 +645,8 @@ class Config:
     
     def get_tor(self) -> TorConfig:
         return self.tor
+    
+    def get_aisbf_config(self) -> AISBFConfig:
+        return self.aisbf
 
 config = Config()

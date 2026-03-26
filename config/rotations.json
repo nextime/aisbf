@@ -3,7 +3,10 @@
   "rotations": {
     "coding": {
       "model_name": "coding",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["code_generation", "code_completion", "reasoning"],
       "providers": [
         {
           "provider_id": "gemini",
@@ -84,7 +87,10 @@
     },
     "general": {
       "model_name": "general",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["t2t", "translation", "summarization", "question_answering"],
       "providers": [
         {
           "provider_id": "gemini",
@@ -120,7 +126,10 @@
     },
     "googletest": {
       "model_name": "googletest",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["code_generation", "testing", "code_completion"],
       "providers": [
         {
           "provider_id": "gemini",
@@ -141,7 +150,10 @@
     },
     "kiro-claude": {
       "model_name": "kiro-claude",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["t2t", "reasoning", "function_calling"],
       "providers": [
         {
           "provider_id": "kiro",
@@ -180,7 +192,10 @@
     "simple-gemini": {
       "_comment": "SIMPLE FORMAT: Specify provider_id only, models will be loaded from providers.json automatically",
       "model_name": "simple-gemini",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["t2t"],
       "providers": [
         {
           "provider_id": "gemini"
@@ -190,7 +205,10 @@
     "simple-openai": {
       "_comment": "SIMPLE FORMAT: Provider with custom weight, models loaded from providers.json",
       "model_name": "simple-openai",
+      "nsfw": false,
+      "privacy": false,
       "notifyerrors": false,
+      "capabilities": ["t2t"],
       "providers": [
         {
           "provider_id": "openai",

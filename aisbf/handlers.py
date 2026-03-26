@@ -40,6 +40,8 @@ from .utils import (
     get_max_request_tokens_for_model
 )
 from .context import ContextManager, get_context_config_for_model
+from .classifier import content_classifier
+from .semantic_classifier import SemanticClassifier
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -775,9 +777,15 @@ class RequestHandler:
             
             # Enhance model information with context window and capabilities
             enhanced_models = []
+            current_time = int(time_module.time())
             for model in models:
                 model_dict = model.dict()
                 model_name = model_dict.get('id', '')
+                
+                # Add OpenAI-compatible required fields
+                model_dict['object'] = 'model'
+                model_dict['created'] = current_time
+                model_dict['owned_by'] = provider_config.name
                 
                 # Try to find model config in provider config
                 model_config = None
@@ -1511,7 +1519,9 @@ class RotationHandler:
                             'name': provider_model.name,
                             'weight': provider_weight,  # Use provider-level weight
                             'rate_limit': provider_model.rate_limit,
-                            'max_request_tokens': provider_model.max_request_tokens
+                            'max_request_tokens': provider_model.max_request_tokens,
+                            'nsfw': getattr(provider_model, 'nsfw', False),
+                            'privacy': getattr(provider_model, 'privacy', False)
                         }
                         rotation_models.append(model_dict)
                     logger.info(f"  Loaded {len(rotation_models)} model(s) from provider config with weight {provider_weight}")
@@ -1552,6 +1562,94 @@ class RotationHandler:
             logger.info(f"Skipped providers: {', '.join(skipped_providers)}")
         logger.info(f"Total models considered: {total_models_considered}")
         logger.info(f"Total models available: {len(available_models)}")
+        
+        # Apply NSFW/Privacy content classification filtering
+        # Only classify the immediate intent (last 3 messages + current query) to avoid
+        # huge context issues and long classification times
+        aisbf_config = self.config.get_aisbf_config()
+        if aisbf_config and (aisbf_config.classify_nsfw or aisbf_config.classify_privacy):
+            logger.info(f"=== CONTENT CLASSIFICATION FILTERING ===")
+            
+            # Get messages for classification - only last 3 user messages + current query
+            messages = request_data.get('messages', [])
+            
+            # Extract last 3 user messages for classification window
+            recent_user_messages = []
+            for msg in reversed(messages):
+                if msg.get('role') == 'user':
+                    content = msg.get('content', '')
+                    if isinstance(content, str):
+                        recent_user_messages.append(content)
+                        if len(recent_user_messages) >= 3:
+                            break
+            
+            # Build the classification prompt from recent messages only
+            # Reverse to get correct order (oldest first)
+            recent_user_messages.reverse()
+            user_prompt = " ".join(recent_user_messages)
+            
+            logger.info(f"Classifying only recent context ({len(recent_user_messages)} messages))")
+            logger.info(f"Recent context preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"Recent context: {user_prompt}")
+            logger.info(f"Classify NSFW: {aisbf_config.classify_nsfw}")
+            logger.info(f"Classify privacy: {aisbf_config.classify_privacy}")
+            
+            # Check if content classification is needed
+            check_nsfw = aisbf_config.classify_nsfw
+            check_privacy = aisbf_config.classify_privacy
+            
+            if check_nsfw or check_privacy:
+                # Initialize classifier with models from config
+                internal_model_config = aisbf_config.internal_model or {}
+                nsfw_model = internal_model_config.get('nsfw_classifier')
+                privacy_model = internal_model_config.get('privacy_classifier')
+                
+                content_classifier.initialize(nsfw_model, privacy_model)
+                
+                # Check user prompt for NSFW/privacy content
+                is_safe, message = content_classifier.check_content(
+                    user_prompt, 
+                    check_nsfw=check_nsfw, 
+                    check_privacy=check_privacy
+                )
+                
+                logger.info(f"Content classification result: {message}")
+                
+                if not is_safe:
+                    # Content is flagged - filter to only nsfw=True or privacy=True models
+                    logger.info(f"Content flagged - filtering available models")
+                    
+                    if check_nsfw and not check_privacy:
+                        # Only NSFW filtering needed
+                        original_count = len(available_models)
+                        available_models = [m for m in available_models if m.get('nsfw', False)]
+                        logger.info(f"NSFW filtering: {original_count} -> {len(available_models)} models")
+                    elif check_privacy and not check_nsfw:
+                        # Only privacy filtering needed
+                        original_count = len(available_models)
+                        available_models = [m for m in available_models if m.get('privacy', False)]
+                        logger.info(f"Privacy filtering: {original_count} -> {len(available_models)} models")
+                    elif check_nsfw and check_privacy:
+                        # Both filtering - need models with EITHER flag
+                        original_count = len(available_models)
+                        available_models = [m for m in available_models if m.get('nsfw', False) or m.get('privacy', False)]
+                        logger.info(f"NSFW+Privacy filtering: {original_count} -> {len(available_models)} models")
+            
+            logger.info(f"=== CONTENT CLASSIFICATION FILTERING END ===")
+        
+        # Check if rotation-level nsfw/privacy flags also apply
+        rotation_nsfw = getattr(rotation_config, 'nsfw', False)
+        rotation_privacy = getattr(rotation_config, 'privacy', False)
+        
+        if rotation_nsfw or rotation_privacy:
+            logger.info(f"=== ROTATION-LEVEL CONTENT FLAGS ===")
+            logger.info(f"Rotation nsfw: {rotation_nsfw}, privacy: {rotation_privacy}")
+            
+            # If rotation explicitly allows NSFW content, keep models that can handle it
+            # If rotation explicitly allows Privacy content, keep models that can handle it
+            if rotation_nsfw:
+                logger.info(f"Rotation allows NSFW content - keeping models that support it")
+            if rotation_privacy:
+                logger.info(f"Rotation allows Privacy content - keeping models that support it")
         
         if not available_models:
             logger.error("No models available in rotation (all providers may be rate limited)")
@@ -2865,8 +2963,51 @@ class AutoselectHandler:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
+
+        # Check if semantic classification is enabled
+        if autoselect_config.classify_semantic:
+            logger.info("=== SEMANTIC CLASSIFICATION ENABLED ===")
+            logger.info(f"Using semantic classification for model selection")
+
+            try:
+                # Initialize semantic classifier
+                semantic_classifier = SemanticClassifier()
+                semantic_classifier.initialize()
+
+                # Build model library for semantic search (model_id -> description)
+                model_library = {}
+                for model_info in autoselect_config.available_models:
+                    model_library[model_info.model_id] = model_info.description
+
+                # Extract recent chat history (last 3 messages)
+                # Split user_prompt into messages (it's formatted as "role: content\nrole: content\n...")
+                chat_history = []
+                if user_prompt:
+                    lines = user_prompt.strip().split('\n')
+                    for line in lines[-3:]:  # Last 3 messages
+                        if ': ' in line:
+                            role, content = line.split(': ', 1)
+                            chat_history.append(content)
+
+                # Perform hybrid BM25 + semantic re-ranking
+                results = semantic_classifier.hybrid_model_search(user_prompt, chat_history, model_library, top_k=1)
+
+                if results:
+                    selected_model_id, score = results[0]
+                    logger.info(f"=== SEMANTIC CLASSIFICATION SUCCESS ===")
+                    logger.info(f"Selected model ID: {selected_model_id} (score: {score:.4f})")
+                    return selected_model_id
+                else:
+                    logger.warning(f"=== SEMANTIC CLASSIFICATION FAILED ===")
+                    logger.warning("No models returned from semantic search, falling back to AI model selection")
+
+            except Exception as e:
+                logger.error(f"=== SEMANTIC CLASSIFICATION ERROR ===")
+                logger.error(f"Error during semantic classification: {str(e)}")
+                logger.warning("Falling back to AI model selection")
+
         logger.info(f"Using '{autoselect_config.selection_model}' for model selection")
-        
+
         # Build messages (system + user)
         messages = self._build_autoselect_messages(user_prompt, autoselect_config)
         

@@ -287,6 +287,20 @@ function renderProviderDetails(key) {
             <input type="text" value="${Array.isArray(provider.default_condense_method) ? provider.default_condense_method.join(', ') : (provider.default_condense_method || '')}" onchange="updateProviderCondenseMethod('${key}', this.value)" placeholder="e.g., semantic, conversational">
         </div>
         
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.nsfw ? 'checked' : ''} onchange="updateProvider('${key}', 'nsfw', this.checked)">
+                NSFW
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.privacy ? 'checked' : ''} onchange="updateProvider('${key}', 'privacy', this.checked)">
+                Privacy
+            </label>
+        </div>
+        
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>
         <div id="models-${key}"></div>
         <button type="button" class="btn btn-secondary" onclick="addModel('${key}')" style="margin-top: 10px;">Add Model</button>
@@ -358,6 +372,20 @@ function renderModels(providerKey) {
             <div class="form-group">
                 <label>Condense Method (conversational, semantic, hierarchical, algorithmic)</label>
                 <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateModelCondenseMethod('${providerKey}', ${index}, this.value)" placeholder="e.g., semantic, conversational">
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'nsfw', this.checked)">
+                    NSFW
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'privacy', this.checked)">
+                    Privacy
+                </label>
             </div>
         `;
         

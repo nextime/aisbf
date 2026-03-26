@@ -1,4 +1,7 @@
 {
+  "classify_nsfw": false,
+  "classify_privacy": false,
+  "classify_semantic": false,
   "server": {
     "host": "0.0.0.0",
     "port": 17765,
@@ -31,7 +34,10 @@
   },
   "internal_model": {
     "condensation_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3",
-    "autoselect_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+    "autoselect_model_id": "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3",
+    "nsfw_classifier": "michelleli99/NSFW_text_classifier",
+    "privacy_classifier": "iiiorg/piiranha-v1-detect-personal-information",
+    "semantic_vectorization": "sentence-transformers/all-MiniLM-L6-v2"
   },
   "tor": {
     "enabled": false,

@@ -17,6 +17,8 @@
       "models": [
         {
           "name": "gemini-2.0-flash",
+          "nsfw": false,
+          "privacy": false,
           "rate_limit": 0,
           "max_request_tokens": 1000000,
           "rate_limit_TPM": 15000,
@@ -29,6 +31,8 @@
         },
         {
           "name": "gemini-1.5-pro",
+          "nsfw": false,
+          "privacy": false,
           "rate_limit": 0,
           "max_request_tokens": 2000000,
           "rate_limit_TPM": 15000,
@@ -48,6 +52,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_OPENAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "anthropic": {
@@ -57,6 +63,8 @@
       "type": "anthropic",
       "api_key_required": true,
       "api_key": "YOUR_ANTHROPIC_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "ollama": {
@@ -65,6 +73,8 @@
       "endpoint": "http://localhost:11434",
       "type": "ollama",
       "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "azure_openai": {
@@ -74,6 +84,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_AZURE_OPENAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "cohere": {
@@ -83,6 +95,8 @@
       "type": "cohere",
       "api_key_required": true,
       "api_key": "YOUR_COHERE_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "huggingface": {
@@ -92,6 +106,8 @@
       "type": "huggingface",
       "api_key_required": true,
       "api_key": "YOUR_HUGGINGFACE_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "replicate": {
@@ -101,6 +117,8 @@
       "type": "replicate",
       "api_key_required": true,
       "api_key": "YOUR_REPLICATE_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "togetherai": {
@@ -110,6 +128,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_TOGETHERAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "groq": {
@@ -119,6 +139,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_GROQ_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "mistralai": {
@@ -128,6 +150,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_MISTRALAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "stabilityai": {
@@ -137,6 +161,8 @@
       "type": "stabilityai",
       "api_key_required": true,
       "api_key": "YOUR_STABILITYAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "kilo": {
@@ -146,6 +172,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_KILO_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "perplexity": {
@@ -155,6 +183,8 @@
       "type": "openai",
       "api_key_required": true,
       "api_key": "YOUR_PERPLEXITY_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "poe": {
@@ -164,6 +194,8 @@
       "type": "poe",
       "api_key_required": true,
       "api_key": "YOUR_POE_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "lanai": {
@@ -173,6 +205,8 @@
       "type": "lanai",
       "api_key_required": true,
       "api_key": "YOUR_LANAI_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "amazon": {
@@ -182,6 +216,8 @@
       "type": "amazon",
       "api_key_required": true,
       "api_key": "YOUR_AMAZON_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "ibm": {
@@ -191,6 +227,8 @@
       "type": "ibm",
       "api_key_required": true,
       "api_key": "YOUR_IBM_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "microsoft": {
@@ -200,6 +238,8 @@
       "type": "microsoft",
       "api_key_required": true,
       "api_key": "YOUR_MICROSOFT_API_KEY",
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0
     },
     "kiro": {
@@ -208,6 +248,8 @@
       "endpoint": "https://q.us-east-1.amazonaws.com",
       "type": "kiro",
       "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0,
       "kiro_config": {
         "_comment": "Uses Kiro IDE credentials (VS Code extension)",
@@ -221,6 +263,8 @@
       "endpoint": "https://q.us-east-1.amazonaws.com",
       "type": "kiro",
       "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
       "rate_limit": 0,
       "kiro_config": {
         "_comment": "Uses kiro-cli credentials (SQLite database)",

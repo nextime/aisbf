@@ -132,6 +132,50 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">Used when autoselect selection_model is set to "internal"</small>
     </div>
     
+    <div class="form-group">
+        <label for="nsfw_classifier">NSFW Classifier Model ID</label>
+        <input type="text" id="nsfw_classifier" name="nsfw_classifier" value="{{ config.internal_model.nsfw_classifier or 'michelleli99/NSFW_text_classifier' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">Model used for NSFW content detection</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="privacy_classifier">Privacy Classifier Model ID</label>
+        <input type="text" id="privacy_classifier" name="privacy_classifier" value="{{ config.internal_model.privacy_classifier or 'iiiorg/piiranha-v1-detect-personal-information' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">Model used for privacy-sensitive information detection</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="semantic_vectorization">Semantic Vectorization Model ID</label>
+        <input type="text" id="semantic_vectorization" name="semantic_vectorization" value="{{ config.internal_model.semantic_vectorization or 'sentence-transformers/all-MiniLM-L6-v2' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">Model used for semantic embedding and vectorization</small>
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Content Classification</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="classify_nsfw" {% if config.classify_nsfw %}checked{% endif %}>
+            Enable NSFW Classification
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Enable automatic NSFW content detection for model selection</small>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="classify_privacy" {% if config.classify_privacy %}checked{% endif %}>
+            Enable Privacy Classification
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Enable automatic privacy-sensitive content detection for model selection</small>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="classify_semantic" {% if config.classify_semantic %}checked{% endif %}>
+            Enable Semantic Classification
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Enable semantic content classification using the configured model</small>
+    </div>
+    
     <h3 style="margin: 30px 0 20px;">TOR Hidden Service</h3>
     
     <div id="tor-status" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">

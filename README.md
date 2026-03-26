@@ -21,6 +21,8 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
+- **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
+- **Content Classification**: NSFW/privacy content filtering with configurable classification windows
 - **Streaming Support**: Full support for streaming responses from all providers
 - **Error Tracking**: Automatic provider disabling after consecutive failures with cooldown periods
 - **Rate Limiting**: Built-in rate limiting and graceful error handling
@@ -286,6 +288,53 @@ When context exceeds the configured percentage of `context_size`, the system aut
 **Note:** Only `conversational` and `semantic` methods require LLM calls and use prompt files from `config/`. The `hierarchical` and `algorithmic` methods are pure algorithmic transformations.
 
 See `config/providers.json` and `config/rotations.json` for configuration examples.
+
+### Content Classification and Semantic Selection
+
+AISBF provides advanced content filtering and intelligent model selection based on content analysis:
+
+#### NSFW/Privacy Content Filtering
+
+Models can be configured with `nsfw` and `privacy` boolean flags to indicate their suitability for sensitive content:
+
+- **`nsfw`**: Model supports NSFW (Not Safe For Work) content
+- **`privacy`**: Model supports privacy-sensitive content (e.g., medical, financial, legal data)
+
+When global `classify_nsfw` or `classify_privacy` is enabled, AISBF automatically analyzes the last 3 user messages to classify content and routes requests only to appropriate models. If no suitable models are available, the request returns a 404 error.
+
+**Configuration:**
+- Provider models: Set in `config/providers.json`
+- Rotation models: Override in `config/rotations.json`
+- Global settings: Enable/disable in `config/aisbf.json` or dashboard
+
+#### Semantic Model Selection
+
+For enhanced performance, autoselect configurations can use semantic classification instead of AI model selection:
+
+- **Hybrid BM25 + Semantic Search**: Combines fast keyword matching with semantic similarity
+- **Sentence Transformers**: Uses pre-trained embeddings for content understanding
+- **Automatic Fallback**: Falls back to AI model selection if semantic classification fails
+
+**Enable Semantic Classification:**
+```json
+{
+  "autoselect": {
+    "autoselect": {
+      "classify_semantic": true,
+      "selection_model": "openai/gpt-4",
+      "available_models": [...]
+    }
+  }
+}
+```
+
+**Benefits:**
+- Faster model selection (no API calls required)
+- Lower costs (no tokens consumed for selection)
+- Deterministic results based on content similarity
+- Automatic model library indexing and caching
+
+See `config/autoselect.json` for configuration examples.
 
 ## API Endpoints
 

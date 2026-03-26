@@ -415,6 +415,83 @@ Autoselect models use AI to analyze the user's request and select the best model
 3. **Automatic Routing**: Routes the request to the most suitable model
 4. **Fallback**: Uses a default model if selection fails or is uncertain
 
+### Semantic Classification (New Feature)
+
+Autoselect configurations can now use semantic classification instead of AI model selection for faster and potentially more accurate model selection:
+
+- **Hybrid BM25 + Semantic Search**: Combines fast keyword matching with semantic similarity using sentence transformers
+- **Automatic Model Library Indexing**: Builds and caches model embeddings for efficient similarity matching
+- **Performance Optimized**: No API calls required, significantly faster than AI-based selection
+- **Fallback Support**: Falls back to AI model selection if semantic classification fails
+
+**Enable Semantic Classification:**
+```json
+{
+  "autoselect": {
+    "smart": {
+      "classify_semantic": true,
+      "selection_model": "openai/gpt-4",
+      "available_models": [...]
+    }
+  }
+}
+```
+
+**Benefits:**
+- Faster model selection (no API costs)
+- Deterministic results based on semantic similarity
+- Automatic model library caching in `~/.aisbf/`
+- Lower latency for model selection
+
+### Content Classification and Filtering (New Feature)
+
+AISBF provides advanced content classification for NSFW and privacy-sensitive content:
+
+#### NSFW/Privacy Content Filtering
+
+Models can be configured with boolean flags to indicate their suitability for sensitive content:
+- **`nsfw`**: Model supports NSFW (Not Safe For Work) content
+- **`privacy`**: Model supports privacy-sensitive content (medical, financial, legal data)
+
+When global `classify_nsfw` or `classify_privacy` is enabled, AISBF analyzes the last 3 user messages and routes requests only to appropriate models. If no suitable models are available, requests return a 404 error.
+
+**Configuration Levels (cascading priority):**
+1. Rotation model config (highest priority)
+2. Provider model config
+3. Global AISBF config (enables/disables classification)
+
+**Example Model Configuration:**
+```json
+{
+  "models": [
+    {
+      "name": "gpt-4",
+      "nsfw": true,
+      "privacy": true
+    },
+    {
+      "name": "gpt-3.5-turbo",
+      "nsfw": false,
+      "privacy": true
+    }
+  ]
+}
+```
+
+**Global Classification Settings:**
+```json
+{
+  "classify_nsfw": true,
+  "classify_privacy": true
+}
+```
+
+**Content Classification Window:**
+- Only analyzes the last 3 user messages for performance
+- Avoids processing full conversation history
+- Uses HuggingFace transformers for content analysis
+- Automatic fallback if classification models are unavailable
+
 ### Autoselect Configuration
 
 ```json
