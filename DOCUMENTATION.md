@@ -6,12 +6,14 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, and Ollama
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
 - **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
 - **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
 - **Streaming Support**: Full support for streaming responses from all providers with proper serialization
 - **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
-- **Rate Limiting**: Built-in rate limiting and graceful error handling
+- **Rate Limiting**: Built-in rate limiting and graceful error handling with persistent tracking across restarts
+- **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
+- **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 - **Security**: Default localhost-only access for improved security
 
 ## Author
@@ -286,6 +288,91 @@ Response includes:
 - `onion_address`: Current onion address (if active)
 - `service_id`: Service ID for ephemeral services
 - `control_host` and `control_port`: TOR control connection details
+
+## Database Features
+
+AISBF includes a comprehensive SQLite database system that provides persistent tracking and multi-user support:
+
+### Database Schema
+
+The database (`~/.aisbf/aisbf.db`) contains the following tables:
+
+- **`context_dimensions`**: Tracks context size, condensation settings, and effective context per model
+- **`token_usage`**: Persistent token usage tracking with TPM/TPH/TPD rate limiting across restarts
+- **`model_embeddings`**: Caches model embeddings for semantic classification performance
+- **`users`**: User management with authentication, roles (admin/user), and metadata
+- **`user_providers`**: Isolated provider configurations per user
+- **`user_rotations`**: Isolated rotation configurations per user
+- **`user_autoselects`**: Isolated autoselect configurations per user
+- **`user_api_tokens`**: API token management per user for MCP and API access
+- **`user_token_usage`**: Per-user token usage tracking
+
+### Database Initialization
+
+The database is automatically initialized on startup:
+- WAL mode enabled for better concurrency
+- Foreign key constraints enabled
+- Automatic cleanup of old records (>7 days)
+- Schema migrations handled automatically
+
+### Multi-User Support
+
+AISBF supports multiple users with complete isolation:
+
+#### User Authentication
+- Database-first authentication with config admin fallback
+- SHA256 password hashing for security
+- Role-based access control (admin vs user roles)
+- Session-based authentication
+
+#### User Isolation
+- Each user has isolated provider, rotation, and autoselect configurations
+- Separate API tokens per user
+- Individual token usage tracking
+- User-specific dashboard access
+
+#### Admin Features
+- Create/manage users via database
+- Full system configuration access
+- User management dashboard (future feature)
+- System-wide analytics and monitoring
+
+#### User Dashboard
+- Usage statistics and token tracking
+- Personal configuration management
+- API token generation and management
+- Restricted access to system settings
+
+### Persistent Tracking
+
+#### Token Usage Tracking
+- Persistent across application restarts
+- TPM/TPH/TPD rate limiting maintained
+- Per-user and per-provider tracking
+- Automatic cleanup of old records
+
+#### Context Dimension Tracking
+- Context size monitoring per model
+- Condensation effectiveness tracking
+- Effective context reporting in API responses
+- Analytics foundation for optimization
+
+#### Model Embeddings Caching
+- Semantic classification performance optimization
+- Automatic model library indexing
+- Reduced API calls for autoselect operations
+- Cached embeddings for faster similarity matching
+
+### Database Configuration
+
+Database features are automatically enabled and require no configuration. The database file location can be customized via environment variables if needed.
+
+### Backup and Maintenance
+
+- Automatic cleanup removes records older than 7 days
+- WAL mode ensures data integrity
+- Database file can be backed up manually from `~/.aisbf/aisbf.db`
+- No external dependencies required (uses built-in SQLite)
 
 ## API Endpoints
 

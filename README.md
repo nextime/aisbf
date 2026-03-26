@@ -12,6 +12,8 @@ AISBF includes a comprehensive web-based dashboard for easy configuration and ma
 - **Rotation Configuration**: Set up weighted load balancing across providers
 - **Autoselect Configuration**: Configure AI-powered model selection
 - **Server Settings**: Manage SSL/TLS, authentication, and TOR hidden service
+- **User Management**: Create/manage users with role-based access control (admin users only)
+- **Multi-User Support**: Isolated configurations per user with API token management
 - **Real-time Monitoring**: View provider status and configuration
 
 Access the dashboard at `http://localhost:17765/dashboard` (default credentials: admin/admin)
@@ -36,6 +38,8 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
 - **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
+- **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
+- **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 
 ## Author
 

@@ -801,6 +801,13 @@ async def startup_event():
         # Use environment variable for config dir if set
         custom_config_dir = get_config_dir()
         initialize_app(custom_config_dir)
+        
+        # Initialize database
+        try:
+            initialize_database()
+        except Exception as e:
+            logger.error(f"Failed to initialize database: {e}")
+            # Continue startup even if database fails
     
     # Log configuration files loaded
     if config and hasattr(config, '_loaded_files'):
@@ -1026,15 +1033,28 @@ async def dashboard_index(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
-    return templates.TemplateResponse("dashboard/index.html", {
-        "request": request,
-        "session": request.session,
-        "providers_count": len(config.providers) if config else 0,
-        "rotations_count": len(config.rotations) if config else 0,
-        "autoselect_count": len(config.autoselect) if config else 0,
-        "server_config": server_config or {}
-    })
+
+    if request.session.get('role') == 'admin':
+        # Admin dashboard
+        return templates.TemplateResponse("dashboard/index.html", {
+            "request": request,
+            "session": request.session,
+            "providers_count": len(config.providers) if config else 0,
+            "rotations_count": len(config.rotations) if config else 0,
+            "autoselect_count": len(config.autoselect) if config else 0,
+            "server_config": server_config or {}
+        })
+    else:
+        # User dashboard - show user stats
+        return templates.TemplateResponse("dashboard/index.html", {
+            "request": request,
+            "session": request.session,
+            "user_message": "User dashboard - usage statistics and configuration management coming soon",
+            "providers_count": 0,
+            "rotations_count": 0,
+            "autoselect_count": 0,
+            "server_config": {}
+        })
 
 @app.get("/dashboard/providers", response_class=HTMLResponse)
 async def dashboard_providers(request: Request):
@@ -1443,7 +1463,7 @@ async def dashboard_condensation_save(request: Request, config: str = Form(...))
 @app.get("/dashboard/settings", response_class=HTMLResponse)
 async def dashboard_settings(request: Request):
     """Edit server settings"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_admin(request)
     if auth_check:
         return auth_check
     
