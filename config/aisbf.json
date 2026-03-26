@@ -88,5 +88,20 @@
     "hidden_service_port": 80,
     "socks_port": 9050,
     "socks_host": "127.0.0.1"
+  },
+  "batching": {
+    "enabled": false,
+    "window_ms": 100,
+    "max_batch_size": 8,
+    "provider_settings": {
+      "openai": {
+        "enabled": true,
+        "max_batch_size": 10
+      },
+      "anthropic": {
+        "enabled": true,
+        "max_batch_size": 5
+      }
+    }
   }
 }

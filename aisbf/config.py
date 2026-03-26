@@ -175,6 +175,13 @@ class TorConfig(BaseModel):
     socks_port: int = 9050
     socks_host: str = "127.0.0.1"
 
+class BatchingConfig(BaseModel):
+    """Configuration for request batching"""
+    enabled: bool = False
+    window_ms: int = 100  # Batching window in milliseconds
+    max_batch_size: int = 8  # Maximum number of requests per batch
+    provider_settings: Optional[Dict[str, Dict]] = None  # Provider-specific settings
+
 class AISBFConfig(BaseModel):
     """Global AISBF configuration from aisbf.json"""
     classify_nsfw: bool = False
@@ -189,6 +196,7 @@ class AISBFConfig(BaseModel):
     database: Optional[Dict] = None
     cache: Optional[Dict] = None
     response_cache: Optional[ResponseCacheConfig] = None
+    batching: Optional[BatchingConfig] = None
 
 
 class AppConfig(BaseModel):
@@ -628,11 +636,17 @@ class Config:
             response_cache_data = data.get('response_cache')
             if response_cache_data:
                 data['response_cache'] = ResponseCacheConfig(**response_cache_data)
+            # Parse batching separately if present
+            batching_data = data.get('batching')
+            if batching_data:
+                data['batching'] = BatchingConfig(**batching_data)
             self.aisbf = AISBFConfig(**data)
             self._loaded_files['aisbf'] = str(aisbf_path.absolute())
             logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")
             if self.aisbf.response_cache:
                 logger.info(f"Response cache config: enabled={self.aisbf.response_cache.enabled}, backend={self.aisbf.response_cache.backend}, ttl={self.aisbf.response_cache.ttl}")
+            if self.aisbf.batching:
+                logger.info(f"Batching config: enabled={self.aisbf.batching.enabled}, window_ms={self.aisbf.batching.window_ms}, max_batch_size={self.aisbf.batching.max_batch_size}")
             logger.info(f"=== Config._load_aisbf_config END ===")
 
     def _initialize_error_tracking(self):

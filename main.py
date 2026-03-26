@@ -866,6 +866,19 @@ async def startup_event():
         except Exception as e:
             logger.error(f"Failed to initialize response cache: {e}")
             # Continue startup even if response cache fails
+
+        # Initialize request batcher
+        try:
+            from aisbf.batching import initialize_request_batcher
+            batching_config = config.aisbf.batching if config.aisbf and config.aisbf.batching else None
+            if batching_config:
+                # Convert to dict for the batcher
+                batching_dict = batching_config.model_dump() if hasattr(batching_config, 'model_dump') else dict(batching_config) if batching_config else None
+                initialize_request_batcher(batching_dict)
+                logger.info(f"Request batcher initialized: enabled={batching_dict.get('enabled', False)}")
+        except Exception as e:
+            logger.error(f"Failed to initialize request batcher: {e}")
+            # Continue startup even if batching fails
     
     # Log configuration files loaded
     if config and hasattr(config, '_loaded_files'):

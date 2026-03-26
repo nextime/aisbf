@@ -35,6 +35,7 @@ from .models import Provider, Model, ErrorTracking
 from .config import config
 from .utils import count_messages_tokens
 from .database import get_database
+from .batching import get_request_batcher
 
 # Check if debug mode is enabled
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
@@ -50,6 +51,8 @@ class BaseProviderHandler:
         self.model_last_request_time = {}  # {model_name: timestamp}
         # Token usage tracking for rate limits
         self.token_usage = {}  # {model_name: {"TPM": [], "TPH": [], "TPD": []}}
+        # Initialize batcher
+        self.batcher = get_request_batcher()
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """
@@ -440,6 +443,61 @@ class BaseProviderHandler:
         else:
             logger.info(f"Provider remains active")
         logger.info(f"=== END SUCCESS RECORDING ===")
+
+    async def handle_request_with_batching(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                                          temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                                          tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+        """
+        Handle a request with optional batching.
+        
+        Args:
+            model: The model name
+            messages: The messages to send
+            max_tokens: Max output tokens
+            temperature: Temperature setting
+            stream: Whether to stream
+            tools: Tool definitions
+            tool_choice: Tool choice setting
+            
+        Returns:
+            The response from the provider handler
+        """
+        # Check if batching is enabled and not streaming
+        if self.batcher.enabled and not stream:
+            # Prepare request data
+            request_data = {
+                "model": model,
+                "messages": messages,
+                "max_tokens": max_tokens,
+                "temperature": temperature,
+                "stream": stream,
+                "tools": tools,
+                "tool_choice": tool_choice,
+                "api_key": self.api_key
+            }
+            
+            # Submit request for batching
+            batched_result = await self.batcher.submit_request(
+                provider_id=self.provider_id,
+                model=model,
+                request_data=request_data
+            )
+            
+            # If batching returned None, it means batching is disabled or we should process directly
+            if batched_result is not None:
+                return batched_result
+         
+        # Fall back to direct processing (either batching disabled, streaming, or batching returned None)
+        return await self._handle_request_direct(model, messages, max_tokens, temperature, stream, tools, tool_choice)
+
+    async def _handle_request_direct(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                                    temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                                    tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+        """
+        Direct request handling without batching (original handle_request logic).
+        This method should be overridden by subclasses with their specific implementation.
+        """
+        raise NotImplementedError("_handle_request_direct must be implemented by subclasses")
 
 class GoogleProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: str):
