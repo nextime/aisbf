@@ -136,8 +136,7 @@ class DatabaseManager:
                     provider_id VARCHAR(255) NOT NULL,
                     model_name VARCHAR(255) NOT NULL,
                     tokens_used INTEGER NOT NULL,
-                    timestamp TIMESTAMP DEFAULT {timestamp_default},
-                    UNIQUE(provider_id, model_name, timestamp)
+                    timestamp TIMESTAMP DEFAULT {timestamp_default}
                 )
             ''')
 

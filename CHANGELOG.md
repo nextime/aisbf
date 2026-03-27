@@ -2,6 +2,17 @@
 
 ## [Unreleased]
 ### Added
+- **Token Usage Analytics**: Comprehensive analytics dashboard for tracking token usage, costs, and performance
+  - Analytics module (`aisbf/analytics.py`) with token usage tracking, cost estimation, and optimization recommendations
+  - Dashboard page with charts for token usage over time (1h, 6h, 24h, 7d)
+  - Cost estimation per provider (Anthropic, OpenAI, Google, Kiro, OpenRouter)
+  - Model performance comparison with latency and error rate tracking
+  - Export functionality (JSON, CSV)
+  - Optimization recommendations based on usage patterns
+  - Integration with RequestHandler, RotationHandler, and AutoselectHandler
+  - Support for rotation_id and autoselect_id tracking
+  - Real-time request counts and latency tracking
+  - Error rates and types tracking
 - OpenRouter-style extended fields to Model class (description, context_length, architecture, pricing, top_provider, supported_parameters, default_parameters)
 - Web dashboard section to README with screenshot reference
 - Comprehensive dashboard documentation including features and access information

@@ -109,6 +109,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/rotations') }}" {% if '/rotations' in request.path %}class="active"{% endif %}>Rotations</a>
             <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %}>Autoselect</a>
             <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %}>Prompts</a>
+            <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %}>Analytics</a>
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
             <a href="{{ url_for(request, '/dashboard/docs') }}" {% if '/docs' in request.path %}class="active"{% endif %}>Docs</a>
             <a href="{{ url_for(request, '/dashboard/about') }}" {% if '/about' in request.path %}class="active"{% endif %}>About</a>

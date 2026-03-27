@@ -1101,6 +1101,45 @@ app.add_middleware(
 )
 
 # Dashboard routes
+@app.get("/dashboard/analytics", response_class=HTMLResponse)
+async def dashboard_analytics(request: Request):
+    """Token usage analytics dashboard"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.analytics import get_analytics
+    from aisbf.database import get_database
+    
+    # Get analytics and database
+    db = get_database()
+    analytics = get_analytics(db)
+    
+    # Get provider statistics
+    provider_stats = analytics.get_all_providers_stats()
+    
+    # Get token usage over time
+    token_over_time = analytics.get_token_usage_over_time(time_range='24h')
+    
+    # Get model performance
+    model_performance = analytics.get_model_performance()
+    
+    # Get cost overview
+    cost_overview = analytics.get_cost_overview()
+    
+    # Get optimization recommendations
+    recommendations = analytics.get_optimization_recommendations()
+    
+    return templates.TemplateResponse("dashboard/analytics.html", {
+        "request": request,
+        "session": request.session,
+        "provider_stats": provider_stats,
+        "token_over_time": json.dumps(token_over_time),
+        "model_performance": model_performance,
+        "cost_overview": cost_overview,
+        "recommendations": recommendations
+    })
+
 @app.get("/dashboard/login", response_class=HTMLResponse)
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""

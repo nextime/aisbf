@@ -15,6 +15,7 @@ AISBF includes a comprehensive web-based dashboard for easy configuration and ma
 - **User Management**: Create/manage users with role-based access control (admin users only)
 - **Multi-User Support**: Isolated configurations per user with API token management
 - **Real-time Monitoring**: View provider status and configuration
+- **Token Usage Analytics**: Track token usage, costs, and performance with charts and export functionality
 
 Access the dashboard at `http://localhost:17765/dashboard` (default credentials: admin/admin)
 

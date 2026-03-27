@@ -1,0 +1,199 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Analytics - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Token Usage Analytics</h2>
+
+{% if recommendations %}
+<h3 style="margin-bottom: 15px;">Optimization Recommendations</h3>
+<div style="margin-bottom: 30px;">
+    {% for rec in recommendations %}
+    <div style="background: {% if rec.severity == 'high' %}#3a1a1a{% elif rec.severity == 'medium' %}#3a2a1a{% else %}#1a2a3a{% endif %}; 
+                padding: 15px; border-radius: 4px; margin-bottom: 10px; 
+                border: 1px solid {% if rec.severity == 'high' %}#ef4444{% elif rec.severity == 'medium' %}#f39c12{% else %}#3b82f6{% endif %};">
+        <strong style="color: {% if rec.severity == 'high' %}#f87171{% elif rec.severity == 'medium' %}#fcd34d{% else %}#60a5fa{% endif %};">
+            {{ rec.type|replace('_', ' ')|title }}
+        </strong>
+        <p style="margin: 5px 0;">{{ rec.message }}</p>
+        <small style="color: #a0a0a0;">{{ rec.action }}</small>
+    </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+<h3 style="margin-bottom: 15px;">Provider Statistics</h3>
+{% if provider_stats %}
+<table>
+    <tr>
+        <th>Provider</th>
+        <th>Total Requests</th>
+        <th>Success</th>
+        <th>Errors</th>
+        <th>Error Rate</th>
+        <th>Avg Latency</th>
+        <th>Tokens/Min</th>
+        <th>Tokens/Hour</th>
+        <th>Tokens/Day</th>
+    </tr>
+    {% for provider in provider_stats %}
+    <tr>
+        <td><strong>{{ provider.provider_id }}</strong></td>
+        <td>{{ provider.requests.total }}</td>
+        <td>{{ provider.requests.success }}</td>
+        <td>{{ provider.requests.error }}</td>
+        <td {% if provider.error_rate > 0.1 %}style="color: #f87171;"{% endif %}>
+            {{ "%.1f"|format(provider.error_rate * 100) }}%
+        </td>
+        <td {% if provider.avg_latency_ms > 5000 %}style="color: #fcd34d;"{% endif %}>
+            {% if provider.avg_latency_ms > 1000 %}{{ "%.1f"|format(provider.avg_latency_ms / 1000) }}s{% else %}{{ "%.0f"|format(provider.avg_latency_ms) }}ms{% endif %}
+        </td>
+        <td>{{ provider.tokens.TPM }}</td>
+        <td>{{ provider.tokens.TPH }}</td>
+        <td>{{ provider.tokens.TPD }}</td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p style="color: #a0a0a0;">No provider statistics available yet. Make API requests to see analytics.</p>
+{% endif %}
+
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Cost Overview</h3>
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+    <div style="background: #2ecc71; color: white; padding: 20px; border-radius: 8px;">
+        <h4 style="font-size: 14px; margin-bottom: 10px;">Today's Estimated Cost</h4>
+        <p style="font-size: 28px; font-weight: bold;">${{ "%.2f"|format(cost_overview.total_estimated_cost_today) }}</p>
+    </div>
+    {% for pc in cost_overview.providers %}
+    <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+        <h4 style="font-size: 14px; margin-bottom: 5px;">{{ pc.provider_id }}</h4>
+        <p style="font-size: 20px; font-weight: bold;">${{ "%.2f"|format(pc.estimated_cost) }}</p>
+        <small style="color: #a0a0a0;">{{ pc.tokens_today }} tokens today</small>
+    </div>
+    {% endfor %}
+</div>
+
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Model Performance</h3>
+{% if model_performance %}
+<table>
+    <tr>
+        <th>Provider</th>
+        <th>Model</th>
+        <th>Context Size</th>
+        <th>Condense %</th>
+        <th>Condense Method</th>
+        <th>Tokens/Day</th>
+        <th>Error Rate</th>
+        <th>Avg Latency</th>
+    </tr>
+    {% for model in model_performance %}
+    <tr>
+        <td>{{ model.provider_id }}</td>
+        <td>{{ model.model_name }}</td>
+        <td>{{ model.context_size|default('N/A') }}</td>
+        <td>{{ model.condense_context|default('N/A') }}%</td>
+        <td>{{ model.condense_method|default('None') }}</td>
+        <td>{{ model.tokens_per_day }}</td>
+        <td {% if model.error_rate > 0.1 %}style="color: #f87171;"{% endif %}>
+            {{ "%.1f"|format(model.error_rate * 100) }}%
+        </td>
+        <td {% if model.avg_latency_ms > 5000 %}style="color: #fcd34d;"{% endif %}>
+            {% if model.avg_latency_ms > 1000 %}{{ "%.1f"|format(model.avg_latency_ms / 1000) }}s{% else %}{{ "%.0f"|format(model.avg_latency_ms) }}ms{% endif %}
+        </td>
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p style="color: #a0a0a0;">No model performance data available yet.</p>
+{% endif %}
+
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Token Usage Over Time (24h)</h3>
+{% if token_over_time != '[]' %}
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+    <canvas id="tokenChart" style="width: 100%; height: 300px;"></canvas>
+</div>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script>
+    const tokenData = {{ token_over_time|safe }};
+    
+    // Group by provider if multiple
+    const providers = [...new Set(tokenData.map(d => d.provider_id || 'all'))];
+    
+    if (providers.length > 1) {
+        // Multiple providers - show stacked
+        const datasets = providers.map((provider, i) => {
+            const colors = ['#e94560', '#3498db', '#2ecc71', '#f39c12', '#9b59b6', '#1abc9c'];
+            const data = tokenData.filter(d => (d.provider_id || 'all') === provider).map(d => ({
+                x: d.timestamp,
+                y: d.tokens
+            }));
+            return {
+                label: provider,
+                data: data,
+                backgroundColor: colors[i % colors.length],
+                borderColor: colors[i % colors.length],
+                fill: false,
+                tension: 0.1
+            };
+        });
+        
+        new Chart(document.getElementById('tokenChart'), {
+            type: 'line',
+            data: { datasets: datasets },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { type: 'time', time: { unit: 'hour' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'Tokens' } }
+                }
+            }
+        });
+    } else {
+        // Single provider
+        new Chart(document.getElementById('tokenChart'), {
+            type: 'line',
+            data: {
+                labels: tokenData.map(d => d.timestamp),
+                datasets: [{
+                    label: 'Tokens Used',
+                    data: tokenData.map(d => d.tokens),
+                    borderColor: '#e94560',
+                    backgroundColor: 'rgba(233, 69, 96, 0.1)',
+                    fill: true,
+                    tension: 0.1
+                }]
+            },
+            options: {
+                responsive: true,
+                scales: {
+                    x: { title: { display: true, text: 'Time' } },
+                    y: { beginAtZero: true, title: { display: true, text: 'Tokens' } }
+                }
+            }
+        });
+    }
+</script>
+{% else %}
+<p style="color: #a0a0a0;">No token usage data available yet.</p>
+{% endif %}
+
+<div style="margin-top: 30px; display: flex; gap: 10px;">
+    <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+</div>
+{% endblock %}

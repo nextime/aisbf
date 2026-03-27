@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.8.0",
+    version="0.9.0",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -117,6 +117,7 @@ setup(
             'aisbf/classifier.py',
             'aisbf/response_cache.py',
             'aisbf/streaming_optimization.py',
+            'aisbf/analytics.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
@@ -132,6 +133,7 @@ setup(
             'templates/dashboard/autoselect.html',
             'templates/dashboard/prompts.html',
             'templates/dashboard/docs.html',
+            'templates/dashboard/analytics.html',
         ]),
     ],
     entry_points={

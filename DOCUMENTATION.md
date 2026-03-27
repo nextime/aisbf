@@ -16,6 +16,8 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 - **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 - **Security**: Default localhost-only access for improved security
+- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, model performance comparison, and optimization recommendations
+- **Token Usage Analytics**: Comprehensive analytics dashboard for tracking token usage, costs, and performance with charts and export functionality
 
 ## Author
 

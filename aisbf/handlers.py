@@ -43,6 +43,8 @@ from .context import ContextManager, get_context_config_for_model
 from .classifier import content_classifier
 from .semantic_classifier import SemanticClassifier
 from .response_cache import get_response_cache
+import time as time_module
+from .analytics import get_analytics
 from .streaming_optimization import (
     get_streaming_optimizer,
     StreamingConfig,
@@ -299,11 +301,16 @@ class RequestHandler:
 
     async def handle_chat_completion(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
         import logging
+        import time
         logger = logging.getLogger(__name__)
         logger.info(f"=== RequestHandler.handle_chat_completion START ===")
         logger.info(f"Provider ID: {provider_id}")
         logger.info(f"User ID: {self.user_id}")
         logger.info(f"Request data: {request_data}")
+        
+        # Track request start time for analytics
+        request_start_time = time.time()
+        model_name = request_data.get('model', 'unknown')
 
         # Check for user-specific provider config first
         if self.user_id and provider_id in self.user_providers:
@@ -435,6 +442,7 @@ class RequestHandler:
             # Apply rate limiting
             logger.info("Applying rate limiting...")
             await handler.apply_rate_limit()
+            await handler.apply_rate_limit()
             logger.info("Rate limiting applied")
 
             logger.info(f"Sending request to provider handler...")
@@ -471,6 +479,25 @@ class RequestHandler:
                     logger.warning(f"Response cache set failed: {cache_error}")
             
             handler.record_success()
+            
+            # Record analytics for token usage
+            try:
+                analytics = get_analytics()
+                if response and isinstance(response, dict):
+                    usage = response.get('usage', {})
+                    total_tokens = usage.get('total_tokens', 0)
+                    if total_tokens > 0:
+                        latency_ms = (time.time() - request_start_time) * 1000
+                        analytics.record_request(
+                            provider_id=provider_id,
+                            model_name=model_name,
+                            tokens_used=total_tokens,
+                            latency_ms=latency_ms,
+                            success=True
+                        )
+            except Exception as analytics_error:
+                logger.warning(f"Analytics recording failed: {analytics_error}")
+            
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
             return response
         except Exception as e:
@@ -2256,6 +2283,25 @@ class RotationHandler:
                         logger.warning(f"Response cache set failed: {cache_error}")
                     
                     logger.info("Returning non-streaming response")
+                    
+                    # Record analytics for token usage
+                    try:
+                        analytics = get_analytics()
+                        if response and isinstance(response, dict):
+                            usage = response.get('usage', {})
+                            total_tokens = usage.get('total_tokens', 0)
+                            if total_tokens > 0:
+                                analytics.record_request(
+                                    provider_id=provider_id,
+                                    model_name=model_name,
+                                    tokens_used=total_tokens,
+                                    latency_ms=0,  # Latency tracking would require more extensive changes
+                                    success=True,
+                                    rotation_id=rotation_id
+                                )
+                    except Exception as analytics_error:
+                        logger.warning(f"Analytics recording failed: {analytics_error}")
+                    
                     return response
             except Exception as e:
                 last_error = str(e)
@@ -3525,6 +3571,27 @@ class AutoselectHandler:
                 logger.warning(f"Response cache set failed: {cache_error}")
         
         logger.info(f"=== AUTOSELECT REQUEST END ===")
+        
+        # Record analytics for token usage
+        try:
+            analytics = get_analytics()
+            if response and isinstance(response, dict):
+                usage = response.get('usage', {})
+                total_tokens = usage.get('total_tokens', 0)
+                if total_tokens > 0:
+                    # The actual provider/model info is in the response model field
+                    model_name = response.get('model', 'unknown')
+                    analytics.record_request(
+                        provider_id='autoselect',
+                        model_name=model_name,
+                        tokens_used=total_tokens,
+                        latency_ms=0,
+                        success=True,
+                        autoselect_id=autoselect_id
+                    )
+        except Exception as analytics_error:
+            logger.warning(f"Analytics recording failed: {analytics_error}")
+        
         return response
 
     async def handle_autoselect_streaming_request(self, autoselect_id: str, request_data: Dict):

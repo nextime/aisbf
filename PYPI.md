@@ -41,8 +41,8 @@ python -m build
 ```
 
 This creates:
-- `dist/aisbf-0.1.0.tar.gz` - Source distribution
-- `dist/aisbf-0.1.0-py3-none-any.whl` - Wheel distribution
+- `dist/aisbf-0.9.0.tar.gz` - Source distribution
+- `dist/aisbf-0.9.0-py3-none-any.whl` - Wheel distribution
 
 ## Testing the Package
 
@@ -50,7 +50,7 @@ This creates:
 
 ```bash
 # Install from the built wheel
-pip install dist/aisbf-0.1.0-py3-none-any.whl
+pip install dist/aisbf-0.9.0-py3-none-any.whl
 
 # Test the installation
 aisbf status
@@ -90,8 +90,8 @@ Before each release:
 4. **Commit changes** to git
 5. **Tag the release**:
    ```bash
-   git tag -a v0.1.0 -m "Release version 0.1.0"
-   git push origin v0.1.0
+   git tag -a v0.9.0 -m "Release version 0.9.0"
+   git push origin v0.9.0
    ```
 
 ## Package Structure
