@@ -26,6 +26,8 @@ import httpx
 import asyncio
 import time
 import os
+import random
+import math
 from typing import Dict, List, Optional, Union
 from google import genai
 from openai import OpenAI
@@ -40,6 +42,213 @@ from .batching import get_request_batcher
 # Check if debug mode is enabled
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
+
+class AdaptiveRateLimiter:
+    """
+    Adaptive Rate Limiter that learns optimal rate limits from 429 responses.
+    
+    Features:
+    - Tracks 429 patterns per provider
+    - Implements exponential backoff with jitter for retries
+    - Learns optimal rate limits from historical 429 data
+    - Adds rate limit headroom (stays below limits)
+    - Gradually recovers rate limits after cooldown periods
+    """
+    
+    def __init__(self, provider_id: str, config: Dict = None):
+        self.provider_id = provider_id
+        
+        # Configuration with defaults
+        self.enabled = config.get('enabled', True) if config else True
+        self.initial_rate_limit = config.get('initial_rate_limit', 0) if config else 0
+        self.learning_rate = config.get('learning_rate', 0.1) if config else 0.1
+        self.headroom_percent = config.get('headroom_percent', 10) if config else 10  # Stay 10% below learned limit
+        self.recovery_rate = config.get('recovery_rate', 0.05) if config else 0.05  # 5% recovery per successful request
+        self.max_rate_limit = config.get('max_rate_limit', 60) if config else 60  # Max 60 seconds between requests
+        self.min_rate_limit = config.get('min_rate_limit', 0.1) if config else 0.1  # Min 0.1 seconds between requests
+        self.backoff_base = config.get('backoff_base', 2) if config else 2
+        self.jitter_factor = config.get('jitter_factor', 0.25) if config else 0.25  # 25% jitter
+        self.history_window = config.get('history_window', 3600) if config else 3600  # 1 hour history window
+        self.consecutive_successes_for_recovery = config.get('consecutive_successes_for_recovery', 10) if config else 10
+        
+        # Learned rate limit (starts with configured value)
+        self.current_rate_limit = self.initial_rate_limit
+        self.base_rate_limit = self.initial_rate_limit  # Original configured limit
+        
+        # 429 tracking
+        self._429_history = []  # List of (timestamp, wait_seconds) tuples
+        self._consecutive_429s = 0
+        self._consecutive_successes = 0
+        
+        # Statistics
+        self.total_429_count = 0
+        self.total_requests = 0
+        self.last_429_time = None
+        
+    def record_429(self, wait_seconds: int):
+        """Record a 429 response and adjust rate limit accordingly."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        current_time = time.time()
+        
+        # Record this 429 in history
+        self._429_history.append((current_time, wait_seconds))
+        self.total_429_count += 1
+        self._consecutive_429s += 1
+        self._consecutive_successes = 0
+        self.last_429_time = current_time
+        
+        # Clean old history
+        self._cleanup_history()
+        
+        # Calculate new rate limit using exponential backoff
+        # New limit = current_limit * backoff_base + wait_seconds from server
+        new_limit = self.current_rate_limit * self.backoff_base + wait_seconds
+        
+        # Apply learning rate adjustment
+        new_limit = self.current_rate_limit + (new_limit - self.current_rate_limit) * self.learning_rate
+        
+        # Apply headroom (stay below the limit)
+        new_limit = new_limit * (1 - self.headroom_percent / 100)
+        
+        # Clamp to min/max
+        self.current_rate_limit = max(self.min_rate_limit, min(self.max_rate_limit, new_limit))
+        
+        logger.info(f"[AdaptiveRateLimiter {self.provider_id}] 429 recorded: wait_seconds={wait_seconds}, "
+                   f"new_rate_limit={self.current_rate_limit:.2f}s, consecutive_429s={self._consecutive_429s}")
+    
+    def record_success(self):
+        """Record a successful request and gradually recover rate limit."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        self.total_requests += 1
+        self._consecutive_successes += 1
+        self._consecutive_429s = 0
+        
+        # Gradually recover rate limit after successful requests
+        if self._consecutive_successes >= self.consecutive_successes_for_recovery:
+            # Recovery: move back towards base rate limit
+            if self.current_rate_limit < self.base_rate_limit:
+                old_limit = self.current_rate_limit
+                self.current_rate_limit = self.current_rate_limit + (self.base_rate_limit - self.current_rate_limit) * self.recovery_rate
+                # Clamp to not exceed base
+                self.current_rate_limit = min(self.current_rate_limit, self.base_rate_limit)
+                
+                if old_limit != self.current_rate_limit:
+                    logger.info(f"[AdaptiveRateLimiter {self.provider_id}] Rate limit recovery: "
+                               f"{old_limit:.2f}s -> {self.current_rate_limit:.2f}s")
+                
+                # Reset consecutive successes counter after recovery
+                self._consecutive_successes = 0
+    
+    def get_rate_limit(self) -> float:
+        """Get the current adaptive rate limit."""
+        return self.current_rate_limit
+    
+    def get_wait_time(self) -> float:
+        """Get the wait time before next request based on adaptive rate limiting."""
+        if not self.enabled or self.current_rate_limit <= 0:
+            return 0
+        
+        # Use current adaptive rate limit
+        return self.current_rate_limit
+    
+    def calculate_backoff_with_jitter(self, attempt: int, base_wait: int = None) -> float:
+        """
+        Calculate exponential backoff wait time with jitter.
+        
+        Args:
+            attempt: Current retry attempt number (0-indexed)
+            base_wait: Optional base wait time from server response
+            
+        Returns:
+            Wait time in seconds with jitter applied
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Calculate exponential backoff
+        if base_wait is not None and base_wait > 0:
+            # Use server-provided wait time as base
+            wait_time = base_wait
+        else:
+            # Use exponential backoff: base * 2^attempt
+            wait_time = self.backoff_base ** attempt
+        
+        # Apply jitter: random factor between (1 - jitter_factor) and (1 + jitter_factor)
+        jitter_multiplier = 1 + random.uniform(-self.jitter_factor, self.jitter_factor)
+        wait_time = wait_time * jitter_multiplier
+        
+        # Clamp to reasonable limits (1 second to 300 seconds)
+        wait_time = max(1, min(300, wait_time))
+        
+        logger.info(f"[AdaptiveRateLimiter {self.provider_id}] Backoff calculation: attempt={attempt}, "
+                   f"base_wait={base_wait}, jitter_multiplier={jitter_multiplier:.2f}, "
+                   f"final_wait={wait_time:.2f}s")
+        
+        return wait_time
+    
+    def _cleanup_history(self):
+        """Remove old entries from 429 history."""
+        current_time = time.time()
+        cutoff_time = current_time - self.history_window
+        self._429_history = [(ts, ws) for ts, ws in self._429_history if ts > cutoff_time]
+    
+    def get_stats(self) -> Dict:
+        """Get rate limiter statistics."""
+        self._cleanup_history()
+        
+        return {
+            'provider_id': self.provider_id,
+            'enabled': self.enabled,
+            'current_rate_limit': self.current_rate_limit,
+            'base_rate_limit': self.base_rate_limit,
+            'total_429_count': self.total_429_count,
+            'total_requests': self.total_requests,
+            'consecutive_429s': self._consecutive_429s,
+            'consecutive_successes': self._consecutive_successes,
+            'recent_429_count': len(self._429_history),
+            'last_429_time': self.last_429_time
+        }
+    
+    def reset(self):
+        """Reset the adaptive rate limiter to initial state."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        self.current_rate_limit = self.initial_rate_limit
+        self._429_history = []
+        self._consecutive_429s = 0
+        self._consecutive_successes = 0
+        self.total_429_count = 0
+        self.total_requests = 0
+        self.last_429_time = None
+        
+        logger.info(f"[AdaptiveRateLimiter {self.provider_id}] Reset to initial state")
+
+
+# Global adaptive rate limiters registry
+_adaptive_rate_limiters: Dict[str, AdaptiveRateLimiter] = {}
+
+
+def get_adaptive_rate_limiter(provider_id: str, config: Dict = None) -> AdaptiveRateLimiter:
+    """Get or create an adaptive rate limiter for a provider."""
+    global _adaptive_rate_limiters
+    
+    if provider_id not in _adaptive_rate_limiters:
+        _adaptive_rate_limiters[provider_id] = AdaptiveRateLimiter(provider_id, config)
+    
+    return _adaptive_rate_limiters[provider_id]
+
+
+def get_all_adaptive_rate_limiters() -> Dict[str, AdaptiveRateLimiter]:
+    """Get all adaptive rate limiters."""
+    global _adaptive_rate_limiters
+    return _adaptive_rate_limiters
+
+
 class BaseProviderHandler:
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
         self.provider_id = provider_id
@@ -53,6 +262,11 @@ class BaseProviderHandler:
         self.token_usage = {}  # {model_name: {"TPM": [], "TPH": [], "TPD": []}}
         # Initialize batcher
         self.batcher = get_request_batcher()
+        # Initialize adaptive rate limiter
+        adaptive_config = None
+        if config.aisbf and config.aisbf.adaptive_rate_limiting:
+            adaptive_config = config.aisbf.adaptive_rate_limiting.dict()
+        self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config)
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """
@@ -202,7 +416,7 @@ class BaseProviderHandler:
     def handle_429_error(self, response_data: Union[Dict, str] = None, headers: Dict = None):
         """
         Handle 429 rate limit error by parsing the response and disabling provider
-        for the appropriate duration.
+        for the appropriate duration. Also records the 429 in the adaptive rate limiter.
         
         Args:
             response_data: Response body (dict or string)
@@ -217,6 +431,9 @@ class BaseProviderHandler:
         # Parse the response to get wait time
         wait_seconds = self.parse_429_response(response_data, headers)
         
+        # Record 429 in adaptive rate limiter for learning
+        self.adaptive_limiter.record_429(wait_seconds)
+        
         # Disable provider for the calculated duration
         self.error_tracking['disabled_until'] = time.time() + wait_seconds
         
@@ -225,6 +442,7 @@ class BaseProviderHandler:
         logger.error(f"Reason: 429 Too Many Requests")
         logger.error(f"Disabled for: {wait_seconds} seconds ({wait_seconds / 60:.1f} minutes)")
         logger.error(f"Disabled until: {self.error_tracking['disabled_until']}")
+        logger.error(f"Adaptive rate limit: {self.adaptive_limiter.current_rate_limit:.2f}s")
         logger.error(f"Provider will be automatically re-enabled after cooldown")
         logger.error("=== END 429 RATE LIMIT ERROR ===")
 
@@ -349,8 +567,20 @@ class BaseProviderHandler:
         logger.error(f"Provider will be automatically re-enabled after cooldown")
 
     async def apply_rate_limit(self, rate_limit: Optional[float] = None):
-        """Apply rate limiting by waiting if necessary"""
-        if rate_limit is None:
+        """Apply rate limiting by waiting if necessary, using adaptive rate limiting."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Use adaptive rate limiter if enabled
+        if self.adaptive_limiter.enabled:
+            adaptive_limit = self.adaptive_limiter.get_rate_limit()
+            
+            if rate_limit is None:
+                rate_limit = adaptive_limit
+            else:
+                # Use the higher of the two (more conservative)
+                rate_limit = max(rate_limit, adaptive_limit)
+        elif rate_limit is None:
             rate_limit = self.rate_limit
 
         if rate_limit and rate_limit > 0:
@@ -359,13 +589,25 @@ class BaseProviderHandler:
             required_wait = rate_limit - time_since_last_request
 
             if required_wait > 0:
+                logger.info(f"[RateLimit] Provider {self.provider_id}: waiting {required_wait:.2f}s (adaptive: {self.adaptive_limiter.enabled})")
                 await asyncio.sleep(required_wait)
 
             self.last_request_time = time.time()
 
     async def apply_model_rate_limit(self, model: str, rate_limit: Optional[float] = None):
-        """Apply rate limiting for a specific model"""
-        if rate_limit is None:
+        """Apply rate limiting for a specific model, using adaptive rate limiting."""
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Use adaptive rate limiter if enabled
+        if self.adaptive_limiter.enabled:
+            adaptive_limit = self.adaptive_limiter.get_rate_limit()
+            
+            if rate_limit is None:
+                rate_limit = adaptive_limit
+            else:
+                rate_limit = max(rate_limit, adaptive_limit)
+        elif rate_limit is None:
             rate_limit = self.rate_limit
 
         if rate_limit and rate_limit > 0:
@@ -375,9 +617,7 @@ class BaseProviderHandler:
             required_wait = rate_limit - time_since_last_request
 
             if required_wait > 0:
-                import logging
-                logger = logging.getLogger(__name__)
-                logger.info(f"Model-level rate limiting: waiting {required_wait:.2f}s for model {model}")
+                logger.info(f"[RateLimit] Model {model}: waiting {required_wait:.2f}s (adaptive: {self.adaptive_limiter.enabled})")
                 await asyncio.sleep(required_wait)
 
             self.model_last_request_time[model] = time.time()
@@ -430,10 +670,14 @@ class BaseProviderHandler:
         self.error_tracking['failures'] = 0
         self.error_tracking['disabled_until'] = None
         
+        # Record success in adaptive rate limiter
+        self.adaptive_limiter.record_success()
+        
         logger.info(f"=== PROVIDER SUCCESS RECORDED ===")
         logger.info(f"Provider: {self.provider_id}")
         logger.info(f"Previous failure count: {previous_failures}")
         logger.info(f"Failure count reset to: 0")
+        logger.info(f"Adaptive rate limit: {self.adaptive_limiter.current_rate_limit:.2f}s")
         
         if was_disabled:
             logger.info(f"!!! PROVIDER RE-ENABLED !!!")

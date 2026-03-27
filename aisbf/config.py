@@ -182,6 +182,21 @@ class BatchingConfig(BaseModel):
     max_batch_size: int = 8  # Maximum number of requests per batch
     provider_settings: Optional[Dict[str, Dict]] = None  # Provider-specific settings
 
+
+class AdaptiveRateLimitingConfig(BaseModel):
+    """Configuration for adaptive rate limiting"""
+    enabled: bool = True  # Enable adaptive rate limiting
+    initial_rate_limit: float = 0.0  # Initial rate limit in seconds (0 = no rate limiting)
+    learning_rate: float = 0.1  # How fast to learn from 429s (0.1 = 10% adjustment)
+    headroom_percent: int = 10  # Percentage to stay below learned limit (10 = 10% headroom)
+    recovery_rate: float = 0.05  # Rate of recovery after successful requests (0.05 = 5% per success)
+    max_rate_limit: float = 60.0  # Maximum rate limit in seconds
+    min_rate_limit: float = 0.1  # Minimum rate limit in seconds
+    backoff_base: float = 2.0  # Base for exponential backoff
+    jitter_factor: float = 0.25  # Jitter factor for backoff (0.25 = 25%)
+    history_window: int = 3600  # History window in seconds (1 hour)
+    consecutive_successes_for_recovery: int = 10  # Successes needed before recovery starts
+
 class AISBFConfig(BaseModel):
     """Global AISBF configuration from aisbf.json"""
     classify_nsfw: bool = False
@@ -197,6 +212,7 @@ class AISBFConfig(BaseModel):
     cache: Optional[Dict] = None
     response_cache: Optional[ResponseCacheConfig] = None
     batching: Optional[BatchingConfig] = None
+    adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
 
 
 class AppConfig(BaseModel):
@@ -640,6 +656,10 @@ class Config:
             batching_data = data.get('batching')
             if batching_data:
                 data['batching'] = BatchingConfig(**batching_data)
+            # Parse adaptive_rate_limiting separately if present
+            adaptive_data = data.get('adaptive_rate_limiting')
+            if adaptive_data:
+                data['adaptive_rate_limiting'] = AdaptiveRateLimitingConfig(**adaptive_data)
             self.aisbf = AISBFConfig(**data)
             self._loaded_files['aisbf'] = str(aisbf_path.absolute())
             logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")
@@ -647,6 +667,8 @@ class Config:
                 logger.info(f"Response cache config: enabled={self.aisbf.response_cache.enabled}, backend={self.aisbf.response_cache.backend}, ttl={self.aisbf.response_cache.ttl}")
             if self.aisbf.batching:
                 logger.info(f"Batching config: enabled={self.aisbf.batching.enabled}, window_ms={self.aisbf.batching.window_ms}, max_batch_size={self.aisbf.batching.max_batch_size}")
+            if self.aisbf.adaptive_rate_limiting:
+                logger.info(f"Adaptive rate limiting: enabled={self.aisbf.adaptive_rate_limiting.enabled}, initial_rate_limit={self.aisbf.adaptive_rate_limiting.initial_rate_limit}")
             logger.info(f"=== Config._load_aisbf_config END ===")
 
     def _initialize_error_tracking(self):

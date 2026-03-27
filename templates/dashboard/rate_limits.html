@@ -1,0 +1,210 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Rate Limits - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Adaptive Rate Limits</h2>
+
+<div style="margin-bottom: 20px;">
+    <button onclick="loadRateLimits()" class="btn">Refresh</button>
+    <button onclick="clearAllRateLimiters()" class="btn btn-secondary">Reset All Rate Limiters</button>
+</div>
+
+<div id="rate-limits-content">
+    <p>Loading rate limit data...</p>
+</div>
+
+<style>
+    .rate-limit-card {
+        background: #f8f9fa;
+        border: 1px solid #ddd;
+        border-radius: 8px;
+        padding: 15px;
+        margin-bottom: 15px;
+    }
+    .rate-limit-card h4 {
+        margin-top: 0;
+        color: #2c3e50;
+    }
+    .stat-row {
+        display: flex;
+        justify-content: space-between;
+        padding: 5px 0;
+        border-bottom: 1px solid #eee;
+    }
+    .stat-label {
+        font-weight: 500;
+        color: #555;
+    }
+    .stat-value {
+        color: #333;
+    }
+    .status-enabled {
+        color: #27ae60;
+        font-weight: bold;
+    }
+    .status-disabled {
+        color: #e74c3c;
+        font-weight: bold;
+    }
+    .btn-danger {
+        background: #e74c3c;
+        color: white;
+        border: none;
+        padding: 5px 10px;
+        border-radius: 4px;
+        cursor: pointer;
+        font-size: 12px;
+    }
+    .btn-danger:hover {
+        background: #c0392b;
+    }
+</style>
+
+<script>
+async function loadRateLimits() {
+    const content = document.getElementById('rate-limits-content');
+    content.innerHTML = '<p>Loading rate limit data...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/rate-limits/data');
+        const data = await response.json();
+        
+        if (Object.keys(data).length === 0) {
+            content.innerHTML = '<p>No rate limiters active. Rate limiting data will appear when providers receive 429 responses.</p>';
+            return;
+        }
+        
+        let html = '';
+        
+        for (const [providerId, stats] of Object.entries(data)) {
+            const enabledClass = stats.enabled ? 'status-enabled' : 'status-disabled';
+            const last429 = stats.last_429_time ? new Date(stats.last_429_time * 1000).toLocaleString() : 'Never';
+            
+            html += `
+                <div class="rate-limit-card">
+                    <div style="display: flex; justify-content: space-between; align-items: center;">
+                        <h4>Provider: ${providerId}</h4>
+                        <button class="btn-danger" onclick="resetRateLimiter('${providerId}')">Reset</button>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Enabled:</span>
+                        <span class="stat-value ${enabledClass}">${stats.enabled ? 'Yes' : 'No'}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Current Rate Limit:</span>
+                        <span class="stat-value">${stats.current_rate_limit.toFixed(2)} seconds</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Base Rate Limit:</span>
+                        <span class="stat-value">${stats.base_rate_limit.toFixed(2)} seconds</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total 429 Count:</span>
+                        <span class="stat-value">${stats.total_429_count}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Total Requests:</span>
+                        <span class="stat-value">${stats.total_requests}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Consecutive 429s:</span>
+                        <span class="stat-value">${stats.consecutive_429s}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Consecutive Successes:</span>
+                        <span class="stat-value">${stats.consecutive_successes}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Recent 429 Count:</span>
+                        <span class="stat-value">${stats.recent_429_count}</span>
+                    </div>
+                    <div class="stat-row">
+                        <span class="stat-label">Last 429 Time:</span>
+                        <span class="stat-value">${last429}</span>
+                    </div>
+                </div>
+            `;
+        }
+        
+        content.innerHTML = html;
+    } catch (error) {
+        content.innerHTML = `<p style="color: red;">Error loading rate limits: ${error.message}</p>`;
+    }
+}
+
+async function resetRateLimiter(providerId) {
+    if (!confirm(`Reset rate limiter for ${providerId}?`)) {
+        return;
+    }
+    
+    try {
+        const response = await fetch(`/dashboard/rate-limits/${providerId}/reset`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert(data.message);
+            loadRateLimits();
+        } else {
+            alert('Error: ' + data.error);
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function clearAllRateLimiters() {
+    if (!confirm('Reset all rate limiters? This will clear all learned rate limits.')) {
+        return;
+    }
+    
+    const content = document.getElementById('rate-limits-content');
+    const providerIds = [];
+    
+    // First get the list of providers
+    try {
+        const response = await fetch('/dashboard/rate-limits/data');
+        const data = await response.json();
+        
+        for (const providerId of Object.keys(data)) {
+            try {
+                await fetch(`/dashboard/rate-limits/${providerId}/reset`, {
+                    method: 'POST'
+                });
+            } catch (e) {
+                console.error(`Failed to reset ${providerId}:`, e);
+            }
+        }
+        
+        alert('All rate limiters reset successfully');
+        loadRateLimits();
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Load on page load
+loadRateLimits();
+
+// Auto-refresh every 30 seconds
+setInterval(loadRateLimits, 30000);
+</script>
+{% endblock %}

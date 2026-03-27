@@ -2225,6 +2225,60 @@ async def dashboard_response_cache_stats(request: Request):
             'error': str(e)
         })
 
+@app.get("/dashboard/rate-limits")
+async def dashboard_rate_limits(request: Request):
+    """Rate limits dashboard page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    return templates.TemplateResponse("dashboard/rate_limits.html", {
+        "request": request,
+        "session": request.session
+    })
+
+@app.get("/dashboard/rate-limits/data")
+async def dashboard_rate_limits_data(request: Request):
+    """Get adaptive rate limit statistics"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.providers import get_all_adaptive_rate_limiters
+    
+    try:
+        limiters = get_all_adaptive_rate_limiters()
+        stats = {}
+        for provider_id, limiter in limiters.items():
+            stats[provider_id] = limiter.get_stats()
+        return JSONResponse(stats)
+    except Exception as e:
+        logger.error(f"Error getting rate limit stats: {e}")
+        return JSONResponse({
+            'error': str(e),
+            'providers': {}
+        })
+
+@app.post("/dashboard/rate-limits/{provider_id}/reset")
+async def dashboard_rate_limits_reset(request: Request, provider_id: str):
+    """Reset adaptive rate limiter for a specific provider"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.providers import get_all_adaptive_rate_limiters
+    
+    try:
+        limiters = get_all_adaptive_rate_limiters()
+        if provider_id in limiters:
+            limiters[provider_id].reset()
+            return JSONResponse({'success': True, 'message': f'Rate limiter for {provider_id} reset successfully'})
+        else:
+            return JSONResponse({'success': False, 'error': f'Provider {provider_id} not found'}, status_code=404)
+    except Exception as e:
+        logger.error(f"Error resetting rate limiter: {e}")
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
 @app.post("/dashboard/response-cache/clear")
 async def dashboard_response_cache_clear(request: Request):
     """Clear response cache"""

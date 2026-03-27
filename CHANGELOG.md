@@ -2,6 +2,16 @@
 
 ## [Unreleased]
 ### Added
+- **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses
+  - Per-provider adaptive rate limiters with learning capability
+  - Exponential backoff with jitter (configurable base and jitter factor)
+  - Rate limit headroom (stays 10% below learned limits)
+  - Gradual recovery after consecutive successful requests
+  - 429 pattern tracking with configurable history window
+  - Dashboard page showing current limits, 429 counts, success rates, and recovery progress
+  - Per-provider reset functionality and reset-all button
+  - Configurable via aisbf.json with learning_rate, headroom_percent, recovery_rate, etc.
+  - Integration with BaseProviderHandler.apply_rate_limit() and handle_429_error()
 - **Token Usage Analytics**: Comprehensive analytics dashboard for tracking token usage, costs, and performance
   - Analytics module (`aisbf/analytics.py`) with token usage tracking, cost estimation, and optimization recommendations
   - Dashboard page with charts for token usage over time (1h, 6h, 24h, 7d)

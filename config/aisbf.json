@@ -103,5 +103,18 @@
         "max_batch_size": 5
       }
     }
+  },
+  "adaptive_rate_limiting": {
+    "enabled": true,
+    "initial_rate_limit": 0,
+    "learning_rate": 0.1,
+    "headroom_percent": 10,
+    "recovery_rate": 0.05,
+    "max_rate_limit": 60,
+    "min_rate_limit": 0.1,
+    "backoff_base": 2,
+    "jitter_factor": 0.25,
+    "history_window": 3600,
+    "consecutive_successes_for_recovery": 10
   }
 }
