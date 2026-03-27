@@ -38,6 +38,7 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
 - **Response Caching**: 20-30% cache hit rate with semantic deduplication across multiple backends (memory, Redis, SQLite, MySQL)
 - **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window with provider-specific configurations
+- **Streaming Response Optimization**: 10-20% memory reduction with chunk pooling, backpressure handling, and provider-specific streaming optimizations for Google and Kiro providers
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
 - **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service

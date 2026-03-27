@@ -43,6 +43,14 @@ from .context import ContextManager, get_context_config_for_model
 from .classifier import content_classifier
 from .semantic_classifier import SemanticClassifier
 from .response_cache import get_response_cache
+from .streaming_optimization import (
+    get_streaming_optimizer,
+    StreamingConfig,
+    calculate_google_delta,
+    KiroSSEParser,
+    OptimizedTextAccumulator,
+    optimize_sse_chunk
+)
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -519,6 +527,18 @@ class RequestHandler:
         # Update request_data with condensed messages
         request_data['messages'] = messages
 
+        # Initialize streaming optimizer for this request
+        stream_config = StreamingConfig(
+            enable_chunk_pooling=True,
+            max_pooled_chunks=20,
+            chunk_reuse_enabled=True,
+            enable_backpressure=True,
+            max_pending_chunks=15,
+            google_delta_calculation=True,
+            kiro_sse_optimization=True
+        )
+        optimizer = get_streaming_optimizer(stream_config)
+
         async def stream_generator(effective_context):
             import logging
             import time
@@ -549,11 +569,24 @@ class RequestHandler:
                     # Handle Kiro streaming response
                     # Kiro returns an async generator that yields OpenAI-compatible SSE strings directly
                     # We need to parse these and handle tool calls properly
+                    
+                    # Use optimized SSE parser for Kiro
+                    if stream_config.kiro_sse_optimization:
+                        kiro_parser = KiroSSEParser(buffer_size=stream_config.kiro_buffer_size)
+                    else:
+                        kiro_parser = None
+                    
                     accumulated_response_text = ""  # Track full response for token counting
                     chunk_count = 0
                     tool_calls_from_stream = []  # Track tool calls from stream
                     completion_id = f"chatcmpl-{uuid.uuid4().hex[:24]}"
                     created_time = int(time.time())
+
+                    # Use optimized text accumulator for Kiro
+                    kiro_text_accumulator = OptimizedTextAccumulator(
+                        max_size=stream_config.max_accumulated_text,
+                        enable_truncation=stream_config.enable_text_truncation
+                    )
 
                     async for chunk in response:
                         chunk_count += 1
@@ -563,7 +596,15 @@ class RequestHandler:
 
                             # Parse SSE chunk to extract JSON data
                             chunk_data = None
-                            if isinstance(chunk, str) and chunk.startswith('data: '):
+                            
+                            if kiro_parser and isinstance(chunk, bytes):
+                                # Use optimized parser
+                                events = kiro_parser.feed(chunk)
+                                for event in events:
+                                    if event.get('type') == 'data':
+                                        chunk_data = event.get('data')
+                                        break
+                            elif isinstance(chunk, str) and chunk.startswith('data: '):
                                 data_str = chunk[6:].strip()  # Remove 'data: ' prefix
                                 if data_str and data_str != '[DONE]':
                                     try:
@@ -589,10 +630,10 @@ class RequestHandler:
                                 if choices:
                                     delta = choices[0].get('delta', {})
                                     
-                                    # Track content
+                                    # Track content using optimized accumulator
                                     delta_content = delta.get('content', '')
                                     if delta_content:
-                                        accumulated_response_text += delta_content
+                                        accumulated_response_text = kiro_text_accumulator.append(delta_content)
                                     
                                     # Track tool calls
                                     delta_tool_calls = delta.get('tool_calls', [])
@@ -682,6 +723,12 @@ class RequestHandler:
                     completion_tokens = 0
                     accumulated_response_text = ""  # Track full response for token counting
                     
+                    # Use optimized text accumulator for memory efficiency
+                    text_accumulator = OptimizedTextAccumulator(
+                        max_size=stream_config.google_accumulated_text_limit,
+                        enable_truncation=stream_config.enable_text_truncation
+                    )
+                    
                     # Collect all chunks first to know when we're at the last one
                     chunks_list = []
                     async for chunk in response:
@@ -733,8 +780,11 @@ class RequestHandler:
                             except Exception as e:
                                 logger.error(f"Error extracting text from Google chunk: {e}")
                             
-                            # Calculate the delta (only the new text since last chunk)
-                            delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
+                            # Calculate the delta (only the new text since last chunk) using optimized function
+                            if stream_config.google_delta_calculation:
+                                delta_text = calculate_google_delta(chunk_text, accumulated_text)
+                            else:
+                                delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
                             accumulated_text = chunk_text  # Update accumulated text for next iteration
                             
                             # Calculate delta tool calls (only tool calls we haven't seen before)
@@ -754,39 +804,43 @@ class RequestHandler:
                             
                             # Only send if there's new content, new tool calls, or it's the last chunk with finish_reason
                             if delta_tool_calls or delta_text or is_last_chunk:
-                                # Create OpenAI-compatible chunk with additional fields
-                                openai_chunk = {
-                                    "id": response_id,
-                                    "object": "chat.completion.chunk",
-                                    "created": created_time,
-                                    "model": request_data['model'],
-                                    "service_tier": None,
-                                    "system_fingerprint": system_fingerprint,
-                                    "usage": None,
-                                    "provider": provider_id,
-                                    "choices": [{
-                                        "index": 0,
-                                        "delta": {
-                                            "content": delta_text if delta_text else "",
-                                            "refusal": None,
-                                            "role": "assistant",
-                                            "tool_calls": delta_tool_calls if len(delta_tool_calls) > 0 else None
-                                        },
-                                        "finish_reason": chunk_finish_reason,
-                                        "logprobs": None,
-                                        "native_finish_reason": chunk_finish_reason
-                                    }]
-                                }
-                                
-                                chunk_id += 1
-                                logger.debug(f"OpenAI chunk (delta length: {len(delta_text)}, finish: {chunk_finish_reason})")
-                                
-                                # Track completion tokens for Google responses
-                                if delta_text:
-                                    accumulated_response_text += delta_text
-                                
-                                # Serialize as JSON
-                                yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                                # Use optimized chunk from pool
+                                openai_chunk = optimizer.chunk_pool.acquire()
+                                try:
+                                    openai_chunk.update({
+                                        "id": response_id,
+                                        "object": "chat.completion.chunk",
+                                        "created": created_time,
+                                        "model": request_data['model'],
+                                        "service_tier": None,
+                                        "system_fingerprint": system_fingerprint,
+                                        "usage": None,
+                                        "provider": provider_id,
+                                        "choices": [{
+                                            "index": 0,
+                                            "delta": {
+                                                "content": delta_text if delta_text else "",
+                                                "refusal": None,
+                                                "role": "assistant",
+                                                "tool_calls": delta_tool_calls if len(delta_tool_calls) > 0 else None
+                                            },
+                                            "finish_reason": chunk_finish_reason,
+                                            "logprobs": None,
+                                            "native_finish_reason": chunk_finish_reason
+                                        }]
+                                    })
+                                    
+                                    chunk_id += 1
+                                    logger.debug(f"OpenAI chunk (delta length: {len(delta_text)}, finish: {chunk_finish_reason})")
+                                    
+                                    # Track completion tokens for Google responses using optimized accumulator
+                                    if delta_text:
+                                        accumulated_response_text = text_accumulator.append(delta_text)
+                                    
+                                    # Serialize as JSON and yield
+                                    yield f"data: {json.dumps(openai_chunk)}\n\n".encode('utf-8')
+                                finally:
+                                    optimizer.chunk_pool.release(openai_chunk)
                             
                             chunk_idx += 1
                         except Exception as chunk_error:

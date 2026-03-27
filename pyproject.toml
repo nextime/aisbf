@@ -52,4 +52,4 @@ packages = ["aisbf"]
 py-modules = ["cli"]
 
 [tool.setuptools.package-data]
-aisbf = ["*.json"]
+aisbf = ["*.json", "streaming_optimization.py"]

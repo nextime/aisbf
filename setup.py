@@ -116,6 +116,7 @@ setup(
             'aisbf/cache.py',
             'aisbf/classifier.py',
             'aisbf/response_cache.py',
+            'aisbf/streaming_optimization.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [

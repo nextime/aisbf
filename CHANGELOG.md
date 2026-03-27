@@ -44,6 +44,13 @@
   - Adaptive condensation based on context size
   - Condensation method chaining
   - Condensation bypass for short contexts
+- **Streaming Response Optimization**: Memory-efficient streaming with provider-specific optimizations
+  - Chunk Pooling: Reuses chunk objects to reduce memory allocations
+  - Backpressure Handling: Flow control to prevent overwhelming consumers
+  - Google Delta Calculation: Only sends new text since last chunk
+  - Kiro SSE Parsing: Optimized SSE parser with reduced string allocations
+  - OptimizedTextAccumulator: Memory-efficient text accumulation with truncation
+  - Configurable optimization settings via StreamingConfig
 
 ### Fixed
 - Model class now supports OpenRouter metadata fields preventing crashes in models list API
