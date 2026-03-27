@@ -21,6 +21,148 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block content %}
 <h2 style="margin-bottom: 30px;">Token Usage Analytics</h2>
 
+<!-- Date Range Filter Section -->
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+    <h3 style="margin-bottom: 15px;">Filter by Date Range</h3>
+    <form method="get" action="/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+        <div style="flex: 1; min-width: 200px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Time Range</label>
+            <select name="time_range" id="timeRangeSelect" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="1h" {% if selected_time_range == '1h' %}selected{% endif %}>Last 1 Hour</option>
+                <option value="6h" {% if selected_time_range == '6h' %}selected{% endif %}>Last 6 Hours</option>
+                <option value="24h" {% if selected_time_range == '24h' %}selected{% endif %}>Last 24 Hours</option>
+                <option value="7d" {% if selected_time_range == '7d' %}selected{% endif %}>Last 7 Days</option>
+                <option value="30d" {% if selected_time_range == '30d' %}selected{% endif %}>Last 30 Days</option>
+                <option value="90d" {% if selected_time_range == '90d' %}selected{% endif %}>Last 90 Days</option>
+                <option value="custom" {% if selected_time_range == 'custom' %}selected{% endif %}>Custom Range</option>
+            </select>
+        </div>
+        
+        <div id="customDateRange" style="display: {% if selected_time_range == 'custom' or from_date %}flex{% else %}none{% endif %}; flex-wrap: wrap; gap: 15px; flex: 2;">
+            <div style="flex: 1; min-width: 200px;">
+                <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">From Date & Time</label>
+                <input type="datetime-local" name="from_date" value="{{ from_date or '' }}" 
+                       style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+            </div>
+            <div style="flex: 1; min-width: 200px;">
+                <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">To Date & Time</label>
+                <input type="datetime-local" name="to_date" value="{{ to_date or '' }}" 
+                       style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+            </div>
+        </div>
+        
+        <div>
+            <button type="submit" style="padding: 10px 20px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                Apply Filter
+            </button>
+        </div>
+    </form>
+    
+    {% if from_date or to_date %}
+    <div style="margin-top: 15px; padding: 10px; background: #0f3460; border-radius: 4px;">
+        <strong style="color: #60a5fa;">Selected Range: </strong>
+        <span style="color: #e0e0e0;">
+            {% if from_date %}{{ from_date }}{% else %}Beginning{% endif %}
+            to 
+            {% if to_date %}{{ to_date }}{% else %}Now{% endif %}
+        </span>
+        {% if date_range_usage %}
+        <span style="margin-left: 20px; color: #a0a0a0;">
+            | Total: {{ date_range_usage.total_tokens }} tokens | Estimated Cost: ${{ "%.2f"|format(date_range_usage.estimated_cost) }}
+        </span>
+        {% endif %}
+    </div>
+    {% endif %}
+</div>
+
+<!-- Filter by Provider/Model/Rotation/Autoselect -->
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+    <h3 style="margin-bottom: 15px;">Filter by Provider, Model, Rotation, or Autoselect</h3>
+    <form method="get" action="/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+        <!-- Preserve date filter parameters -->
+        <input type="hidden" name="time_range" value="{{ selected_time_range }}">
+        {% if from_date %}<input type="hidden" name="from_date" value="{{ from_date }}">{% endif %}
+        {% if to_date %}<input type="hidden" name="to_date" value="{{ to_date }}">{% endif %}
+        
+        <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Provider</label>
+            <select name="provider_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="">All Providers</option>
+                {% for provider in available_providers %}
+                <option value="{{ provider }}" {% if selected_provider == provider %}selected{% endif %}>{{ provider }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Model</label>
+            <select name="model_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="">All Models</option>
+                {% for model in available_models %}
+                <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Rotation</label>
+            <select name="rotation_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="">All Rotations</option>
+                {% for rotation in available_rotations %}
+                <option value="{{ rotation }}" {% if selected_rotation == rotation %}selected{% endif %}>{{ rotation }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Autoselect</label>
+            <select name="autoselect_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="">All Autoselects</option>
+                {% for autoselect in available_autoselects %}
+                <option value="{{ autoselect }}" {% if selected_autoselect == autoselect %}selected{% endif %}>{{ autoselect }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
+        <div>
+            <button type="submit" style="padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+                Apply Filters
+            </button>
+        </div>
+        
+        {% if selected_provider or selected_model or selected_rotation or selected_autoselect %}
+        <div>
+            <a href="/dashboard/analytics?time_range={{ selected_time_range }}{% if from_date %}&from_date={{ from_date }}{% endif %}{% if to_date %}&to_date={{ to_date }}{% endif %}" style="padding: 10px 20px; background: #7f8c8d; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
+                Clear Filters
+            </a>
+        </div>
+        {% endif %}
+    </form>
+    
+    {% if selected_provider or selected_model or selected_rotation or selected_autoselect %}
+    <div style="margin-top: 15px; padding: 10px; background: #0f3460; border-radius: 4px;">
+        <strong style="color: #60a5fa;">Active Filters: </strong>
+        <span style="color: #e0e0e0;">
+            {% if selected_provider %}Provider: {{ selected_provider }}{% endif %}
+            {% if selected_model %}{% if selected_provider %} | {% endif %}Model: {{ selected_model }}{% endif %}
+            {% if selected_rotation %}{% if selected_provider or selected_model %} | {% endif %}Rotation: {{ selected_rotation }}{% endif %}
+            {% if selected_autoselect %}{% if selected_provider or selected_model or selected_rotation %} | {% endif %}Autoselect: {{ selected_autoselect }}{% endif %}
+        </span>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+document.getElementById('timeRangeSelect').addEventListener('change', function() {
+    var customRange = document.getElementById('customDateRange');
+    if (this.value === 'custom') {
+        customRange.style.display = 'flex';
+    } else {
+        customRange.style.display = 'none';
+    }
+});
+</script>
+
 {% if recommendations %}
 <h3 style="margin-bottom: 15px;">Optimization Recommendations</h3>
 <div style="margin-bottom: 30px;">
@@ -77,14 +219,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <h3 style="margin-top: 30px; margin-bottom: 15px;">Cost Overview</h3>
 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
     <div style="background: #2ecc71; color: white; padding: 20px; border-radius: 8px;">
-        <h4 style="font-size: 14px; margin-bottom: 10px;">Today's Estimated Cost</h4>
+        <h4 style="font-size: 14px; margin-bottom: 10px;">
+            {% if from_date or to_date %}Selected Period Cost{% else %}Today's Estimated Cost{% endif %}
+        </h4>
         <p style="font-size: 28px; font-weight: bold;">${{ "%.2f"|format(cost_overview.total_estimated_cost_today) }}</p>
+        {% if cost_overview.date_range %}
+        <small style="color: rgba(255,255,255,0.8);">
+            {{ cost_overview.date_range.start[:10] }} to {{ cost_overview.date_range.end[:10] }}
+        </small>
+        {% endif %}
     </div>
     {% for pc in cost_overview.providers %}
     <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
         <h4 style="font-size: 14px; margin-bottom: 5px;">{{ pc.provider_id }}</h4>
         <p style="font-size: 20px; font-weight: bold;">${{ "%.2f"|format(pc.estimated_cost) }}</p>
-        <small style="color: #a0a0a0;">{{ pc.tokens_today }} tokens today</small>
+        <small style="color: #a0a0a0;">{{ pc.tokens_today }} tokens</small>
     </div>
     {% endfor %}
 </div>
@@ -95,6 +244,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <tr>
         <th>Provider</th>
         <th>Model</th>
+        <th>Type</th>
         <th>Context Size</th>
         <th>Condense %</th>
         <th>Condense Method</th>
@@ -106,6 +256,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <tr>
         <td>{{ model.provider_id }}</td>
         <td>{{ model.model_name }}</td>
+        <td>
+            {% if model.is_rotation %}
+            <span style="color: #f39c12;">Rotation: {{ model.rotation_id }}</span>
+            {% elif model.is_autoselect %}
+            <span style="color: #9b59b6;">Autoselect: {{ model.autoselect_id }}</span>
+            {% else %}
+            <span style="color: #3498db;">Provider Model</span>
+            {% endif %}
+        </td>
         <td>{{ model.context_size|default('N/A') }}</td>
         <td>{{ model.condense_context|default('N/A') }}%</td>
         <td>{{ model.condense_method|default('None') }}</td>
@@ -123,12 +282,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <p style="color: #a0a0a0;">No model performance data available yet.</p>
 {% endif %}
 
-<h3 style="margin-top: 30px; margin-bottom: 15px;">Token Usage Over Time (24h)</h3>
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Token Usage Over Time {% if from_date or to_date %}(Custom Range){% else %}(24h){% endif %}</h3>
 {% if token_over_time != '[]' %}
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
     <canvas id="tokenChart" style="width: 100%; height: 300px;"></canvas>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/chartjs-adapter-date-fns"></script>
 <script>
     const tokenData = {{ token_over_time|safe }};
     
@@ -159,7 +319,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             options: {
                 responsive: true,
                 scales: {
-                    x: { type: 'time', time: { unit: 'hour' } },
+                    x: { 
+                        type: 'time', 
+                        time: { 
+                            unit: {% if selected_time_range == '1h' or selected_time_range == '6h' %}'hour'{% elif selected_time_range == '24h' %}'hour'{% elif selected_time_range == '7d' %}'day'{% else %}'day'{% endif %}
+                        },
+                        title: { display: true, text: 'Time' }
+                    },
                     y: { beginAtZero: true, title: { display: true, text: 'Tokens' } }
                 }
             }
@@ -169,10 +335,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         new Chart(document.getElementById('tokenChart'), {
             type: 'line',
             data: {
-                labels: tokenData.map(d => d.timestamp),
                 datasets: [{
                     label: 'Tokens Used',
-                    data: tokenData.map(d => d.tokens),
+                    data: tokenData.map(d => ({x: d.timestamp, y: d.tokens})),
                     borderColor: '#e94560',
                     backgroundColor: 'rgba(233, 69, 96, 0.1)',
                     fill: true,
@@ -182,7 +347,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             options: {
                 responsive: true,
                 scales: {
-                    x: { title: { display: true, text: 'Time' } },
+                    x: { 
+                        type: 'time',
+                        time: { 
+                            unit: {% if selected_time_range == '1h' or selected_time_range == '6h' %}'hour'{% elif selected_time_range == '24h' %}'hour'{% elif selected_time_range == '7d' %}'day'{% else %}'day'{% endif %}
+                        },
+                        title: { display: true, text: 'Time' }
+                    },
                     y: { beginAtZero: true, title: { display: true, text: 'Tokens' } }
                 }
             }
@@ -190,7 +361,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     }
 </script>
 {% else %}
-<p style="color: #a0a0a0;">No token usage data available yet.</p>
+<p style="color: #a0a0a0;">No token usage data available for the selected period.</p>
 {% endif %}
 
 <div style="margin-top: 30px; display: flex; gap: 10px;">

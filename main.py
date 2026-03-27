@@ -22,7 +22,8 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 Main application for AISBF.
 """
-from fastapi import FastAPI, HTTPException, Request, status, Form
+from typing import Optional
+from fastapi import FastAPI, HTTPException, Request, status, Form, Query
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -1102,7 +1103,16 @@ app.add_middleware(
 
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
-async def dashboard_analytics(request: Request):
+async def dashboard_analytics(
+    request: Request,
+    time_range: str = Query("24h"),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    provider_filter: Optional[str] = Query(None),
+    model_filter: Optional[str] = Query(None),
+    rotation_filter: Optional[str] = Query(None),
+    autoselect_filter: Optional[str] = Query(None)
+):
     """Token usage analytics dashboard"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
@@ -1115,20 +1125,73 @@ async def dashboard_analytics(request: Request):
     db = get_database()
     analytics = get_analytics(db)
     
-    # Get provider statistics
-    provider_stats = analytics.get_all_providers_stats()
+    # Parse date range
+    from_datetime = None
+    to_datetime = None
     
-    # Get token usage over time
-    token_over_time = analytics.get_token_usage_over_time(time_range='24h')
+    if from_date:
+        try:
+            from_datetime = datetime.fromisoformat(from_date.replace('Z', '+00:00'))
+        except ValueError:
+            pass
     
-    # Get model performance
-    model_performance = analytics.get_model_performance()
+    if to_date:
+        try:
+            to_datetime = datetime.fromisoformat(to_date.replace('Z', '+00:00'))
+        except ValueError:
+            pass
+    
+    # If custom date range is provided, use custom mode
+    if from_datetime and to_datetime:
+        time_range = 'custom'
+    
+    # Get available providers, models, rotations, and autoselects for filter dropdowns
+    available_providers = list(config.providers.keys()) if config else []
+    available_rotations = list(config.rotations.keys()) if config else []
+    available_autoselects = list(config.autoselect.keys()) if config else []
+    
+    # Get models from providers
+    available_models = []
+    if config and hasattr(config, 'providers'):
+        for provider_id, provider_config in config.providers.items():
+            if hasattr(provider_config, 'models') and provider_config.models:
+                for model in provider_config.models:
+                    available_models.append(f"{provider_id}/{model.name}")
+    
+    # Get provider statistics (with optional filter)
+    if provider_filter:
+        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime)]
+    else:
+        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime)
+    
+    # Get token usage over time (with optional filters)
+    token_over_time = analytics.get_token_usage_over_time(
+        provider_id=provider_filter,
+        time_range=time_range,
+        from_datetime=from_datetime,
+        to_datetime=to_datetime
+    )
+    
+    # Get model performance (with optional filters)
+    model_performance = analytics.get_model_performance(
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter
+    )
     
     # Get cost overview
-    cost_overview = analytics.get_cost_overview()
+    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime)
     
     # Get optimization recommendations
     recommendations = analytics.get_optimization_recommendations()
+    
+    # Get date range usage summary
+    date_range_usage = None
+    if from_datetime or to_datetime:
+        start = from_datetime or (datetime.now() - timedelta(days=1))
+        end = to_datetime or datetime.now()
+        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end)
     
     return templates.TemplateResponse("dashboard/analytics.html", {
         "request": request,
@@ -1137,7 +1200,19 @@ async def dashboard_analytics(request: Request):
         "token_over_time": json.dumps(token_over_time),
         "model_performance": model_performance,
         "cost_overview": cost_overview,
-        "recommendations": recommendations
+        "recommendations": recommendations,
+        "selected_time_range": time_range,
+        "from_date": from_date,
+        "to_date": to_date,
+        "date_range_usage": date_range_usage,
+        "available_providers": available_providers,
+        "available_models": available_models,
+        "available_rotations": available_rotations,
+        "available_autoselects": available_autoselects,
+        "selected_provider": provider_filter,
+        "selected_model": model_filter,
+        "selected_rotation": rotation_filter,
+        "selected_autoselect": autoselect_filter
     })
 
 @app.get("/dashboard/login", response_class=HTMLResponse)
