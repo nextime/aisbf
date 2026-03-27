@@ -621,6 +621,46 @@ class DatabaseManager:
             cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
             conn.commit()
 
+    def update_user(self, user_id: int, username: str, password_hash: str = None, role: str = None, is_active: bool = None):
+        """
+        Update a user.
+
+        Args:
+            user_id: User ID to update
+            username: New username
+            password_hash: New password hash (optional)
+            role: New role (optional)
+            is_active: New active status (optional)
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            # Build update query dynamically
+            updates = []
+            params = []
+            
+            updates.append(f"username = {placeholder}")
+            params.append(username)
+            
+            if password_hash:
+                updates.append(f"password_hash = {placeholder}")
+                params.append(password_hash)
+            
+            if role:
+                updates.append(f"role = {placeholder}")
+                params.append(role)
+            
+            if is_active is not None:
+                updates.append(f"is_active = {placeholder}")
+                params.append(1 if is_active else 0)
+            
+            params.append(user_id)
+            
+            query = f"UPDATE users SET {', '.join(updates)} WHERE id = {placeholder}"
+            cursor.execute(query, params)
+            conn.commit()
+
     # User-specific provider methods
     def save_user_provider(self, user_id: int, provider_name: str, config: Dict):
         """

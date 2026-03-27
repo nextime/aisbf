@@ -27,8 +27,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .header { background: #16213e; color: white; padding: 20px 0; margin-bottom: 30px; border-bottom: 2px solid #0f3460; }
         .header h1 { font-size: 24px; font-weight: 600; display: inline-block; }
         .header-actions { float: right; }
-        .nav { background: #16213e; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
-        .nav a { color: #a0a0a0; text-decoration: none; margin-right: 20px; padding: 8px 12px; border-radius: 4px; }
+        .nav { background: #16213e; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; flex-wrap: wrap; gap: 10px; }
+        .nav a { color: #a0a0a0; text-decoration: none; padding: 8px 12px; border-radius: 4px; flex-shrink: 0; }
         .nav a:hover { background: #0f3460; color: #e0e0e0; }
         .nav a.active { background: #e94560; color: white; }
         .content { background: #16213e; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
@@ -110,6 +110,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %}>Autoselect</a>
             <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %}>Prompts</a>
             <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %}>Analytics</a>
+            {% if request.session.role == 'admin' %}
+            <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
+            {% endif %}
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
             <a href="{{ url_for(request, '/dashboard/docs') }}" {% if '/docs' in request.path %}class="active"{% endif %}>Docs</a>
             <a href="{{ url_for(request, '/dashboard/about') }}" {% if '/about' in request.path %}class="active"{% endif %}>About</a>

@@ -1843,6 +1843,124 @@ async def dashboard_settings_save(
         "success": "Settings saved successfully! Restart server for changes to take effect."
     })
 
+    return templates.TemplateResponse("dashboard/settings.html", {
+        "request": request,
+        "session": request.session,
+        "config": aisbf_config,
+        "success": "Settings saved successfully! Restart server for changes to take effect."
+    })
+
+# Admin user management routes
+@app.get("/dashboard/users", response_class=HTMLResponse)
+async def dashboard_users(request: Request):
+    """Admin user management page"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    # Get all users
+    users = db.get_users()
+    
+    return templates.TemplateResponse("dashboard/users.html", {
+        "request": request,
+        "session": request.session,
+        "users": users
+    })
+
+@app.post("/dashboard/users/add")
+async def dashboard_users_add(request: Request, username: str = Form(...), password: str = Form(...), role: str = Form("user")):
+    """Add a new user"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    # Hash the password
+    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    
+    try:
+        # Get current admin username
+        admin_username = request.session.get('username', 'admin')
+        user_id = db.create_user(username, password_hash, role, admin_username)
+        return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
+    except Exception as e:
+        users = db.get_users()
+        return templates.TemplateResponse("dashboard/users.html", {
+            "request": request,
+            "session": request.session,
+            "users": users,
+            "error": f"Failed to create user: {str(e)}"
+        })
+
+@app.post("/dashboard/users/{user_id}/edit")
+async def dashboard_users_edit(request: Request, user_id: int, username: str = Form(...), password: str = Form(""), role: str = Form("user"), is_active: bool = Form(True)):
+    """Edit an existing user"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        # Update user (only if password is provided)
+        if password:
+            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            db.update_user(user_id, username, password_hash, role, is_active)
+        else:
+            db.update_user(user_id, username, None, role, is_active)
+        return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
+    except Exception as e:
+        users = db.get_users()
+        return templates.TemplateResponse("dashboard/users.html", {
+            "request": request,
+            "session": request.session,
+            "users": users,
+            "error": f"Failed to update user: {str(e)}"
+        })
+
+@app.post("/dashboard/users/{user_id}/toggle")
+async def dashboard_users_toggle(request: Request, user_id: int):
+    """Toggle user active status"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        users = db.get_users()
+        for user in users:
+            if user['id'] == user_id:
+                new_status = not user['is_active']
+                db.update_user(user_id, user['username'], None, user['role'], new_status)
+                return JSONResponse({"success": True})
+        return JSONResponse({"success": False, "error": "User not found"}, status_code=404)
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+@app.post("/dashboard/users/{user_id}/delete")
+async def dashboard_users_delete(request: Request, user_id: int):
+    """Delete a user"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        db.delete_user(user_id)
+        return JSONResponse({"success": True})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
 @app.post("/dashboard/restart")
 async def dashboard_restart(request: Request):
     """Restart the server"""

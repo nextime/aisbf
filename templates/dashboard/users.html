@@ -1,0 +1,226 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}User Management - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">User Management</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<!-- Add New User Form -->
+<div style="margin-bottom: 30px; padding: 20px; background: #0f3460; border-radius: 8px;">
+    <h3 style="margin-bottom: 15px;">Add New User</h3>
+    <form method="POST" action="{{ url_for(request, '/dashboard/users/add') }}" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
+        <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required style="width: 100%;">
+        </div>
+        <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required style="width: 100%;">
+        </div>
+        <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
+            <label for="role">Role</label>
+            <select id="role" name="role" style="width: 100%;">
+                <option value="user">User</option>
+                <option value="admin">Admin</option>
+            </select>
+        </div>
+        <button type="submit" class="btn">Add User</button>
+    </form>
+</div>
+
+<!-- Users Table -->
+<h3 style="margin-bottom: 15px;">All Users</h3>
+<table>
+    <thead>
+        <tr>
+            <th>ID</th>
+            <th>Username</th>
+            <th>Role</th>
+            <th>Created By</th>
+            <th>Created At</th>
+            <th>Last Login</th>
+            <th>Active</th>
+            <th>Actions</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% if users %}
+            {% for user in users %}
+            <tr>
+                <td>{{ user.id }}</td>
+                <td>{{ user.username }}</td>
+                <td>
+                    {% if user.role == 'admin' %}
+                    <span style="color: #e94560; font-weight: bold;">Admin</span>
+                    {% else %}
+                    <span style="color: #a0a0a0;">User</span>
+                    {% endif %}
+                </td>
+                <td>{{ user.created_by or '-' }}</td>
+                <td>{{ user.created_at }}</td>
+                <td>{{ user.last_login or 'Never' }}</td>
+                <td>
+                    {% if user.is_active %}
+                    <span style="color: #4ade80;">Yes</span>
+                    {% else %}
+                    <span style="color: #f87171;">No</span>
+                    {% endif %}
+                </td>
+                <td>
+                    <div style="display: flex; gap: 5px; flex-wrap: wrap;">
+                        <button onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.role }}', {{ user.is_active|lower }})" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin: 0;">Edit</button>
+                        <button onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})" class="btn btn-warning" style="padding: 5px 10px; font-size: 12px; margin: 0;">
+                            {% if user.is_active %}Disable{% else %}Enable{% endif %}
+                        </button>
+                        <button onclick="deleteUser({{ user.id }}, '{{ user.username }}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px; margin: 0;">Delete</button>
+                    </div>
+                </td>
+            </tr>
+            {% endfor %}
+        {% else %}
+            <tr>
+                <td colspan="8" style="text-align: center; color: #666;">No users found</td>
+            </tr>
+        {% endif %}
+    </tbody>
+</table>
+
+<!-- Edit User Modal -->
+<div id="edit-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000;">
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 30px; border-radius: 8px; width: 90%; max-width: 500px;">
+        <h3 style="margin-bottom: 20px;">Edit User</h3>
+        <form id="edit-form" method="POST">
+            <input type="hidden" id="edit-user-id" name="user_id">
+            <div class="form-group">
+                <label for="edit-username">Username</label>
+                <input type="text" id="edit-username" name="username" required>
+            </div>
+            <div class="form-group">
+                <label for="edit-password">New Password (leave blank to keep current)</label>
+                <input type="password" id="edit-password" name="password" placeholder="Enter new password">
+            </div>
+            <div class="form-group">
+                <label for="edit-role">Role</label>
+                <select id="edit-role" name="role">
+                    <option value="user">User</option>
+                    <option value="admin">Admin</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" id="edit-is-active" name="is_active" value="1">
+                    Active
+                </label>
+            </div>
+            <div style="display: flex; gap: 10px;">
+                <button type="submit" class="btn">Save Changes</button>
+                <button type="button" onclick="closeEditModal()" class="btn btn-secondary">Cancel</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<script>
+function editUser(userId, username, role, isActive) {
+    document.getElementById('edit-user-id').value = userId;
+    document.getElementById('edit-username').value = username;
+    document.getElementById('edit-role').value = role;
+    document.getElementById('edit-is-active').checked = isActive;
+    document.getElementById('edit-form').action = '/dashboard/users/' + userId + '/edit';
+    document.getElementById('edit-modal').style.display = 'block';
+}
+
+function closeEditModal() {
+    document.getElementById('edit-modal').style.display = 'none';
+}
+
+function toggleUserStatus(userId, currentStatus) {
+    const action = currentStatus ? 'disable' : 'enable';
+    if (confirm('Are you sure you want to ' + action + ' this user?')) {
+        fetch('/dashboard/users/' + userId + '/toggle', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || 'Failed to toggle user status');
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error);
+        });
+    }
+}
+
+function deleteUser(userId, username) {
+    if (confirm('Are you sure you want to delete user "' + username + '"? This action cannot be undone.')) {
+        fetch('/dashboard/users/' + userId + '/delete', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                alert(data.error || 'Failed to delete user');
+            }
+        })
+        .catch(error => {
+            alert('Error: ' + error);
+        });
+    }
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('edit-modal');
+    if (event.target === modal) {
+        closeEditModal();
+    }
+}
+</script>
+
+<style>
+table {
+    width: 100%;
+    border-collapse: collapse;
+}
+th, td {
+    padding: 12px;
+    text-align: left;
+    border-bottom: 1px solid #0f3460;
+}
+th {
+    background: #0f3460;
+    font-weight: 600;
+}
+</style>
+{% endblock %}
