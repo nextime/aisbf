@@ -276,6 +276,7 @@ class BaseProviderHandler:
         1. Retry-After header (seconds or HTTP date)
         2. X-RateLimit-Reset header (Unix timestamp)
         3. Response body fields (retry_after, reset_time, etc.)
+        4. X-RateLimit-* headers for auto-configuration
         
         Returns:
             Wait time in seconds, or None if cannot be determined
@@ -289,6 +290,17 @@ class BaseProviderHandler:
         logger.info("=== PARSING 429 RATE LIMIT RESPONSE ===")
         
         wait_seconds = None
+        rate_limit_headers = {}  # Store rate limit headers for auto-configuration
+        
+        # Check for rate limit headers (for auto-configuration)
+        if headers:
+            rate_limit_headers = {
+                'limit': headers.get('X-RateLimit-Limit') or headers.get('x-ratelimit-limit'),
+                'remaining': headers.get('X-RateLimit-Remaining') or headers.get('x-ratelimit-remaining'),
+                'reset': headers.get('X-RateLimit-Reset') or headers.get('x-ratelimit-reset'),
+                'reset_at': headers.get('X-RateLimit-Reset-After') or headers.get('x-ratelimit-reset-after')
+            }
+            logger.info(f"Rate limit headers found: {rate_limit_headers}")
         
         # Check Retry-After header
         if headers:
@@ -418,6 +430,8 @@ class BaseProviderHandler:
         Handle 429 rate limit error by parsing the response and disabling provider
         for the appropriate duration. Also records the 429 in the adaptive rate limiter.
         
+        Optionally auto-configures rate limits if not already configured.
+        
         Args:
             response_data: Response body (dict or string)
             headers: Response headers
@@ -434,6 +448,10 @@ class BaseProviderHandler:
         # Record 429 in adaptive rate limiter for learning
         self.adaptive_limiter.record_429(wait_seconds)
         
+        # Check for rate limit headers and auto-configure if not already set
+        if headers:
+            self._auto_configure_rate_limits(headers)
+        
         # Disable provider for the calculated duration
         self.error_tracking['disabled_until'] = time.time() + wait_seconds
         
@@ -445,6 +463,64 @@ class BaseProviderHandler:
         logger.error(f"Adaptive rate limit: {self.adaptive_limiter.current_rate_limit:.2f}s")
         logger.error(f"Provider will be automatically re-enabled after cooldown")
         logger.error("=== END 429 RATE LIMIT ERROR ===")
+
+    def _auto_configure_rate_limits(self, headers: Dict = None):
+        """
+        Auto-configure rate limits from response headers if not already configured.
+        
+        Looks for X-RateLimit-* headers and saves them to the provider config.
+        
+        Args:
+            headers: Response headers from the API
+        """
+        import logging
+        from .config import config
+        
+        logger = logging.getLogger(__name__)
+        
+        if not headers:
+            return
+        
+        # Extract rate limit headers
+        rate_limit_header = headers.get('X-RateLimit-Limit') or headers.get('x-ratelimit-limit')
+        remaining_header = headers.get('X-RateLimit-Remaining') or headers.get('x-ratelimit-remaining')
+        reset_header = headers.get('X-RateLimit-Reset') or headers.get('x-ratelimit-reset')
+        
+        if not rate_limit_header:
+            logger.debug("No X-RateLimit-Limit header found, skipping auto-configuration")
+            return
+        
+        try:
+            rate_limit_value = int(rate_limit_header)
+            logger.info(f"Found rate limit header: {rate_limit_value} requests")
+            
+            # Get current provider config
+            provider_config = config.providers.get(self.provider_id)
+            if not provider_config:
+                logger.debug(f"Provider {self.provider_id} not found in config")
+                return
+            
+            # Check if we don't have a rate limit configured
+            current_rate_limit = getattr(provider_config, 'rate_limit', None)
+            if current_rate_limit is None or current_rate_limit == 0:
+                # Calculate: use 80% of the limit to stay below it
+                auto_rate_limit = rate_limit_value * 0.8
+                
+                logger.info(f"Auto-configuring rate limit for {self.provider_id}: {auto_rate_limit:.1f}s (from header limit: {rate_limit_value})")
+                
+                # Try to save to config (this may not persist if config is immutable)
+                try:
+                    # Update the in-memory config
+                    if hasattr(provider_config, 'rate_limit'):
+                        provider_config.rate_limit = auto_rate_limit
+                        logger.info(f"✓ Auto-configured rate_limit: {auto_rate_limit:.1f}s for provider {self.provider_id}")
+                except Exception as e:
+                    logger.debug(f"Could not auto-configure rate limit: {e}")
+            else:
+                logger.debug(f"Rate limit already configured ({current_rate_limit}), skipping auto-configuration")
+                
+        except (ValueError, TypeError) as e:
+            logger.debug(f"Could not parse rate limit header: {e}")
 
     def is_rate_limited(self) -> bool:
         if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
@@ -1894,12 +1970,28 @@ class OpenAIProviderHandler(BaseProviderHandler):
                 elif hasattr(model, 'max_context_length') and model.max_context_length:
                     context_size = model.max_context_length
                 
+                # Extract pricing if available (OpenRouter-style)
+                pricing = None
+                if hasattr(model, 'pricing') and model.pricing:
+                    pricing = model.pricing
+                elif hasattr(model, 'top_provider') and model.top_provider:
+                    # Try to extract from top_provider
+                    top_provider = model.top_provider
+                    if hasattr(top_provider, 'dict'):
+                        top_provider = top_provider.dict()
+                    if isinstance(top_provider, dict):
+                        # Check for pricing in top_provider
+                        tp_pricing = top_provider.get('pricing')
+                        if tp_pricing:
+                            pricing = tp_pricing
+                
                 result.append(Model(
                     id=model.id,
                     name=model.id,
                     provider_id=self.provider_id,
                     context_size=context_size,
-                    context_length=context_size
+                    context_length=context_size,
+                    pricing=pricing
                 ))
             
             return result
@@ -3398,6 +3490,17 @@ class KiroProviderHandler(BaseProviderHandler):
                                 supported_parameters = model_data.get('supported_parameters')
                                 architecture = model_data.get('architecture')
                                 
+                                # For nexlab: extract rate_multiplier and rate_unit as pricing
+                                rate_multiplier = model_data.get('rate_multiplier')
+                                rate_unit = model_data.get('rate_unit')
+                                if rate_multiplier or rate_unit:
+                                    if not pricing:
+                                        pricing = {}
+                                    if rate_multiplier:
+                                        pricing['rate_multiplier'] = float(rate_multiplier) if isinstance(rate_multiplier, (int, float, str)) else None
+                                    if rate_unit:
+                                        pricing['rate_unit'] = rate_unit
+                                
                                 # Extract top_provider info (contains context_length, max_completion_tokens, is_moderated)
                                 if isinstance(top_provider, dict):
                                     top_provider_data = {
@@ -3567,6 +3670,23 @@ class KiroProviderHandler(BaseProviderHandler):
                         pricing = model_data.get('pricing')
                         description = model_data.get('description')
                         supported_parameters = model_data.get('supported_parameters')
+                        
+                        # For AWS Q API: extract pricing from promptTokenPrice and completionTokenPrice
+                        prompt_token_price = model_data.get('promptTokenPrice') or model_data.get('prompt_token_price')
+                        completion_token_price = model_data.get('completionTokenPrice') or model_data.get('completion_token_price')
+                        if prompt_token_price or completion_token_price:
+                            if not pricing:
+                                pricing = {}
+                            if prompt_token_price:
+                                try:
+                                    pricing['prompt'] = float(prompt_token_price)
+                                except (ValueError, TypeError):
+                                    pricing['prompt'] = prompt_token_price
+                            if completion_token_price:
+                                try:
+                                    pricing['completion'] = float(completion_token_price)
+                                except (ValueError, TypeError):
+                                    pricing['completion'] = completion_token_price
                         
                         # Extract top_provider info if present
                         top_provider = model_data.get('topProvider') or model_data.get('top_provider')
