@@ -764,6 +764,157 @@ class Analytics:
         self._latencies = {}
         self._error_types = {}
         logger.info("Analytics stats reset")
+    
+    # User-specific analytics methods
+    def get_user_stats(self, user_id: int) -> Dict[str, Any]:
+        """
+        Get token usage statistics for a specific user.
+        
+        Args:
+            user_id: The user ID
+            
+        Returns:
+            Dictionary with user token statistics
+        """
+        return self.db.get_user_token_usage_stats(user_id)
+    
+    def get_all_users_stats(self) -> List[Dict[str, Any]]:
+        """
+        Get token usage statistics for all users (admin only).
+        
+        Returns:
+            List of user statistics
+        """
+        return self.db.get_all_users_token_usage()
+    
+    def get_global_stats(self) -> Dict[str, Any]:
+        """
+        Get global token usage statistics (across all users and non-user requests).
+        
+        Returns:
+            Dictionary with global token statistics
+        """
+        # Get total tokens in last hour and day from the token_usage table
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            
+            # Last hour
+            cursor.execute(f'''
+                SELECT COALESCE(SUM(tokens_used), 0)
+                FROM token_usage
+                WHERE timestamp >= {placeholder}
+            ''', ((datetime.now() - timedelta(hours=1)).isoformat(),))
+            tokens_1h = cursor.fetchone()[0] or 0
+            
+            # Last day
+            cursor.execute(f'''
+                SELECT COALESCE(SUM(tokens_used), 0)
+                FROM token_usage
+                WHERE timestamp >= {placeholder}
+            ''', ((datetime.now() - timedelta(days=1)).isoformat(),))
+            tokens_1d = cursor.fetchone()[0] or 0
+            
+            # Last week
+            cursor.execute(f'''
+                SELECT COALESCE(SUM(tokens_used), 0)
+                FROM token_usage
+                WHERE timestamp >= {placeholder}
+            ''', ((datetime.now() - timedelta(days=7)).isoformat(),))
+            tokens_7d = cursor.fetchone()[0] or 0
+            
+            # Total by provider
+            cursor.execute(f'''
+                SELECT provider_id, COALESCE(SUM(tokens_used), 0) as total
+                FROM token_usage
+                GROUP BY provider_id
+            ''')
+            provider_totals = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            return {
+                'tokens_1h': tokens_1h,
+                'tokens_1d': tokens_1d,
+                'tokens_7d': tokens_7d,
+                'provider_totals': provider_totals,
+                'estimated_cost_1h': self.estimate_cost('global', tokens_1h),
+                'estimated_cost_1d': self.estimate_cost('global', tokens_1d),
+                'estimated_cost_7d': self.estimate_cost('global', tokens_7d)
+            }
+    
+    def get_user_token_usage_over_time(
+        self,
+        user_id: int,
+        time_range: str = '24h',
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
+        """
+        Get token usage over time for a specific user.
+        
+        Args:
+            user_id: The user ID
+            time_range: Time range ('1h', '6h', '24h', '7d', '30d', '90d', 'custom')
+            from_datetime: Optional custom start datetime
+            to_datetime: Optional custom end datetime
+            
+        Returns:
+            List of time-series data points
+        """
+        # Determine time range
+        if time_range == 'custom' and from_datetime and to_datetime:
+            cutoff = from_datetime
+            end_time = to_datetime
+        elif time_range == '1h':
+            cutoff = datetime.now() - timedelta(hours=1)
+            end_time = datetime.now()
+        elif time_range == '6h':
+            cutoff = datetime.now() - timedelta(hours=6)
+            end_time = datetime.now()
+        elif time_range == '24h':
+            cutoff = datetime.now() - timedelta(hours=24)
+            end_time = datetime.now()
+        elif time_range == '7d':
+            cutoff = datetime.now() - timedelta(days=7)
+            end_time = datetime.now()
+        elif time_range == '30d':
+            cutoff = datetime.now() - timedelta(days=30)
+            end_time = datetime.now()
+        elif time_range == '90d':
+            cutoff = datetime.now() - timedelta(days=90)
+            end_time = datetime.now()
+        else:  # Default 24h
+            cutoff = datetime.now() - timedelta(hours=24)
+            end_time = datetime.now()
+        
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            
+            if self.db.db_type == 'sqlite':
+                date_format = "%Y-%m-%d %H:%M"
+            else:
+                date_format = "%Y-%m-%d %H:%i"
+            
+            cursor.execute(f'''
+                SELECT 
+                    strftime('{date_format}', timestamp) as time_bucket,
+                    SUM(tokens_used) as tokens,
+                    provider_id
+                FROM token_usage
+                WHERE user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                GROUP BY time_bucket, provider_id
+                ORDER BY time_bucket
+            ''', (user_id, cutoff.isoformat(), end_time.isoformat()))
+            
+            results = []
+            for row in cursor.fetchall():
+                results.append({
+                    'timestamp': row[0],
+                    'tokens': row[1],
+                    'provider_id': row[2]
+                })
+            
+            return results
 
 
 # Global analytics instance

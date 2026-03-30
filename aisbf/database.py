@@ -133,12 +133,22 @@ class DatabaseManager:
             cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id INTEGER PRIMARY KEY {auto_increment},
+                    user_id INTEGER,
                     provider_id VARCHAR(255) NOT NULL,
                     model_name VARCHAR(255) NOT NULL,
                     tokens_used INTEGER NOT NULL,
                     timestamp TIMESTAMP DEFAULT {timestamp_default}
                 )
             ''')
+
+            # Create indexes for token_usage
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_token_user
+                    ON token_usage(user_id)
+                ''')
+            except:
+                pass
 
             # Create indexes for better query performance
             try:
@@ -408,7 +418,8 @@ class DatabaseManager:
         self,
         provider_id: str,
         model_name: str,
-        tokens_used: int
+        tokens_used: int,
+        user_id: Optional[int] = None
     ):
         """
         Record token usage for rate limiting.
@@ -417,23 +428,25 @@ class DatabaseManager:
             provider_id: The provider identifier
             model_name: The model name
             tokens_used: Number of tokens used in the request
+            user_id: Optional user ID for user-specific tracking
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                INSERT INTO token_usage (provider_id, model_name, tokens_used, timestamp)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-            ''', (provider_id, model_name, tokens_used))
+                INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, timestamp)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+            ''', (user_id, provider_id, model_name, tokens_used))
 
             conn.commit()
-            logger.debug(f"Recorded token usage for {provider_id}/{model_name}: {tokens_used}")
+            logger.debug(f"Recorded token usage for {provider_id}/{model_name}: {tokens_used} (user_id={user_id})")
     
     def get_token_usage(
         self,
         provider_id: str,
         model_name: str,
-        time_window: str = '1m'  # 1m, 1h, 1d
+        time_window: str = '1m',  # 1m, 1h, 1d
+        user_id: Optional[int] = None
     ) -> int:
         """
         Get total token usage for a model within a time window.
@@ -442,6 +455,7 @@ class DatabaseManager:
             provider_id: The provider identifier
             model_name: The model name
             time_window: Time window ('1m' for minute, '1h' for hour, '1d' for day)
+            user_id: Optional user ID to filter by
 
         Returns:
             Total tokens used within the time window
@@ -460,21 +474,132 @@ class DatabaseManager:
                 cutoff = datetime.now() - timedelta(minutes=1)
 
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
-            if self.db_type == 'sqlite':
-                cursor.execute(f'''
-                    SELECT COALESCE(SUM(tokens_used), 0)
-                    FROM token_usage
-                    WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
-                ''', (provider_id, model_name, cutoff.isoformat()))
-            else:  # mysql
-                cursor.execute(f'''
-                    SELECT COALESCE(SUM(tokens_used), 0)
-                    FROM token_usage
-                    WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
-                ''', (provider_id, model_name, cutoff.isoformat()))
+            
+            if user_id is not None:
+                if self.db_type == 'sqlite':
+                    cursor.execute(f'''
+                        SELECT COALESCE(SUM(tokens_used), 0)
+                        FROM token_usage
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                    ''', (user_id, provider_id, model_name, cutoff.isoformat()))
+                else:  # mysql
+                    cursor.execute(f'''
+                        SELECT COALESCE(SUM(tokens_used), 0)
+                        FROM token_usage
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                    ''', (user_id, provider_id, model_name, cutoff.isoformat()))
+            else:
+                if self.db_type == 'sqlite':
+                    cursor.execute(f'''
+                        SELECT COALESCE(SUM(tokens_used), 0)
+                        FROM token_usage
+                        WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                    ''', (provider_id, model_name, cutoff.isoformat()))
+                else:  # mysql
+                    cursor.execute(f'''
+                        SELECT COALESCE(SUM(tokens_used), 0)
+                        FROM token_usage
+                        WHERE provider_id = {placeholder} AND model_name = {placeholder} AND timestamp >= {placeholder}
+                    ''', (provider_id, model_name, cutoff.isoformat()))
 
             result = cursor.fetchone()
             return result[0] if result else 0
+    
+    def get_user_token_usage_stats(self, user_id: int) -> Dict[str, int]:
+        """
+        Get aggregated token usage statistics for a user across all providers.
+        
+        Args:
+            user_id: The user ID
+            
+        Returns:
+            Dictionary with TPM, TPH, TPD statistics
+        """
+        return {
+            'TPM': self.get_user_token_usage(user_id, '1m'),
+            'TPH': self.get_user_token_usage(user_id, '1h'),
+            'TPD': self.get_user_token_usage(user_id, '1d')
+        }
+    
+    def get_user_token_usage(self, user_id: int, time_window: str = '1m') -> int:
+        """
+        Get total token usage for a user within a time window.
+        
+        Args:
+            user_id: The user ID
+            time_window: Time window ('1m', '1h', '1d')
+            
+        Returns:
+            Total tokens used within the time window
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            if time_window == '1m':
+                cutoff = datetime.now() - timedelta(minutes=1)
+            elif time_window == '1h':
+                cutoff = datetime.now() - timedelta(hours=1)
+            elif time_window == '1d':
+                cutoff = datetime.now() - timedelta(days=1)
+            else:
+                cutoff = datetime.now() - timedelta(minutes=1)
+            
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT COALESCE(SUM(tokens_used), 0)
+                FROM token_usage
+                WHERE user_id = {placeholder} AND timestamp >= {placeholder}
+            ''', (user_id, cutoff.isoformat()))
+            
+            result = cursor.fetchone()
+            return result[0] if result else 0
+    
+    def get_all_users_token_usage(self) -> List[Dict]:
+        """
+        Get aggregated token usage for all users.
+        
+        Returns:
+            List of user statistics with token usage
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            # Get all users
+            cursor.execute(f'''
+                SELECT u.id, u.username, u.role
+                FROM users u
+                WHERE u.is_active = 1
+            ''')
+            
+            users = []
+            for row in cursor.fetchall():
+                user_id = row[0]
+                # Get token usage for this user in last hour and day
+                cursor.execute(f'''
+                    SELECT COALESCE(SUM(tokens_used), 0)
+                    FROM token_usage
+                    WHERE user_id = {placeholder} AND timestamp >= {placeholder}
+                ''', (user_id, (datetime.now() - timedelta(hours=1)).isoformat()))
+                tokens_1h = cursor.fetchone()[0] or 0
+                
+                cursor.execute(f'''
+                    SELECT COALESCE(SUM(tokens_used), 0)
+                    FROM token_usage
+                    WHERE user_id = {placeholder} AND timestamp >= {placeholder}
+                ''', (user_id, (datetime.now() - timedelta(days=1)).isoformat()))
+                tokens_1d = cursor.fetchone()[0] or 0
+                
+                users.append({
+                    'user_id': user_id,
+                    'username': row[1],
+                    'role': row[2],
+                    'tokens_1h': tokens_1h,
+                    'tokens_1d': tokens_1d
+                })
+            
+            return users
     
     def cleanup_old_token_usage(self, days_to_keep: int = 7):
         """

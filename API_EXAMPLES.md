@@ -766,6 +766,262 @@ Default credentials:
 - Username: `admin`
 - Password: `admin` (SHA256 hashed in config)
 
+## User-Specific API Endpoints
+
+AISBF provides user-specific API endpoints that allow authenticated users to access their own configurations. These endpoints are useful for users who want to manage their own providers, rotations, and autoselects separately from the global configuration.
+
+### Authentication
+
+All user-specific endpoints require authentication via Bearer token:
+
+```bash
+curl -H "Authorization: Bearer YOUR_USER_TOKEN" http://localhost:17765/api/user/models
+```
+
+Generate a user token from the dashboard: **Dashboard > My Account > API Tokens**
+
+### User API Endpoints
+
+#### List User Models
+
+Returns all models from the user's own providers, rotations, and autoselects:
+
+```bash
+# Get all user models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+```
+
+Response includes:
+- User provider models (`user-provider/provider_id/model_name`)
+- User rotation models (`user-rotation/rotation_name`)
+- User autoselect models (`user-autoselect/autoselect_name`)
+
+#### List User Providers
+
+Returns all user-configured providers:
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+```
+
+#### List User Rotations
+
+Returns all user-configured rotations:
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations
+```
+
+#### List User Autoselects
+
+Returns all user-configured autoselects:
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/autoselects
+```
+
+#### User Chat Completions
+
+Send chat completion requests using user's own configurations:
+
+```bash
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "user-rotation/myrotation",
+    "messages": [{"role": "user", "content": "Hello"}]
+  }' \
+  http://localhost:17765/api/user/chat/completions
+```
+
+**Model formats for user endpoints:**
+- `user-provider/provider_id/model_name` - Use user's provider
+- `user-rotation/rotation_name` - Use user's rotation  
+- `user-autoselect/autoselect_name` - Use user's autoselect
+
+**Admin users** can also access global configurations via these endpoints using the format:
+- `provider/model_name` - Global provider
+- `rotation/rotation_name` - Global rotation
+- `autoselect/autoselect_name` - Global autoselect
+
+#### List Models for Specific Config Type
+
+Get models for a specific user configuration type:
+
+```bash
+# Get user provider models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers/models
+
+# Get user rotation models  
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations/models
+
+# Get user autoselect models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/autoselects/models
+```
+
+### Python Examples
+
+```python
+import requests
+
+BASE_URL = "http://localhost:17765"
+TOKEN = "YOUR_USER_TOKEN"
+
+headers = {"Authorization": f"Bearer {TOKEN}"}
+
+# List user models
+response = requests.get(f"{BASE_URL}/api/user/models", headers=headers)
+print(response.json())
+
+# List user providers
+response = requests.get(f"{BASE_URL}/api/user/providers", headers=headers)
+print(response.json())
+
+# Send chat completion using user rotation
+response = requests.post(
+    f"{BASE_URL}/api/user/chat/completions",
+    headers=headers,
+    json={
+        "model": "user-rotation/myrotation",
+        "messages": [{"role": "user", "content": "Hello"}]
+    }
+)
+print(response.json())
+```
+
+### Using with OpenAI SDK
+
+```python
+from openai import OpenAI
+
+client = OpenAI(
+    base_url="http://localhost:17765/api/v1",
+    api_key="YOUR_USER_TOKEN"  # Use user token as API key
+)
+
+# Use user's rotation
+response = client.chat.completions.create(
+    model="user-rotation/myrotation",
+    messages=[{"role": "user", "content": "Hello"}]
+)
+
+print(response.choices[0].message.content)
+```
+
+## MCP User Tools
+
+The MCP server includes user-specific tools that allow authenticated users to configure their own models, providers, rotations, and autoselects. These tools are available when a user_id is associated with the authenticated token.
+
+### Available User Tools
+
+**User Models:**
+- `list_user_models` - List all models from user's own configurations
+
+**User Providers:**
+- `list_user_providers` - List all user-configured providers
+- `get_user_provider` - Get a specific user provider
+- `set_user_provider` - Save a user provider configuration
+- `delete_user_provider` - Delete a user provider
+
+**User Rotations:**
+- `list_user_rotations` - List all user-configured rotations
+- `get_user_rotation` - Get a specific user rotation
+- `set_user_rotation` - Save a user rotation configuration
+- `delete_user_rotation` - Delete a user rotation
+
+**User Autoselects:**
+- `list_user_autoselects` - List all user-configured autoselects
+- `get_user_autoselect` - Get a specific user autoselect
+- `set_user_autoselect` - Save a user autoselect configuration
+- `delete_user_autoselect` - Delete a user autoselect
+
+**User Chat:**
+- `user_chat_completion` - Send chat completion using user's configurations
+
+### MCP User Tool Examples
+
+```bash
+# List user models
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "list_user_models",
+      "arguments": {}
+    }
+  }'
+
+# Set a user provider
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "set_user_provider",
+      "arguments": {
+        "provider_id": "myprovider",
+        "provider_data": {
+          "name": "My Provider",
+          "type": "openai",
+          "endpoint": "https://api.openai.com/v1",
+          "api_key": "sk-...",
+          "models": [
+            {"name": "gpt-4"}
+          ]
+        }
+      }
+    }
+  }'
+
+# Send chat using user's rotation
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "tools/call",
+    "params": {
+      "name": "user_chat_completion",
+      "arguments": {
+        "model": "user-rotation/myrotation",
+        "messages": [{"role": "user", "content": "Hello"}]
+      }
+    }
+  }'
+```
+
+### Direct Tool Call Examples
+
+```bash
+# List user providers
+curl -X POST http://localhost:17765/mcp/tools/call \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "list_user_providers",
+    "arguments": {}
+  }'
+
+# Get user rotation
+curl -X POST http://localhost:17765/mcp/tools/call \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "get_user_rotation",
+    "arguments": {
+      "rotation_id": "myrotation"
+    }
+  }'
+```
+
 ## License
 
 Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
