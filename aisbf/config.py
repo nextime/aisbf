@@ -69,6 +69,7 @@ class ProviderConfig(BaseModel):
     api_key: Optional[str] = None  # Optional API key in provider config
     models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
     kiro_config: Optional[Dict] = None  # Optional Kiro-specific configuration (credentials, region, etc.)
+    claude_config: Optional[Dict] = None  # Optional Claude-specific configuration (credentials file path)
     # Default settings for models in this provider
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
@@ -80,9 +81,10 @@ class ProviderConfig(BaseModel):
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
     # Provider-native caching configuration
-    enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching)
+    enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching, OpenAI-compatible APIs)
     cache_ttl: Optional[int] = None  # Cache TTL in seconds for Google Context Caching API
-    min_cacheable_tokens: Optional[int] = 1000  # Minimum token count for content to be cacheable
+    min_cacheable_tokens: Optional[int] = 1024  # Minimum token count for content to be cacheable (default matches OpenAI)
+    prompt_cache_key: Optional[str] = None  # Optional cache key for OpenAI's load balancer routing optimization
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this provider (None = use global default)
 

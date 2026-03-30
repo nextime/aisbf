@@ -269,6 +269,36 @@ class DatabaseManager:
 
             conn.commit()
             logger.info("Database tables initialized successfully")
+            
+            # Create user_auth_files table for storing authentication file metadata
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS user_auth_files (
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    user_id INTEGER NOT NULL,
+                    provider_id VARCHAR(255) NOT NULL,
+                    file_type VARCHAR(50) NOT NULL,
+                    original_filename VARCHAR(255) NOT NULL,
+                    stored_filename VARCHAR(255) NOT NULL,
+                    file_path TEXT NOT NULL,
+                    file_size INTEGER,
+                    mime_type VARCHAR(100),
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    UNIQUE(user_id, provider_id, file_type)
+                )
+            ''')
+            
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_user_auth_files_user_provider
+                    ON user_auth_files(user_id, provider_id)
+                ''')
+            except:
+                pass  # Index might already exist
+            
+            conn.commit()
+            logger.info("User auth files table initialized")
     
     def record_context_dimension(
         self,
@@ -609,16 +639,17 @@ class DatabaseManager:
         Args:
             user_id: User ID to delete
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
             # Delete user configurations first (due to foreign key constraints)
-            cursor.execute('DELETE FROM user_providers WHERE user_id = ?', (user_id,))
-            cursor.execute('DELETE FROM user_rotations WHERE user_id = ?', (user_id,))
-            cursor.execute('DELETE FROM user_autoselects WHERE user_id = ?', (user_id,))
-            cursor.execute('DELETE FROM user_api_tokens WHERE user_id = ?', (user_id,))
-            cursor.execute('DELETE FROM user_token_usage WHERE user_id = ?', (user_id,))
+            cursor.execute(f'DELETE FROM user_providers WHERE user_id = {placeholder}', (user_id,))
+            cursor.execute(f'DELETE FROM user_rotations WHERE user_id = {placeholder}', (user_id,))
+            cursor.execute(f'DELETE FROM user_autoselects WHERE user_id = {placeholder}', (user_id,))
+            cursor.execute(f'DELETE FROM user_api_tokens WHERE user_id = {placeholder}', (user_id,))
+            cursor.execute(f'DELETE FROM user_token_usage WHERE user_id = {placeholder}', (user_id,))
             # Delete the user
-            cursor.execute('DELETE FROM users WHERE id = ?', (user_id,))
+            cursor.execute(f'DELETE FROM users WHERE id = {placeholder}', (user_id,))
             conn.commit()
 
     def update_user(self, user_id: int, username: str, password_hash: str = None, role: str = None, is_active: bool = None):
@@ -671,13 +702,22 @@ class DatabaseManager:
             provider_name: Provider name
             config: Provider configuration dictionary
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             config_json = json.dumps(config)
-            cursor.execute('''
-                INSERT OR REPLACE INTO user_providers (user_id, provider_id, config, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (user_id, provider_name, config_json))
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_providers (user_id, provider_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, provider_name, config_json))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_providers (user_id, provider_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE config=VALUES(config), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, provider_name, config_json))
             conn.commit()
 
     def get_user_providers(self, user_id: int) -> List[Dict]:
@@ -690,12 +730,13 @@ class DatabaseManager:
         Returns:
             List of provider configurations
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT provider_id, config, created_at, updated_at
                 FROM user_providers
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
                 ORDER BY provider_id
             ''', (user_id,))
 
@@ -720,12 +761,13 @@ class DatabaseManager:
         Returns:
             Provider configuration dict or None
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT config, created_at, updated_at
                 FROM user_providers
-                WHERE user_id = ? AND provider_id = ?
+                WHERE user_id = {placeholder} AND provider_id = {placeholder}
             ''', (user_id, provider_name))
 
             row = cursor.fetchone()
@@ -745,11 +787,12 @@ class DatabaseManager:
             user_id: User ID
             provider_name: Provider name
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 DELETE FROM user_providers
-                WHERE user_id = ? AND provider_id = ?
+                WHERE user_id = {placeholder} AND provider_id = {placeholder}
             ''', (user_id, provider_name))
             conn.commit()
 
@@ -763,13 +806,22 @@ class DatabaseManager:
             rotation_name: Rotation name
             config: Rotation configuration dictionary
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             config_json = json.dumps(config)
-            cursor.execute('''
-                INSERT OR REPLACE INTO user_rotations (user_id, rotation_id, config, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (user_id, rotation_name, config_json))
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_rotations (user_id, rotation_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, rotation_name, config_json))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_rotations (user_id, rotation_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE config=VALUES(config), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, rotation_name, config_json))
             conn.commit()
 
     def get_user_rotations(self, user_id: int) -> List[Dict]:
@@ -782,12 +834,13 @@ class DatabaseManager:
         Returns:
             List of rotation configurations
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT rotation_id, config, created_at, updated_at
                 FROM user_rotations
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
                 ORDER BY rotation_id
             ''', (user_id,))
 
@@ -812,12 +865,13 @@ class DatabaseManager:
         Returns:
             Rotation configuration dict or None
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT config, created_at, updated_at
                 FROM user_rotations
-                WHERE user_id = ? AND rotation_id = ?
+                WHERE user_id = {placeholder} AND rotation_id = {placeholder}
             ''', (user_id, rotation_name))
 
             row = cursor.fetchone()
@@ -837,11 +891,12 @@ class DatabaseManager:
             user_id: User ID
             rotation_name: Rotation name
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 DELETE FROM user_rotations
-                WHERE user_id = ? AND rotation_id = ?
+                WHERE user_id = {placeholder} AND rotation_id = {placeholder}
             ''', (user_id, rotation_name))
             conn.commit()
 
@@ -855,13 +910,22 @@ class DatabaseManager:
             autoselect_name: Autoselect name
             config: Autoselect configuration dictionary
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
             config_json = json.dumps(config)
-            cursor.execute('''
-                INSERT OR REPLACE INTO user_autoselects (user_id, autoselect_id, config, updated_at)
-                VALUES (?, ?, ?, CURRENT_TIMESTAMP)
-            ''', (user_id, autoselect_name, config_json))
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_autoselects (user_id, autoselect_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, autoselect_name, config_json))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_autoselects (user_id, autoselect_id, config, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE config=VALUES(config), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, autoselect_name, config_json))
             conn.commit()
 
     def get_user_autoselects(self, user_id: int) -> List[Dict]:
@@ -874,12 +938,13 @@ class DatabaseManager:
         Returns:
             List of autoselect configurations
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT autoselect_id, config, created_at, updated_at
                 FROM user_autoselects
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
                 ORDER BY autoselect_id
             ''', (user_id,))
 
@@ -904,12 +969,13 @@ class DatabaseManager:
         Returns:
             Autoselect configuration dict or None
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT config, created_at, updated_at
                 FROM user_autoselects
-                WHERE user_id = ? AND autoselect_id = ?
+                WHERE user_id = {placeholder} AND autoselect_id = {placeholder}
             ''', (user_id, autoselect_name))
 
             row = cursor.fetchone()
@@ -929,11 +995,12 @@ class DatabaseManager:
             user_id: User ID
             autoselect_name: Autoselect name
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 DELETE FROM user_autoselects
-                WHERE user_id = ? AND autoselect_id = ?
+                WHERE user_id = {placeholder} AND autoselect_id = {placeholder}
             ''', (user_id, autoselect_name))
             conn.commit()
 
@@ -950,11 +1017,12 @@ class DatabaseManager:
         Returns:
             Token ID
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 INSERT INTO user_api_tokens (user_id, token, description)
-                VALUES (?, ?, ?)
+                VALUES ({placeholder}, {placeholder}, {placeholder})
             ''', (user_id, token, description))
             conn.commit()
             return cursor.lastrowid
@@ -969,12 +1037,13 @@ class DatabaseManager:
         Returns:
             List of token dictionaries
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT id, token, description, created_at, last_used, is_active
                 FROM user_api_tokens
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
                 ORDER BY created_at DESC
             ''', (user_id,))
 
@@ -1000,13 +1069,14 @@ class DatabaseManager:
         Returns:
             User dict if authenticated, None otherwise
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT u.id, u.username, u.role, t.id as token_id
                 FROM users u
                 JOIN user_api_tokens t ON u.id = t.user_id
-                WHERE t.token = ? AND t.is_active = 1 AND u.is_active = 1
+                WHERE t.token = {placeholder} AND t.is_active = 1 AND u.is_active = 1
             ''', (token,))
 
             row = cursor.fetchone()
@@ -1027,11 +1097,12 @@ class DatabaseManager:
             user_id: User ID
             token_id: Token ID
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 DELETE FROM user_api_tokens
-                WHERE id = ? AND user_id = ?
+                WHERE id = {placeholder} AND user_id = {placeholder}
             ''', (token_id, user_id))
             conn.commit()
 
@@ -1047,18 +1118,19 @@ class DatabaseManager:
             model_name: Model name
             tokens_used: Number of tokens used
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 INSERT INTO user_token_usage (user_id, token_id, provider_id, model_name, tokens_used)
-                VALUES (?, ?, ?, ?, ?)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
             ''', (user_id, token_id, provider_id, model_name, tokens_used))
 
             # Update last_used timestamp for the token
-            cursor.execute('''
+            cursor.execute(f'''
                 UPDATE user_api_tokens
                 SET last_used = CURRENT_TIMESTAMP
-                WHERE id = ?
+                WHERE id = {placeholder}
             ''', (token_id,))
 
             conn.commit()
@@ -1073,12 +1145,13 @@ class DatabaseManager:
         Returns:
             List of token usage records
         """
-        with sqlite3.connect(self.db_path) as conn:
+        with self._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute('''
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
                 SELECT provider_id, model_name, tokens_used, timestamp
                 FROM user_token_usage
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
                 ORDER BY timestamp DESC
                 LIMIT 1000
             ''', (user_id,))
@@ -1092,6 +1165,185 @@ class DatabaseManager:
                     'timestamp': row[3]
                 })
             return usage
+    
+    # User authentication file methods
+    def save_user_auth_file(self, user_id: int, provider_id: str, file_type: str,
+                           original_filename: str, stored_filename: str,
+                           file_path: str, file_size: int, mime_type: str = None) -> int:
+        """
+        Save user authentication file metadata.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            file_type: Type of file (e.g., 'credentials', 'database', 'config')
+            original_filename: Original uploaded filename
+            stored_filename: Filename stored on disk
+            file_path: Full path to stored file
+            file_size: File size in bytes
+            mime_type: MIME type of the file
+            
+        Returns:
+            File record ID
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_auth_files
+                    (user_id, provider_id, file_type, original_filename, stored_filename,
+                     file_path, file_size, mime_type, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder},
+                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, provider_id, file_type, original_filename, stored_filename,
+                      file_path, file_size, mime_type))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_auth_files
+                    (user_id, provider_id, file_type, original_filename, stored_filename,
+                     file_path, file_size, mime_type, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder},
+                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                    original_filename=VALUES(original_filename), stored_filename=VALUES(stored_filename),
+                    file_path=VALUES(file_path), file_size=VALUES(file_size), mime_type=VALUES(mime_type),
+                    updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, provider_id, file_type, original_filename, stored_filename,
+                      file_path, file_size, mime_type))
+            
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_user_auth_files(self, user_id: int, provider_id: str = None) -> List[Dict]:
+        """
+        Get all authentication files for a user.
+        
+        Args:
+            user_id: User ID
+            provider_id: Optional provider ID to filter by
+            
+        Returns:
+            List of file metadata dictionaries
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if provider_id:
+                cursor.execute(f'''
+                    SELECT id, provider_id, file_type, original_filename, stored_filename,
+                           file_path, file_size, mime_type, created_at, updated_at
+                    FROM user_auth_files
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder}
+                    ORDER BY provider_id, file_type
+                ''', (user_id, provider_id))
+            else:
+                cursor.execute(f'''
+                    SELECT id, provider_id, file_type, original_filename, stored_filename,
+                           file_path, file_size, mime_type, created_at, updated_at
+                    FROM user_auth_files
+                    WHERE user_id = {placeholder}
+                    ORDER BY provider_id, file_type
+                ''', (user_id,))
+            
+            files = []
+            for row in cursor.fetchall():
+                files.append({
+                    'id': row[0],
+                    'provider_id': row[1],
+                    'file_type': row[2],
+                    'original_filename': row[3],
+                    'stored_filename': row[4],
+                    'file_path': row[5],
+                    'file_size': row[6],
+                    'mime_type': row[7],
+                    'created_at': row[8],
+                    'updated_at': row[9]
+                })
+            return files
+    
+    def get_user_auth_file(self, user_id: int, provider_id: str, file_type: str) -> Optional[Dict]:
+        """
+        Get a specific authentication file for a user.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            file_type: Type of file
+            
+        Returns:
+            File metadata dictionary or None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT id, provider_id, file_type, original_filename, stored_filename,
+                       file_path, file_size, mime_type, created_at, updated_at
+                FROM user_auth_files
+                WHERE user_id = {placeholder} AND provider_id = {placeholder} AND file_type = {placeholder}
+            ''', (user_id, provider_id, file_type))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'provider_id': row[1],
+                    'file_type': row[2],
+                    'original_filename': row[3],
+                    'stored_filename': row[4],
+                    'file_path': row[5],
+                    'file_size': row[6],
+                    'mime_type': row[7],
+                    'created_at': row[8],
+                    'updated_at': row[9]
+                }
+            return None
+    
+    def delete_user_auth_file(self, user_id: int, provider_id: str, file_type: str) -> bool:
+        """
+        Delete an authentication file record.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            file_type: Type of file
+            
+        Returns:
+            True if deleted, False if not found
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                DELETE FROM user_auth_files
+                WHERE user_id = {placeholder} AND provider_id = {placeholder} AND file_type = {placeholder}
+            ''', (user_id, provider_id, file_type))
+            conn.commit()
+            return cursor.rowcount > 0
+    
+    def delete_user_auth_files_by_provider(self, user_id: int, provider_id: str) -> int:
+        """
+        Delete all authentication files for a provider.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            
+        Returns:
+            Number of files deleted
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                DELETE FROM user_auth_files
+                WHERE user_id = {placeholder} AND provider_id = {placeholder}
+            ''', (user_id, provider_id))
+            conn.commit()
+            return cursor.rowcount
 
 
 # Global database manager instance

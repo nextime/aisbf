@@ -525,6 +525,87 @@ Once configured, kiro-gateway can be used like any other provider in AISBF:
 - Use Claude models in AISBF rotations alongside other providers
 - Automatic failover and load balancing with other providers
 
+### Claude Code Provider Integration
+
+**Overview:**
+Claude Code is an OAuth2-based authentication method for accessing Claude models through the official Anthropic API with subscription-based access. It uses the same authentication flow as the official claude-cli tool.
+
+**What is Claude Code:**
+- OAuth2 authentication for Claude API access
+- Uses subscription-based access (claude-code)
+- Compatible with claude-cli credentials
+- Provides access to latest Claude models (3.7 Sonnet, 3.5 Sonnet, 3.5 Haiku, etc.)
+- Supports all Claude features: streaming, tools, vision, extended thinking
+
+**Integration Architecture:**
+- [`ClaudeAuth`](aisbf/claude_auth.py) class handles OAuth2 PKCE flow
+- [`ClaudeProviderHandler`](aisbf/providers.py) in [`aisbf/providers.py`](aisbf/providers.py) manages API requests
+- Supports all standard AISBF features: streaming, tools, rate limiting, error tracking
+
+**Configuration:**
+
+**IMPORTANT:** Claude providers use OAuth2 authentication instead of API keys. The `claude_config` object contains authentication settings.
+
+**Claude Provider Configuration:**
+```json
+{
+  "claude": {
+    "id": "claude",
+    "name": "Claude Code (OAuth2)",
+    "endpoint": "https://api.anthropic.com/v1",
+    "type": "claude",
+    "api_key_required": false,
+    "rate_limit": 0,
+    "claude_config": {
+      "credentials_file": "~/.claude_credentials.json"
+    },
+    "models": [
+      {
+        "name": "claude-3-7-sonnet-20250219",
+        "rate_limit": 0,
+        "max_request_tokens": 200000,
+        "context_size": 200000
+      }
+    ]
+  }
+}
+```
+
+**Claude Configuration Fields (claude_config):**
+- `credentials_file`: Path to OAuth2 credentials file (default: `~/.claude_credentials.json`)
+
+**Authentication Flow:**
+1. First request triggers OAuth2 flow if no credentials exist
+2. Browser opens to https://claude.ai for authentication
+3. User logs in with Claude account
+4. Authorization code exchanged for access token
+5. Credentials saved to file for future use
+6. Automatic token refresh when expired
+
+**Setup Requirements:**
+1. Claude subscription (claude-code access)
+2. Web browser for initial authentication
+3. Port 54545 available for OAuth callback
+
+**Available Models:**
+- `claude-3-7-sonnet-20250219` - Latest Claude 3.7 Sonnet
+- `claude-3-5-sonnet-20241022` - Claude 3.5 Sonnet
+- `claude-3-5-haiku-20241022` - Claude 3.5 Haiku (fast)
+- `claude-3-opus-20240229` - Claude 3 Opus (top-tier)
+
+**Usage:**
+Once configured, claude provider can be used like any other provider in AISBF:
+- Direct provider access: `/api/claude/chat/completions`
+- Rotation access: `/api/claude-code/chat/completions`
+- Model listing: `/api/claude/models`
+
+**Benefits:**
+- Access Claude models through OAuth2 subscription
+- No need to manage API keys
+- Automatic token refresh
+- Use Claude models in AISBF rotations alongside other providers
+- Automatic failover and load balancing with other providers
+
 ### Modifying Configuration
 1. Edit files in `~/.aisbf/` for user-specific changes
 2. Edit files in installed location for system-wide defaults

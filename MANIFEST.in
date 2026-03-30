@@ -11,3 +11,5 @@ recursive-include aisbf *.py
 recursive-include templates *.html
 recursive-include templates *.css
 recursive-include templates *.js
+recursive-include static *.zip
+recursive-include static/extension *.js *.json *.html *.md *.png *.svg

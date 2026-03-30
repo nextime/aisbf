@@ -36,7 +36,7 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Provider-Level Defaults**: Set default condensation settings at provider level with cascading fallback logic
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
 - **Enhanced Context Condensation**: 8 condensation methods including hierarchical, conversational, semantic, algorithmic, sliding window, importance-based, entity-aware, and code-aware condensation
-- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
+- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control`, Google Context Caching, and OpenAI-compatible APIs (including prompt_cache_key for OpenAI load balancer routing)
 - **Response Caching**: 20-30% cache hit rate with semantic deduplication across multiple backends (memory, Redis, SQLite, MySQL)
 - **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window with provider-specific configurations
 - **Streaming Response Optimization**: 10-20% memory reduction with chunk pooling, backpressure handling, and provider-specific streaming optimizations for Google and Kiro providers
@@ -362,6 +362,73 @@ Edit `~/.aisbf/aisbf.json`:
 - **Reduced API Calls**: Cached provider model listings reduce API overhead
 - **Lower Latency**: Redis provides sub-millisecond cache access
 - **Scalability**: Distributed Redis supports multiple AISBF instances
+
+### Provider-Native Caching Configuration
+
+AISBF supports provider-native caching for reduced API costs and latency across multiple provider types:
+
+#### Supported Providers
+
+| Provider | Caching Method | Configuration |
+|----------|---------------|---------------|
+| **OpenAI** | Automatic prefix caching (no code change needed) | Enabled by default for prompts >1024 tokens |
+| **DeepSeek** | Automatic in 64-token chunks | Enabled by default |
+| **Anthropic** | `cache_control` with `{"type": "ephemeral"}` | Requires `enable_native_caching: true` |
+| **OpenRouter** | `cache_control` (wraps Anthropic) | Requires `enable_native_caching: true` |
+| **Google** | Context Caching API (`cached_contents.create`) | Requires `enable_native_caching: true` and `cache_ttl` |
+
+#### Configuration Options
+
+Add to provider configuration in `providers.json`:
+
+```json
+{
+  "providers": {
+    "my_provider": {
+      "type": "openai",
+      "endpoint": "https://api.openrouter.ai/v1",
+      "enable_native_caching": true,
+      "min_cacheable_tokens": 1024,
+      "prompt_cache_key": "optional-cache-key-for-load-balancer"
+    },
+    "anthropic_provider": {
+      "type": "anthropic",
+      "api_key_required": true,
+      "enable_native_caching": true,
+      "min_cacheable_tokens": 1024
+    },
+    "google_provider": {
+      "type": "google",
+      "api_key_required": true,
+      "enable_native_caching": true,
+      "cache_ttl": 3600,
+      "min_cacheable_tokens": 1024
+    }
+  }
+}
+```
+
+#### Configuration Fields
+
+- **`enable_native_caching`**: Enable provider-native caching (boolean, default: false)
+- **`min_cacheable_tokens`**: Minimum token count for caching (default: 1024, matches OpenAI)
+- **`cache_ttl`**: Cache TTL in seconds for Google Context Caching (optional)
+- **`prompt_cache_key`**: Optional cache key for OpenAI's load balancer routing optimization
+
+#### How It Works
+
+1. **Automatic Providers** (OpenAI, DeepSeek): Caching is handled automatically by the provider based on prompt length and prefix matching - no code changes required in AISBF.
+
+2. **Explicit Providers** (Anthropic, OpenRouter, Google): AISBF adds `cache_control` blocks to messages or creates cached content objects after the first request, then reuses them for subsequent requests with similar prefixes.
+
+3. **OpenAI-Compatible**: Custom providers using OpenAI-compatible endpoints (like OpenRouter) support both automatic caching and explicit `cache_control` blocks.
+
+#### Cost Reduction
+
+- **Anthropic**: 50-70% cost reduction with `cache_control` on long conversations
+- **Google**: Up to 75% cost reduction with Context Caching API
+- **OpenAI**: Automatic savings on repeated prompt prefixes
+- **OpenRouter**: Passes through caching benefits from underlying providers
 
 ### Provider-Level Defaults
 

@@ -992,6 +992,18 @@ class RequestHandler:
 
             models = await handler.get_models()
             
+            # Apply model filter if configured and no models are manually specified
+            model_filter = getattr(provider_config, 'model_filter', None)
+            if model_filter and (not provider_config.models or len(provider_config.models) == 0):
+                import logging
+                logger = logging.getLogger(__name__)
+                logger.info(f"Applying model filter '{model_filter}' to provider {provider_id}")
+                
+                # Filter models whose ID contains the filter word (case-insensitive)
+                original_count = len(models)
+                models = [m for m in models if model_filter.lower() in m.id.lower()]
+                logger.info(f"Model filter applied: {original_count} -> {len(models)} models")
+            
             # Enhance model information with context window and capabilities
             enhanced_models = []
             current_time = int(time_module.time())
@@ -1012,12 +1024,41 @@ class RequestHandler:
                             model_config = m
                             break
                 
-                # Add context window information
-                if model_config and hasattr(model_config, 'context_size'):
+                # Add context window information - use dynamically fetched value unless manually configured
+                # Priority: manually configured > dynamically fetched > inferred
+                if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
+                    # Manually configured - use this value
                     model_dict['context_window'] = model_config.context_size
-                elif 'context_window' not in model_dict:
-                    # Try to infer from model name or set a default
+                elif model_dict.get('context_size'):
+                    # Dynamically fetched from provider - use this value
+                    model_dict['context_window'] = model_dict['context_size']
+                else:
+                    # Fall back to inference
                     model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                
+                # Add context_length for compatibility - same priority order as context_window
+                if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
+                    model_dict['context_length'] = model_config.context_size
+                elif model_dict.get('context_size'):
+                    model_dict['context_length'] = model_dict['context_size']
+                elif model_dict.get('context_length'):
+                    model_dict['context_length'] = model_dict['context_length']
+                
+                # Add pricing if available (from dynamic fetch)
+                if model_dict.get('pricing'):
+                    model_dict['pricing'] = model_dict['pricing']
+                
+                # Add description if available (from dynamic fetch)
+                if model_dict.get('description'):
+                    model_dict['description'] = model_dict['description']
+                
+                # Add top_provider info if available (from dynamic fetch)
+                if model_dict.get('top_provider'):
+                    model_dict['top_provider'] = model_dict['top_provider']
+                
+                # Add supported_parameters if available (from dynamic fetch)
+                if model_dict.get('supported_parameters'):
+                    model_dict['supported_parameters'] = model_dict['supported_parameters']
                 
                 # Add capabilities information
                 if model_config and hasattr(model_config, 'capabilities'):

@@ -1,0 +1,290 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AISBF OAuth2 Relay - Options</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: #f5f5f5;
+      margin: 0;
+      padding: 20px;
+      min-height: 100vh;
+    }
+    
+    .container {
+      max-width: 600px;
+      margin: 0 auto;
+    }
+    
+    .header {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      padding: 30px;
+      border-radius: 12px 12px 0 0;
+      margin-bottom: 0;
+    }
+    
+    .header h1 {
+      margin: 0 0 8px 0;
+      font-size: 24px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .header h1 img {
+      width: 32px;
+      height: 32px;
+    }
+    
+    .header p {
+      margin: 0;
+      opacity: 0.9;
+      font-size: 14px;
+    }
+    
+    .card {
+      background: white;
+      border-radius: 0 0 12px 12px;
+      padding: 25px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    .section {
+      margin-bottom: 25px;
+    }
+    
+    .section:last-child {
+      margin-bottom: 0;
+    }
+    
+    .section h2 {
+      font-size: 16px;
+      color: #333;
+      margin: 0 0 15px 0;
+      padding-bottom: 8px;
+      border-bottom: 1px solid #eee;
+    }
+    
+    .form-group {
+      margin-bottom: 15px;
+    }
+    
+    .form-group:last-child {
+      margin-bottom: 0;
+    }
+    
+    label {
+      display: block;
+      font-size: 13px;
+      color: #555;
+      margin-bottom: 6px;
+      font-weight: 500;
+    }
+    
+    input[type="text"],
+    input[type="url"],
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border: 1px solid #ddd;
+      border-radius: 8px;
+      font-size: 14px;
+      transition: border-color 0.2s;
+    }
+    
+    input[type="text"]:focus,
+    input[type="url"]:focus,
+    textarea:focus {
+      outline: none;
+      border-color: #667eea;
+    }
+    
+    textarea {
+      resize: vertical;
+      min-height: 80px;
+      font-family: monospace;
+    }
+    
+    .help-text {
+      font-size: 12px;
+      color: #888;
+      margin-top: 5px;
+    }
+    
+    .checkbox-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+    
+    .checkbox-group input[type="checkbox"] {
+      width: 18px;
+      height: 18px;
+      accent-color: #667eea;
+    }
+    
+    .checkbox-group label {
+      margin: 0;
+      font-weight: normal;
+    }
+    
+    .btn-group {
+      display: flex;
+      gap: 10px;
+      margin-top: 20px;
+    }
+    
+    .btn {
+      padding: 12px 24px;
+      border: none;
+      border-radius: 8px;
+      font-size: 14px;
+      cursor: pointer;
+      transition: all 0.2s;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+      flex: 1;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 4px 8px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+    }
+    
+    .btn-secondary:hover {
+      background: #eeeeee;
+    }
+    
+    .status-bar {
+      padding: 10px 15px;
+      border-radius: 8px;
+      font-size: 13px;
+      margin-bottom: 20px;
+      display: none;
+    }
+    
+    .status-bar.success {
+      display: block;
+      background: #e8f5e9;
+      color: #2e7d32;
+      border: 1px solid #a5d6a7;
+    }
+    
+    .status-bar.error {
+      display: block;
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #ef9a9a;
+    }
+    
+    .info-box {
+      background: #e3f2fd;
+      border: 1px solid #90caf9;
+      border-radius: 8px;
+      padding: 15px;
+      font-size: 13px;
+      color: #1565c0;
+    }
+    
+    .info-box h3 {
+      margin: 0 0 10px 0;
+      font-size: 14px;
+    }
+    
+    .info-box ul {
+      margin: 0;
+      padding-left: 20px;
+    }
+    
+    .info-box li {
+      margin-bottom: 5px;
+    }
+    
+    .info-box li:last-child {
+      margin-bottom: 0;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <h1>
+        <img src="icons/icon48.png" alt="">
+        AISBF OAuth2 Relay
+      </h1>
+      <p>Configure OAuth2 callback interception for remote AISBF deployments</p>
+    </div>
+    
+    <div class="card">
+      <div id="statusBar" class="status-bar"></div>
+      
+      <div class="section">
+        <h2>General Settings</h2>
+        
+        <div class="form-group">
+          <div class="checkbox-group">
+            <input type="checkbox" id="enabled" checked>
+            <label for="enabled">Enable OAuth2 relay</label>
+          </div>
+        </div>
+        
+        <div class="form-group">
+          <label for="remoteServer">AISBF Server URL</label>
+          <input type="url" id="remoteServer" placeholder="https://aisbf.example.com">
+          <div class="help-text">The URL of your remote AISBF server (e.g., https://192.168.1.100:17765)</div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2>Interception Settings</h2>
+        
+        <div class="form-group">
+          <label for="ports">Ports to Intercept</label>
+          <input type="text" id="ports" placeholder="54545">
+          <div class="help-text">Comma-separated list of localhost ports to intercept (default: 54545 for Claude)</div>
+        </div>
+        
+        <div class="form-group">
+          <label for="paths">Callback Paths</label>
+          <textarea id="paths" placeholder="/callback&#10;/oauth/callback&#10;/auth/callback"></textarea>
+          <div class="help-text">One path per line. These paths on localhost will be redirected to AISBF.</div>
+        </div>
+      </div>
+      
+      <div class="section">
+        <h2>How It Works</h2>
+        <div class="info-box">
+          <h3>OAuth2 Localhost Redirect</h3>
+          <ul>
+            <li>Many OAuth2 providers (like Claude) require localhost redirect URIs</li>
+            <li>When AISBF runs on a remote server, it can't receive these localhost callbacks</li>
+            <li>This extension intercepts localhost OAuth2 callbacks in your browser</li>
+            <li>It redirects them to your remote AISBF server automatically</li>
+          </ul>
+        </div>
+      </div>
+      
+      <div class="btn-group">
+        <button id="saveBtn" class="btn btn-primary">Save Configuration</button>
+        <button id="resetBtn" class="btn btn-secondary">Reset to Defaults</button>
+      </div>
+    </div>
+  </div>
+  
+  <script src="options.js"></script>
+</body>
+</html>

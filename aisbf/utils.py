@@ -170,8 +170,13 @@ def get_max_request_tokens_for_model(
     # Then check provider models config
     if hasattr(provider_config, 'models') and provider_config.models:
         for model in provider_config.models:
-            if model.get('name') == model_name:
-                max_tokens = model.get('max_request_tokens')
+            # Handle both Pydantic objects and dictionaries
+            model_name_value = model.name if hasattr(model, 'name') else model.get('name')
+            if model_name_value == model_name:
+                max_tokens = model.max_request_tokens if hasattr(model, 'max_request_tokens') else model.get('max_request_tokens')
+                if max_tokens:
+                    logger.info(f"Found max_request_tokens in provider model config: {max_tokens}")
+                    return max_tokens
                 if max_tokens:
                     logger.info(f"Found max_request_tokens in provider model config: {max_tokens}")
                     return max_tokens

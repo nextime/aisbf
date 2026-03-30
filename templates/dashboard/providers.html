@@ -47,6 +47,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="anthropic">Anthropic</option>
             <option value="ollama">Ollama</option>
             <option value="kiro">Kiro (Amazon Q Developer)</option>
+            <option value="claude">Claude (OAuth2)</option>
         </select>
         <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
@@ -123,6 +124,7 @@ function renderProviderDetails(key) {
     const container = document.getElementById(`provider-details-${key}`);
     const provider = providersData[key];
     const isKiroProvider = provider.type === 'kiro';
+    const isClaudeProvider = provider.type === 'claude';
     
     // Initialize kiro_config if this is a kiro provider and doesn't have it
     if (isKiroProvider && !provider.kiro_config) {
@@ -137,7 +139,15 @@ function renderProviderDetails(key) {
         };
     }
     
+    // Initialize claude_config if this is a claude provider and doesn't have it
+    if (isClaudeProvider && !provider.claude_config) {
+        provider.claude_config = {
+            credentials_file: '~/.claude_credentials.json'
+        };
+    }
+    
     const kiroConfig = provider.kiro_config || {};
+    const claudeConfig = provider.claude_config || {};
     
     // Build authentication fields based on provider type
     let authFieldsHtml = '';
@@ -194,6 +204,56 @@ function renderProviderDetails(key) {
                     <input type="password" value="${kiroConfig.client_secret || ''}" onchange="updateKiroConfig('${key}', 'client_secret', this.value)" placeholder="OAuth client secret">
                     <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth client secret for AWS SSO OIDC authentication</small>
                 </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 4: Upload Files</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="kiro-creds-file-${key}" accept=".json" onchange="uploadKiroFile('${key}', 'creds_file', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Kiro IDE credentials JSON file</small>
+                </div>
+                <div class="form-group">
+                    <label>Upload SQLite Database</label>
+                    <input type="file" id="kiro-db-file-${key}" accept=".sqlite3,.db,.sqlite" onchange="uploadKiroFile('${key}', 'sqlite_db', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload kiro-cli SQLite database file</small>
+                </div>
+                <div id="kiro-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
+    } else if (isClaudeProvider) {
+        // Claude OAuth2 authentication fields
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Claude OAuth2 Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Claude uses OAuth2 authentication. Click "Authenticate" to start the OAuth2 flow in your browser.
+                </small>
+                
+                <div class="form-group">
+                    <label>Credentials File Path</label>
+                    <input type="text" value="${claudeConfig.credentials_file || '~/.claude_credentials.json'}" onchange="updateClaudeConfig('${key}', 'credentials_file', this.value)" placeholder="~/.claude_credentials.json">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateClaude('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Claude
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkClaudeAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+                
+                <div id="claude-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="claude-creds-file-${key}" accept=".json" onchange="uploadClaudeFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Claude OAuth2 credentials JSON file</small>
+                </div>
+                <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
         `;
     } else {
@@ -238,6 +298,7 @@ function renderProviderDetails(key) {
                 <option value="anthropic" ${provider.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
                 <option value="ollama" ${provider.type === 'ollama' ? 'selected' : ''}>Ollama</option>
                 <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
+                <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
             </select>
         </div>
         
@@ -327,8 +388,27 @@ function renderProviderDetails(key) {
         </div>
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>
+        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+            Configure specific models for this provider, or leave empty to automatically fetch all available models from the provider's API.
+        </small>
+
+        <div class="form-group" style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <label>Model Filter (for auto-fetched models)</label>
+            <input type="text" value="${provider.model_filter || ''}" onchange="updateProvider('${key}', 'model_filter', this.value)" placeholder="e.g., free, pro, flash">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                When no models are manually configured, only expose models whose ID contains this filter word (case-insensitive wildcard matching).
+                <br>Example: "free" will match models like "model-name-free", "free-model", "gpt-4-free-tier", etc.
+            </small>
+        </div>
+
         <div id="models-${key}"></div>
-        <button type="button" class="btn btn-secondary" onclick="addModel('${key}')" style="margin-top: 10px;">Add Model</button>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button type="button" class="btn" onclick="getModelsFromProvider('${key}')" style="background: #4a9eff;">
+                🔄 Get Models from Provider
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">Add Model Manually</button>
+        </div>
+        <div id="get-models-status-${key}" style="margin-top: 10px;"></div>
     `;
     
     renderModels(key);
@@ -441,7 +521,8 @@ function updateNewProviderDefaults() {
         'google': 'Google AI provider (Gemini). Uses API key authentication. Endpoint: https://generativelanguage.googleapis.com/v1beta',
         'anthropic': 'Anthropic provider (Claude). Uses API key authentication. Endpoint: https://api.anthropic.com/v1',
         'ollama': 'Ollama local provider. No API key required by default. Endpoint: http://localhost:11434/api',
-        'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com'
+        'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com',
+        'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1'
     };
     
     descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
@@ -477,7 +558,7 @@ function confirmAddProvider() {
         name: key,
         endpoint: '',
         type: providerType,
-        api_key_required: providerType !== 'kiro' && providerType !== 'ollama',
+        api_key_required: providerType !== 'kiro' && providerType !== 'ollama' && providerType !== 'claude',
         rate_limit: 0,
         default_rate_limit: 0,
         models: []
@@ -495,6 +576,12 @@ function confirmAddProvider() {
             profile_arn: '',
             client_id: '',
             client_secret: ''
+        };
+    } else if (providerType === 'claude') {
+        newProvider.endpoint = 'https://api.anthropic.com/v1';
+        newProvider.name = key + ' (Claude OAuth2)';
+        newProvider.claude_config = {
+            credentials_file: '~/.claude_credentials.json'
         };
     } else if (providerType === 'openai') {
         newProvider.endpoint = 'https://api.openai.com/v1';
@@ -586,14 +673,27 @@ function updateProviderType(key, newType) {
             client_id: '',
             client_secret: ''
         };
+        delete providersData[key].claude_config;
         // Set default endpoint for kiro
         if (!providersData[key].endpoint || providersData[key].endpoint === '') {
             providersData[key].endpoint = 'https://q.us-east-1.amazonaws.com';
         }
-    } else if (newType !== 'kiro' && oldType === 'kiro') {
-        // Transitioning FROM kiro: remove kiro_config, set api_key_required to true
+    } else if (newType === 'claude' && oldType !== 'claude') {
+        // Transitioning TO claude: initialize claude_config, set api_key_required to false
+        providersData[key].api_key_required = false;
+        providersData[key].claude_config = {
+            credentials_file: '~/.claude_credentials.json'
+        };
+        delete providersData[key].kiro_config;
+        // Set default endpoint for claude
+        if (!providersData[key].endpoint || providersData[key].endpoint === '') {
+            providersData[key].endpoint = 'https://api.anthropic.com/v1';
+        }
+    } else if (newType !== 'kiro' && newType !== 'claude' && (oldType === 'kiro' || oldType === 'claude')) {
+        // Transitioning FROM kiro/claude: remove special configs, set api_key_required to true
         providersData[key].api_key_required = true;
         delete providersData[key].kiro_config;
+        delete providersData[key].claude_config;
     }
     
     // Re-render to show appropriate fields
@@ -605,6 +705,460 @@ function updateKiroConfig(key, field, value) {
         providersData[key].kiro_config = {};
     }
     providersData[key].kiro_config[field] = value;
+}
+
+function updateClaudeConfig(key, field, value) {
+    if (!providersData[key].claude_config) {
+        providersData[key].claude_config = {};
+    }
+    providersData[key].claude_config[field] = value;
+}
+
+// Extension detection and configuration
+let extensionInstalled = false;
+let extensionCheckComplete = false;
+
+async function checkExtensionInstalled() {
+    if (extensionCheckComplete) {
+        return extensionInstalled;
+    }
+    
+    try {
+        // Check if the extension has injected a marker into the page
+        // The extension should set window.aisbfOAuth2Extension when loaded
+        if (window.aisbfOAuth2Extension) {
+            extensionInstalled = true;
+            extensionCheckComplete = true;
+            return true;
+        }
+        
+        // Try using postMessage to detect the extension
+        return new Promise((resolve) => {
+            const messageHandler = (event) => {
+                if (event.data && event.data.type === 'aisbf-extension-pong') {
+                    extensionInstalled = true;
+                    extensionCheckComplete = true;
+                    window.removeEventListener('message', messageHandler);
+                    resolve(true);
+                }
+            };
+            
+            window.addEventListener('message', messageHandler);
+            
+            // Send ping message
+            window.postMessage({ type: 'aisbf-extension-ping' }, '*');
+            
+            // Timeout after 1 second
+            setTimeout(() => {
+                window.removeEventListener('message', messageHandler);
+                extensionInstalled = false;
+                extensionCheckComplete = true;
+                resolve(false);
+            }, 1000);
+        });
+    } catch (error) {
+        console.error('Error checking extension:', error);
+        extensionInstalled = false;
+        extensionCheckComplete = true;
+        return false;
+    }
+}
+
+async function configureExtension() {
+    try {
+        const serverUrl = window.location.origin;
+        
+        // Send configuration to extension using postMessage
+        window.postMessage({
+            type: 'aisbf-extension-configure',
+            serverUrl: serverUrl
+        }, '*');
+        
+        console.log('Extension configuration sent');
+    } catch (error) {
+        console.error('Error configuring extension:', error);
+    }
+}
+
+async function authenticateClaude(key) {
+    const statusEl = document.getElementById(`claude-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
+    
+    try {
+        // Get OAuth2 URL from server
+        const response = await fetch('/dashboard/claude/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].claude_config?.credentials_file || '~/.claude_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.auth_url) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        // Check if extension is needed (not needed when accessing from localhost)
+        const needsExtension = data.use_extension;
+        
+        if (needsExtension) {
+            // Check if extension is installed
+            const hasExtension = await checkExtensionInstalled();
+            
+            if (!hasExtension) {
+                // Show extension installation prompt
+                statusEl.style.background = '#403010';
+                statusEl.style.border = '1px solid #ffaa4a';
+                statusEl.innerHTML = `
+                    <div style="margin: 0;">
+                        <p style="margin: 0 0 10px 0; color: #ffaa4a;">⚠️ OAuth2 Redirect Extension Required</p>
+                        <p style="margin: 0 0 10px 0; color: #a0a0a0; font-size: 13px;">
+                            For remote server OAuth2 authentication, you need to install the AISBF OAuth2 Redirect Extension.
+                            This extension intercepts localhost OAuth2 callbacks and redirects them to your AISBF server.
+                        </p>
+                        <div style="display: flex; gap: 10px; margin-top: 10px;">
+                            <a href="/dashboard/extension/download" class="btn" style="background: #4a9eff; color: white; text-decoration: none; padding: 8px 15px; border-radius: 3px; font-size: 13px;">
+                                📥 Download Extension
+                            </a>
+                            <button type="button" class="btn btn-secondary" onclick="showExtensionInstructions()" style="padding: 8px 15px; font-size: 13px;">
+                                📖 Installation Guide
+                            </button>
+                        </div>
+                    </div>
+                `;
+                return;
+            }
+            
+            // Configure extension with server URL
+            await configureExtension();
+        }
+        
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Opening authentication window...</p>';
+        
+        // Open OAuth2 URL in new window
+        const authWindow = window.open(data.auth_url, 'claude-auth', 'width=600,height=700');
+        
+        // Wait for user to interact with the popup before starting to poll
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Please complete authentication in the popup window...</p>';
+        
+        // Poll for completion
+        let pollCount = 0;
+        const maxPolls = 60; // 2 minutes
+        let pollDelay = 2000; // 2 second delay between polls
+        let isCompleting = false; // Prevent duplicate complete calls
+        
+        // Wait 8 seconds before starting to poll (give user time to interact with popup)
+        await new Promise(resolve => setTimeout(resolve, 8000));
+        
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            // For localhost flow, check callback status endpoint
+            if (!needsExtension) {
+                try {
+                    const statusResponse = await fetch('/dashboard/claude/auth/callback-status');
+                    const statusData = await statusResponse.json();
+                    
+                    if (statusData.received) {
+                        clearInterval(pollInterval);
+                        
+                        // Close the auth window if still open
+                        if (authWindow && !authWindow.closed) {
+                            authWindow.close();
+                        }
+                        
+                        if (statusData.error) {
+                            statusEl.style.background = '#402010';
+                            statusEl.style.border = '1px solid #ff4a4a';
+                            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ OAuth2 error: ${statusData.error}</p>`;
+                            return;
+                        }
+                        
+                        // Prevent duplicate complete calls
+                        if (isCompleting) return;
+                        isCompleting = true;
+                        
+                        // Wait a moment before completing to avoid rate limits
+                        await new Promise(resolve => setTimeout(resolve, 1000));
+                        
+                        // Try to complete authentication
+                        try {
+                            statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication (this may take a moment if rate limited)...</p>';
+                            
+                            const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                }
+                            });
+                            
+                            const completeData = await completeResponse.json();
+                            
+                            if (completeData.success) {
+                                statusEl.style.background = '#0f4020';
+                                statusEl.style.border = '1px solid #4eff9e';
+                                statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
+                            } else {
+                                statusEl.style.background = '#402010';
+                                statusEl.style.border = '1px solid #ff4a4a';
+                                if (completeData.error && completeData.error.includes('rate_limit')) {
+                                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Rate limited by Claude. Please wait 1-2 minutes and try again.</p>`;
+                                } else {
+                                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication incomplete. ${completeData.error || 'Please try again.'}</p>`;
+                                }
+                            }
+                        } catch (error) {
+                            statusEl.style.background = '#402010';
+                            statusEl.style.border = '1px solid #ff4a4a';
+                            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error completing authentication: ${error.message}</p>`;
+                        }
+                    }
+                } catch (error) {
+                    console.error('Error checking callback status:', error);
+                    // Increase delay on error to avoid rate limits
+                    pollDelay = Math.min(pollDelay * 1.5, 10000);
+                }
+            } else {
+                // For extension flow, check if window was closed
+                if (authWindow && authWindow.closed) {
+                    clearInterval(pollInterval);
+                    
+                    // Prevent duplicate complete calls
+                    if (isCompleting) return;
+                    isCompleting = true;
+                    
+                    // Wait a moment for the OAuth2 callback to be processed
+                    await new Promise(resolve => setTimeout(resolve, 2000));
+                    
+                    // Try to complete authentication
+                    try {
+                        const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            }
+                        });
+                        
+                        const completeData = await completeResponse.json();
+                        
+                        if (completeData.success) {
+                            statusEl.style.background = '#0f4020';
+                            statusEl.style.border = '1px solid #4eff9e';
+                            statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
+                        } else {
+                            statusEl.style.background = '#402010';
+                            statusEl.style.border = '1px solid #ff4a4a';
+                            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication incomplete. ${completeData.error || 'Please try again.'}</p>`;
+                        }
+                    } catch (error) {
+                        statusEl.style.background = '#402010';
+                        statusEl.style.border = '1px solid #ff4a4a';
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error completing authentication: ${error.message}</p>`;
+                    }
+                }
+            }
+            
+            // Timeout after max polls
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                if (authWindow && !authWindow.closed) {
+                    authWindow.close();
+                }
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, pollDelay); // Use dynamic delay
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+function showExtensionInstructions() {
+    // Create modal overlay
+    const modal = document.createElement('div');
+    modal.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        width: 100%;
+        height: 100%;
+        background: rgba(0, 0, 0, 0.8);
+        display: flex;
+        justify-content: center;
+        align-items: center;
+        z-index: 10000;
+        padding: 20px;
+    `;
+    
+    modal.innerHTML = `
+        <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 10px; padding: 30px; max-width: 700px; max-height: 90vh; overflow-y: auto;">
+            <h2 style="margin: 0 0 20px 0; color: #4a9eff; font-size: 24px;">
+                📦 AISBF OAuth2 Extension - Installation Guide
+            </h2>
+            
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 3px solid #4eff9e;">
+                <p style="margin: 0; color: #4eff9e; font-weight: bold;">ℹ️ About This Extension</p>
+                <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 14px;">
+                    This extension intercepts OAuth2 callbacks from localhost:54545 and redirects them to your AISBF server, enabling remote authentication.
+                </p>
+            </div>
+            
+            <div style="margin-bottom: 25px;">
+                <h3 style="color: #8ec8ff; margin: 0 0 15px 0; font-size: 18px;">Installation Steps:</h3>
+                
+                <div style="margin-bottom: 20px;">
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">1</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Download the Extension</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                Click the "📥 Download Extension" button to download <code style="background: #0f2840; padding: 2px 6px; border-radius: 3px;">aisbf-oauth2-extension.zip</code>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">2</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Extract the ZIP File</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                Extract the contents to a <strong>permanent location</strong> (e.g., Documents/Extensions/). Don't delete this folder after installation.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">3</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Open Chrome Extensions</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                In Chrome, navigate to: <code style="background: #0f2840; padding: 2px 6px; border-radius: 3px;">chrome://extensions/</code>
+                                <br><span style="font-size: 12px; color: #808080;">(Copy and paste this into your address bar)</span>
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">4</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Enable Developer Mode</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                Toggle the "Developer mode" switch in the top-right corner of the extensions page.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">5</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Load Unpacked Extension</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                Click the "Load unpacked" button and select the <strong>extracted folder</strong> (not the ZIP file).
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start; margin-bottom: 15px;">
+                        <div style="background: #4a9eff; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">6</div>
+                        <div>
+                            <strong style="color: #e0e0e0; display: block; margin-bottom: 5px;">Verify Installation</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                The extension should appear in your extensions list. You may see the extension icon in your browser toolbar.
+                            </p>
+                        </div>
+                    </div>
+                    
+                    <div style="display: flex; align-items: start;">
+                        <div style="background: #4eff9e; color: #0a0a0a; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-weight: bold; flex-shrink: 0; margin-right: 15px;">✓</div>
+                        <div>
+                            <strong style="color: #4eff9e; display: block; margin-bottom: 5px;">Ready to Authenticate</strong>
+                            <p style="margin: 0; color: #a0a0a0; font-size: 14px;">
+                                Return to this page and click "🔐 Authenticate with Claude" again. The extension will automatically handle OAuth2 callbacks.
+                            </p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 20px; border-left: 3px solid #ffaa4a;">
+                <p style="margin: 0 0 5px 0; color: #ffaa4a; font-weight: bold;">⚠️ Important Notes:</p>
+                <ul style="margin: 5px 0 0 20px; padding: 0; color: #a0a0a0; font-size: 13px;">
+                    <li style="margin-bottom: 5px;">Extract to a permanent location - don't delete the folder after installation</li>
+                    <li style="margin-bottom: 5px;">The extension only intercepts localhost:54545 OAuth2 callbacks</li>
+                    <li style="margin-bottom: 5px;">No data is collected or stored by the extension</li>
+                    <li>You can disable the extension when not using Claude authentication</li>
+                </ul>
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" class="btn" onclick="this.closest('div').parentElement.parentElement.remove()" style="background: #4a9eff; padding: 10px 20px;">
+                    Got It!
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Close modal when clicking outside
+    modal.addEventListener('click', (e) => {
+        if (e.target === modal) {
+            modal.remove();
+        }
+    });
+    
+    document.body.appendChild(modal);
+}
+
+async function checkClaudeAuth(key) {
+    const statusEl = document.getElementById(`claude-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/claude/auth/status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].claude_config?.credentials_file || '~/.claude_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            const expiresIn = data.expires_in ? ` (expires in ${Math.floor(data.expires_in / 60)} minutes)` : '';
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Authenticated${expiresIn}</p>`;
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Not authenticated. Click "Authenticate with Claude" to log in.</p>';
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
 }
 
 function addModel(providerKey) {
@@ -680,6 +1234,167 @@ async function saveProviders() {
         }
     } catch (error) {
         alert('Error: ' + error.message);
+    }
+}
+
+async function uploadKiroFile(providerKey, fileType, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`kiro-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('provider_key', providerKey);
+    formData.append('file_type', fileType);
+    
+    try {
+        const response = await fetch('/dashboard/providers/upload-auth-file', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
+            // Update the config with the new file path
+            if (fileType === 'creds_file') {
+                updateKiroConfig(providerKey, 'creds_file', data.file_path);
+            } else if (fileType === 'sqlite_db') {
+                updateKiroConfig(providerKey, 'sqlite_db', data.file_path);
+            }
+        } else {
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
+        }
+    } catch (error) {
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function uploadClaudeFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`claude-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('provider_key', providerKey);
+    formData.append('file_type', 'credentials');
+    
+    try {
+        const response = await fetch('/dashboard/providers/upload-auth-file', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
+            // Update the config with the new file path
+            updateClaudeConfig(providerKey, 'credentials_file', data.file_path);
+        } else {
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
+        }
+    } catch (error) {
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function getModelsFromProvider(providerKey) {
+    const statusEl = document.getElementById(`get-models-status-${providerKey}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.style.padding = '10px';
+    statusEl.style.borderRadius = '3px';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Fetching models from provider API...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/providers/get-models', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: providerKey
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success && data.models && data.models.length > 0) {
+            // Clear existing models
+            providersData[providerKey].models = [];
+            
+            // Add fetched models with all available fields
+            data.models.forEach(model => {
+                const modelConfig = {
+                    name: model.id || model.name,
+                    rate_limit: 0,
+                    max_request_tokens: null,
+                    context_size: model.context_size || model.context_length || null,
+                    rate_limit_TPM: null,
+                    rate_limit_TPH: null,
+                    rate_limit_TPD: null,
+                    condense_context: null,
+                    condense_method: null,
+                    nsfw: false,
+                    privacy: false
+                };
+                
+                // Add optional fields if available from API
+                if (model.description) {
+                    modelConfig.description = model.description;
+                }
+                if (model.context_length) {
+                    modelConfig.context_length = model.context_length;
+                }
+                if (model.architecture) {
+                    modelConfig.architecture = model.architecture;
+                }
+                if (model.pricing) {
+                    modelConfig.pricing = model.pricing;
+                }
+                if (model.top_provider) {
+                    modelConfig.top_provider = model.top_provider;
+                }
+                if (model.supported_parameters) {
+                    modelConfig.supported_parameters = model.supported_parameters;
+                }
+                if (model.default_parameters) {
+                    modelConfig.default_parameters = model.default_parameters;
+                }
+                
+                providersData[providerKey].models.push(modelConfig);
+            });
+            
+            // Re-render models
+            renderModels(providerKey);
+            
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Successfully fetched ${data.models.length} model(s)! Review and save the configuration.</p>`;
+            
+            // Auto-hide success message after 5 seconds
+            setTimeout(() => {
+                statusEl.style.display = 'none';
+            }, 5000);
+        } else if (data.success && (!data.models || data.models.length === 0)) {
+            statusEl.style.background = '#403010';
+            statusEl.style.border = '1px solid #ffaa4a';
+            statusEl.innerHTML = '<p style="margin: 0; color: #ffaa4a;">⚠️ No models found from provider API.</p>';
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to fetch models: ${data.error || 'Unknown error'}</p>`;
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
     }
 }
 

@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}AISBF Dashboard{% endblock %}</title>
+    <link rel="icon" type="image/png" href="/favicon.ico">
     <style>
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #1a1a2e; color: #e0e0e0; }
@@ -94,6 +95,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <h1>AISBF Dashboard</h1>
             {% if request.session.logged_in %}
             <div class="header-actions">
+                <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary">License</a>
                 <button onclick="restartServer()" class="btn btn-warning">Restart Server</button>
                 <a href="{{ url_for(request, '/dashboard/logout') }}" class="btn btn-secondary">Logout</a>
             </div>
@@ -116,7 +118,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
             <a href="{{ url_for(request, '/dashboard/docs') }}" {% if '/docs' in request.path %}class="active"{% endif %}>Docs</a>
             <a href="{{ url_for(request, '/dashboard/about') }}" {% if '/about' in request.path %}class="active"{% endif %}>About</a>
-            <a href="{{ url_for(request, '/dashboard/license') }}" {% if '/license' in request.path %}class="active"{% endif %}>License</a>
         </div>
     </div>
     {% endif %}

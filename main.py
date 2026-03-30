@@ -23,7 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Main application for AISBF.
 """
 from typing import Optional
-from fastapi import FastAPI, HTTPException, Request, status, Form, Query
+from fastapi import FastAPI, HTTPException, Request, status, Form, Query, UploadFile, File
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -917,6 +917,24 @@ async def startup_event():
             else:
                 logger.warning("TOR hidden service initialization failed")
     
+    # Pre-fetch models at startup for providers without local model config
+    logger.info("Pre-fetching models from providers with dynamic model lists...")
+    prefetch_count = 0
+    for provider_id, provider_config in config.providers.items():
+        if not (hasattr(provider_config, 'models') and provider_config.models):
+            try:
+                models = await fetch_provider_models(provider_id)
+                if models:
+                    prefetch_count += 1
+                    logger.info(f"Pre-fetched {len(models)} models from provider: {provider_id}")
+            except Exception as e:
+                logger.warning(f"Failed to pre-fetch models from provider {provider_id}: {e}")
+    
+    if prefetch_count > 0:
+        logger.info(f"Pre-fetched models from {prefetch_count} provider(s) at startup")
+    else:
+        logger.info("No providers with dynamic model lists found for pre-fetching")
+    
     # Start background task for model cache refresh
     if _cache_refresh_task is None:
         _cache_refresh_task = asyncio.create_task(refresh_model_cache())
@@ -985,8 +1003,11 @@ async def shutdown_event():
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config and server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint and dashboard routes
-        if request.url.path == "/" or request.url.path.startswith("/dashboard"):
+        # Skip auth for root endpoint, dashboard routes, favicon, and browser metadata
+        if (request.url.path == "/" or
+            request.url.path.startswith("/dashboard") or
+            request.url.path == "/favicon.ico" or
+            request.url.path.startswith("/.well-known/")):
             response = await call_next(request)
             return response
 
@@ -1435,6 +1456,83 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             "providers_json": json.dumps(providers_data),
             "error": f"Invalid JSON: {str(e)}"
         })
+
+@app.post("/dashboard/providers/get-models")
+async def dashboard_providers_get_models(request: Request):
+    """Fetch models from provider API"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Parse request body
+        body = await request.json()
+        provider_key = body.get('provider_key')
+        
+        if not provider_key:
+            return JSONResponse({
+                "success": False,
+                "error": "provider_key is required"
+            }, status_code=400)
+        
+        # Check if provider exists in config
+        if not config or provider_key not in config.providers:
+            return JSONResponse({
+                "success": False,
+                "error": f"Provider '{provider_key}' not found in configuration"
+            }, status_code=404)
+        
+        # Get provider handler
+        from aisbf.providers import get_provider_handler
+        
+        provider_config = config.providers[provider_key]
+        api_key = provider_config.api_key if hasattr(provider_config, 'api_key') else None
+        
+        handler = get_provider_handler(provider_key, api_key)
+        
+        # Fetch models from provider
+        models = await handler.get_models()
+        
+        # Convert Model objects to dicts with all available fields
+        models_data = []
+        for model in models:
+            model_dict = {
+                "id": model.id,
+                "name": model.name,
+                "provider_id": model.provider_id
+            }
+            
+            # Add all optional fields if present
+            optional_fields = [
+                'weight', 'rate_limit', 'max_request_tokens',
+                'rate_limit_TPM', 'rate_limit_TPH', 'rate_limit_TPD',
+                'context_size', 'context_length', 'condense_context', 'condense_method',
+                'error_cooldown', 'description', 'architecture', 'pricing',
+                'top_provider', 'supported_parameters', 'default_parameters'
+            ]
+            
+            for field in optional_fields:
+                if hasattr(model, field):
+                    value = getattr(model, field)
+                    if value is not None:
+                        model_dict[field] = value
+            
+            models_data.append(model_dict)
+        
+        return JSONResponse({
+            "success": True,
+            "models": models_data
+        })
+        
+    except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Error fetching models for provider: {str(e)}", exc_info=True)
+        
+        return JSONResponse({
+            "success": False,
+            "error": str(e)
+        }, status_code=500)
 
 @app.get("/dashboard/rotations", response_class=HTMLResponse)
 async def dashboard_rotations(request: Request):
@@ -2138,6 +2236,312 @@ async def dashboard_user_providers_delete(request: Request, provider_name: str):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+
+# User authentication file management routes
+def get_user_auth_files_dir(user_id: int) -> Path:
+    """Get the directory for user authentication files"""
+    auth_files_dir = Path.home() / '.aisbf' / 'user_auth_files' / str(user_id)
+    auth_files_dir.mkdir(parents=True, exist_ok=True)
+    return auth_files_dir
+
+
+@app.post("/dashboard/user/providers/{provider_name}/upload")
+async def dashboard_user_provider_upload(
+    request: Request,
+    provider_name: str,
+    file_type: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """Upload authentication file for a provider"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        # Validate file type
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials']
+        if file_type not in allowed_types:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid file type. Allowed: {', '.join(allowed_types)}"}
+            )
+
+        # Get user auth files directory
+        auth_files_dir = get_user_auth_files_dir(user_id)
+        
+        # Generate unique filename
+        import uuid
+        file_ext = Path(file.filename).suffix if file.filename else '.json'
+        stored_filename = f"{provider_name}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+        file_path = auth_files_dir / stored_filename
+
+        # Save file
+        content = await file.read()
+        with open(file_path, 'wb') as f:
+            f.write(content)
+
+        # Save metadata to database
+        file_id = db.save_user_auth_file(
+            user_id=user_id,
+            provider_id=provider_name,
+            file_type=file_type,
+            original_filename=file.filename or stored_filename,
+            stored_filename=stored_filename,
+            file_path=str(file_path),
+            file_size=len(content),
+            mime_type=file.content_type
+        )
+
+        return JSONResponse({
+            "message": "File uploaded successfully",
+            "file_id": file_id,
+            "file_path": str(file_path),
+            "stored_filename": stored_filename
+        })
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/dashboard/user/providers/{provider_name}/files")
+async def dashboard_user_provider_files(request: Request, provider_name: str):
+    """Get all authentication files for a provider"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        files = db.get_user_auth_files(user_id, provider_name)
+        return JSONResponse({"files": files})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/dashboard/user/providers/{provider_name}/files/{file_type}/download")
+async def dashboard_user_provider_file_download(
+    request: Request,
+    provider_name: str,
+    file_type: str
+):
+    """Download an authentication file"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    from fastapi.responses import FileResponse
+    db = get_database()
+
+    try:
+        file_info = db.get_user_auth_file(user_id, provider_name, file_type)
+        if not file_info:
+            return JSONResponse(status_code=404, content={"error": "File not found"})
+
+        file_path = Path(file_info['file_path'])
+        if not file_path.exists():
+            return JSONResponse(status_code=404, content={"error": "File not found on disk"})
+
+        return FileResponse(
+            path=str(file_path),
+            filename=file_info['original_filename'],
+            media_type=file_info['mime_type'] or 'application/octet-stream'
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/dashboard/user/providers/{provider_name}/files/{file_type}")
+async def dashboard_user_provider_file_delete(
+    request: Request,
+    provider_name: str,
+    file_type: str
+):
+    """Delete an authentication file"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    from aisbf.database import get_database
+    db = get_database()
+
+    try:
+        file_info = db.get_user_auth_file(user_id, provider_name, file_type)
+        if file_info:
+            # Delete file from disk
+            file_path = Path(file_info['file_path'])
+            if file_path.exists():
+                file_path.unlink()
+            
+            # Delete from database
+            db.delete_user_auth_file(user_id, provider_name, file_type)
+        
+        return JSONResponse({"message": "File deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+# Admin authentication file management routes
+def get_admin_auth_files_dir() -> Path:
+    """Get the directory for admin authentication files"""
+    auth_files_dir = Path.home() / '.aisbf' / 'admin_auth_files'
+    auth_files_dir.mkdir(parents=True, exist_ok=True)
+    return auth_files_dir
+
+
+@app.post("/dashboard/providers/{provider_name}/upload")
+async def dashboard_provider_upload(
+    request: Request,
+    provider_name: str,
+    file_type: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """Upload authentication file for a global provider (admin only)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        # Validate file type
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials']
+        if file_type not in allowed_types:
+            return JSONResponse(
+                status_code=400,
+                content={"error": f"Invalid file type. Allowed: {', '.join(allowed_types)}"}
+            )
+
+        # Get admin auth files directory
+        auth_files_dir = get_admin_auth_files_dir()
+        
+        # Generate unique filename
+        import uuid
+        file_ext = Path(file.filename).suffix if file.filename else '.json'
+        stored_filename = f"{provider_name}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+        file_path = auth_files_dir / stored_filename
+
+        # Save file
+        content = await file.read()
+        with open(file_path, 'wb') as f:
+            f.write(content)
+
+        logger.info(f"Admin uploaded auth file: {file_path}")
+
+        return JSONResponse({
+            "message": "File uploaded successfully",
+            "file_path": str(file_path),
+            "stored_filename": stored_filename
+        })
+    except Exception as e:
+        logger.error(f"Error uploading admin file: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/dashboard/providers/{provider_name}/files")
+async def dashboard_provider_files(request: Request, provider_name: str):
+    """Get all authentication files for a global provider (admin only)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        auth_files_dir = get_admin_auth_files_dir()
+        files = []
+        
+        for file_path in auth_files_dir.glob(f"{provider_name}_*"):
+            if file_path.is_file():
+                stat = file_path.stat()
+                files.append({
+                    "filename": file_path.name,
+                    "file_path": str(file_path),
+                    "file_size": stat.st_size,
+                    "modified_at": datetime.fromtimestamp(stat.st_mtime).isoformat()
+                })
+        
+        return JSONResponse({"files": files})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.get("/dashboard/providers/{provider_name}/files/{filename}/download")
+async def dashboard_provider_file_download(
+    request: Request,
+    provider_name: str,
+    filename: str
+):
+    """Download an authentication file for a global provider (admin only)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        auth_files_dir = get_admin_auth_files_dir()
+        file_path = auth_files_dir / filename
+        
+        if not file_path.exists() or not file_path.is_file():
+            return JSONResponse(status_code=404, content={"error": "File not found"})
+        
+        # Security check: ensure file belongs to this provider
+        if not filename.startswith(f"{provider_name}_"):
+            return JSONResponse(status_code=403, content={"error": "Access denied"})
+        
+        return FileResponse(
+            path=str(file_path),
+            filename=filename,
+            media_type='application/octet-stream'
+        )
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.delete("/dashboard/providers/{provider_name}/files/{filename}")
+async def dashboard_provider_file_delete(
+    request: Request,
+    provider_name: str,
+    filename: str
+):
+    """Delete an authentication file for a global provider (admin only)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        auth_files_dir = get_admin_auth_files_dir()
+        file_path = auth_files_dir / filename
+        
+        if not file_path.exists():
+            return JSONResponse(status_code=404, content={"error": "File not found"})
+        
+        # Security check: ensure file belongs to this provider
+        if not filename.startswith(f"{provider_name}_"):
+            return JSONResponse(status_code=403, content={"error": "Access denied"})
+        
+        file_path.unlink()
+        
+        return JSONResponse({"message": "File deleted successfully"})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+
 # User-specific rotation management routes
 @app.get("/dashboard/user/rotations", response_class=HTMLResponse)
 async def dashboard_user_rotations(request: Request):
@@ -2628,6 +3032,30 @@ async def root():
         "rotations": list(config.rotations.keys()),
         "autoselect": list(config.autoselect.keys())
     }
+
+
+@app.get("/favicon.ico")
+async def favicon():
+    """Serve favicon"""
+    from fastapi.responses import FileResponse
+    
+    # Try to find favicon in multiple locations
+    search_paths = [
+        Path(__file__).parent / 'static' / 'extension' / 'icons' / 'icon16.png',
+        Path(__file__).parent / 'static' / 'favicon.ico',
+        Path.home() / '.local' / 'share' / 'aisbf' / 'static' / 'extension' / 'icons' / 'icon16.png',
+    ]
+    
+    for favicon_path in search_paths:
+        if favicon_path.exists():
+            return FileResponse(
+                path=favicon_path,
+                media_type="image/png" if favicon_path.suffix == '.png' else "image/x-icon"
+            )
+    
+    # Return 204 No Content if favicon not found (better than 404)
+    from fastapi.responses import Response
+    return Response(status_code=204)
 
 
 @app.get("/health")
@@ -4215,6 +4643,551 @@ async def mcp_call_tool(request: Request):
         return JSONResponse(
             status_code=500,
             content={"error": str(e)}
+        )
+
+
+# Chrome extension download endpoint
+@app.get("/dashboard/extension/download")
+async def dashboard_extension_download(request: Request):
+    """Download the OAuth2 redirect extension as a ZIP file"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        from fastapi.responses import FileResponse
+        
+        # Path to pre-packaged extension ZIP
+        extension_zip = Path(__file__).parent / 'static' / 'aisbf-oauth2-extension.zip'
+        
+        if not extension_zip.exists():
+            # Fallback: try to build it dynamically
+            logger.warning("Pre-packaged extension not found, creating dynamically...")
+            import zipfile
+            import io
+            from fastapi.responses import Response
+            
+            extension_dir = Path(__file__).parent / 'static' / 'extension'
+            
+            if not extension_dir.exists():
+                return JSONResponse(
+                    status_code=404,
+                    content={"error": "Extension files not found"}
+                )
+            
+            # Create ZIP file in memory
+            zip_buffer = io.BytesIO()
+            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
+                for file_path in extension_dir.rglob('*'):
+                    if file_path.is_file() and not file_path.name.endswith('.sh'):
+                        arcname = file_path.relative_to(extension_dir)
+                        zip_file.write(file_path, arcname)
+            
+            zip_buffer.seek(0)
+            return Response(
+                content=zip_buffer.getvalue(),
+                media_type="application/zip",
+                headers={
+                    "Content-Disposition": "attachment; filename=aisbf-oauth2-extension.zip"
+                }
+            )
+        
+        # Serve pre-packaged ZIP file
+        return FileResponse(
+            path=extension_zip,
+            media_type="application/zip",
+            filename="aisbf-oauth2-extension.zip"
+        )
+        
+    except Exception as e:
+        logger.error(f"Error serving extension ZIP: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
+# Global storage for pending OAuth2 callbacks (for localhost flow)
+_pending_oauth2_callbacks = {}
+_oauth2_callback_server = None
+
+
+def _start_localhost_callback_server():
+    """Start a temporary HTTP server on port 54545 to catch OAuth2 callbacks."""
+    global _oauth2_callback_server
+    
+    if _oauth2_callback_server is not None:
+        logger.info("Localhost callback server already running")
+        return
+    
+    from http.server import HTTPServer, BaseHTTPRequestHandler
+    from urllib.parse import urlparse, parse_qs
+    import threading
+    
+    class CallbackHandler(BaseHTTPRequestHandler):
+        def log_message(self, format, *args):
+            # Suppress default logging
+            pass
+        
+        def do_GET(self):
+            """Handle GET request - OAuth2 callback"""
+            parsed = urlparse(self.path)
+            
+            if parsed.path == '/callback':
+                query_params = parse_qs(parsed.query)
+                code = query_params.get('code', [None])[0]
+                state = query_params.get('state', [None])[0]
+                error = query_params.get('error', [None])[0]
+                
+                logger.info(f"Localhost callback server received - Code: {code[:10] if code else 'None'}...")
+                
+                # Store the callback data
+                _pending_oauth2_callbacks['latest'] = {
+                    'code': code,
+                    'state': state,
+                    'error': error,
+                    'timestamp': time.time()
+                }
+                
+                # Send success response
+                if error:
+                    response_html = f"""
+                    <html>
+                        <head><title>Authentication Error</title></head>
+                        <body style="font-family: Arial; text-align: center; padding: 50px;">
+                            <h1 style="color: #e74c3c;">✗ Authentication Error</h1>
+                            <p>Error: {error}</p>
+                            <p>You can close this window.</p>
+                        </body>
+                    </html>
+                    """
+                    self.send_response(400)
+                else:
+                    response_html = """
+                    <html>
+                        <head><title>Authentication Successful</title></head>
+                        <body style="font-family: Arial; text-align: center; padding: 50px; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; height: 100vh; margin: 0; display: flex; justify-content: center; align-items: center;">
+                            <div style="background: rgba(255,255,255,0.1); padding: 40px; border-radius: 10px;">
+                                <h1>✓ Authentication Successful</h1>
+                                <p>You can close this window and return to the dashboard.</p>
+                            </div>
+                            <script>setTimeout(() => window.close(), 3000);</script>
+                        </body>
+                    </html>
+                    """
+                    self.send_response(200)
+                
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(response_html.encode())
+            else:
+                self.send_response(404)
+                self.end_headers()
+    
+    def run_server():
+        global _oauth2_callback_server
+        try:
+            _oauth2_callback_server = HTTPServer(('127.0.0.1', 54545), CallbackHandler)
+            logger.info("Started localhost OAuth2 callback server on port 54545")
+            _oauth2_callback_server.serve_forever()
+        except OSError as e:
+            if "Address already in use" in str(e):
+                logger.warning("Port 54545 already in use - another callback server may be running")
+            else:
+                logger.error(f"Failed to start callback server: {e}")
+        except Exception as e:
+            logger.error(f"Callback server error: {e}")
+        finally:
+            _oauth2_callback_server = None
+    
+    # Start server in a daemon thread
+    server_thread = threading.Thread(target=run_server, daemon=True)
+    server_thread.start()
+    
+    # Give it a moment to start
+    time.sleep(0.1)
+
+
+def _stop_localhost_callback_server():
+    """Stop the localhost callback server."""
+    global _oauth2_callback_server
+    if _oauth2_callback_server:
+        _oauth2_callback_server.shutdown()
+        _oauth2_callback_server = None
+        logger.info("Stopped localhost OAuth2 callback server")
+
+
+# OAuth2 callback endpoint (receives callbacks from extension OR direct localhost)
+@app.get("/dashboard/oauth2/callback")
+async def dashboard_oauth2_callback(
+    request: Request,
+    code: str = Query(None),
+    state: str = Query(None),
+    error: str = Query(None)
+):
+    """
+    Handle OAuth2 callback redirected from localhost.
+    
+    This endpoint handles two scenarios:
+    1. Direct localhost callback (when browser is on same machine as AISBF)
+    2. Redirected callback from browser extension (when browser is remote)
+    """
+    try:
+        if error:
+            logger.error(f"OAuth2 callback error: {error}")
+            return HTMLResponse(
+                content=f"""
+                <html>
+                    <head><title>Authentication Error</title></head>
+                    <body>
+                        <h1>Authentication Error</h1>
+                        <p>Error: {error}</p>
+                        <p><a href="/dashboard/providers">Return to Dashboard</a></p>
+                    </body>
+                </html>
+                """,
+                status_code=400
+            )
+        
+        if not code:
+            return HTMLResponse(
+                content="""
+                <html>
+                    <head><title>Authentication Error</title></head>
+                    <body>
+                        <h1>Authentication Error</h1>
+                        <p>No authorization code received</p>
+                        <p><a href="/dashboard/providers">Return to Dashboard</a></p>
+                    </body>
+                </html>
+                """,
+                status_code=400
+            )
+        
+        # Store the code in session for the auth completion
+        request.session['oauth2_code'] = code
+        request.session['oauth2_state'] = state
+        
+        # Detect if this is a direct localhost callback (no extension involved)
+        referer = request.headers.get('referer', '')
+        is_direct_callback = 'localhost:54545' in referer or '127.0.0.1:54545' in referer
+        
+        logger.info(f"OAuth2 callback received - Direct: {is_direct_callback}, Code: {code[:10]}...")
+        
+        # Return success page with auto-close script
+        return HTMLResponse(
+            content="""
+            <html>
+                <head>
+                    <title>Authentication Successful</title>
+                    <style>
+                        body {
+                            font-family: Arial, sans-serif;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                            height: 100vh;
+                            margin: 0;
+                            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+                            color: white;
+                        }
+                        .container {
+                            text-align: center;
+                            padding: 40px;
+                            background: rgba(255, 255, 255, 0.1);
+                            border-radius: 10px;
+                            backdrop-filter: blur(10px);
+                        }
+                        h1 { margin-bottom: 20px; }
+                        p { margin: 10px 0; }
+                        a {
+                            color: #fff;
+                            text-decoration: underline;
+                        }
+                    </style>
+                </head>
+                <body>
+                    <div class="container">
+                        <h1>✓ Authentication Successful</h1>
+                        <p>You can close this window and return to the dashboard.</p>
+                        <p><a href="/dashboard/providers">Return to Dashboard</a></p>
+                    </div>
+                    <script>
+                        // Auto-close after 3 seconds
+                        setTimeout(() => {
+                            window.close();
+                        }, 3000);
+                    </script>
+                </body>
+            </html>
+            """
+        )
+        
+    except Exception as e:
+        logger.error(f"Error handling OAuth2 callback: {e}")
+        return HTMLResponse(
+            content=f"""
+            <html>
+                <head><title>Authentication Error</title></head>
+                <body>
+                    <h1>Authentication Error</h1>
+                    <p>Error: {str(e)}</p>
+                    <p><a href="/dashboard/providers">Return to Dashboard</a></p>
+                </body>
+            </html>
+            """,
+            status_code=500
+        )
+
+
+# Claude OAuth2 authentication endpoints
+@app.post("/dashboard/claude/auth/start")
+async def dashboard_claude_auth_start(request: Request):
+    """Start Claude OAuth2 authentication flow - returns URL for browser opening"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.claude_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import ClaudeAuth
+        from aisbf.claude_auth import ClaudeAuth
+        
+        # Create auth instance
+        auth = ClaudeAuth()
+        # Override credentials file if specified
+        auth.credentials_file = Path(credentials_file).expanduser()
+        
+        # Generate PKCE challenge
+        verifier, challenge = auth._generate_pkce()
+        
+        # Generate state for CSRF protection
+        state = secrets.token_urlsafe(32)
+        
+        # Store verifier and state in session for later use
+        request.session['oauth2_verifier'] = verifier
+        request.session['oauth2_state'] = state
+        request.session['oauth2_provider'] = provider_key
+        request.session['oauth2_credentials_file'] = credentials_file
+        
+        # Detect if the browser is accessing from localhost/127.0.0.1
+        # If so, we can use direct localhost callback without the extension
+        client_host = request.client.host if request.client else None
+        is_local_access = client_host in ['127.0.0.1', '::1', 'localhost']
+        
+        # Get the request host to determine the callback URL
+        request_host = request.headers.get('host', '').split(':')[0]
+        is_localhost_request = request_host in ['127.0.0.1', 'localhost', '::1']
+        
+        # Use local callback if accessing from localhost
+        use_extension = not (is_local_access or is_localhost_request)
+        
+        # If using localhost, start the callback server
+        if not use_extension:
+            _start_localhost_callback_server()
+            logger.info("Started localhost callback server for direct OAuth2 flow")
+        
+        # Build OAuth2 URL (Claude requires full scope set)
+        auth_params = {
+            "client_id": auth.CLIENT_ID,
+            "response_type": "code",
+            "code_challenge": challenge,
+            "code_challenge_method": "S256",
+            "redirect_uri": auth.REDIRECT_URI,
+            "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+            "state": state
+        }
+        auth_url = f"{auth.AUTH_URL}?{'&'.join(f'{k}={v}' for k, v in auth_params.items())}"
+        
+        return JSONResponse({
+            "success": True,
+            "auth_url": auth_url,
+            "use_extension": use_extension,
+            "message": "Please complete authentication in the browser window" if use_extension else "Authentication will use direct localhost callback"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting Claude auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/claude/auth/complete")
+async def dashboard_claude_auth_complete(request: Request):
+    """Complete Claude OAuth2 authentication using the code from callback"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Get code from session (stored by callback endpoint) or from localhost callback server
+        code = request.session.get('oauth2_code')
+        verifier = request.session.get('oauth2_verifier')
+        state = request.session.get('oauth2_state')
+        credentials_file = request.session.get('oauth2_credentials_file', '~/.claude_credentials.json')
+        
+        # Check for callback data from localhost server if not in session
+        if not code and 'latest' in _pending_oauth2_callbacks:
+            callback_data = _pending_oauth2_callbacks['latest']
+            # Only use if received within the last 5 minutes
+            if time.time() - callback_data.get('timestamp', 0) < 300:
+                code = callback_data.get('code')
+                state = callback_data.get('state') or state  # Use callback state if available
+                if callback_data.get('error'):
+                    return JSONResponse(
+                        status_code=400,
+                        content={"success": False, "error": f"OAuth2 error: {callback_data['error']}"}
+                    )
+                logger.info(f"Using code from localhost callback server: {code[:10] if code else 'None'}...")
+        
+        if not code or not verifier:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "No authorization code found. Please restart authentication."}
+            )
+        
+        # Import ClaudeAuth
+        from aisbf.claude_auth import ClaudeAuth
+        
+        # Create auth instance
+        auth = ClaudeAuth()
+        auth.credentials_file = Path(credentials_file).expanduser()
+        
+        # Use the new exchange_code_for_tokens method with retry logic
+        # Pass state as the second parameter (required), verifier as third (optional)
+        success = auth.exchange_code_for_tokens(code, state, verifier)
+        
+        if success:
+            # Clear session data
+            request.session.pop('oauth2_code', None)
+            request.session.pop('oauth2_verifier', None)
+            request.session.pop('oauth2_state', None)
+            request.session.pop('oauth2_provider', None)
+            request.session.pop('oauth2_credentials_file', None)
+            
+            # Clear pending callback data
+            _pending_oauth2_callbacks.pop('latest', None)
+            
+            return JSONResponse({
+                "success": True,
+                "message": "Authentication completed successfully"
+            })
+        else:
+            # Check if it was a rate limit issue
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Token exchange failed. If you see rate_limit_error, please wait 1-2 minutes before trying again."}
+            )
+        
+    except Exception as e:
+        logger.error(f"Error completing Claude auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.get("/dashboard/claude/auth/callback-status")
+async def dashboard_claude_auth_callback_status(request: Request):
+    """Check if OAuth2 callback has been received (for localhost flow)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Check if we have callback data from the localhost server
+    if 'latest' in _pending_oauth2_callbacks:
+        callback_data = _pending_oauth2_callbacks['latest']
+        # Only valid if received within the last 5 minutes
+        if time.time() - callback_data.get('timestamp', 0) < 300:
+            if callback_data.get('error'):
+                return JSONResponse({
+                    "received": True,
+                    "error": callback_data['error']
+                })
+            elif callback_data.get('code'):
+                return JSONResponse({
+                    "received": True,
+                    "has_code": True
+                })
+    
+    # Also check session (for extension flow)
+    if request.session.get('oauth2_code'):
+        return JSONResponse({
+            "received": True,
+            "has_code": True
+        })
+    
+    return JSONResponse({
+        "received": False
+    })
+
+
+@app.post("/dashboard/claude/auth/status")
+async def dashboard_claude_auth_status(request: Request):
+    """Check Claude authentication status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.claude_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"authenticated": False, "error": "Provider key is required"}
+            )
+        
+        # Import ClaudeAuth
+        from aisbf.claude_auth import ClaudeAuth
+        
+        # Create auth instance
+        auth = ClaudeAuth(credentials_file=credentials_file)
+        
+        # Check if credentials exist and are valid
+        if auth.tokens:
+            # Check if token is expired (with 5 minute buffer)
+            expires_at = auth.tokens.get('expires_at', 0)
+            if time.time() < (expires_at - 300):
+                # Token is valid
+                return JSONResponse({
+                    "authenticated": True,
+                    "expires_in": expires_at - time.time()
+                })
+            else:
+                # Token expired, try to refresh
+                if auth.refresh_token():
+                    return JSONResponse({
+                        "authenticated": True,
+                        "expires_in": auth.tokens.get('expires_at', 0) - time.time()
+                    })
+                else:
+                    return JSONResponse({
+                        "authenticated": False
+                    })
+        else:
+            return JSONResponse({
+                "authenticated": False
+            })
+        
+    except Exception as e:
+        logger.error(f"Error checking Claude auth status: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"authenticated": False, "error": str(e)}
         )
 
 

@@ -16,7 +16,7 @@
       "rate_limit": 0,
       "enable_native_caching": false,
       "cache_ttl": 3600,
-      "min_cacheable_tokens": 1000,
+      "min_cacheable_tokens": 1024,
       "models": [
         {
           "name": "gemini-2.0-flash",
@@ -71,7 +71,7 @@
       "rate_limit": 0,
       "enable_native_caching": false,
       "cache_ttl": null,
-      "min_cacheable_tokens": 1000
+      "min_cacheable_tokens": 1024
     },
     "ollama": {
       "id": "ollama",
@@ -277,6 +277,49 @@
         "sqlite_db": "~/.local/share/kiro-cli/data.sqlite3",
         "region": "us-east-1"
       }
+    },
+    "claude": {
+      "id": "claude",
+      "name": "Claude Code (OAuth2)",
+      "endpoint": "https://api.anthropic.com/v1",
+      "type": "claude",
+      "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
+      "rate_limit": 0,
+      "claude_config": {
+        "_comment": "Uses OAuth2 authentication flow (claude-cli compatible)",
+        "credentials_file": "~/.claude_credentials.json"
+      },
+      "models": [
+        {
+          "name": "claude-3-7-sonnet-20250219",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 200000,
+          "context_size": 200000,
+          "capabilities": ["t2t", "vision", "function_calling"]
+        },
+        {
+          "name": "claude-3-5-sonnet-20241022",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 200000,
+          "context_size": 200000,
+          "capabilities": ["t2t", "vision", "function_calling"]
+        },
+        {
+          "name": "claude-3-5-haiku-20241022",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 200000,
+          "context_size": 200000,
+          "capabilities": ["t2t", "vision", "function_calling"]
+        }
+      ]
     }
   }
 }

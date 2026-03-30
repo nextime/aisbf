@@ -311,15 +311,25 @@ class KiroAuthManager:
             json.dump(data, f, indent=2)
     
     def get_auth_headers(self, token: str) -> dict:
-        """Get headers for Kiro API requests"""
-        fingerprint = self._get_machine_fingerprint()
+        """Get headers for Kiro API requests - matches kiro-cli format exactly"""
+        import platform
+        import sys
+        
+        # Get system info for User-Agent (matching kiro-cli's format)
+        os_name = platform.system().lower()
+        python_version = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+        
+        # Build User-Agent matching kiro-cli's AWS SDK Rust format
+        # Format: aws-sdk-rust/{version} os/{os} lang/rust/{version} md/appVersion/{version} app/AmazonQ-For-CLI
+        # We adapt this to Python: aws-sdk-python/{version} os/{os} lang/python/{version} md/appVersion/{version} app/AmazonQ-For-CLI
+        user_agent = f"aws-sdk-python/1.0.0 os/{os_name} lang/python/{python_version} md/appVersion/1.0.0 app/AmazonQ-For-CLI"
+        
         return {
             "Authorization": f"Bearer {token}",
             "Content-Type": "application/json",
-            "User-Agent": f"aws-sdk-js/1.0.27 KiroIDE-0.7.45-{fingerprint}",
-            "x-amz-user-agent": f"aws-sdk-js/1.0.27 KiroIDE-0.7.45-{fingerprint}",
-            "x-amz-codewhisperer-optout": "true",
-            "x-amzn-kiro-agent-mode": "vibe",
+            "User-Agent": user_agent,
+            "x-amz-user-agent": user_agent,
+            "x-amz-codewhisperer-optout": "false",
             "amz-sdk-invocation-id": str(uuid.uuid4()),
             "amz-sdk-request": "attempt=1; max=3"
         }

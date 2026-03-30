@@ -77,6 +77,48 @@ function renderProviders() {
             <div class="provider-details">
                 <p><strong>Created:</strong> ${new Date(provider.created_at).toLocaleString()}</p>
                 <p><strong>Last Updated:</strong> ${new Date(provider.updated_at).toLocaleString()}</p>
+                ${provider.config.type === 'claude' ? `
+                <div class="claude-auth-section">
+                    <h4>Claude Authentication</h4>
+                    <div id="claude-auth-status-${provider.provider_id}" style="display: none; margin: 10px 0; padding: 10px; border-radius: 4px;"></div>
+                    <button class="btn btn-secondary" onclick="authenticateClaudeUser('${provider.provider_id}')">
+                        Authenticate with Claude
+                    </button>
+                    <button class="btn btn-secondary" onclick="checkClaudeAuthUser('${provider.provider_id}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                    <div class="auth-files-section" style="margin-top: 15px;">
+                        <h5>Authentication Files</h5>
+                        <div id="auth-files-${provider.provider_id}"></div>
+                        <div class="upload-form" style="margin-top: 10px;">
+                            <select id="file-type-${provider.provider_id}" style="margin-right: 10px; padding: 5px;">
+                                <option value="claude_credentials">Claude Credentials</option>
+                                <option value="config">Configuration</option>
+                            </select>
+                            <input type="file" id="file-input-${provider.provider_id}" style="margin-right: 10px;">
+                            <button class="btn btn-secondary btn-sm" onclick="uploadAuthFile('${provider.provider_id}')">Upload</button>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
+                ${provider.config.type === 'kiro' ? `
+                <div class="kiro-auth-section">
+                    <h4>Kiro Authentication</h4>
+                    <div class="auth-files-section" style="margin-top: 15px;">
+                        <h5>Authentication Files</h5>
+                        <div id="auth-files-${provider.provider_id}"></div>
+                        <div class="upload-form" style="margin-top: 10px;">
+                            <select id="file-type-${provider.provider_id}" style="margin-right: 10px; padding: 5px;">
+                                <option value="kiro_credentials">Kiro Credentials</option>
+                                <option value="database">SQLite Database</option>
+                                <option value="config">Configuration</option>
+                            </select>
+                            <input type="file" id="file-input-${provider.provider_id}" style="margin-right: 10px;">
+                            <button class="btn btn-secondary btn-sm" onclick="uploadAuthFile('${provider.provider_id}')">Upload</button>
+                        </div>
+                    </div>
+                </div>
+                ` : ''}
                 <details>
                     <summary>Configuration (JSON)</summary>
                     <pre>${JSON.stringify(provider.config, null, 2)}</pre>
@@ -178,6 +220,179 @@ document.getElementById('provider-form').addEventListener('submit', function(e) 
         }
     }).catch(error => {
         alert('Error: ' + error.message);
+    });
+});
+
+async function authenticateClaudeUser(providerId) {
+    const statusEl = document.getElementById(`claude-auth-status-${providerId}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/claude/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: providerId,
+                credentials_file: '~/.claude_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication failed: ${data.error || 'Unknown error'}</p>`;
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function checkClaudeAuthUser(providerId) {
+    const statusEl = document.getElementById(`claude-auth-status-${providerId}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/claude/auth/status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: providerId,
+                credentials_file: '~/.claude_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            const expiresIn = data.expires_in ? ` (expires in ${Math.floor(data.expires_in / 60)} minutes)` : '';
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Authenticated${expiresIn}</p>`;
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Not authenticated. Click "Authenticate with Claude" to log in.</p>';
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function uploadAuthFile(providerId) {
+    const fileTypeSelect = document.getElementById(`file-type-${providerId}`);
+    const fileInput = document.getElementById(`file-input-${providerId}`);
+    
+    if (!fileInput.files || fileInput.files.length === 0) {
+        alert('Please select a file to upload');
+        return;
+    }
+    
+    const formData = new FormData();
+    formData.append('file_type', fileTypeSelect.value);
+    formData.append('file', fileInput.files[0]);
+    
+    try {
+        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (response.ok) {
+            alert('File uploaded successfully');
+            fileInput.value = '';
+            loadAuthFiles(providerId);
+        } else {
+            alert('Upload failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+async function loadAuthFiles(providerId) {
+    try {
+        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/files`);
+        const data = await response.json();
+        
+        const container = document.getElementById(`auth-files-${providerId}`);
+        if (!container) return;
+        
+        if (data.files && data.files.length > 0) {
+            container.innerHTML = data.files.map(file => `
+                <div class="auth-file-item" style="background: #0f3460; padding: 8px; margin: 5px 0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
+                    <span>
+                        <strong>${file.file_type}</strong>: ${file.original_filename}
+                        <span style="color: #a0a0a0; font-size: 0.9em;"> (${formatFileSize(file.file_size)})</span>
+                    </span>
+                    <span>
+                        <a href="/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
+                        <button class="btn btn-danger btn-sm" onclick="deleteAuthFile('${providerId}', '${file.file_type}')">Delete</button>
+                    </span>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<p style="color: #a0a0a0; font-style: italic;">No authentication files uploaded</p>';
+        }
+    } catch (error) {
+        console.error('Error loading auth files:', error);
+    }
+}
+
+async function deleteAuthFile(providerId, fileType) {
+    if (!confirm(`Are you sure you want to delete this ${fileType} file?`)) return;
+    
+    try {
+        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${fileType}`, {
+            method: 'DELETE'
+        });
+        
+        if (response.ok) {
+            loadAuthFiles(providerId);
+        } else {
+            const data = await response.json();
+            alert('Delete failed: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+function formatFileSize(bytes) {
+    if (!bytes) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+}
+
+// Load auth files for all providers on page load
+document.addEventListener('DOMContentLoaded', function() {
+    providers.forEach(provider => {
+        if (provider.config.type === 'claude' || provider.config.type === 'kiro') {
+            loadAuthFiles(provider.provider_id);
+        }
     });
 });
 

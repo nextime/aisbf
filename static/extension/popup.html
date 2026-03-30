@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>AISBF OAuth2 Relay</title>
+  <style>
+    body {
+      width: 300px;
+      padding: 15px;
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      margin: 0;
+    }
+    
+    .container {
+      background: white;
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+    }
+    
+    h1 {
+      margin: 0 0 15px 0;
+      font-size: 18px;
+      color: #333;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    
+    h1 img {
+      width: 24px;
+      height: 24px;
+    }
+    
+    .status {
+      padding: 12px;
+      border-radius: 8px;
+      margin-bottom: 15px;
+      font-size: 13px;
+    }
+    
+    .status.active {
+      background: #e8f5e9;
+      color: #2e7d32;
+      border: 1px solid #a5d6a7;
+    }
+    
+    .status.inactive {
+      background: #ffebee;
+      color: #c62828;
+      border: 1px solid #ef9a9a;
+    }
+    
+    .status.warning {
+      background: #fff3e0;
+      color: #ef6c00;
+      border: 1px solid #ffcc80;
+    }
+    
+    .server-info {
+      font-size: 12px;
+      color: #666;
+      margin-top: 8px;
+      word-break: break-all;
+    }
+    
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 15px;
+    }
+    
+    .toggle-label {
+      font-size: 14px;
+      color: #333;
+    }
+    
+    .toggle {
+      position: relative;
+      width: 50px;
+      height: 26px;
+    }
+    
+    .toggle input {
+      opacity: 0;
+      width: 0;
+      height: 0;
+    }
+    
+    .slider {
+      position: absolute;
+      cursor: pointer;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background-color: #ccc;
+      transition: 0.3s;
+      border-radius: 26px;
+    }
+    
+    .slider:before {
+      position: absolute;
+      content: "";
+      height: 20px;
+      width: 20px;
+      left: 3px;
+      bottom: 3px;
+      background-color: white;
+      transition: 0.3s;
+      border-radius: 50%;
+    }
+    
+    input:checked + .slider {
+      background-color: #667eea;
+    }
+    
+    input:checked + .slider:before {
+      transform: translateX(24px);
+    }
+    
+    .btn {
+      display: block;
+      width: 100%;
+      padding: 10px;
+      border: none;
+      border-radius: 8px;
+      font-size: 13px;
+      cursor: pointer;
+      transition: all 0.2s;
+      text-decoration: none;
+      text-align: center;
+      box-sizing: border-box;
+    }
+    
+    .btn-primary {
+      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      color: white;
+    }
+    
+    .btn-primary:hover {
+      transform: translateY(-1px);
+      box-shadow: 0 2px 4px rgba(102, 126, 234, 0.4);
+    }
+    
+    .btn-secondary {
+      background: #f5f5f5;
+      color: #333;
+      margin-top: 8px;
+    }
+    
+    .btn-secondary:hover {
+      background: #eeeeee;
+    }
+    
+    .rules-count {
+      text-align: center;
+      font-size: 11px;
+      color: #999;
+      margin-top: 10px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h1>
+      <img src="icons/icon48.png" alt="">
+      AISBF OAuth2 Relay
+    </h1>
+    
+    <div id="status" class="status inactive">
+      Checking status...
+    </div>
+    
+    <div class="toggle-container">
+      <span class="toggle-label">Enable Relay</span>
+      <label class="toggle">
+        <input type="checkbox" id="enableToggle">
+        <span class="slider"></span>
+      </label>
+    </div>
+    
+    <button id="configBtn" class="btn btn-primary">Configure Server</button>
+    <button id="optionsBtn" class="btn btn-secondary">Advanced Options</button>
+    
+    <div id="rulesCount" class="rules-count"></div>
+  </div>
+  
+  <script src="popup.js"></script>
+</body>
+</html>

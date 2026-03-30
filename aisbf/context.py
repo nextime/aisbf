@@ -995,8 +995,16 @@ def get_context_config_for_model(
         # Try to find model-specific config in provider
         if hasattr(provider_config, 'models') and provider_config.models:
             for model in provider_config.models:
-                if model.get('name') == model_name:
-                    model_specific_config = model
+                # Handle both Pydantic objects and dictionaries
+                model_name_value = model.name if hasattr(model, 'name') else model.get('name')
+                if model_name_value == model_name:
+                    # Convert Pydantic object to dict if needed
+                    if hasattr(model, 'model_dump'):
+                        model_specific_config = model.model_dump()
+                    elif hasattr(model, 'dict'):
+                        model_specific_config = model.dict()
+                    else:
+                        model_specific_config = model
                     break
         
         # Build base config from provider (model-specific > provider defaults)

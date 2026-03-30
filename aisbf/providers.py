@@ -456,8 +456,16 @@ class BaseProviderHandler:
         provider_config = config.providers.get(self.provider_id)
         if provider_config and hasattr(provider_config, 'models') and provider_config.models:
             for model_config in provider_config.models:
-                if model_config.get('name') == model:
-                    return model_config
+                # Handle both Pydantic objects and dictionaries
+                model_name_value = model_config.name if hasattr(model_config, 'name') else model_config.get('name')
+                if model_name_value == model:
+                    # Convert Pydantic object to dict if needed
+                    if hasattr(model_config, 'model_dump'):
+                        return model_config.model_dump()
+                    elif hasattr(model_config, 'dict'):
+                        return model_config.dict()
+                    else:
+                        return model_config
         return None
     
     def _check_token_rate_limit(self, model: str, token_count: int) -> bool:
@@ -749,6 +757,8 @@ class GoogleProviderHandler(BaseProviderHandler):
         # Initialize google-genai library
         from google import genai
         self.client = genai.Client(api_key=api_key)
+        # Cache storage for Google Context Caching
+        self._cached_content_refs = {}  # {cache_key: (cached_content_name, expiry_time)}
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                             temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
@@ -779,17 +789,55 @@ class GoogleProviderHandler(BaseProviderHandler):
             provider_config = config.providers.get(self.provider_id)
             enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
             cache_ttl = getattr(provider_config, 'cache_ttl', None)
+            min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1000)
 
             logging.info(f"GoogleProviderHandler: Native caching enabled: {enable_native_caching}")
+            
+            # Initialize cached_content_name for this request (will be set if we use caching)
+            cached_content_name = None
+            
             if enable_native_caching:
-                logging.info(f"GoogleProviderHandler: Cache TTL: {cache_ttl} seconds")
-                # Note: Google Context Caching API implementation would go here
-                # For now, we log that caching is enabled but don't implement the full caching logic
-                # Full implementation would require:
-                # 1. Creating cached content using context_cache.create()
-                # 2. Storing cache references and managing TTL
-                # 3. Referencing cached content in generate_content calls
-                logging.info(f"GoogleProviderHandler: Context caching configured but not yet implemented")
+                logging.info(f"GoogleProviderHandler: Cache TTL: {cache_ttl} seconds, min_cacheable_tokens: {min_cacheable_tokens}")
+                
+                # Calculate total token count to determine if caching is beneficial
+                total_tokens = count_messages_tokens(messages, model)
+                logging.info(f"GoogleProviderHandler: Total message tokens: {total_tokens}")
+                
+                # Only use caching if total tokens exceed minimum threshold
+                if total_tokens >= min_cacheable_tokens:
+                    # Generate a cache key based on system message and early conversation
+                    # We cache system message + early messages (not the last few turns)
+                    cache_key = self._generate_cache_key(messages, model)
+                    
+                    logging.info(f"GoogleProviderHandler: Generated cache_key: {cache_key}")
+                    
+                    # Check if we have a valid cached content
+                    if cache_key in self._cached_content_refs:
+                        cached_content_name, expiry_time = self._cached_content_refs[cache_key]
+                        current_time = time.time()
+                        
+                        if current_time < expiry_time:
+                            logging.info(f"GoogleProviderHandler: Using cached content: {cached_content_name} (expires in {expiry_time - current_time:.0f}s)")
+                        else:
+                            # Cache expired, remove it
+                            logging.info(f"GoogleProviderHandler: Cache expired, removing: {cached_content_name}")
+                            del self._cached_content_refs[cache_key]
+                            cached_content_name = None
+                    else:
+                        logging.info(f"GoogleProviderHandler: No cached content found for cache_key")
+                    
+                    # If no cached content, and we have a TTL, mark to create cache after first request
+                    if cached_content_name is None and cache_ttl:
+                        # We'll set this flag to create cache after first request
+                        self._pending_cache_key = (cache_key, cache_ttl, messages)
+                        logging.info(f"GoogleProviderHandler: Will create cached content after first request")
+                    else:
+                        self._pending_cache_key = None
+                else:
+                    logging.info(f"GoogleProviderHandler: Total tokens ({total_tokens}) below min_cacheable_tokens ({min_cacheable_tokens}), skipping cache")
+                    self._pending_cache_key = None
+            else:
+                self._pending_cache_key = None
 
             # Build content from messages
             content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
@@ -829,6 +877,10 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Handle streaming request
             if stream:
                 logging.info(f"GoogleProviderHandler: Using streaming API")
+                
+                # For streaming, we don't use cached content (API limitations)
+                # But we can still prepare for future caching by tracking the pending cache
+                
                 # Create a new client instance for streaming to ensure it stays open
                 from google import genai
                 stream_client = genai.Client(api_key=self.api_key)
@@ -847,6 +899,20 @@ class GoogleProviderHandler(BaseProviderHandler):
                 logging.info(f"GoogleProviderHandler: Streaming response received (total chunks: {len(chunks)})")
                 self.record_success()
                 
+                # After successful streaming response, create cached content if pending
+                if hasattr(self, '_pending_cache_key') and self._pending_cache_key:
+                    cache_key, cache_ttl, cache_messages = self._pending_cache_key
+                    try:
+                        new_cached_name = self._create_cached_content(cache_messages, model, cache_ttl)
+                        if new_cached_name:
+                            # Calculate expiry time
+                            expiry_time = time.time() + cache_ttl
+                            self._cached_content_refs[cache_key] = (new_cached_name, expiry_time)
+                            logging.info(f"GoogleProviderHandler: Cached content stored (streaming): {new_cached_name}, expires in {cache_ttl}s")
+                    except Exception as e:
+                        logging.warning(f"GoogleProviderHandler: Failed to create cache after streaming: {e}")
+                    self._pending_cache_key = None
+                
                 # Now yield chunks asynchronously - yield raw chunk objects
                 # The handlers.py will handle the conversion to OpenAI format
                 async def async_generator():
@@ -856,15 +922,96 @@ class GoogleProviderHandler(BaseProviderHandler):
                 return async_generator()
             else:
                 # Non-streaming request
+                # Determine if we should use cached content
+                use_cached = cached_content_name is not None
+                
+                # Build content from messages
+                if use_cached and cached_content_name:
+                    # When using cached content, only send the last few messages
+                    # (the ones not included in the cache)
+                    last_msg_count = min(3, len(messages))
+                    last_messages = messages[-last_msg_count:] if messages else []
+                    content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in last_messages])
+                    logging.info(f"GoogleProviderHandler: Using cached content, sending last {last_msg_count} messages")
+                else:
+                    content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in messages])
+
+                # Build config with only non-None values
+                config = {"temperature": temperature}
+                if max_tokens is not None:
+                    config["max_output_tokens"] = max_tokens
+
+                # Convert OpenAI tools to Google's function calling format
+                google_tools = None
+                if tools:
+                    function_declarations = []
+                    for tool in tools:
+                        if tool.get("type") == "function":
+                            function = tool.get("function", {})
+                            # Use Google's SDK types for proper validation
+                            from google.genai import types as genai_types
+                            function_declaration = genai_types.FunctionDeclaration(
+                                name=function.get("name"),
+                                description=function.get("description", ""),
+                                parameters=function.get("parameters", {})
+                            )
+                            function_declarations.append(function_declaration)
+                            logging.info(f"GoogleProviderHandler: Converted tool to Google format: {function_declaration}")
+                    
+                    if function_declarations:
+                        # Google API expects tools to be a Tool object with function_declarations
+                        from google.genai import types as genai_types
+                        google_tools = genai_types.Tool(function_declarations=function_declarations)
+                        logging.info(f"GoogleProviderHandler: Added {len(function_declarations)} tools to google_tools")
+                        
+                        # Add tools to config for both streaming and non-streaming
+                        config["tools"] = google_tools
+                        logging.info(f"GoogleProviderHandler: Added tools to config")
+
                 # Generate content using the google-genai client
-                response = self.client.models.generate_content(
-                    model=model,
-                    contents=content,
-                    config=config
-                )
+                if use_cached and cached_content_name:
+                    # Use cached content in the request
+                    try:
+                        logging.info(f"GoogleProviderHandler: Making request with cached_content: {cached_content_name}")
+                        response = self.client.models.generate_content(
+                            model=model,
+                            contents=content,
+                            config=config,
+                            cached_content=cached_content_name
+                        )
+                    except TypeError as e:
+                        # cached_content parameter may not be available in this SDK version
+                        # Fall back to regular request
+                        logging.warning(f"GoogleProviderHandler: cached_content param not supported, using regular request: {e}")
+                        response = self.client.models.generate_content(
+                            model=model,
+                            contents=content,
+                            config=config
+                        )
+                else:
+                    # Regular request without caching
+                    response = self.client.models.generate_content(
+                        model=model,
+                        contents=content,
+                        config=config
+                    )
 
                 logging.info(f"GoogleProviderHandler: Response received: {response}")
                 self.record_success()
+                
+                # After successful response, create cached content if pending
+                if hasattr(self, '_pending_cache_key') and self._pending_cache_key:
+                    cache_key, cache_ttl, cache_messages = self._pending_cache_key
+                    try:
+                        new_cached_name = self._create_cached_content(cache_messages, model, cache_ttl)
+                        if new_cached_name:
+                            # Calculate expiry time
+                            expiry_time = time.time() + cache_ttl
+                            self._cached_content_refs[cache_key] = (new_cached_name, expiry_time)
+                            logging.info(f"GoogleProviderHandler: Cached content stored: {new_cached_name}, expires in {cache_ttl}s")
+                    except Exception as e:
+                        logging.warning(f"GoogleProviderHandler: Failed to create cache after response: {e}")
+                    self._pending_cache_key = None
 
                 # Dump raw response if AISBF_DEBUG is enabled
                 if AISBF_DEBUG:
@@ -1399,10 +1546,21 @@ class GoogleProviderHandler(BaseProviderHandler):
             # Convert to our Model format
             result = []
             for model in models:
+                # Extract context size if available - check multiple field names
+                context_size = None
+                if hasattr(model, 'context_window') and model.context_window:
+                    context_size = model.context_window
+                elif hasattr(model, 'context_length') and model.context_length:
+                    context_size = model.context_length
+                elif hasattr(model, 'max_context_length') and model.max_context_length:
+                    context_size = model.max_context_length
+                
                 result.append(Model(
                     id=model.name,
                     name=model.display_name or model.name,
-                    provider_id=self.provider_id
+                    provider_id=self.provider_id,
+                    context_size=context_size,
+                    context_length=context_size
                 ))
 
             return result
@@ -1410,6 +1568,169 @@ class GoogleProviderHandler(BaseProviderHandler):
             import logging
             logging.error(f"GoogleProviderHandler: Error getting models: {str(e)}", exc_info=True)
             raise e
+
+    def _generate_cache_key(self, messages: List[Dict], model: str) -> str:
+        """
+        Generate a cache key based on the early messages (system + early conversation).
+        We only cache the system message and early conversation turns, not the most recent ones.
+        
+        Args:
+            messages: List of message dicts
+            model: Model name
+            
+        Returns:
+            Cache key string
+        """
+        import hashlib
+        import json
+        
+        # Extract system message and first part of conversation
+        # We cache system + first few messages (excluding last 2 messages for dynamic content)
+        cacheable_messages = []
+        
+        for i, msg in enumerate(messages):
+            # Include system messages and early conversation (first half, up to last 2)
+            if msg.get('role') == 'system' or i < max(0, len(messages) - 3):
+                cacheable_messages.append({
+                    'role': msg.get('role'),
+                    'content': msg.get('content', '')[:1000]  # Truncate long content for key
+                })
+        
+        # Create hash from messages + model
+        cache_data = json.dumps({
+            'model': model,
+            'messages': cacheable_messages
+        }, sort_keys=True)
+        
+        return hashlib.sha256(cache_data.encode()).hexdigest()[:32]
+    
+    def _create_cached_content(self, messages: List[Dict], model: str, cache_ttl: int) -> Optional[str]:
+        """
+        Create a cached content object in Google API.
+        
+        Args:
+            messages: Messages to cache
+            model: Model name
+            cache_ttl: Cache TTL in seconds
+            
+        Returns:
+            Cached content name or None on failure
+        """
+        import logging
+        
+        try:
+            # Extract the cacheable content (system + early messages)
+            cacheable_parts = []
+            
+            for i, msg in enumerate(messages):
+                # Include system messages and early conversation (first half, up to last 2)
+                if msg.get('role') == 'system' or i < max(0, len(messages) - 3):
+                    role = msg.get('role', 'user')
+                    content = msg.get('content', '')
+                    cacheable_parts.append(f"{role}: {content}")
+            
+            if not cacheable_parts:
+                logging.info("GoogleProviderHandler: No cacheable content to create")
+                return None
+            
+            cached_content_text = "\n\n".join(cacheable_parts)
+            
+            # Create cache name
+            cache_name = f"cached_content_{int(time.time())}"
+            
+            logging.info(f"GoogleProviderHandler: Creating cached content: {cache_name}")
+            logging.info(f"GoogleProviderHandler: Cached content length: {len(cached_content_text)} chars")
+            
+            # Use the google-genai client to create cached content
+            # The cached content is created via the content caching API
+            from google.genai import types as genai_types
+            
+            # Create cached content using the client
+            # Note: The actual API call depends on the SDK version and model support
+            # For models that support context caching, we create the cached content
+            try:
+                # Try to create cached content through the API
+                # This may not be available in all SDK versions
+                cached_content = self.client.cached_contents.create(
+                    model=model,
+                    display_name=cache_name,
+                    system_instruction=cached_content_text,
+                    ttl=f"{cache_ttl}s"
+                )
+                
+                logging.info(f"GoogleProviderHandler: Cached content created: {cached_content.name}")
+                return cached_content.name
+                
+            except AttributeError as e:
+                # cached_contents may not be available in this SDK version
+                logging.info(f"GoogleProviderHandler: Cached content API not available in this SDK: {e}")
+                # Fall back to just storing the content locally as a reference
+                # The next request will still process normally but we track this attempt
+                return None
+            except Exception as e:
+                logging.warning(f"GoogleProviderHandler: Failed to create cached content: {e}")
+                return None
+                
+        except Exception as e:
+            logging.error(f"GoogleProviderHandler: Error creating cached content: {e}")
+            return None
+    
+    def _use_cached_content_in_request(self, cached_content_name: str, model: str, 
+                                         last_messages: List[Dict], max_tokens: Optional[int],
+                                         temperature: float, tools: Optional[List[Dict]]) -> Union[Dict, object]:
+        """
+        Make a request using cached content.
+        
+        Args:
+            cached_content_name: Name of the cached content
+            model: Model name
+            last_messages: The non-cached messages (last few turns)
+            max_tokens: Max output tokens
+            temperature: Temperature setting
+            tools: Tool definitions
+            
+        Returns:
+            Response from API
+        """
+        import logging
+        from google.genai import types as genai_types
+        
+        logging.info(f"GoogleProviderHandler: Using cached content: {cached_content_name}")
+        
+        # Build content from only the non-cached (last) messages
+        content = "\n\n".join([f"{msg['role']}: {msg['content']}" for msg in last_messages])
+        
+        # Build config
+        config = {"temperature": temperature}
+        if max_tokens is not None:
+            config["max_output_tokens"] = max_tokens
+        if tools:
+            # Convert tools to Google format (same as before)
+            function_declarations = []
+            for tool in tools:
+                if tool.get("type") == "function":
+                    function = tool.get("function", {})
+                    function_declaration = genai_types.FunctionDeclaration(
+                        name=function.get("name"),
+                        description=function.get("description", ""),
+                        parameters=function.get("parameters", {})
+                    )
+                    function_declarations.append(function_declaration)
+            
+            if function_declarations:
+                google_tools = genai_types.Tool(function_declarations=function_declarations)
+                config["tools"] = google_tools
+        
+        # Make request using cached content
+        # Reference the cached content in the request
+        response = self.client.models.generate_content(
+            model=model,
+            contents=content,
+            config=config,
+            cached_content=cached_content_name  # Use the cached content
+        )
+        
+        return response
 
 class OpenAIProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: str):
@@ -1436,6 +1757,16 @@ class OpenAIProviderHandler(BaseProviderHandler):
             # Apply rate limiting
             await self.apply_rate_limit()
 
+            # Check if native caching is enabled for this provider
+            provider_config = config.providers.get(self.provider_id)
+            enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
+            min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1024)
+            prompt_cache_key = getattr(provider_config, 'prompt_cache_key', None)
+
+            logging.info(f"OpenAIProviderHandler: Native caching enabled: {enable_native_caching}")
+            if enable_native_caching:
+                logging.info(f"OpenAIProviderHandler: Min cacheable tokens: {min_cacheable_tokens}, prompt_cache_key: {prompt_cache_key}")
+
             # Build request parameters
             request_params = {
                 "model": model,
@@ -1448,26 +1779,70 @@ class OpenAIProviderHandler(BaseProviderHandler):
             if max_tokens is not None:
                 request_params["max_tokens"] = max_tokens
             
-            # Build messages with all fields (including tool_calls and tool_call_id)
-            for msg in messages:
-                message = {"role": msg["role"]}
-                
-                # For tool role, tool_call_id is required
-                if msg["role"] == "tool":
-                    if "tool_call_id" in msg and msg["tool_call_id"] is not None:
-                        message["tool_call_id"] = msg["tool_call_id"]
+            # Add prompt_cache_key if provided (for OpenAI's load balancer routing optimization)
+            if enable_native_caching and prompt_cache_key:
+                request_params["prompt_cache_key"] = prompt_cache_key
+                logging.info(f"OpenAIProviderHandler: Added prompt_cache_key to request")
+            
+            # Build messages with all fields (including tool_calls, tool_call_id, and cache_control)
+            if enable_native_caching:
+                # Count cumulative tokens for cache decision
+                cumulative_tokens = 0
+                for i, msg in enumerate(messages):
+                    # Count tokens in this message
+                    message_tokens = count_messages_tokens([msg], model)
+                    cumulative_tokens += message_tokens
+
+                    message = {"role": msg["role"]}
+                    
+                    # For tool role, tool_call_id is required
+                    if msg["role"] == "tool":
+                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                            message["tool_call_id"] = msg["tool_call_id"]
+                        else:
+                            # Skip tool messages without tool_call_id
+                            logger.warning(f"Skipping tool message without tool_call_id: {msg}")
+                            continue
+                    
+                    if "content" in msg and msg["content"] is not None:
+                        message["content"] = msg["content"]
+                    if "tool_calls" in msg and msg["tool_calls"] is not None:
+                        message["tool_calls"] = msg["tool_calls"]
+                    if "name" in msg and msg["name"] is not None:
+                        message["name"] = msg["name"]
+                    
+                    # Apply cache_control based on position and token count
+                    # Cache system messages and long conversation prefixes
+                    # This is compatible with Anthropic via OpenRouter, DeepSeek, and other OpenAI-compatible APIs
+                    if (msg["role"] == "system" or
+                        (i < len(messages) - 2 and cumulative_tokens >= min_cacheable_tokens)):
+                        message["cache_control"] = {"type": "ephemeral"}
+                        logging.info(f"OpenAIProviderHandler: Applied cache_control to message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
                     else:
-                        # Skip tool messages without tool_call_id
-                        logger.warning(f"Skipping tool message without tool_call_id: {msg}")
-                        continue
-                
-                if "content" in msg and msg["content"] is not None:
-                    message["content"] = msg["content"]
-                if "tool_calls" in msg and msg["tool_calls"] is not None:
-                    message["tool_calls"] = msg["tool_calls"]
-                if "name" in msg and msg["name"] is not None:
-                    message["name"] = msg["name"]
-                request_params["messages"].append(message)
+                        logging.info(f"OpenAIProviderHandler: Not caching message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+                    
+                    request_params["messages"].append(message)
+            else:
+                # Standard message formatting without caching
+                for msg in messages:
+                    message = {"role": msg["role"]}
+                    
+                    # For tool role, tool_call_id is required
+                    if msg["role"] == "tool":
+                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                            message["tool_call_id"] = msg["tool_call_id"]
+                        else:
+                            # Skip tool messages without tool_call_id
+                            logger.warning(f"Skipping tool message without tool_call_id: {msg}")
+                            continue
+                    
+                    if "content" in msg and msg["content"] is not None:
+                        message["content"] = msg["content"]
+                    if "tool_calls" in msg and msg["tool_calls"] is not None:
+                        message["tool_calls"] = msg["tool_calls"]
+                    if "name" in msg and msg["name"] is not None:
+                        message["name"] = msg["name"]
+                    request_params["messages"].append(message)
             
             # Add tools and tool_choice if provided
             if tools is not None:
@@ -1508,7 +1883,26 @@ class OpenAIProviderHandler(BaseProviderHandler):
             models = self.client.models.list()
             logging.info(f"OpenAIProviderHandler: Models received: {models}")
 
-            return [Model(id=model.id, name=model.id, provider_id=self.provider_id) for model in models]
+            result = []
+            for model in models:
+                # Extract context size if available - check multiple field names
+                context_size = None
+                if hasattr(model, 'context_window') and model.context_window:
+                    context_size = model.context_window
+                elif hasattr(model, 'context_length') and model.context_length:
+                    context_size = model.context_length
+                elif hasattr(model, 'max_context_length') and model.max_context_length:
+                    context_size = model.max_context_length
+                
+                result.append(Model(
+                    id=model.id,
+                    name=model.id,
+                    provider_id=self.provider_id,
+                    context_size=context_size,
+                    context_length=context_size
+                ))
+            
+            return result
         except Exception as e:
             import logging
             logging.error(f"OpenAIProviderHandler: Error getting models: {str(e)}", exc_info=True)
@@ -1731,12 +2125,701 @@ class AnthropicProviderHandler(BaseProviderHandler):
             raise e
 
     async def get_models(self) -> List[Model]:
-        # Anthropic doesn't have a models list endpoint, so we'll return a static list
-        return [
-            Model(id="claude-3-haiku-20240307", name="Claude 3 Haiku", provider_id=self.provider_id),
-            Model(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", provider_id=self.provider_id),
-            Model(id="claude-3-opus-20240229", name="Claude 3 Opus", provider_id=self.provider_id)
-        ]
+        """
+        Return list of available Anthropic models.
+        
+        Note: Anthropic's API doesn't provide a public models endpoint,
+        so we return a curated static list of available models.
+        """
+        try:
+            import logging
+            logging.info("=" * 80)
+            logging.info("AnthropicProviderHandler: Starting model list retrieval")
+            logging.info("=" * 80)
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Try to fetch models from API (in case Anthropic adds this endpoint)
+            try:
+                logging.info("AnthropicProviderHandler: Attempting to fetch models from API...")
+                logging.info("AnthropicProviderHandler: Note: Anthropic doesn't currently provide a public models endpoint")
+                logging.info("AnthropicProviderHandler: Checking if endpoint is now available...")
+                
+                response = self.client.models.list()
+                if response:
+                    logging.info(f"AnthropicProviderHandler: ✓ API call successful!")
+                    logging.info(f"AnthropicProviderHandler: Retrieved models from API")
+                    
+                    models = [Model(id=model.id, name=model.id, provider_id=self.provider_id) for model in response]
+                    
+                    for model in models:
+                        logging.info(f"AnthropicProviderHandler:   - {model.id}")
+                    
+                    logging.info("=" * 80)
+                    logging.info(f"AnthropicProviderHandler: ✓ SUCCESS - Returning {len(models)} models from API")
+                    logging.info(f"AnthropicProviderHandler: Source: Dynamic API retrieval")
+                    logging.info("=" * 80)
+                    return models
+            except AttributeError as attr_error:
+                logging.info(f"AnthropicProviderHandler: ✗ API endpoint not available")
+                logging.info(f"AnthropicProviderHandler: Error: {type(attr_error).__name__} - {str(attr_error)}")
+                logging.info("AnthropicProviderHandler: Reason: Anthropic SDK doesn't expose models.list() method")
+                logging.info("AnthropicProviderHandler: Action: Falling back to static list")
+            except Exception as api_error:
+                logging.warning(f"AnthropicProviderHandler: ✗ Exception during API call")
+                logging.warning(f"AnthropicProviderHandler: Error type: {type(api_error).__name__}")
+                logging.warning(f"AnthropicProviderHandler: Error message: {str(api_error)}")
+                logging.warning("AnthropicProviderHandler: Action: Falling back to static list")
+                if AISBF_DEBUG:
+                    logging.warning(f"AnthropicProviderHandler: Full traceback:", exc_info=True)
+            
+            # Return static list (Anthropic doesn't have a public models endpoint as of 2025)
+            logging.info("-" * 80)
+            logging.info("AnthropicProviderHandler: Using static fallback model list")
+            logging.info("AnthropicProviderHandler: Note: This is the expected behavior for Anthropic provider")
+            
+            static_models = [
+                Model(id="claude-3-7-sonnet-20250219", name="Claude 3.7 Sonnet", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-opus-20240229", name="Claude 3 Opus", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-haiku-20240307", name="Claude 3 Haiku", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-sonnet-20240229", name="Claude 3 Sonnet", provider_id=self.provider_id, context_size=200000, context_length=200000),
+            ]
+            
+            for model in static_models:
+                logging.info(f"AnthropicProviderHandler:   - {model.id} ({model.name})")
+            
+            logging.info("=" * 80)
+            logging.info(f"AnthropicProviderHandler: ✓ Returning {len(static_models)} models from static list")
+            logging.info(f"AnthropicProviderHandler: Source: Static fallback configuration")
+            logging.info("=" * 80)
+            
+            return static_models
+        except Exception as e:
+            import logging
+            logging.error("=" * 80)
+            logging.error(f"AnthropicProviderHandler: ✗ FATAL ERROR getting models: {str(e)}")
+            logging.error("=" * 80)
+            logging.error(f"AnthropicProviderHandler: Error details:", exc_info=True)
+            raise e
+
+class ClaudeProviderHandler(BaseProviderHandler):
+    """
+    Handler for Claude Code OAuth2 integration.
+    
+    This handler uses OAuth2 authentication to access Claude models through
+    the official Claude API with subscription-based access (claude-code).
+    """
+    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+        super().__init__(provider_id, api_key)
+        self.provider_config = config.get_provider(provider_id)
+        
+        # Get credentials file path from config
+        claude_config = getattr(self.provider_config, 'claude_config', None)
+        credentials_file = None
+        if claude_config and isinstance(claude_config, dict):
+            credentials_file = claude_config.get('credentials_file')
+        
+        # Initialize ClaudeAuth with credentials file
+        from .claude_auth import ClaudeAuth
+        self.auth = ClaudeAuth(credentials_file=credentials_file)
+        
+        # HTTP client for making requests
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+    
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            logging.info(f"ClaudeProviderHandler: Handling request for model {model}")
+            if AISBF_DEBUG:
+                logging.info(f"ClaudeProviderHandler: Messages: {messages}")
+            else:
+                logging.info(f"ClaudeProviderHandler: Messages count: {len(messages)}")
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Get valid access token (will refresh or re-authenticate if needed)
+            access_token = self.auth.get_valid_token()
+            
+            # Prepare messages for Anthropic API format
+            # Extract system message if present
+            system_message = None
+            anthropic_messages = []
+            
+            for msg in messages:
+                if msg['role'] == 'system':
+                    system_message = msg['content']
+                else:
+                    anthropic_messages.append({
+                        'role': msg['role'],
+                        'content': msg['content']
+                    })
+            
+            # Build request payload
+            request_payload = {
+                'model': model,
+                'messages': anthropic_messages,
+                'max_tokens': max_tokens or 4096,
+                'temperature': temperature,
+                'stream': stream
+            }
+            
+            if system_message:
+                request_payload['system'] = system_message
+            
+            if tools:
+                request_payload['tools'] = tools
+            
+            if tool_choice:
+                request_payload['tool_choice'] = tool_choice
+            
+            # Prepare headers
+            headers = {
+                'Authorization': f'Bearer {access_token}',
+                'anthropic-version': '2023-06-01',
+                'anthropic-beta': 'claude-code-20250219',  # Required for subscription usage
+                'Content-Type': 'application/json'
+            }
+            
+            if AISBF_DEBUG:
+                logging.info(f"ClaudeProviderHandler: Request payload: {request_payload}")
+            
+            # Make request to Claude API
+            if stream:
+                logging.info(f"ClaudeProviderHandler: Using streaming mode")
+                return await self._handle_streaming_request(headers, request_payload, model)
+            
+            # Non-streaming request
+            response = await self.client.post(
+                'https://api.anthropic.com/v1/messages',
+                headers=headers,
+                json=request_payload
+            )
+            
+            # Check for 429 rate limit error before raising
+            if response.status_code == 429:
+                try:
+                    response_data = response.json()
+                except Exception:
+                    response_data = response.text
+                
+                # Handle 429 error with intelligent parsing
+                self.handle_429_error(response_data, dict(response.headers))
+                
+                # Re-raise the error after handling
+                response.raise_for_status()
+            
+            response.raise_for_status()
+            
+            response_data = response.json()
+            
+            if AISBF_DEBUG:
+                logging.info(f"ClaudeProviderHandler: Raw response: {response_data}")
+            
+            logging.info(f"ClaudeProviderHandler: Response received successfully")
+            self.record_success()
+            
+            # Convert to OpenAI format
+            openai_response = self._convert_to_openai_format(response_data, model)
+            
+            return openai_response
+            
+        except Exception as e:
+            import logging
+            logging.error(f"ClaudeProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+    
+    async def _handle_streaming_request(self, headers: Dict, payload: Dict, model: str):
+        """Handle streaming request to Claude API."""
+        import logging
+        import json
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"ClaudeProviderHandler: Starting streaming request")
+        
+        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as streaming_client:
+            async with streaming_client.stream(
+                "POST",
+                "https://api.anthropic.com/v1/messages",
+                headers=headers,
+                json=payload
+            ) as response:
+                logger.info(f"ClaudeProviderHandler: Streaming response status: {response.status_code}")
+                
+                if response.status_code >= 400:
+                    error_text = await response.aread()
+                    logger.error(f"ClaudeProviderHandler: Streaming error: {error_text}")
+                    raise Exception(f"Claude API error: {response.status_code}")
+                
+                # Generate completion ID and timestamps
+                completion_id = f"claude-{int(time.time())}"
+                created_time = int(time.time())
+                
+                # Track state for streaming
+                first_chunk = True
+                accumulated_content = ""
+                accumulated_tool_calls = []
+                
+                # Process the streaming response (SSE format)
+                async for line in response.aiter_lines():
+                    if not line or not line.startswith('data: '):
+                        continue
+                    
+                    # Remove 'data: ' prefix
+                    data_str = line[6:]
+                    
+                    if data_str == '[DONE]':
+                        break
+                    
+                    try:
+                        chunk_data = json.loads(data_str)
+                        
+                        # Handle different event types
+                        event_type = chunk_data.get('type')
+                        
+                        if event_type == 'content_block_delta':
+                            delta = chunk_data.get('delta', {})
+                            if delta.get('type') == 'text_delta':
+                                text = delta.get('text', '')
+                                accumulated_content += text
+                                
+                                # Build OpenAI chunk
+                                openai_delta = {'content': text}
+                                if first_chunk:
+                                    openai_delta['role'] = 'assistant'
+                                    first_chunk = False
+                                
+                                openai_chunk = {
+                                    'id': completion_id,
+                                    'object': 'chat.completion.chunk',
+                                    'created': created_time,
+                                    'model': f'{self.provider_id}/{model}',
+                                    'choices': [{
+                                        'index': 0,
+                                        'delta': openai_delta,
+                                        'finish_reason': None
+                                    }]
+                                }
+                                
+                                yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                        
+                        elif event_type == 'message_stop':
+                            # Final chunk
+                            finish_reason = 'stop'
+                            
+                            final_chunk = {
+                                'id': completion_id,
+                                'object': 'chat.completion.chunk',
+                                'created': created_time,
+                                'model': f'{self.provider_id}/{model}',
+                                'choices': [{
+                                    'index': 0,
+                                    'delta': {},
+                                    'finish_reason': finish_reason
+                                }]
+                            }
+                            
+                            yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                            yield b"data: [DONE]\n\n"
+                    
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse streaming chunk: {e}")
+                        continue
+    
+    def _convert_to_openai_format(self, claude_response: Dict, model: str) -> Dict:
+        """Convert Claude API response to OpenAI format."""
+        import logging
+        
+        # Extract content
+        content_text = ""
+        tool_calls = []
+        
+        if 'content' in claude_response:
+            for block in claude_response['content']:
+                if block.get('type') == 'text':
+                    content_text += block.get('text', '')
+                elif block.get('type') == 'tool_use':
+                    tool_calls.append({
+                        'id': block.get('id', f"call_{len(tool_calls)}"),
+                        'type': 'function',
+                        'function': {
+                            'name': block.get('name', ''),
+                            'arguments': json.dumps(block.get('input', {}))
+                        }
+                    })
+        
+        # Map stop reason
+        stop_reason_map = {
+            'end_turn': 'stop',
+            'max_tokens': 'length',
+            'stop_sequence': 'stop',
+            'tool_use': 'tool_calls'
+        }
+        stop_reason = claude_response.get('stop_reason', 'end_turn')
+        finish_reason = stop_reason_map.get(stop_reason, 'stop')
+        
+        # Build OpenAI-style response
+        openai_response = {
+            'id': f"claude-{model}-{int(time.time())}",
+            'object': 'chat.completion',
+            'created': int(time.time()),
+            'model': f'{self.provider_id}/{model}',
+            'choices': [{
+                'index': 0,
+                'message': {
+                    'role': 'assistant',
+                    'content': content_text if not tool_calls else None
+                },
+                'finish_reason': finish_reason
+            }],
+            'usage': {
+                'prompt_tokens': claude_response.get('usage', {}).get('input_tokens', 0),
+                'completion_tokens': claude_response.get('usage', {}).get('output_tokens', 0),
+                'total_tokens': (
+                    claude_response.get('usage', {}).get('input_tokens', 0) +
+                    claude_response.get('usage', {}).get('output_tokens', 0)
+                )
+            }
+        }
+        
+        # Add tool_calls if present
+        if tool_calls:
+            openai_response['choices'][0]['message']['tool_calls'] = tool_calls
+        
+        return openai_response
+    
+    def _get_models_cache_path(self) -> str:
+        """Get the path to the models cache file."""
+        import os
+        cache_dir = os.path.expanduser("~/.aisbf")
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"claude_models_cache_{self.provider_id}.json")
+    
+    def _save_models_cache(self, models: List[Model]) -> None:
+        """Save models to cache file."""
+        import logging
+        import json
+        
+        try:
+            cache_path = self._get_models_cache_path()
+            cache_data = {
+                'timestamp': time.time(),
+                'models': []
+            }
+            
+            for m in models:
+                model_dict = {'id': m.id, 'name': m.name}
+                # Save optional fields
+                if m.context_size:
+                    model_dict['context_size'] = m.context_size
+                if m.context_length:
+                    model_dict['context_length'] = m.context_length
+                if m.description:
+                    model_dict['description'] = m.description
+                if m.pricing:
+                    model_dict['pricing'] = m.pricing
+                if m.top_provider:
+                    model_dict['top_provider'] = m.top_provider
+                if m.supported_parameters:
+                    model_dict['supported_parameters'] = m.supported_parameters
+                cache_data['models'].append(model_dict)
+            
+            with open(cache_path, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            
+            logging.info(f"ClaudeProviderHandler: ✓ Saved {len(models)} models to cache: {cache_path}")
+        except Exception as e:
+            logging.warning(f"ClaudeProviderHandler: Failed to save models cache: {e}")
+    
+    def _load_models_cache(self) -> Optional[List[Model]]:
+        """Load models from cache file if available and not too old."""
+        import logging
+        import json
+        import os
+        
+        try:
+            cache_path = self._get_models_cache_path()
+            
+            if not os.path.exists(cache_path):
+                logging.info(f"ClaudeProviderHandler: No cache file found at {cache_path}")
+                return None
+            
+            with open(cache_path, 'r') as f:
+                cache_data = json.load(f)
+            
+            cache_age = time.time() - cache_data.get('timestamp', 0)
+            cache_age_hours = cache_age / 3600
+            
+            logging.info(f"ClaudeProviderHandler: Found cache file (age: {cache_age_hours:.1f} hours)")
+            
+            # Cache is valid for 24 hours
+            if cache_age > 86400:
+                logging.info(f"ClaudeProviderHandler: Cache is too old (>{cache_age_hours:.1f} hours), ignoring")
+                return None
+            
+            models = []
+            for m in cache_data.get('models', []):
+                models.append(Model(
+                    id=m['id'],
+                    name=m['name'],
+                    provider_id=self.provider_id,
+                    context_size=m.get('context_size'),
+                    context_length=m.get('context_length'),
+                    description=m.get('description'),
+                    pricing=m.get('pricing'),
+                    top_provider=m.get('top_provider'),
+                    supported_parameters=m.get('supported_parameters')
+                ))
+            
+            if models:
+                logging.info(f"ClaudeProviderHandler: ✓ Loaded {len(models)} models from cache")
+                return models
+            else:
+                logging.info(f"ClaudeProviderHandler: Cache file is empty")
+                return None
+                
+        except Exception as e:
+            logging.warning(f"ClaudeProviderHandler: Failed to load models cache: {e}")
+            return None
+
+    async def get_models(self) -> List[Model]:
+        """Return list of available Claude models by querying the API."""
+        try:
+            import logging
+            import json
+            logging.info("=" * 80)
+            logging.info("ClaudeProviderHandler: Starting model list retrieval")
+            logging.info("=" * 80)
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Try to fetch models from the primary API
+            try:
+                logging.info("ClaudeProviderHandler: [1/3] Attempting primary API endpoint...")
+                
+                # Get valid access token
+                access_token = self.auth.get_valid_token()
+                logging.info("ClaudeProviderHandler: Access token obtained successfully")
+                
+                # Prepare headers
+                headers = {
+                    'Authorization': f'Bearer {access_token}',
+                    'anthropic-version': '2023-06-01',
+                    'anthropic-beta': 'claude-code-20250219',
+                    'Content-Type': 'application/json'
+                }
+                
+                # Log the API endpoint being called
+                api_endpoint = 'https://api.anthropic.com/v1/models'
+                logging.info(f"ClaudeProviderHandler: Calling API endpoint: {api_endpoint}")
+                logging.info(f"ClaudeProviderHandler: Using OAuth2 authentication with claude-code beta")
+                
+                # Query the models endpoint
+                response = await self.client.get(api_endpoint, headers=headers)
+                
+                logging.info(f"ClaudeProviderHandler: API response status: {response.status_code}")
+                
+                if response.status_code == 200:
+                    models_data = response.json()
+                    logging.info(f"ClaudeProviderHandler: ✓ Primary API call successful!")
+                    logging.info(f"ClaudeProviderHandler: Response data keys: {list(models_data.keys())}")
+                    logging.info(f"ClaudeProviderHandler: Retrieved {len(models_data.get('data', []))} models from API")
+                    
+                    if AISBF_DEBUG:
+                        logging.info(f"ClaudeProviderHandler: Full API response: {models_data}")
+                    
+                    # Convert API response to Model objects
+                    models = []
+                    for model_data in models_data.get('data', []):
+                        model_id = model_data.get('id', '')
+                        display_name = model_data.get('display_name') or model_data.get('name') or model_id
+                        
+                        # Extract context size from API response
+                        # For Anthropic/Claude models, max_input_tokens is the correct field
+                        context_size = (
+                            model_data.get('max_input_tokens') or
+                            model_data.get('context_window') or
+                            model_data.get('context_length') or
+                            model_data.get('max_tokens')
+                        )
+                        
+                        # Extract description if available
+                        description = model_data.get('description')
+                        
+                        models.append(Model(
+                            id=model_id,
+                            name=display_name,
+                            provider_id=self.provider_id,
+                            context_size=context_size,
+                            context_length=context_size,
+                            description=description
+                        ))
+                        logging.info(f"ClaudeProviderHandler:   - {model_id} ({display_name}, context: {context_size})")
+                    
+                    if models:
+                        # Save to cache
+                        self._save_models_cache(models)
+                        
+                        logging.info("=" * 80)
+                        logging.info(f"ClaudeProviderHandler: ✓ SUCCESS - Returning {len(models)} models from primary API")
+                        logging.info(f"ClaudeProviderHandler: Source: Dynamic API retrieval (Anthropic)")
+                        logging.info("=" * 80)
+                        return models
+                    else:
+                        logging.warning("ClaudeProviderHandler: ✗ Primary API returned empty model list")
+                else:
+                    logging.warning(f"ClaudeProviderHandler: ✗ Primary API call failed with status {response.status_code}")
+                    try:
+                        error_body = response.json()
+                        logging.warning(f"ClaudeProviderHandler: Error response: {error_body}")
+                    except:
+                        logging.warning(f"ClaudeProviderHandler: Error response (text): {response.text[:200]}")
+            
+            except Exception as api_error:
+                logging.warning(f"ClaudeProviderHandler: ✗ Exception during primary API call")
+                logging.warning(f"ClaudeProviderHandler: Error type: {type(api_error).__name__}")
+                logging.warning(f"ClaudeProviderHandler: Error message: {str(api_error)}")
+                if AISBF_DEBUG:
+                    logging.warning(f"ClaudeProviderHandler: Full traceback:", exc_info=True)
+            
+            # Try fallback endpoint
+            try:
+                logging.info("-" * 80)
+                logging.info("ClaudeProviderHandler: [2/3] Attempting fallback endpoint...")
+                
+                fallback_endpoint = 'http://lisa.nexlab.net:5000/claude/models'
+                logging.info(f"ClaudeProviderHandler: Calling fallback endpoint: {fallback_endpoint}")
+                
+                # Create a new client with shorter timeout for fallback
+                fallback_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+                
+                try:
+                    fallback_response = await fallback_client.get(fallback_endpoint)
+                    logging.info(f"ClaudeProviderHandler: Fallback response status: {fallback_response.status_code}")
+                    
+                    if fallback_response.status_code == 200:
+                        fallback_data = fallback_response.json()
+                        logging.info(f"ClaudeProviderHandler: ✓ Fallback API call successful!")
+                        
+                        if AISBF_DEBUG:
+                            logging.info(f"ClaudeProviderHandler: Fallback response: {fallback_data}")
+                        
+                        # Parse fallback response - expect array of models or {data: [...]}
+                        models_list = fallback_data if isinstance(fallback_data, list) else fallback_data.get('data', fallback_data.get('models', []))
+                        
+                        models = []
+                        for model_data in models_list:
+                            if isinstance(model_data, str):
+                                # Simple string model ID
+                                models.append(Model(id=model_data, name=model_data, provider_id=self.provider_id))
+                            elif isinstance(model_data, dict):
+                                # Dict with id/name
+                                model_id = model_data.get('id', model_data.get('model', ''))
+                                display_name = model_data.get('name', model_data.get('display_name', model_id))
+                                
+                                # Extract context size - include max_input_tokens for Claude providers
+                                context_size = (
+                                    model_data.get('max_input_tokens') or
+                                    model_data.get('context_window') or
+                                    model_data.get('context_length') or
+                                    model_data.get('context_size') or
+                                    model_data.get('max_tokens')
+                                )
+                                
+                                # Extract description if available
+                                description = model_data.get('description')
+                                
+                                models.append(Model(
+                                    id=model_id,
+                                    name=display_name,
+                                    provider_id=self.provider_id,
+                                    context_size=context_size,
+                                    context_length=context_size,
+                                    description=description
+                                ))
+                        
+                        if models:
+                            for model in models:
+                                logging.info(f"ClaudeProviderHandler:   - {model.id} ({model.name})")
+                            
+                            # Save to cache
+                            self._save_models_cache(models)
+                            
+                            logging.info("=" * 80)
+                            logging.info(f"ClaudeProviderHandler: ✓ SUCCESS - Returning {len(models)} models from fallback API")
+                            logging.info(f"ClaudeProviderHandler: Source: Dynamic API retrieval (Fallback)")
+                            logging.info("=" * 80)
+                            return models
+                        else:
+                            logging.warning("ClaudeProviderHandler: ✗ Fallback API returned empty model list")
+                    else:
+                        logging.warning(f"ClaudeProviderHandler: ✗ Fallback API call failed with status {fallback_response.status_code}")
+                        try:
+                            error_body = fallback_response.json()
+                            logging.warning(f"ClaudeProviderHandler: Fallback error response: {error_body}")
+                        except:
+                            logging.warning(f"ClaudeProviderHandler: Fallback error response (text): {fallback_response.text[:200]}")
+                finally:
+                    await fallback_client.aclose()
+                    
+            except Exception as fallback_error:
+                logging.warning(f"ClaudeProviderHandler: ✗ Exception during fallback API call")
+                logging.warning(f"ClaudeProviderHandler: Error type: {type(fallback_error).__name__}")
+                logging.warning(f"ClaudeProviderHandler: Error message: {str(fallback_error)}")
+                if AISBF_DEBUG:
+                    logging.warning(f"ClaudeProviderHandler: Full traceback:", exc_info=True)
+            
+            # Try to load from cache
+            logging.info("-" * 80)
+            logging.info("ClaudeProviderHandler: [3/3] Attempting to load from cache...")
+            
+            cached_models = self._load_models_cache()
+            if cached_models:
+                for model in cached_models:
+                    logging.info(f"ClaudeProviderHandler:   - {model.id} ({model.name})")
+                
+                logging.info("=" * 80)
+                logging.info(f"ClaudeProviderHandler: ✓ Returning {len(cached_models)} models from cache")
+                logging.info(f"ClaudeProviderHandler: Source: Cached model list")
+                logging.info("=" * 80)
+                return cached_models
+            
+            # Final fallback to static list
+            logging.info("-" * 80)
+            logging.info("ClaudeProviderHandler: Using static fallback model list")
+            static_models = [
+                Model(id="claude-3-7-sonnet-20250219", name="Claude 3.7 Sonnet", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-5-sonnet-20241022", name="Claude 3.5 Sonnet", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-5-haiku-20241022", name="Claude 3.5 Haiku", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-3-opus-20240229", name="Claude 3 Opus", provider_id=self.provider_id, context_size=200000, context_length=200000),
+            ]
+            
+            for model in static_models:
+                logging.info(f"ClaudeProviderHandler:   - {model.id} ({model.name})")
+            
+            logging.info("=" * 80)
+            logging.info(f"ClaudeProviderHandler: ✓ Returning {len(static_models)} models from static list")
+            logging.info(f"ClaudeProviderHandler: Source: Static fallback configuration")
+            logging.info("=" * 80)
+            
+            return static_models
+        except Exception as e:
+            import logging
+            logging.error("=" * 80)
+            logging.error(f"ClaudeProviderHandler: ✗ FATAL ERROR getting models: {str(e)}")
+            logging.error("=" * 80)
+            logging.error(f"ClaudeProviderHandler: Error details:", exc_info=True)
+            raise e
 
 class KiroProviderHandler(BaseProviderHandler):
     """
@@ -2149,26 +3232,424 @@ class KiroProviderHandler(BaseProviderHandler):
                 yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
                 yield b"data: [DONE]\n\n"
     
+    def _get_models_cache_path(self) -> str:
+        """Get the path to the models cache file."""
+        import os
+        cache_dir = os.path.expanduser("~/.aisbf")
+        os.makedirs(cache_dir, exist_ok=True)
+        return os.path.join(cache_dir, f"kiro_models_cache_{self.provider_id}.json")
+    
+    def _save_models_cache(self, models: List[Model]) -> None:
+        """Save models to cache file."""
+        import logging
+        import json
+        
+        try:
+            cache_path = self._get_models_cache_path()
+            cache_data = {
+                'timestamp': time.time(),
+                'models': []
+            }
+            
+            for m in models:
+                model_dict = {'id': m.id, 'name': m.name}
+                # Save optional fields
+                if m.context_size:
+                    model_dict['context_size'] = m.context_size
+                if m.context_length:
+                    model_dict['context_length'] = m.context_length
+                if m.description:
+                    model_dict['description'] = m.description
+                if m.pricing:
+                    model_dict['pricing'] = m.pricing
+                if m.top_provider:
+                    model_dict['top_provider'] = m.top_provider
+                if m.supported_parameters:
+                    model_dict['supported_parameters'] = m.supported_parameters
+                cache_data['models'].append(model_dict)
+            
+            with open(cache_path, 'w') as f:
+                json.dump(cache_data, f, indent=2)
+            
+            logging.info(f"KiroProviderHandler: ✓ Saved {len(models)} models to cache: {cache_path}")
+        except Exception as e:
+            logging.warning(f"KiroProviderHandler: Failed to save models cache: {e}")
+    
+    def _load_models_cache(self) -> Optional[List[Model]]:
+        """Load models from cache file if available and not too old."""
+        import logging
+        import json
+        import os
+        
+        try:
+            cache_path = self._get_models_cache_path()
+            
+            if not os.path.exists(cache_path):
+                logging.info(f"KiroProviderHandler: No cache file found at {cache_path}")
+                return None
+            
+            with open(cache_path, 'r') as f:
+                cache_data = json.load(f)
+            
+            cache_age = time.time() - cache_data.get('timestamp', 0)
+            cache_age_hours = cache_age / 3600
+            
+            logging.info(f"KiroProviderHandler: Found cache file (age: {cache_age_hours:.1f} hours)")
+            
+            # Cache is valid for 24 hours
+            if cache_age > 86400:
+                logging.info(f"KiroProviderHandler: Cache is too old (>{cache_age_hours:.1f} hours), ignoring")
+                return None
+            
+            models = []
+            for m in cache_data.get('models', []):
+                models.append(Model(
+                    id=m['id'],
+                    name=m['name'],
+                    provider_id=self.provider_id,
+                    context_size=m.get('context_size'),
+                    context_length=m.get('context_length'),
+                    description=m.get('description'),
+                    pricing=m.get('pricing'),
+                    top_provider=m.get('top_provider'),
+                    supported_parameters=m.get('supported_parameters')
+                ))
+            
+            if models:
+                logging.info(f"KiroProviderHandler: ✓ Loaded {len(models)} models from cache")
+                return models
+            else:
+                logging.info(f"KiroProviderHandler: Cache file is empty")
+                return None
+                
+        except Exception as e:
+            logging.warning(f"KiroProviderHandler: Failed to load models cache: {e}")
+            return None
+
     async def get_models(self) -> List[Model]:
+        """
+        Return list of available models using fallback strategy.
+        
+        Priority order:
+        1. Nexlab endpoint (http://lisa.nexlab.net:5000/kiro/models)
+        2. Cache (if available and not too old)
+        3. AWS Q API (ListAvailableModels)
+        4. Static fallback list
+        """
         try:
             import logging
-            logging.info("KiroProviderHandler: Getting models list")
+            import json
+            logging.info("=" * 80)
+            logging.info("KiroProviderHandler: Starting model list retrieval")
+            logging.info("=" * 80)
 
             # Apply rate limiting
             await self.apply_rate_limit()
 
-            # Return static list of Claude models available through Kiro
-            return [
-                Model(id="anthropic.claude-3-5-sonnet-20241022-v2:0", name="Claude 3.5 Sonnet v2", provider_id=self.provider_id),
-                Model(id="anthropic.claude-3-5-haiku-20241022-v1:0", name="Claude 3.5 Haiku", provider_id=self.provider_id),
-                Model(id="anthropic.claude-3-5-sonnet-20240620-v1:0", name="Claude 3.5 Sonnet v1", provider_id=self.provider_id),
-                Model(id="anthropic.claude-sonnet-3-5-v2", name="Claude 3.5 Sonnet v2 (alias)", provider_id=self.provider_id),
-                Model(id="claude-sonnet-4-5", name="Claude 3.5 Sonnet v2 (short)", provider_id=self.provider_id),
-                Model(id="claude-haiku-4-5", name="Claude 3.5 Haiku (short)", provider_id=self.provider_id),
+            # Try nexlab endpoint first
+            try:
+                logging.info("KiroProviderHandler: [1/4] Attempting nexlab endpoint...")
+                
+                nexlab_endpoint = 'http://lisa.nexlab.net:5000/kiro/models'
+                logging.info(f"KiroProviderHandler: Calling nexlab endpoint: {nexlab_endpoint}")
+                
+                # Create a new client with shorter timeout for nexlab
+                nexlab_client = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0))
+                
+                try:
+                    nexlab_response = await nexlab_client.get(nexlab_endpoint)
+                    logging.info(f"KiroProviderHandler: Nexlab response status: {nexlab_response.status_code}")
+                    
+                    if nexlab_response.status_code == 200:
+                        nexlab_data = nexlab_response.json()
+                        logging.info(f"KiroProviderHandler: ✓ Nexlab API call successful!")
+                        
+                        if AISBF_DEBUG:
+                            logging.info(f"KiroProviderHandler: Nexlab response: {nexlab_data}")
+                        
+                        # Parse nexlab response - expect array of models or {data: [...]}
+                        models_list = nexlab_data if isinstance(nexlab_data, list) else nexlab_data.get('data', nexlab_data.get('models', []))
+                        
+                        models = []
+                        for model_data in models_list:
+                            if isinstance(model_data, str):
+                                # Simple string model ID
+                                models.append(Model(id=model_data, name=model_data, provider_id=self.provider_id))
+                            elif isinstance(model_data, dict):
+                                # Dict with id/name - check multiple field name variations
+                                model_id = model_data.get('model_id') or model_data.get('id') or model_data.get('model', '')
+                                display_name = model_data.get('model_name') or model_data.get('name') or model_data.get('display_name') or model_id
+                                
+                                # Extract context size/length - check all possible sources
+                                # Priority: direct field > top_provider > nested
+                                top_provider = model_data.get('top_provider', {})
+                                context_size = (
+                                    model_data.get('context_window_tokens') or
+                                    model_data.get('context_window') or
+                                    model_data.get('context_length') or
+                                    model_data.get('context_size') or
+                                    model_data.get('max_tokens') or
+                                    (top_provider.get('context_length') if isinstance(top_provider, dict) else None)
+                                )
+                                
+                                # Extract all available metadata
+                                pricing = model_data.get('pricing')
+                                description = model_data.get('description')
+                                supported_parameters = model_data.get('supported_parameters')
+                                architecture = model_data.get('architecture')
+                                
+                                # Extract top_provider info (contains context_length, max_completion_tokens, is_moderated)
+                                if isinstance(top_provider, dict):
+                                    top_provider_data = {
+                                        'context_length': top_provider.get('context_length'),
+                                        'max_completion_tokens': top_provider.get('max_completion_tokens'),
+                                        'is_moderated': top_provider.get('is_moderated')
+                                    }
+                                else:
+                                    top_provider_data = None
+                                
+                                if model_id:
+                                    models.append(Model(
+                                        id=model_id,
+                                        name=display_name,
+                                        provider_id=self.provider_id,
+                                        context_size=context_size,
+                                        context_length=context_size,
+                                        description=description,
+                                        pricing=pricing,
+                                        top_provider=top_provider_data,
+                                        supported_parameters=supported_parameters
+                                    ))
+                        
+                        if models:
+                            for model in models:
+                                logging.info(f"KiroProviderHandler:   - {model.id} ({model.name})")
+                            
+                            # Save to cache
+                            self._save_models_cache(models)
+                            
+                            logging.info("=" * 80)
+                            logging.info(f"KiroProviderHandler: ✓ SUCCESS - Returning {len(models)} models from nexlab endpoint")
+                            logging.info(f"KiroProviderHandler: Source: Dynamic API retrieval (Nexlab)")
+                            logging.info("=" * 80)
+                            return models
+                        else:
+                            logging.warning("KiroProviderHandler: ✗ Nexlab endpoint returned empty model list")
+                    else:
+                        logging.warning(f"KiroProviderHandler: ✗ Nexlab API call failed with status {nexlab_response.status_code}")
+                        try:
+                            error_body = nexlab_response.json()
+                            logging.warning(f"KiroProviderHandler: Nexlab error response: {error_body}")
+                        except:
+                            logging.warning(f"KiroProviderHandler: Nexlab error response (text): {nexlab_response.text[:200]}")
+                finally:
+                    await nexlab_client.aclose()
+                    
+            except Exception as nexlab_error:
+                logging.warning(f"KiroProviderHandler: ✗ Exception during nexlab API call")
+                logging.warning(f"KiroProviderHandler: Error type: {type(nexlab_error).__name__}")
+                logging.warning(f"KiroProviderHandler: Error message: {str(nexlab_error)}")
+                if AISBF_DEBUG:
+                    logging.warning(f"KiroProviderHandler: Full traceback:", exc_info=True)
+            
+            # Try to load from cache
+            logging.info("-" * 80)
+            logging.info("KiroProviderHandler: [2/4] Attempting to load from cache...")
+            
+            cached_models = self._load_models_cache()
+            if cached_models:
+                for model in cached_models:
+                    logging.info(f"KiroProviderHandler:   - {model.id} ({model.name})")
+                
+                logging.info("=" * 80)
+                logging.info(f"KiroProviderHandler: ✓ Returning {len(cached_models)} models from cache")
+                logging.info(f"KiroProviderHandler: Source: Cached model list")
+                logging.info("=" * 80)
+                return cached_models
+
+            # Try to fetch models from AWS Q API using OAuth2 bearer token with pagination
+            try:
+                logging.info("-" * 80)
+                logging.info("KiroProviderHandler: [3/4] Attempting to fetch from AWS Q API...")
+                
+                if not self.auth_manager:
+                    raise Exception("Auth manager not initialized")
+                
+                # Get access token
+                access_token = await self.auth_manager.get_access_token()
+                profile_arn = self.auth_manager.profile_arn
+                
+                # For ListAvailableModels, always include profileArn if available (like kiro-cli)
+                effective_profile_arn = profile_arn or ""
+                if effective_profile_arn:
+                    logging.info(f"KiroProviderHandler: Using profileArn for models API")
+                else:
+                    logging.info(f"KiroProviderHandler: No profileArn available for models API")
+                
+                # Prepare headers for AWS JSON 1.0 protocol
+                headers = self.auth_manager.get_auth_headers(access_token)
+                headers['Content-Type'] = 'application/x-amz-json-1.0'
+                headers['x-amz-target'] = 'AmazonCodeWhispererService.ListAvailableModels'
+                
+                # Build URL (AWS JSON protocol style)
+                base_url = f"https://q.{self.region}.amazonaws.com/"
+                
+                # Handle pagination - keep fetching until no nextToken
+                all_models = []
+                next_token = None
+                page_num = 0
+                
+                while True:
+                    page_num += 1
+                    logging.info(f"KiroProviderHandler: Fetching page {page_num}...")
+                    
+                    # Build JSON body with fields (not query params!)
+                    # Based on SDK serialization: origin, profileArn, nextToken go in the body
+                    # Origin::Cli.as_str() returns "CLI" (all uppercase) - see _origin.rs line 162
+                    request_body = {
+                        "origin": "CLI"
+                    }
+                    
+                    if effective_profile_arn:
+                        request_body["profileArn"] = effective_profile_arn
+                    
+                    if next_token:
+                        request_body["nextToken"] = next_token
+                    
+                    logging.info(f"KiroProviderHandler: Calling {base_url} with AWS JSON 1.0 protocol")
+                    
+                    if AISBF_DEBUG:
+                        logging.info(f"KiroProviderHandler: Request body: {json.dumps(request_body, indent=2)}")
+                    
+                    # AWS JSON protocol: POST with JSON body containing the fields
+                    response = await self.client.post(
+                        base_url,
+                        json=request_body,
+                        headers=headers
+                    )
+                    
+                    logging.info(f"KiroProviderHandler: API response status: {response.status_code}")
+                    
+                    if response.status_code != 200:
+                        logging.warning(f"KiroProviderHandler: ✗ API call failed with status {response.status_code}")
+                        try:
+                            error_body = response.json()
+                            logging.warning(f"KiroProviderHandler: Error response: {error_body}")
+                        except:
+                            logging.warning(f"KiroProviderHandler: Error response (text): {response.text[:200]}")
+                        break
+                    
+                    response_data = response.json()
+                    
+                    if AISBF_DEBUG:
+                        logging.info(f"KiroProviderHandler: Response data: {json.dumps(response_data, indent=2)}")
+                    
+                    # Parse response - expecting structure similar to AWS SDK response
+                    models_list = response_data.get('models', [])
+                    
+                    for model_data in models_list:
+                        # Extract model ID and name
+                        model_id = model_data.get('modelId', model_data.get('id', ''))
+                        model_name = model_data.get('modelName', model_data.get('name', model_id))
+                        
+                        # Extract context size/length
+                        context_size = (
+                            model_data.get('contextWindow') or
+                            model_data.get('context_window') or
+                            model_data.get('contextLength') or
+                            model_data.get('context_length') or
+                            model_data.get('max_context_length') or
+                            model_data.get('maxTokens') or
+                            model_data.get('max_tokens')
+                        )
+                        
+                        # Extract all available metadata
+                        pricing = model_data.get('pricing')
+                        description = model_data.get('description')
+                        supported_parameters = model_data.get('supported_parameters')
+                        
+                        # Extract top_provider info if present
+                        top_provider = model_data.get('topProvider') or model_data.get('top_provider')
+                        if isinstance(top_provider, dict):
+                            top_provider_data = {
+                                'context_length': top_provider.get('context_length') or top_provider.get('contextLength'),
+                                'max_completion_tokens': top_provider.get('max_completion_tokens') or top_provider.get('maxCompletionTokens'),
+                                'is_moderated': top_provider.get('is_moderated') or top_provider.get('isModerated')
+                            }
+                        else:
+                            top_provider_data = None
+                        
+                        if model_id:
+                            all_models.append(Model(
+                                id=model_id,
+                                name=model_name,
+                                provider_id=self.provider_id,
+                                context_size=context_size,
+                                context_length=context_size,
+                                description=description,
+                                pricing=pricing,
+                                top_provider=top_provider_data,
+                                supported_parameters=supported_parameters
+                            ))
+                            logging.info(f"KiroProviderHandler:   - {model_id} ({model_name})")
+                    
+                    # Check for pagination token
+                    next_token = response_data.get('nextToken')
+                    if not next_token:
+                        logging.info(f"KiroProviderHandler: No more pages (total pages: {page_num})")
+                        break
+                    
+                    logging.info(f"KiroProviderHandler: Found nextToken, fetching next page...")
+                
+                if all_models:
+                    logging.info(f"KiroProviderHandler: ✓ API call successful!")
+                    logging.info(f"KiroProviderHandler: Retrieved {len(all_models)} models across {page_num} page(s)")
+                    
+                    # Save to cache
+                    self._save_models_cache(all_models)
+                    
+                    logging.info("=" * 80)
+                    logging.info(f"KiroProviderHandler: ✓ SUCCESS - Returning {len(all_models)} models from API")
+                    logging.info(f"KiroProviderHandler: Source: Dynamic API retrieval (AWS Q)")
+                    logging.info("=" * 80)
+                    return all_models
+                else:
+                    logging.warning("KiroProviderHandler: ✗ API returned empty model list")
+            
+            except Exception as api_error:
+                logging.warning(f"KiroProviderHandler: ✗ Exception during AWS Q API call")
+                logging.warning(f"KiroProviderHandler: Error type: {type(api_error).__name__}")
+                logging.warning(f"KiroProviderHandler: Error message: {str(api_error)}")
+                if AISBF_DEBUG:
+                    logging.warning(f"KiroProviderHandler: Full traceback:", exc_info=True)
+            
+            # Final fallback to static list
+            logging.info("-" * 80)
+            logging.info("KiroProviderHandler: [4/4] Using static fallback model list")
+            static_models = [
+                Model(id="anthropic.claude-3-5-sonnet-20241022-v2:0", name="Claude 3.5 Sonnet v2", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="anthropic.claude-3-5-haiku-20241022-v1:0", name="Claude 3.5 Haiku", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="anthropic.claude-3-5-sonnet-20240620-v1:0", name="Claude 3.5 Sonnet v1", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="anthropic.claude-sonnet-3-5-v2", name="Claude 3.5 Sonnet v2 (alias)", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-sonnet-4-5", name="Claude 3.5 Sonnet v2 (short)", provider_id=self.provider_id, context_size=200000, context_length=200000),
+                Model(id="claude-haiku-4-5", name="Claude 3.5 Haiku (short)", provider_id=self.provider_id, context_size=200000, context_length=200000),
             ]
+            
+            for model in static_models:
+                logging.info(f"KiroProviderHandler:   - {model.id} ({model.name})")
+            
+            logging.info("=" * 80)
+            logging.info(f"KiroProviderHandler: ✓ Returning {len(static_models)} models from static list")
+            logging.info(f"KiroProviderHandler: Source: Static fallback configuration")
+            logging.info("=" * 80)
+            
+            return static_models
         except Exception as e:
             import logging
-            logging.error(f"KiroProviderHandler: Error getting models: {str(e)}", exc_info=True)
+            logging.error("=" * 80)
+            logging.error(f"KiroProviderHandler: ✗ FATAL ERROR getting models: {str(e)}")
+            logging.error("=" * 80)
+            logging.error(f"KiroProviderHandler: Error details:", exc_info=True)
             raise e
 
 class OllamaProviderHandler(BaseProviderHandler):
@@ -2362,7 +3843,8 @@ PROVIDER_HANDLERS = {
     'openai': OpenAIProviderHandler,
     'anthropic': AnthropicProviderHandler,
     'ollama': OllamaProviderHandler,
-    'kiro': KiroProviderHandler
+    'kiro': KiroProviderHandler,
+    'claude': ClaudeProviderHandler
 }
 
 def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:

@@ -59,6 +59,18 @@ if ! python -m build --version &> /dev/null; then
     pip_install build twine
 fi
 
+# Build the extension first
+echo ""
+echo "Building OAuth2 extension..."
+if [ -f "static/extension/build.sh" ]; then
+    cd static/extension
+    bash build.sh
+    cd ../..
+    echo "Extension built successfully"
+else
+    echo "Warning: Extension build script not found, skipping extension build"
+fi
+
 # Clean previous builds
 echo ""
 echo "Cleaning previous build artifacts..."

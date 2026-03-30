@@ -4,6 +4,9 @@ venv/
 env/
 ENV/
 
+# vendors directory
+vendors/
+
 # Python cache directories
 __pycache__/
 *.py[cod]

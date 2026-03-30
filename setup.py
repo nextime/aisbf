@@ -111,6 +111,7 @@ setup(
             'aisbf/kiro_models.py',
             'aisbf/kiro_parsers.py',
             'aisbf/kiro_utils.py',
+            'aisbf/claude_auth.py',
             'aisbf/semantic_classifier.py',
             'aisbf/batching.py',
             'aisbf/cache.py',

@@ -1,0 +1,39 @@
+{
+  "manifest_version": 3,
+  "name": "AISBF OAuth2 Relay",
+  "description": "Intercepts localhost OAuth2 callbacks and redirects them to the remote AISBF server for providers that require localhost redirect URIs.",
+  "version": "1.0.1",
+  "permissions": [
+    "declarativeNetRequest",
+    "storage"
+  ],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_start"
+    }
+  ],
+  "options_page": "options.html",
+  "icons": {
+    "16": "icons/icon16.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    },
+    "default_title": "AISBF OAuth2 Relay",
+    "default_popup": "popup.html"
+  }
+}
