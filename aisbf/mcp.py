@@ -141,12 +141,13 @@ class MCPServer:
     def __init__(self):
         self.config = config
     
-    def get_available_tools(self, auth_level: int) -> List[Dict]:
+    def get_available_tools(self, auth_level: int, user_id: Optional[int] = None) -> List[Dict]:
         """
-        Get list of available MCP tools based on auth level.
+        Get list of available MCP tools based on auth level and user.
         
         Args:
             auth_level: The authentication level (MCPAuthLevel)
+            user_id: Optional user ID to include user-specific tools
             
         Returns:
             List of tool definitions
@@ -216,6 +217,223 @@ class MCPServer:
                 }
             }
         ])
+        
+        # Add user-specific tools if user_id is provided
+        if user_id:
+            tools.extend([
+                # User models
+                {
+                    "name": "list_user_models",
+                    "description": "List all models from user's own providers, rotations, and autoselects",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                # User providers
+                {
+                    "name": "list_user_providers",
+                    "description": "List all user-configured providers",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "get_user_provider",
+                    "description": "Get a specific user provider configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "provider_id": {
+                                "type": "string",
+                                "description": "Provider ID to get"
+                            }
+                        },
+                        "required": ["provider_id"]
+                    }
+                },
+                {
+                    "name": "set_user_provider",
+                    "description": "Save a user provider configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "provider_id": {
+                                "type": "string",
+                                "description": "Provider ID to save"
+                            },
+                            "provider_data": {
+                                "type": "object",
+                                "description": "Provider configuration data"
+                            }
+                        },
+                        "required": ["provider_id", "provider_data"]
+                    }
+                },
+                {
+                    "name": "delete_user_provider",
+                    "description": "Delete a user provider configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "provider_id": {
+                                "type": "string",
+                                "description": "Provider ID to delete"
+                            }
+                        },
+                        "required": ["provider_id"]
+                    }
+                },
+                # User rotations
+                {
+                    "name": "list_user_rotations",
+                    "description": "List all user-configured rotations",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "get_user_rotation",
+                    "description": "Get a specific user rotation configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "rotation_id": {
+                                "type": "string",
+                                "description": "Rotation ID to get"
+                            }
+                        },
+                        "required": ["rotation_id"]
+                    }
+                },
+                {
+                    "name": "set_user_rotation",
+                    "description": "Save a user rotation configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "rotation_id": {
+                                "type": "string",
+                                "description": "Rotation ID to save"
+                            },
+                            "rotation_data": {
+                                "type": "object",
+                                "description": "Rotation configuration data"
+                            }
+                        },
+                        "required": ["rotation_id", "rotation_data"]
+                    }
+                },
+                {
+                    "name": "delete_user_rotation",
+                    "description": "Delete a user rotation configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "rotation_id": {
+                                "type": "string",
+                                "description": "Rotation ID to delete"
+                            }
+                        },
+                        "required": ["rotation_id"]
+                    }
+                },
+                # User autoselects
+                {
+                    "name": "list_user_autoselects",
+                    "description": "List all user-configured autoselects",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "get_user_autoselect",
+                    "description": "Get a specific user autoselect configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "autoselect_id": {
+                                "type": "string",
+                                "description": "Autoselect ID to get"
+                            }
+                        },
+                        "required": ["autoselect_id"]
+                    }
+                },
+                {
+                    "name": "set_user_autoselect",
+                    "description": "Save a user autoselect configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "autoselect_id": {
+                                "type": "string",
+                                "description": "Autoselect ID to save"
+                            },
+                            "autoselect_data": {
+                                "type": "object",
+                                "description": "Autoselect configuration data"
+                            }
+                        },
+                        "required": ["autoselect_id", "autoselect_data"]
+                    }
+                },
+                {
+                    "name": "delete_user_autoselect",
+                    "description": "Delete a user autoselect configuration",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "autoselect_id": {
+                                "type": "string",
+                                "description": "Autoselect ID to delete"
+                            }
+                        },
+                        "required": ["autoselect_id"]
+                    }
+                },
+                # User chat completion
+                {
+                    "name": "user_chat_completion",
+                    "description": "Send a chat completion request using user's own configurations",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "model": {
+                                "type": "string",
+                                "description": "User model identifier (e.g., 'user-provider/myprovider/mymodel', 'user-rotation/myrotation', 'user-autoselect/myautoselect')"
+                            },
+                            "messages": {
+                                "type": "array",
+                                "description": "List of message objects with role and content"
+                            },
+                            "temperature": {
+                                "type": "number",
+                                "description": "Sampling temperature (0-2)",
+                                "default": 1.0
+                            },
+                            "max_tokens": {
+                                "type": "integer",
+                                "description": "Maximum tokens to generate",
+                                "default": 2048
+                            },
+                            "stream": {
+                                "type": "boolean",
+                                "description": "Enable streaming response",
+                                "default": False
+                            }
+                        },
+                        "required": ["model", "messages"]
+                    }
+                }
+            ])
         
         # Tools available to AUTOSELECT level and above
         if auth_level >= MCPAuthLevel.AUTOSELECT:
@@ -435,6 +653,7 @@ class MCPServer:
             tool_name: Name of the tool to call
             arguments: Tool arguments
             auth_level: Authentication level
+            user_id: Optional user ID for user-specific operations
             
         Returns:
             Tool result
@@ -470,6 +689,30 @@ class MCPServer:
                 'delete_autoselect_config': self._delete_autoselect_config,
                 'delete_rotation_config': self._delete_rotation_config,
                 'delete_provider_config': self._delete_provider_config,
+            })
+        
+        # Add user-specific tools (available to all authenticated users with user_id)
+        if user_id:
+            handlers.update({
+                # User models
+                'list_user_models': self._list_user_models,
+                # User providers
+                'list_user_providers': self._list_user_providers,
+                'get_user_provider': self._get_user_provider,
+                'set_user_provider': self._set_user_provider,
+                'delete_user_provider': self._delete_user_provider,
+                # User rotations
+                'list_user_rotations': self._list_user_rotations,
+                'get_user_rotation': self._get_user_rotation,
+                'set_user_rotation': self._set_user_rotation,
+                'delete_user_rotation': self._delete_user_rotation,
+                # User autoselects
+                'list_user_autoselects': self._list_user_autoselects,
+                'get_user_autoselect': self._get_user_autoselect,
+                'set_user_autoselect': self._set_user_autoselect,
+                'delete_user_autoselect': self._delete_user_autoselect,
+                # User chat completion
+                'user_chat_completion': self._user_chat_completion,
             })
         
         if tool_name not in handlers:
@@ -988,6 +1231,381 @@ class MCPServer:
             json.dump(full_config, f, indent=2)
         
         return {"status": "success", "message": f"Provider '{provider_id}' deleted. Restart server for changes to take effect."}
+
+
+    # ===== User-specific MCP tools =====
+    
+    async def _list_user_models(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """List all models from user's own providers, rotations, and autoselects"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        all_models = []
+        
+        # Get user providers
+        user_providers = db.get_user_providers(user_id)
+        for provider in user_providers:
+            provider_id = provider['provider_id']
+            provider_config = provider['config']
+            models = provider_config.get('models', [])
+            for model in models:
+                all_models.append({
+                    'id': f"user-provider/{provider_id}/{model.get('name', '')}",
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': provider_id,
+                    'provider': provider_id,
+                    'type': 'user_provider',
+                    'model_name': model.get('name', ''),
+                    'source': 'user_config'
+                })
+        
+        # Get user rotations
+        user_rotations = db.get_user_rotations(user_id)
+        for rotation in user_rotations:
+            rotation_id = rotation['rotation_id']
+            rotation_config = rotation['config']
+            all_models.append({
+                'id': f"user-rotation/{rotation_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-user-rotation',
+                'type': 'user_rotation',
+                'rotation_id': rotation_id,
+                'model_name': rotation_config.get('model_name', rotation_id),
+                'source': 'user_config'
+            })
+        
+        # Get user autoselects
+        user_autoselects = db.get_user_autoselects(user_id)
+        for autoselect in user_autoselects:
+            autoselect_id = autoselect['autoselect_id']
+            autoselect_config = autoselect['config']
+            all_models.append({
+                'id': f"user-autoselect/{autoselect_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-user-autoselect',
+                'type': 'user_autoselect',
+                'autoselect_id': autoselect_id,
+                'model_name': autoselect_config.get('model_name', autoselect_id),
+                'description': autoselect_config.get('description'),
+                'source': 'user_config'
+            })
+        
+        return {"models": all_models}
+
+    async def _list_user_providers(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """List all user-configured providers"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        providers = db.get_user_providers(user_id)
+        providers_info = {}
+        
+        for provider in providers:
+            provider_id = provider['provider_id']
+            provider_config = provider['config']
+            # Remove sensitive fields
+            safe_config = {k: v for k, v in provider_config.items() 
+                          if k not in ['api_key', 'password', 'secret', 'token']}
+            
+            providers_info[provider_id] = {
+                'name': provider_config.get('name', provider_id),
+                'type': provider_config.get('type', 'unknown'),
+                'endpoint': provider_config.get('endpoint'),
+                'models_count': len(provider_config.get('models', [])),
+                'config': safe_config
+            }
+        
+        return {"providers": providers_info}
+
+    async def _get_user_provider(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Get a specific user provider configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        provider_id = args.get('provider_id')
+        if not provider_id:
+            raise HTTPException(status_code=400, detail="provider_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        provider = db.get_user_provider(user_id, provider_id)
+        if not provider:
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+        
+        # Remove sensitive fields
+        safe_config = {k: v for k, v in provider['config'].items() 
+                      if k not in ['api_key', 'password', 'secret', 'token']}
+        
+        return {"provider_id": provider_id, "config": safe_config}
+
+    async def _set_user_provider(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Save a user provider configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        provider_id = args.get('provider_id')
+        provider_data = args.get('provider_data')
+        
+        if not provider_id or not provider_data:
+            raise HTTPException(status_code=400, detail="provider_id and provider_data are required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.save_user_provider(user_id, provider_id, provider_data)
+        
+        return {"status": "success", "message": f"Provider '{provider_id}' saved successfully."}
+
+    async def _delete_user_provider(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Delete a user provider configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        provider_id = args.get('provider_id')
+        if not provider_id:
+            raise HTTPException(status_code=400, detail="provider_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.delete_user_provider(user_id, provider_id)
+        
+        return {"status": "success", "message": f"Provider '{provider_id}' deleted successfully."}
+
+    async def _list_user_rotations(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """List all user-configured rotations"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        rotations = db.get_user_rotations(user_id)
+        rotations_info = {}
+        
+        for rotation in rotations:
+            rotation_id = rotation['rotation_id']
+            rotation_config = rotation['config']
+            rotations_info[rotation_id] = {
+                "model_name": rotation_config.get('model_name', rotation_id),
+                "providers": rotation_config.get('providers', [])
+            }
+        
+        return {"rotations": rotations_info}
+
+    async def _get_user_rotation(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Get a specific user rotation configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        rotation_id = args.get('rotation_id')
+        if not rotation_id:
+            raise HTTPException(status_code=400, detail="rotation_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        rotation = db.get_user_rotation(user_id, rotation_id)
+        if not rotation:
+            raise HTTPException(status_code=404, detail=f"Rotation '{rotation_id}' not found")
+        
+        return {"rotation_id": rotation_id, "config": rotation['config']}
+
+    async def _set_user_rotation(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Save a user rotation configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        rotation_id = args.get('rotation_id')
+        rotation_data = args.get('rotation_data')
+        
+        if not rotation_id or not rotation_data:
+            raise HTTPException(status_code=400, detail="rotation_id and rotation_data are required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.save_user_rotation(user_id, rotation_id, rotation_data)
+        
+        return {"status": "success", "message": f"Rotation '{rotation_id}' saved successfully."}
+
+    async def _delete_user_rotation(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Delete a user rotation configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        rotation_id = args.get('rotation_id')
+        if not rotation_id:
+            raise HTTPException(status_code=400, detail="rotation_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.delete_user_rotation(user_id, rotation_id)
+        
+        return {"status": "success", "message": f"Rotation '{rotation_id}' deleted successfully."}
+
+    async def _list_user_autoselects(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """List all user-configured autoselects"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        autoselects = db.get_user_autoselects(user_id)
+        autoselects_info = {}
+        
+        for autoselect in autoselects:
+            autoselect_id = autoselect['autoselect_id']
+            autoselect_config = autoselect['config']
+            autoselects_info[autoselect_id] = {
+                "model_name": autoselect_config.get('model_name', autoselect_id),
+                "description": autoselect_config.get('description', ''),
+                "fallback": autoselect_config.get('fallback', ''),
+                "available_models": autoselect_config.get('available_models', [])
+            }
+        
+        return {"autoselects": autoselects_info}
+
+    async def _get_user_autoselect(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Get a specific user autoselect configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        autoselect_id = args.get('autoselect_id')
+        if not autoselect_id:
+            raise HTTPException(status_code=400, detail="autoselect_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        autoselect = db.get_user_autoselect(user_id, autoselect_id)
+        if not autoselect:
+            raise HTTPException(status_code=404, detail=f"Autoselect '{autoselect_id}' not found")
+        
+        return {"autoselect_id": autoselect_id, "config": autoselect['config']}
+
+    async def _set_user_autoselect(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Save a user autoselect configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        autoselect_id = args.get('autoselect_id')
+        autoselect_data = args.get('autoselect_data')
+        
+        if not autoselect_id or not autoselect_data:
+            raise HTTPException(status_code=400, detail="autoselect_id and autoselect_data are required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.save_user_autoselect(user_id, autoselect_id, autoselect_data)
+        
+        return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved successfully."}
+
+    async def _delete_user_autoselect(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Delete a user autoselect configuration"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        autoselect_id = args.get('autoselect_id')
+        if not autoselect_id:
+            raise HTTPException(status_code=400, detail="autoselect_id is required")
+        
+        from .database import get_database
+        db = get_database()
+        
+        db.delete_user_autoselect(user_id, autoselect_id)
+        
+        return {"status": "success", "message": f"Autoselect '{autoselect_id}' deleted successfully."}
+
+    async def _user_chat_completion(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Send a chat completion request using user's own configurations"""
+        if not user_id:
+            raise HTTPException(status_code=401, detail="User authentication required")
+        
+        model = args.get('model')
+        messages = args.get('messages', [])
+        temperature = args.get('temperature', 1.0)
+        max_tokens = args.get('max_tokens', 2048)
+        stream = args.get('stream', False)
+        
+        if not model:
+            raise HTTPException(status_code=400, detail="model is required")
+        
+        # Parse model format: user-provider/id/model, user-rotation/id, user-autoselect/id
+        if '/' in model:
+            parts = model.split('/', 2)
+            if len(parts) < 3:
+                raise HTTPException(status_code=400, detail="Invalid model format. Use 'user-provider/id/model', 'user-rotation/id', or 'user-autoselect/id'")
+            
+            provider_type = parts[0]
+            config_id = parts[1]
+            actual_model = parts[2] if len(parts) > 2 else None
+        else:
+            raise HTTPException(status_code=400, detail="Invalid model format. Use 'user-provider/id/model', 'user-rotation/id', or 'user-autoselect/id'")
+        
+        # Create request data
+        request_data = {
+            "model": actual_model or config_id,
+            "messages": messages,
+            "temperature": temperature,
+            "max_tokens": max_tokens,
+            "stream": stream
+        }
+        
+        # Route to appropriate handler
+        from starlette.requests import Request
+        from main import get_user_handler
+        
+        scope = {
+            "type": "http",
+            "method": "POST",
+            "headers": [],
+            "query_string": b"",
+            "path": "/api/user/chat/completions"
+        }
+        dummy_request = Request(scope)
+        
+        if provider_type == "user-autoselect":
+            handler = get_user_handler('autoselect', user_id)
+            if config_id not in handler.user_autoselects:
+                raise HTTPException(status_code=400, detail=f"User autoselect '{config_id}' not found")
+            if stream:
+                return {"error": "Streaming not supported in MCP, use SSE endpoint instead"}
+            return await handler.handle_autoselect_request(config_id, request_data)
+        
+        elif provider_type == "user-rotation":
+            handler = get_user_handler('rotation', user_id)
+            if config_id not in handler.user_rotations:
+                raise HTTPException(status_code=400, detail=f"User rotation '{config_id}' not found")
+            return await handler.handle_rotation_request(config_id, request_data)
+        
+        elif provider_type == "user-provider":
+            handler = get_user_handler('request', user_id)
+            if config_id not in handler.user_providers:
+                raise HTTPException(status_code=400, detail=f"User provider '{config_id}' not found")
+            
+            provider_config = handler.user_providers[config_id]
+            if not validate_kiro_credentials(config_id, provider_config):
+                raise HTTPException(status_code=403, detail=f"Provider '{config_id}' credentials not available")
+            
+            if stream:
+                return {"error": "Streaming not supported in MCP, use SSE endpoint instead"}
+            return await handler.handle_chat_completion(dummy_request, config_id, request_data)
+        
+        raise HTTPException(status_code=400, detail="Invalid model type. Use 'user-provider', 'user-rotation', or 'user-autoselect'")
 
 
 # Global MCP server instance

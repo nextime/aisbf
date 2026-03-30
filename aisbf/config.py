@@ -141,6 +141,16 @@ class AutoselectConfig(BaseModel):
     pricing: Optional[Dict] = None
     supported_parameters: Optional[List[str]] = None
     default_parameters: Optional[Dict] = None
+    # Default settings for models in this autoselect
+    default_rate_limit: Optional[float] = None
+    default_max_request_tokens: Optional[int] = None
+    default_rate_limit_TPM: Optional[int] = None
+    default_rate_limit_TPH: Optional[int] = None
+    default_rate_limit_TPD: Optional[int] = None
+    default_context_size: Optional[int] = None
+    default_condense_context: Optional[int] = None
+    default_condense_method: Optional[Union[str, List[str]]] = None
+    default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this autoselect (None = use global default)
 

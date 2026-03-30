@@ -1505,7 +1505,8 @@ class RotationHandler:
         Priority order:
         1. Model-specific settings (highest priority)
         2. Rotation default settings
-        3. Provider default settings (lowest priority)
+        3. Provider default settings
+        4. Auto-derived from first model in provider (lowest priority)
         
         Args:
             model: The model configuration dict
@@ -1539,8 +1540,107 @@ class RotationHandler:
                     provider_default = getattr(provider_config, f'default_{field}', None)
                     if provider_default is not None:
                         model[field] = provider_default
+                    else:
+                        # Auto-derive from first model in provider config if available
+                        if provider_config and provider_config.models and len(provider_config.models) > 0:
+                            first_model = provider_config.models[0]
+                            # For context_size, check multiple field names (from dynamic fetch)
+                            if field == 'context_size':
+                                model_field = getattr(first_model, 'context_size', None)
+                                if model_field is None:
+                                    model_field = getattr(first_model, 'context_window', None)
+                                if model_field is None:
+                                    model_field = getattr(first_model, 'context_length', None)
+                            else:
+                                model_field = getattr(first_model, field, None)
+                            if model_field is not None:
+                                model[field] = model_field
         
         return model
+
+    def _apply_defaults_to_autoselect_model(self, model_config: Dict, autoselect_config) -> Dict:
+        """
+        Apply default settings to an autoselect model configuration.
+        
+        Priority order:
+        1. Model-specific settings (highest priority)
+        2. Autoselect default settings
+        3. Auto-derived from first model in rotation (lowest priority)
+        
+        Args:
+            model_config: The model configuration dict (typically a rotation_id from autoselect)
+            autoselect_config: The autoselect configuration
+            
+        Returns:
+            Model dict with defaults applied
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # List of fields that can have defaults
+        default_fields = [
+            'rate_limit',
+            'max_request_tokens',
+            'rate_limit_TPM',
+            'rate_limit_TPH',
+            'rate_limit_TPD',
+            'context_size',
+            'condense_context',
+            'condense_method'
+        ]
+        
+        # First, check if the model_config is a rotation ID and get its settings
+        model_id = model_config.get('model_id') or model_config.get('name') or model_config.get('id', '')
+        
+        # Try to get defaults from the referenced rotation (first model in the rotation)
+        if model_id in self.config.rotations:
+            rotation_config = self.config.rotations[model_id]
+            
+            # Check each default field
+            for field in default_fields:
+                # If field is not set in model, try autoselect defaults, then rotation defaults
+                if field not in model_config or model_config.get(field) is None:
+                    # Try autoselect defaults first
+                    autoselect_default = getattr(autoselect_config, f'default_{field}', None)
+                    if autoselect_default is not None:
+                        model_config[field] = autoselect_default
+                        logger.debug(f"Applied autoselect default_{field}: {autoselect_default} to model {model_id}")
+                    else:
+                        # Try rotation defaults
+                        rotation_default = getattr(rotation_config, f'default_{field}', None)
+                        if rotation_default is not None:
+                            model_config[field] = rotation_default
+                            logger.debug(f"Applied rotation default_{field}: {rotation_default} to model {model_id}")
+                        else:
+                            # Auto-derive from first provider in rotation, then first model
+                            if rotation_config.providers and len(rotation_config.providers) > 0:
+                                first_provider = rotation_config.providers[0]
+                                provider_id = first_provider.get('provider_id')
+                                provider_config = self.config.get_provider(provider_id)
+                                
+                                if provider_config and provider_config.models and len(provider_config.models) > 0:
+                                    first_model = provider_config.models[0]
+                                    # Check for context_size, context_window, or context_length
+                                    if field == 'context_size':
+                                        model_field = getattr(first_model, 'context_size', None)
+                                        if model_field is None:
+                                            model_field = getattr(first_model, 'context_window', None)
+                                        if model_field is None:
+                                            model_field = getattr(first_model, 'context_length', None)
+                                    else:
+                                        model_field = getattr(first_model, field, None)
+                                    if model_field is not None:
+                                        model_config[field] = model_field
+                                        logger.debug(f"Auto-derived default_{field}: {model_field} from first model in {provider_id}")
+        else:
+            # Not a rotation, apply autoselect defaults directly
+            for field in default_fields:
+                if field not in model_config or model_config.get(field) is None:
+                    autoselect_default = getattr(autoselect_config, f'default_{field}', None)
+                    if autoselect_default is not None:
+                        model_config[field] = autoselect_default
+        
+        return model_config
 
     async def _handle_chunked_rotation_request(
         self,
@@ -2994,16 +3094,31 @@ class RotationHandler:
                 }
                 
                 # Add context window information
+                # Priority: model config in rotation > provider config > first model in provider
                 if model.get('context_size'):
                     model_dict['context_window'] = model['context_size']
                 elif provider_config:
                     # Try to find in provider config
+                    found_in_provider = False
                     for pm in provider_config.models or []:
-                        if pm.name == model_name and hasattr(pm, 'context_size'):
+                        if pm.name == model_name and hasattr(pm, 'context_size') and pm.context_size:
                             model_dict['context_window'] = pm.context_size
+                            found_in_provider = True
                             break
-                    if 'context_window' not in model_dict:
-                        model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                    if not found_in_provider:
+                        # Auto-derive from first model in provider (which has context_size from dynamic fetch)
+                        if provider_config.models and len(provider_config.models) > 0:
+                            first_model = provider_config.models[0]
+                            if hasattr(first_model, 'context_size') and first_model.context_size:
+                                model_dict['context_window'] = first_model.context_size
+                            elif hasattr(first_model, 'context_window') and first_model.context_window:
+                                model_dict['context_window'] = first_model.context_window
+                            elif hasattr(first_model, 'context_length') and first_model.context_length:
+                                model_dict['context_window'] = first_model.context_length
+                            else:
+                                model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                        else:
+                            model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
                 
                 # Add capabilities information
                 if model.get('capabilities'):

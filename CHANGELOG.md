@@ -2,6 +2,21 @@
 
 ## [Unreleased]
 ### Added
+- **User-Specific API Endpoints**: New API endpoints for authenticated users to access their own configurations
+  - `GET /api/user/models` - List user's own models
+  - `GET /api/user/providers` - List user's provider configurations  
+  - `GET /api/user/rotations` - List user's rotation configurations
+  - `GET /api/user/autoselects` - List user's autoselect configurations
+  - `POST /api/user/chat/completions` - Chat completions using user's own models
+  - `GET /api/user/{config_type}/models` - List models for specific config type
+  - Requires Bearer token or query parameter authentication
+  - Admin users get access to global + user configs, regular users get user-only configs
+  - Global tokens (in aisbf.json) have full access to all configurations
+- **MCP User Configuration**: Enhanced MCP server with user-specific tools for authenticated users
+  - User can configure their own models, providers, autoselects, and rotations through MCP
+  - Admin users get access to both global and user tools
+  - Regular users get access to user-only tools
+- **Dashboard API Documentation**: User dashboard now includes comprehensive API endpoint documentation
 - **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses
   - Per-provider adaptive rate limiters with learning capability
   - Exponential backoff with jitter (configurable base and jitter factor)

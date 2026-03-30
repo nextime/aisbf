@@ -971,9 +971,10 @@ def get_context_config_for_model(
     
     Priority order for each field:
     1. Rotation model config (if explicitly set)
-    2. Provider model-specific config (if exists)
-    3. Provider default config (fallback)
-    4. System default (0 for condense_context, None for others)
+    2. Model-specific config in provider (if exists)
+    3. First model in provider (auto-derived from dynamic fetch)
+    4. Provider default config (fallback)
+    5. System default (0 for condense_context, None for others)
     
     Args:
         model_name: Name of the model
@@ -1007,12 +1008,23 @@ def get_context_config_for_model(
                         model_specific_config = model
                     break
         
-        # Build base config from provider (model-specific > provider defaults)
+        # Build base config from provider (model-specific > first model > provider defaults)
         # context_size
         if model_specific_config and model_specific_config.get('context_size') is not None:
             context_config['context_size'] = model_specific_config.get('context_size')
         elif hasattr(provider_config, 'default_context_size') and provider_config.default_context_size is not None:
             context_config['context_size'] = provider_config.default_context_size
+        else:
+            # Auto-derive from first model in provider (has context_size from dynamic fetch)
+            if provider_config.models and len(provider_config.models) > 0:
+                first_model = provider_config.models[0]
+                # Check for context_size in the first model (from dynamic fetch)
+                if hasattr(first_model, 'context_size') and first_model.context_size:
+                    context_config['context_size'] = first_model.context_size
+                elif hasattr(first_model, 'context_window') and first_model.context_window:
+                    context_config['context_size'] = first_model.context_window
+                elif hasattr(first_model, 'context_length') and first_model.context_length:
+                    context_config['context_size'] = first_model.context_length
         
         # condense_context
         if model_specific_config and model_specific_config.get('condense_context') is not None:
@@ -1033,11 +1045,69 @@ def get_context_config_for_model(
         # Only override if the field is explicitly set in rotation config
         if 'context_size' in rotation_model_config and rotation_model_config['context_size'] is not None:
             context_config['context_size'] = rotation_model_config['context_size']
+        elif context_config.get('context_size') is None:
+            # If context_size is still None, check if rotation_model_config has default_context_size
+            # (This handles the case where rotation-level default should be used)
+            if 'default_context_size' in rotation_model_config and rotation_model_config['default_context_size'] is not None:
+                context_config['context_size'] = rotation_model_config['default_context_size']
         
         if 'condense_context' in rotation_model_config and rotation_model_config['condense_context'] is not None:
             context_config['condense_context'] = rotation_model_config['condense_context']
+        elif context_config.get('condense_context') == 0:
+            # If condense_context is still at default (0), check if rotation has default
+            if 'default_condense_context' in rotation_model_config and rotation_model_config['default_condense_context'] is not None:
+                context_config['condense_context'] = rotation_model_config['default_condense_context']
         
         if 'condense_method' in rotation_model_config and rotation_model_config['condense_method'] is not None:
             context_config['condense_method'] = rotation_model_config['condense_method']
     
+    # Step 3: Final fallback if context_size is still None
+    # Use inference based on model name patterns
+    if context_config.get('context_size') is None:
+        context_config['context_size'] = _infer_context_size_from_model(model_name)
+    
     return context_config
+
+
+def _infer_context_size_from_model(model_name: str) -> int:
+    """
+    Infer context window size from model name patterns.
+    
+    Args:
+        model_name: Name of the model
+        
+    Returns:
+        Inferred context size in tokens
+    """
+    model_lower = model_name.lower()
+    
+    # Known model patterns
+    if 'gpt-4' in model_lower:
+        if 'turbo' in model_lower or '1106' in model_lower or '0125' in model_lower:
+            return 128000
+        return 8192
+    elif 'gpt-3.5' in model_lower:
+        if 'turbo' in model_lower and ('1106' in model_lower or '0125' in model_lower):
+            return 16385
+        return 4096
+    elif 'claude-3' in model_lower:
+        return 200000
+    elif 'claude-2' in model_lower:
+        return 100000
+    elif 'gemini' in model_lower:
+        if '1.5' in model_lower:
+            return 2000000 if 'pro' in model_lower else 1000000
+        elif '2.0' in model_lower:
+            return 1000000
+        return 32000
+    elif 'llama' in model_lower:
+        if '3' in model_lower:
+            return 128000
+        return 4096
+    elif 'mistral' in model_lower:
+        if 'large' in model_lower:
+            return 32000
+        return 8192
+    
+    # Generic default
+    return 8192

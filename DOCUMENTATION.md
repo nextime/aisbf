@@ -563,6 +563,68 @@ Cache backend can be configured via the web dashboard or configuration file:
   - Supports both streaming and non-streaming responses
 - `GET /api/autoselect/models` - List all models across all autoselect configurations
 
+### User-Specific API Endpoints
+
+Authenticated users can access their own configurations via user-specific API endpoints. These endpoints require either a valid API token (generated in the user dashboard) or session authentication.
+
+#### Authentication
+
+**Option 1: Bearer Token (Recommended for API access)**
+```bash
+Authorization: Bearer YOUR_API_TOKEN
+```
+
+**Option 2: Query Parameter**
+```bash
+?token=YOUR_API_TOKEN
+```
+
+#### User API Endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /api/user/models` | List available models from user's own configurations |
+| `GET /api/user/providers` | List user's provider configurations |
+| `GET /api/user/rotations` | List user's rotation configurations |
+| `GET /api/user/autoselects` | List user's autoselect configurations |
+| `POST /api/user/chat/completions` | Chat completions using user's own models |
+| `GET /api/user/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
+
+**Access Control:**
+- **Admin Users** have access to both global and user configurations when using user API endpoints
+- **Regular Users** can only access their own configurations
+- **Global Tokens** (configured in aisbf.json) have full access to all configurations
+
+#### Example: Using User API with cURL
+
+```bash
+# List user models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+
+# Chat using user's own models
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "your-rotation/model", "messages": [{"role": "user", "content": "Hello"}]}' \
+  http://localhost:17765/api/user/chat/completions
+```
+
+### MCP (Model Context Protocol)
+
+AISBF provides an MCP server for remote agent configuration and model access:
+
+- **SSE Endpoint**: `GET /mcp` - Server-Sent Events for MCP communication
+- **HTTP Endpoint**: `POST /mcp` - Direct HTTP transport for MCP
+
+MCP tools include:
+- `list_models` - List available models (user or global depending on auth)
+- `chat_completions` - Send chat completion requests
+- `get_providers` - Get provider configurations
+- `get_rotations` - Get rotation configurations
+- `get_autoselects` - Get autoselect configurations
+- And more for authenticated users to manage their own configs
+
+User tokens authenticate MCP requests, with admin users getting full access and regular users getting user-only access.
+
 ## Provider Support
 
 AISBF supports the following AI providers:

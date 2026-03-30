@@ -15,6 +15,74 @@
     <div class="alert alert-error">{{ error }}</div>
     {% endif %}
 
+    <!-- API Documentation -->
+    <div class="card">
+        <h2>🔌 How to Use Your Token</h2>
+        <p>Include your API token in the <code>Authorization</code> header when making requests:</p>
+        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>Authorization: Bearer YOUR_API_TOKEN</code></pre>
+        
+        <h3>Available Endpoints:</h3>
+        <table class="endpoints-table">
+            <thead>
+                <tr>
+                    <th>Method</th>
+                    <th>Endpoint</th>
+                    <th>Description</th>
+                </tr>
+            </thead>
+            <tbody>
+                <tr>
+                    <td><code class="method GET">GET</code></td>
+                    <td><code>/api/user/models</code></td>
+                    <td>List your models</td>
+                </tr>
+                <tr>
+                    <td><code class="method GET">GET</code></td>
+                    <td><code>/api/user/providers</code></td>
+                    <td>List your providers</td>
+                </tr>
+                <tr>
+                    <td><code class="method GET">GET</code></td>
+                    <td><code>/api/user/rotations</code></td>
+                    <td>List your rotations</td>
+                </tr>
+                <tr>
+                    <td><code class="method GET">GET</code></td>
+                    <td><code>/api/user/autoselects</code></td>
+                    <td>List your autoselects</td>
+                </tr>
+                <tr>
+                    <td><code class="method POST">POST</code></td>
+                    <td><code>/api/user/chat/completions</code></td>
+                    <td>Chat using your configs</td>
+                </tr>
+                <tr>
+                    <td><code class="method GET">GET</code></td>
+                    <td><code>/mcp/tools</code></td>
+                    <td>List MCP tools</td>
+                </tr>
+                <tr>
+                    <td><code class="method POST">POST</code></td>
+                    <td><code>/mcp/tools/call</code></td>
+                    <td>Call MCP tools</td>
+                </tr>
+            </tbody>
+        </table>
+        
+        <h3>Example curl commands:</h3>
+        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code># List your models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+
+# List your providers  
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+
+# Send a chat request
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
+  http://localhost:17765/api/user/chat/completions</code></pre>
+    </div>
+
     <div class="card">
         <h2>API Tokens</h2>
         <div id="tokens-list">
@@ -355,6 +423,43 @@ renderTokens();
     border-radius: 4px;
     font-family: monospace;
     word-break: break-all;
+}
+
+/* API Endpoints Table */
+.endpoints-table {
+    width: 100%;
+    margin: 1rem 0;
+    border-collapse: collapse;
+}
+
+.endpoints-table th,
+.endpoints-table td {
+    padding: 0.75rem;
+    text-align: left;
+    border-bottom: 1px solid #333;
+}
+
+.endpoints-table th {
+    background: #1a1a2e;
+    font-weight: bold;
+}
+
+.endpoints-table .method {
+    display: inline-block;
+    padding: 0.2rem 0.5rem;
+    border-radius: 3px;
+    font-weight: bold;
+    font-size: 0.75rem;
+}
+
+.endpoints-table .method.GET {
+    background: #28a745;
+    color: white;
+}
+
+.endpoints-table .method.POST {
+    background: #007bff;
+    color: white;
 }
 </style>
 {% endblock %}

@@ -15,6 +15,83 @@
     <div class="alert alert-error">{{ error }}</div>
     {% endif %}
 
+    <!-- API Documentation Section -->
+    <div class="card">
+        <h2>🔌 Your API Endpoints</h2>
+        <p>Use your API token to access your personal configurations. Include the token in the Authorization header:</p>
+        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>Authorization: Bearer YOUR_API_TOKEN</code></pre>
+        
+        <div class="api-endpoints">
+            <h3>Your Models</h3>
+            <div class="endpoint">
+                <code class="method GET">GET</code>
+                <code class="url">/api/user/models</code>
+                <p>List all models from your providers, rotations, and autoselects</p>
+            </div>
+            
+            <h3>Your Providers</h3>
+            <div class="endpoint">
+                <code class="method GET">GET</code>
+                <code class="url">/api/user/providers</code>
+                <p>List all your configured providers</p>
+            </div>
+            
+            <h3>Your Rotations</h3>
+            <div class="endpoint">
+                <code class="method GET">GET</code>
+                <code class="url">/api/user/rotations</code>
+                <p>List all your configured rotations</p>
+            </div>
+            
+            <h3>Your Autoselects</h3>
+            <div class="endpoint">
+                <code class="method GET">GET</code>
+                <code class="url">/api/user/autoselects</code>
+                <p>List all your configured autoselects</p>
+            </div>
+            
+            <h3>Your Chat Completions</h3>
+            <div class="endpoint">
+                <code class="method POST">POST</code>
+                <code class="url">/api/user/chat/completions</code>
+                <p>Send chat requests using your configurations</p>
+                <p class="example">Example model formats:</p>
+                <ul>
+                    <li><code>user-provider/myprovider/mymodel</code></li>
+                    <li><code>user-rotation/myrotation</code></li>
+                    <li><code>user-autoselect/myautoselect</code></li>
+                </ul>
+            </div>
+            
+            <h3>MCP Tools</h3>
+            <div class="endpoint">
+                <code class="method GET">GET</code>
+                <code class="url">/mcp/tools</code>
+                <p>List available MCP tools for your configurations</p>
+            </div>
+            <div class="endpoint">
+                <code class="method POST">POST</code>
+                <code class="url">/mcp/tools/call</code>
+                <p>Call MCP tools to manage your configurations</p>
+            </div>
+        </div>
+        
+        {% if session.role == 'admin' %}
+        <div class="admin-notice">
+            <h4>⚡ Admin Access</h4>
+            <p>As an admin user, you also have access to global configurations (providers, rotations, autoselects configured by the admin) in addition to your own user configurations.</p>
+            <p class="example">Admin model formats:</p>
+            <ul>
+                <li><code>provider/model</code> - global provider</li>
+                <li><code>rotation/myrotation</code> - global rotation</li>
+                <li><code>autoselect/myautoselect</code> - global autoselect</li>
+            </ul>
+        </div>
+        {% endif %}
+        
+        <p class="note">⚠️ Note: Your API token is required for all these endpoints. Manage your tokens in the <a href="{{ url_for(request, '/dashboard/user/tokens') }}">API Tokens</a> section.</p>
+    </div>
+
     <!-- Usage Statistics -->
     <div class="card">
         <h2>Usage Statistics</h2>
@@ -135,6 +212,117 @@
 
 .table tbody tr:hover {
     background: #1a1a2e;
+}
+
+/* API Endpoints Section */
+.api-endpoints {
+    margin-top: 1rem;
+}
+
+.api-endpoints h3 {
+    margin-top: 1.5rem;
+    color: #e0e0e0;
+    font-size: 1.1rem;
+}
+
+.endpoint {
+    background: #0f3460;
+    padding: 1rem;
+    margin: 0.5rem 0;
+    border-radius: 4px;
+    border-left: 3px solid #667eea;
+}
+
+.endpoint .method {
+    display: inline-block;
+    padding: 0.25rem 0.5rem;
+    border-radius: 3px;
+    font-weight: bold;
+    font-size: 0.8rem;
+    margin-right: 0.5rem;
+}
+
+.endpoint .method.GET {
+    background: #28a745;
+    color: white;
+}
+
+.endpoint .method.POST {
+    background: #007bff;
+    color: white;
+}
+
+.endpoint .url {
+    color: #e0e0e0;
+    font-family: monospace;
+}
+
+.endpoint p {
+    margin: 0.5rem 0 0 0;
+    color: #a0a0a0;
+    font-size: 0.9rem;
+}
+
+.endpoint .example {
+    color: #667eea;
+}
+
+.endpoint ul {
+    margin: 0.5rem 0 0 0;
+    padding-left: 1.5rem;
+    color: #a0a0a0;
+}
+
+.endpoint code {
+    background: #1a1a2e;
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
+    font-size: 0.9rem;
+}
+
+.note {
+    margin-top: 1rem;
+    padding: 1rem;
+    background: #1a1a2e;
+    border-radius: 4px;
+    color: #a0a0a0;
+}
+
+.note a {
+    color: #667eea;
+}
+
+.admin-notice {
+    margin-top: 1.5rem;
+    padding: 1rem;
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border-radius: 8px;
+    color: white;
+}
+
+.admin-notice h4 {
+    margin: 0 0 0.5rem 0;
+    color: white;
+}
+
+.admin-notice p {
+    margin: 0.5rem 0;
+    color: white;
+}
+
+.admin-notice .example {
+    color: #ffd700;
+}
+
+.admin-notice ul {
+    margin: 0.5rem 0 0 0;
+    padding-left: 1.5rem;
+}
+
+.admin-notice code {
+    background: rgba(0,0,0,0.3);
+    padding: 0.2rem 0.4rem;
+    border-radius: 3px;
 }
 </style>
 {% endblock %}

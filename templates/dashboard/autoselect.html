@@ -197,6 +197,50 @@ function renderAutoselectDetails(autoselectKey) {
             <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
         </div>
         
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Default Settings</h4>
+        <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Default values for models in this autoselect (optional - auto-derived from first model if not set)</p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="form-group">
+                <label>Default Rate Limit (seconds)</label>
+                <input type="number" value="${autoselect.default_rate_limit || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Max Request Tokens</label>
+                <input type="number" value="${autoselect.default_max_request_tokens || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Context Size</label>
+                <input type="number" value="${autoselect.default_context_size || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPM</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPM || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per minute limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPH</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPH || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per hour limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPD</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPD || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per day limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Condense Context</label>
+                <input type="number" value="${autoselect.default_condense_context || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Trigger context condensation at this token count</small>
+            </div>
+        </div>
+        
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Available Models</h4>
         <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Define which models can be selected and their descriptions for AI analysis</p>
         <div id="models-${autoselectKey}"></div>
