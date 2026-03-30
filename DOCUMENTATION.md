@@ -2,11 +2,12 @@
 
 ## Overview
 
-AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Ollama) with support for provider rotation, AI-assisted model selection, and error tracking.
+AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Claude Code, Ollama, Kiro) with support for provider rotation, AI-assisted model selection, and error tracking.
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, and Kiro (Amazon Q Developer)
+- **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh, Chrome extension for remote servers, and curl_cffi TLS fingerprinting support
 - **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
 - **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
 - **Streaming Support**: Full support for streaming responses from all providers with proper serialization
@@ -633,16 +634,31 @@ AISBF supports the following AI providers:
 - Uses google-genai SDK
 - Requires API key
 - Supports streaming and non-streaming responses
+- Context Caching API support for cost reduction
 
 ### OpenAI
 - Uses openai SDK
 - Requires API key
 - Supports streaming and non-streaming responses
+- Automatic prefix caching (no configuration needed)
 
 ### Anthropic
 - Uses anthropic SDK
 - Requires API key
 - Static model list (no dynamic model discovery)
+- cache_control support for cost reduction
+
+### Claude Code (OAuth2)
+- Full OAuth2 PKCE authentication flow
+- Automatic token refresh with refresh token rotation
+- Chrome extension for remote server OAuth2 callback interception
+- Dashboard integration with authentication UI
+- Credentials stored in `~/.aisbf/claude_credentials.json`
+- Optional curl_cffi TLS fingerprinting for Cloudflare bypass
+- Compatible with official claude-cli credentials
+- Access to latest Claude models (3.7 Sonnet, 3.5 Sonnet, 3.5 Haiku, etc.)
+- Supports streaming, tool calling, vision, and all Claude features
+- See [`CLAUDE_OAUTH2_SETUP.md`](CLAUDE_OAUTH2_SETUP.md) for setup instructions
 
 ### Ollama
 - Uses direct HTTP API

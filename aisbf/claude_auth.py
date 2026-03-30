@@ -74,11 +74,12 @@ def _generate_client_id():
     # Generate UUID5 (name-based) from the machine ID
     return str(uuid.uuid5(uuid.NAMESPACE_DNS, machine_id))
 
-# Use the provided client ID for Claude OAuth2
-CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"
-AUTH_URL = "https://claude.ai/oauth/authorize"
-TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"  # Correct endpoint from CLIProxyAPI
-REDIRECT_URI = "http://localhost:54545/callback"
+# Claude OAuth2 Configuration
+# These values match the official claude-cli implementation
+CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Official Claude Code client ID
+AUTH_URL = "https://claude.ai/oauth/authorize"  # Authorization endpoint
+TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"  # Token exchange endpoint
+REDIRECT_URI = "http://localhost:54545/callback"  # OAuth2 callback URI
 CLI_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 logger = logging.getLogger(__name__)

@@ -21,13 +21,15 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, and Kiro (Amazon Q Developer)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), and Claude Code (OAuth2)
+- **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh and Chrome extension for remote servers
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
 - **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
 - **Content Classification**: NSFW/privacy content filtering with configurable classification windows
 - **Streaming Support**: Full support for streaming responses from all providers
-- **Error Tracking**: Automatic provider disabling after consecutive failures with cooldown periods
+- **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
+- **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses with exponential backoff and gradual recovery
 - **Rate Limiting**: Built-in rate limiting and graceful error handling
 - **Request Splitting**: Automatic splitting of large requests when exceeding `max_request_tokens` limit
 - **Token Rate Limiting**: Per-model token usage tracking with TPM (tokens per minute), TPH (tokens per hour), and TPD (tokens per day) limits
@@ -37,18 +39,33 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Effective Context Tracking**: Reports total tokens used (effective_context) for every request
 - **Enhanced Context Condensation**: 8 condensation methods including hierarchical, conversational, semantic, algorithmic, sliding window, importance-based, entity-aware, and code-aware condensation
 - **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control`, Google Context Caching, and OpenAI-compatible APIs (including prompt_cache_key for OpenAI load balancer routing)
-- **Response Caching**: 20-30% cache hit rate with semantic deduplication across multiple backends (memory, Redis, SQLite, MySQL)
+- **Response Caching (Semantic Deduplication)**: 20-30% cache hit rate with intelligent request deduplication
+  - Multiple backends: In-memory LRU cache, Redis, SQLite, MySQL, file-based
+  - SHA256-based cache key generation for request deduplication
+  - TTL-based expiration with configurable timeouts
+  - Granular cache control at model, provider, rotation, and autoselect levels
+  - Cache statistics tracking (hits, misses, hit rate, evictions)
+  - Dashboard endpoints for cache management
 - **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window with provider-specific configurations
 - **Streaming Response Optimization**: 10-20% memory reduction with chunk pooling, backpressure handling, and provider-specific streaming optimizations for Google and Kiro providers
+- **Token Usage Analytics**: Comprehensive analytics dashboard with charts, cost estimation, performance tracking, and export functionality
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
-- **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
+- **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service (ephemeral and persistent)
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
 - **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
+- **User-Specific API Endpoints**: Dedicated API endpoints for authenticated users to access their own configurations
 - **Database Integration**: SQLite/MySQL-based persistent storage for user configurations, token usage tracking, and context management
 - **User-Specific Configurations**: Each user can have their own providers, rotations, and autoselect configurations stored in the database
-- **Flexible Caching**: SQLite/MySQL/Redis/file/memory-based caching system for model embeddings and other cached data with automatic fallback
+- **Flexible Caching System**: Multi-backend caching for model embeddings and performance optimization
+  - Redis: High-performance distributed caching for production
+  - SQLite/MySQL: Persistent database-backed caching
+  - File-based: Legacy local file storage
+  - Memory: In-memory caching for development
+  - Automatic fallback between backends
+  - Configurable TTL per data type
+- **Proxy-Awareness**: Full support for reverse proxy deployments with automatic URL generation and subpath support
 
 ## Author
 
@@ -107,6 +124,7 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - Google (google-genai)
 - OpenAI and openai-compatible endpoints (openai)
 - Anthropic (anthropic)
+- Claude Code (OAuth2 authentication via claude.ai)
 - Ollama (direct HTTP)
 - Kiro (Amazon Q Developer / AWS CodeWhisperer)
 ## Configuration
@@ -255,6 +273,98 @@ http://your-onion-address.onion/
 - Consider using persistent hidden services for production
 - Monitor access logs for suspicious activity
 - Keep TOR and AISBF updated
+
+### Claude OAuth2 Authentication
+
+AISBF supports Claude Code (claude.ai) as a provider using OAuth2 authentication with automatic token refresh:
+
+#### Features
+- Full OAuth2 PKCE flow matching official claude-cli
+- Automatic token refresh with refresh token rotation
+- Chrome extension for remote server OAuth2 callback interception
+- Dashboard integration with authentication UI
+- Credentials stored in `~/.aisbf/claude_credentials.json`
+- Optional curl_cffi TLS fingerprinting for Cloudflare bypass
+- Compatible with official claude-cli credentials
+
+#### Setup
+1. Add Claude provider to configuration (via dashboard or `~/.aisbf/providers.json`)
+2. For remote servers: Install Chrome extension (download from dashboard)
+3. Click "Authenticate with Claude" in dashboard
+4. Log in with your Claude account
+5. Use Claude models via API: `claude/claude-3-7-sonnet-20250219`
+
+#### Configuration Example
+```json
+{
+  "providers": {
+    "claude": {
+      "id": "claude",
+      "name": "Claude Code (OAuth2)",
+      "endpoint": "https://api.anthropic.com/v1",
+      "type": "claude",
+      "api_key_required": false,
+      "claude_config": {
+        "credentials_file": "~/.aisbf/claude_credentials.json"
+      },
+      "models": [
+        {
+          "name": "claude-3-7-sonnet-20250219",
+          "context_size": 200000
+        }
+      ]
+    }
+  }
+}
+```
+
+See [`CLAUDE_OAUTH2_SETUP.md`](CLAUDE_OAUTH2_SETUP.md) for detailed setup instructions and [`CLAUDE_OAUTH2_DEEP_DIVE.md`](CLAUDE_OAUTH2_DEEP_DIVE.md) for technical details.
+
+### Response Caching (Semantic Deduplication)
+
+AISBF includes an intelligent response caching system that deduplicates similar requests to reduce API costs and latency:
+
+#### Supported Cache Backends
+- **Memory (LRU)**: In-memory cache with LRU eviction, fast but ephemeral
+- **Redis**: High-performance distributed caching, recommended for production
+- **SQLite**: Persistent local database caching
+- **MySQL**: Network database caching for multi-server deployments
+
+#### Features
+- **SHA256-based Deduplication**: Generates cache keys from request content for intelligent deduplication
+- **TTL-based Expiration**: Configurable timeout (default: 600 seconds)
+- **LRU Eviction**: Automatic eviction of least recently used entries (memory backend)
+- **Cache Statistics**: Tracks hits, misses, hit rate, and evictions
+- **Granular Control**: Enable/disable caching at model, provider, rotation, or autoselect level
+- **Hierarchical Configuration**: Model > Provider > Rotation > Autoselect > Global
+- **Dashboard Management**: View statistics and clear cache via dashboard
+- **Streaming Skip**: Automatically skips caching for streaming requests
+
+#### Configuration
+
+**Via Dashboard:**
+1. Navigate to Dashboard → Settings → Response Cache
+2. Enable response caching
+3. Select cache backend (Memory, Redis, SQLite, MySQL)
+4. Configure TTL and max size
+5. Save settings and restart server
+
+**Via Configuration File:**
+Edit `~/.aisbf/aisbf.json`:
+```json
+{
+  "response_cache": {
+    "enabled": true,
+    "backend": "redis",
+    "ttl": 600,
+    "max_size": 1000,
+    "redis_host": "localhost",
+    "redis_port": 6379
+  }
+}
+```
+
+**Cache Hit Rate:** Typically achieves 20-30% cache hit rate in production workloads, significantly reducing API costs and latency.
 
 ### Database Configuration
 

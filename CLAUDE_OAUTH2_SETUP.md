@@ -2,7 +2,15 @@
 
 ## Overview
 
-AISBF now supports Claude Code (claude.ai) as a provider using OAuth2 authentication. This implementation mimics the official Claude CLI authentication flow and includes a Chrome extension to handle OAuth2 callbacks when AISBF runs on a remote server.
+AISBF supports Claude Code (claude.ai) as a provider using OAuth2 authentication with automatic token refresh. This implementation matches the official Claude CLI authentication flow and includes a Chrome extension to handle OAuth2 callbacks when AISBF runs on a remote server.
+
+**Key Features:**
+- Full OAuth2 PKCE flow matching official claude-cli
+- Automatic token refresh with refresh token rotation
+- Chrome extension for remote server OAuth2 callback interception
+- Dashboard integration with authentication UI
+- Optional curl_cffi TLS fingerprinting for Cloudflare bypass
+- Compatible with official claude-cli credentials
 
 ## Architecture
 
