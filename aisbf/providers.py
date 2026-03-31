@@ -2364,6 +2364,134 @@ class ClaudeProviderHandler(BaseProviderHandler):
         logging.info("ClaudeProviderHandler: Created auth headers with OAuth2 Bearer token")
         return headers
     
+    def _sanitize_tool_call_id(self, tool_call_id: str) -> str:
+        """
+        Sanitize tool call ID for Claude API compatibility.
+        
+        Claude API requires tool call IDs to contain only alphanumeric characters,
+        underscores, and hyphens. This replaces invalid characters with underscores.
+        
+        Reference: vendors/kilocode normalizeMessages() tool call ID sanitization
+        
+        Args:
+            tool_call_id: Original tool call ID (may contain invalid chars)
+            
+        Returns:
+            Sanitized tool call ID safe for Claude API
+        """
+        import re
+        # Replace any character that is not alphanumeric, underscore, or hyphen
+        sanitized = re.sub(r'[^a-zA-Z0-9_-]', '_', tool_call_id)
+        return sanitized
+    
+    def _filter_empty_content(self, content: Union[str, List, None]) -> Union[str, List, None]:
+        """
+        Filter empty content from messages for Claude API compatibility.
+        
+        Claude API rejects messages with empty content strings or empty text
+        parts in array content. This filters out empty content.
+        
+        Reference: vendors/kilocode normalizeMessages() empty content filtering
+        
+        Args:
+            content: Message content (string, list of content blocks, or None)
+            
+        Returns:
+            Filtered content, or None if all content was empty
+        """
+        if content is None:
+            return None
+        
+        if isinstance(content, str):
+            if content.strip() == "":
+                return None
+            return content
+        
+        if isinstance(content, list):
+            # Filter out empty text parts and empty content blocks
+            filtered = []
+            for block in content:
+                if isinstance(block, dict):
+                    block_type = block.get('type', '')
+                    if block_type == 'text':
+                        text = block.get('text', '')
+                        if text and text.strip():
+                            filtered.append(block)
+                        # Skip empty text blocks
+                    else:
+                        # Keep non-text blocks (tool_use, tool_result, etc.)
+                        filtered.append(block)
+                else:
+                    filtered.append(block)
+            
+            if not filtered:
+                return None
+            return filtered
+        
+        return content
+    
+    def _apply_cache_control(self, anthropic_messages: List[Dict], enable_caching: bool = True) -> List[Dict]:
+        """
+        Apply ephemeral cache_control to messages for prompt caching.
+        
+        Applies cache_control to system message and last 2 non-system messages
+        to enable Anthropic's prompt caching feature.
+        
+        Reference: vendors/kilocode applyCaching()
+        
+        Args:
+            anthropic_messages: Messages in Anthropic format
+            enable_caching: Whether to enable caching (default True)
+            
+        Returns:
+            Messages with cache_control applied
+        """
+        if not enable_caching or not anthropic_messages:
+            return anthropic_messages
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Only apply caching for conversations with enough messages
+        if len(anthropic_messages) < 4:
+            logger.debug(f"ClaudeProviderHandler: Skipping cache control (only {len(anthropic_messages)} messages)")
+            return anthropic_messages
+        
+        # Find system message (if present as a separate message in the list)
+        # Note: In our implementation, system is extracted separately, so we
+        # apply caching to the last 2 messages in the list
+        cache_indices = []
+        
+        # Cache the last 2 messages (these are the most recent conversation turns)
+        for i in range(max(0, len(anthropic_messages) - 2), len(anthropic_messages)):
+            cache_indices.append(i)
+        
+        # Apply cache_control to selected messages
+        for idx in cache_indices:
+            msg = anthropic_messages[idx]
+            content = msg.get('content')
+            
+            if isinstance(content, str):
+                # Convert string content to list with cache_control
+                if content.strip():  # Only cache non-empty content
+                    msg['content'] = [
+                        {
+                            'type': 'text',
+                            'text': content,
+                            'cache_control': {'type': 'ephemeral'}
+                        }
+                    ]
+                    logger.debug(f"ClaudeProviderHandler: Applied cache_control to message {idx} (string content)")
+            elif isinstance(content, list) and content:
+                # Apply cache_control to the last content block
+                last_block = content[-1]
+                if isinstance(last_block, dict):
+                    last_block['cache_control'] = {'type': 'ephemeral'}
+                    logger.debug(f"ClaudeProviderHandler: Applied cache_control to message {idx} (list content)")
+        
+        logger.info(f"ClaudeProviderHandler: Applied cache_control to {len(cache_indices)} messages for prompt caching")
+        return anthropic_messages
+    
     def _convert_tool_choice_to_anthropic(self, tool_choice: Optional[Union[str, Dict]]) -> Optional[Dict]:
         """
         Convert OpenAI tool_choice format to Anthropic format.
@@ -2585,16 +2713,25 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     # Convert to Anthropic format with tool_use content blocks
                     content_blocks = []
                     
-                    # Add text content if present
-                    if content:
-                        content_blocks.append({
-                            'type': 'text',
-                            'text': content
-                        })
+                    # Add text content if present (filter empty content)
+                    filtered_content = self._filter_empty_content(content)
+                    if filtered_content:
+                        if isinstance(filtered_content, str):
+                            content_blocks.append({
+                                'type': 'text',
+                                'text': filtered_content
+                            })
+                        elif isinstance(filtered_content, list):
+                            content_blocks.extend(filtered_content)
                     
                     # Add tool_use blocks
                     for tc in tool_calls:
-                        tool_id = tc.get('id', f"toolu_{len(content_blocks)}")
+                        # Sanitize tool call ID for Claude API compatibility
+                        raw_tool_id = tc.get('id', f"toolu_{len(content_blocks)}")
+                        tool_id = self._sanitize_tool_call_id(raw_tool_id)
+                        if tool_id != raw_tool_id:
+                            logging.info(f"ClaudeProviderHandler: Sanitized tool call ID: {raw_tool_id} -> {tool_id}")
+                        
                         function = tc.get('function', {})
                         tool_name = function.get('name', '')
                         
@@ -2616,17 +2753,26 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         content_blocks.append(tool_use_block)
                         logging.info(f"Converted tool_call to tool_use block: {tool_name}")
                     
-                    anthropic_messages.append({
-                        'role': 'assistant',
-                        'content': content_blocks
-                    })
+                    # Only add message if we have content blocks
+                    if content_blocks:
+                        anthropic_messages.append({
+                            'role': 'assistant',
+                            'content': content_blocks
+                        })
                 else:
                     # Regular assistant message
+                    # Filter empty content before processing
+                    filtered_content = self._filter_empty_content(content)
+                    if filtered_content is None:
+                        # Skip empty assistant messages
+                        logging.info(f"ClaudeProviderHandler: Skipping empty assistant message")
+                        continue
+                    
                     # Handle case where content might already be an array (from previous API responses)
-                    if isinstance(content, list):
+                    if isinstance(filtered_content, list):
                         # Extract text from content blocks
                         text_parts = []
-                        for block in content:
+                        for block in filtered_content:
                             if isinstance(block, dict):
                                 if block.get('type') == 'text':
                                     text_parts.append(block.get('text', ''))
@@ -2637,12 +2783,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         content_str = '\n'.join(text_parts) if text_parts else ""
                         logging.info(f"Normalized assistant message content from array to string ({len(text_parts)} blocks)")
                     else:
-                        content_str = content or ""
+                        content_str = filtered_content or ""
                     
-                    anthropic_messages.append({
-                        'role': 'assistant',
-                        'content': content_str
-                    })
+                    # Only add non-empty assistant messages
+                    if content_str:
+                        anthropic_messages.append({
+                            'role': 'assistant',
+                            'content': content_str
+                        })
             
             elif role == 'user':
                 # Regular user message
