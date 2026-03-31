@@ -1135,7 +1135,8 @@ async def dashboard_analytics(
     provider_filter: Optional[str] = Query(None),
     model_filter: Optional[str] = Query(None),
     rotation_filter: Optional[str] = Query(None),
-    autoselect_filter: Optional[str] = Query(None)
+    autoselect_filter: Optional[str] = Query(None),
+    user_filter: Optional[int] = Query(None)
 ):
     """Token usage analytics dashboard"""
     auth_check = require_dashboard_auth(request)
@@ -1169,6 +1170,9 @@ async def dashboard_analytics(
     if from_datetime and to_datetime:
         time_range = 'custom'
     
+    # Get all users for filter dropdown
+    all_users = db.get_users() if db else []
+    
     # Get available providers, models, rotations, and autoselects for filter dropdowns
     available_providers = list(config.providers.keys()) if config else []
     available_rotations = list(config.rotations.keys()) if config else []
@@ -1193,7 +1197,8 @@ async def dashboard_analytics(
         provider_id=provider_filter,
         time_range=time_range,
         from_datetime=from_datetime,
-        to_datetime=to_datetime
+        to_datetime=to_datetime,
+        user_filter=user_filter
     )
     
     # Get model performance (with optional filters)
@@ -1201,7 +1206,8 @@ async def dashboard_analytics(
         provider_filter=provider_filter,
         model_filter=model_filter,
         rotation_filter=rotation_filter,
-        autoselect_filter=autoselect_filter
+        autoselect_filter=autoselect_filter,
+        user_filter=user_filter
     )
     
     # Get cost overview
@@ -1233,10 +1239,12 @@ async def dashboard_analytics(
         "available_models": available_models,
         "available_rotations": available_rotations,
         "available_autoselects": available_autoselects,
+        "available_users": all_users,
         "selected_provider": provider_filter,
         "selected_model": model_filter,
         "selected_rotation": rotation_filter,
-        "selected_autoselect": autoselect_filter
+        "selected_autoselect": autoselect_filter,
+        "selected_user": user_filter
     })
 
 @app.get("/dashboard/login", response_class=HTMLResponse)

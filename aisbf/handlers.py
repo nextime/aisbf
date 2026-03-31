@@ -914,59 +914,117 @@ class RequestHandler:
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
                 else:
-                    # Handle OpenAI/Anthropic streaming responses
-                    # OpenAI SDK returns a sync Stream object, not an async iterator
-                    # So we use a regular for loop, not async for
+                    # Handle OpenAI/Anthropic/Claude streaming responses
+                    # Some providers return async generators, others return sync iterables
                     accumulated_response_text = ""  # Track full response for token counting
-                    for chunk in response:
-                        try:
-                            # Debug: Log chunk type and content before serialization
-                            logger.debug(f"Chunk type: {type(chunk)}")
-                            logger.debug(f"Chunk: {chunk}")
-                            
-                            # For OpenAI-compatible providers, just pass through the raw chunk
-                            # Convert chunk to dict and serialize as JSON
-                            chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
-                            
-                            # Track response content for token calculation
-                            if isinstance(chunk_dict, dict):
-                                choices = chunk_dict.get('choices', [])
-                                if choices:
-                                    delta = choices[0].get('delta', {})
-                                    delta_content = delta.get('content', '')
-                                    if delta_content:
-                                        accumulated_response_text += delta_content
-                            
-                            # Add effective_context to the last chunk (when finish_reason is present)
-                            if isinstance(chunk_dict, dict):
-                                choices = chunk_dict.get('choices', [])
-                                if choices and choices[0].get('finish_reason') is not None:
-                                    # This is the last chunk, add effective_context
-                                    if 'usage' not in chunk_dict:
-                                        chunk_dict['usage'] = {}
-                                    chunk_dict['usage']['effective_context'] = effective_context
+                    
+                    # Check if response is an async generator
+                    import inspect
+                    if inspect.iscoroutinefunction(response) or hasattr(response, '__aiter__'):
+                        # Handle async generator (like Claude, Kiro)
+                        logger.info(f"Detected async generator response, using async for loop")
+                        async for chunk in response:
+                            try:
+                                logger.debug(f"Async chunk type: {type(chunk)}")
+                                logger.debug(f"Async chunk: {chunk}")
+                                
+                                # For async generators, chunks might be bytes (SSE format)
+                                if isinstance(chunk, bytes):
+                                    logger.debug(f"Yielding raw bytes chunk: {len(chunk)} bytes")
+                                    yield chunk
+                                else:
+                                    # Fallback: treat as dict and serialize
+                                    chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
                                     
-                                    # If provider doesn't provide token counts, calculate them
-                                    if chunk_dict['usage'].get('total_tokens') is None:
-                                        # Calculate completion tokens from accumulated response
-                                        if accumulated_response_text:
-                                            completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], request_data['model'])
-                                        else:
-                                            completion_tokens = 0
-                                        total_tokens = effective_context + completion_tokens
-                                        chunk_dict['usage']['prompt_tokens'] = effective_context
-                                        chunk_dict['usage']['completion_tokens'] = completion_tokens
-                                        chunk_dict['usage']['total_tokens'] = total_tokens
-                            
-                            yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
-                        except Exception as chunk_error:
-                            # Handle errors during chunk serialization
-                            error_msg = str(chunk_error)
-                            logger.warning(f"Error serializing chunk: {error_msg}")
-                            logger.warning(f"Chunk type: {type(chunk)}")
-                            logger.warning(f"Chunk content: {chunk}")
-                            # Skip this chunk and continue with the next one
-                            continue
+                                    # Track response content for token calculation
+                                    if isinstance(chunk_dict, dict):
+                                        choices = chunk_dict.get('choices', [])
+                                        if choices:
+                                            delta = choices[0].get('delta', {})
+                                            delta_content = delta.get('content', '')
+                                            if delta_content:
+                                                accumulated_response_text += delta_content
+                                    
+                                    # Add effective_context to the last chunk (when finish_reason is present)
+                                    if isinstance(chunk_dict, dict):
+                                        choices = chunk_dict.get('choices', [])
+                                        if choices and choices[0].get('finish_reason') is not None:
+                                            # This is the last chunk, add effective_context
+                                            if 'usage' not in chunk_dict:
+                                                chunk_dict['usage'] = {}
+                                            chunk_dict['usage']['effective_context'] = effective_context
+                                            
+                                            # If provider doesn't provide token counts, calculate them
+                                            if chunk_dict['usage'].get('total_tokens') is None:
+                                                # Calculate completion tokens from accumulated response
+                                                if accumulated_response_text:
+                                                    completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], request_data['model'])
+                                                else:
+                                                    completion_tokens = 0
+                                                total_tokens = effective_context + completion_tokens
+                                                chunk_dict['usage']['prompt_tokens'] = effective_context
+                                                chunk_dict['usage']['completion_tokens'] = completion_tokens
+                                                chunk_dict['usage']['total_tokens'] = total_tokens
+                                    
+                                    yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                error_msg = str(chunk_error)
+                                logger.warning(f"Error processing async chunk: {error_msg}")
+                                logger.warning(f"Chunk type: {type(chunk)}")
+                                logger.warning(f"Chunk content: {chunk}")
+                                continue
+                    else:
+                        # Handle sync iterable (like OpenAI SDK)
+                        logger.info(f"Detected sync iterable response, using regular for loop")
+                        for chunk in response:
+                            try:
+                                # Debug: Log chunk type and content before serialization
+                                logger.debug(f"Chunk type: {type(chunk)}")
+                                logger.debug(f"Chunk: {chunk}")
+                                
+                                # For OpenAI-compatible providers, just pass through the raw chunk
+                                # Convert chunk to dict and serialize as JSON
+                                chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                                
+                                # Track response content for token calculation
+                                if isinstance(chunk_dict, dict):
+                                    choices = chunk_dict.get('choices', [])
+                                    if choices:
+                                        delta = choices[0].get('delta', {})
+                                        delta_content = delta.get('content', '')
+                                        if delta_content:
+                                            accumulated_response_text += delta_content
+                                
+                                # Add effective_context to the last chunk (when finish_reason is present)
+                                if isinstance(chunk_dict, dict):
+                                    choices = chunk_dict.get('choices', [])
+                                    if choices and choices[0].get('finish_reason') is not None:
+                                        # This is the last chunk, add effective_context
+                                        if 'usage' not in chunk_dict:
+                                            chunk_dict['usage'] = {}
+                                        chunk_dict['usage']['effective_context'] = effective_context
+                                        
+                                        # If provider doesn't provide token counts, calculate them
+                                        if chunk_dict['usage'].get('total_tokens') is None:
+                                            # Calculate completion tokens from accumulated response
+                                            if accumulated_response_text:
+                                                completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], request_data['model'])
+                                            else:
+                                                completion_tokens = 0
+                                            total_tokens = effective_context + completion_tokens
+                                            chunk_dict['usage']['prompt_tokens'] = effective_context
+                                            chunk_dict['usage']['completion_tokens'] = completion_tokens
+                                            chunk_dict['usage']['total_tokens'] = total_tokens
+                                
+                                yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
+                            except Exception as chunk_error:
+                                # Handle errors during chunk serialization
+                                error_msg = str(chunk_error)
+                                logger.warning(f"Error serializing chunk: {error_msg}")
+                                logger.warning(f"Chunk type: {type(chunk)}")
+                                logger.warning(f"Chunk content: {chunk}")
+                                # Skip this chunk and continue with the next one
+                                continue
                 handler.record_success()
             except Exception as e:
                 handler.record_failure()

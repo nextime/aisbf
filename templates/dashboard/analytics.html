@@ -77,7 +77,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <!-- Filter by Provider/Model/Rotation/Autoselect -->
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-    <h3 style="margin-bottom: 15px;">Filter by Provider, Model, Rotation, or Autoselect</h3>
+    <h3 style="margin-bottom: 15px;">Filter by Provider, Model, Rotation, Autoselect, or User</h3>
     <form method="get" action="/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
         <!-- Preserve date filter parameters -->
         <input type="hidden" name="time_range" value="{{ selected_time_range }}">
@@ -124,13 +124,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             </select>
         </div>
         
+        <div style="flex: 1; min-width: 150px;">
+            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">User</label>
+            <select name="user_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <option value="">All Users</option>
+                {% for user in available_users %}
+                <option value="{{ user.id }}" {% if selected_user == user.id %}selected{% endif %}>{{ user.username }}{% if user.role == 'admin' %} (admin){% endif %}</option>
+                {% endfor %}
+            </select>
+        </div>
+        
         <div>
             <button type="submit" style="padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 Apply Filters
             </button>
         </div>
         
-        {% if selected_provider or selected_model or selected_rotation or selected_autoselect %}
+        {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
         <div>
             <a href="/dashboard/analytics?time_range={{ selected_time_range }}{% if from_date %}&from_date={{ from_date }}{% endif %}{% if to_date %}&to_date={{ to_date }}{% endif %}" style="padding: 10px 20px; background: #7f8c8d; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
                 Clear Filters
@@ -139,7 +149,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% endif %}
     </form>
     
-    {% if selected_provider or selected_model or selected_rotation or selected_autoselect %}
+    {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
     <div style="margin-top: 15px; padding: 10px; background: #0f3460; border-radius: 4px;">
         <strong style="color: #60a5fa;">Active Filters: </strong>
         <span style="color: #e0e0e0;">
@@ -147,6 +157,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% if selected_model %}{% if selected_provider %} | {% endif %}Model: {{ selected_model }}{% endif %}
             {% if selected_rotation %}{% if selected_provider or selected_model %} | {% endif %}Rotation: {{ selected_rotation }}{% endif %}
             {% if selected_autoselect %}{% if selected_provider or selected_model or selected_rotation %} | {% endif %}Autoselect: {{ selected_autoselect }}{% endif %}
+            {% if selected_user %}{% if selected_provider or selected_model or selected_rotation or selected_autoselect %} | {% endif %}User: {% for user in available_users %}{% if user.id == selected_user %}{{ user.username }}{% endif %}{% endfor %}{% endif %}
         </span>
     </div>
     {% endif %}

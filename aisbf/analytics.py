@@ -292,7 +292,8 @@ class Analytics:
         provider_id: Optional[str] = None,
         time_range: str = '24h',
         from_datetime: Optional[datetime] = None,
-        to_datetime: Optional[datetime] = None
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Get token usage over time for charts.
@@ -302,6 +303,7 @@ class Analytics:
             time_range: Time range ('1h', '6h', '24h', '7d', '30d', '90d', 'custom')
             from_datetime: Optional custom start datetime (used when time_range='custom')
             to_datetime: Optional custom end datetime (used when time_range='custom')
+            user_filter: Optional user ID to filter by
             
         Returns:
             List of time-series data points
@@ -365,26 +367,49 @@ class Analytics:
                 date_format = "%Y-%m-%d %H:%i"
             
             if provider_id:
-                cursor.execute(f'''
-                    SELECT 
-                        strftime('{date_format}', timestamp) as time_bucket,
-                        SUM(tokens_used) as tokens
-                    FROM token_usage
-                    WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                    GROUP BY time_bucket
-                    ORDER BY time_bucket
-                ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
+                if user_filter:
+                    cursor.execute(f'''
+                        SELECT 
+                            strftime('{date_format}', timestamp) as time_bucket,
+                            SUM(tokens_used) as tokens
+                        FROM token_usage
+                        WHERE provider_id = {placeholder} AND user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket
+                        ORDER BY time_bucket
+                    ''', (provider_id, user_filter, cutoff.isoformat(), end_time.isoformat()))
+                else:
+                    cursor.execute(f'''
+                        SELECT 
+                            strftime('{date_format}', timestamp) as time_bucket,
+                            SUM(tokens_used) as tokens
+                        FROM token_usage
+                        WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket
+                        ORDER BY time_bucket
+                    ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
             else:
-                cursor.execute(f'''
-                    SELECT 
-                        strftime('{date_format}', timestamp) as time_bucket,
-                        SUM(tokens_used) as tokens,
-                        provider_id
-                    FROM token_usage
-                    WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
-                    GROUP BY time_bucket, provider_id
-                    ORDER BY time_bucket
-                ''', (cutoff.isoformat(), end_time.isoformat()))
+                if user_filter:
+                    cursor.execute(f'''
+                        SELECT 
+                            strftime('{date_format}', timestamp) as time_bucket,
+                            SUM(tokens_used) as tokens,
+                            provider_id
+                        FROM token_usage
+                        WHERE user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket, provider_id
+                        ORDER BY time_bucket
+                    ''', (user_filter, cutoff.isoformat(), end_time.isoformat()))
+                else:
+                    cursor.execute(f'''
+                        SELECT 
+                            strftime('{date_format}', timestamp) as time_bucket,
+                            SUM(tokens_used) as tokens,
+                            provider_id
+                        FROM token_usage
+                        WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket, provider_id
+                        ORDER BY time_bucket
+                    ''', (cutoff.isoformat(), end_time.isoformat()))
             
             results = []
             for row in cursor.fetchall():
@@ -407,7 +432,8 @@ class Analytics:
         provider_filter: Optional[str] = None,
         model_filter: Optional[str] = None,
         rotation_filter: Optional[str] = None,
-        autoselect_filter: Optional[str] = None
+        autoselect_filter: Optional[str] = None,
+        user_filter: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Get model performance comparison with optional filters.
@@ -417,11 +443,12 @@ class Analytics:
             model_filter: Optional model name to filter by
             rotation_filter: Optional rotation ID to filter by
             autoselect_filter: Optional autoselect ID to filter by
+            user_filter: Optional user ID to filter by
             
         Returns:
             List of model performance data
         """
-        context_dims = self.db.get_all_context_dimensions()
+        context_dims = self.db.get_all_context_dimensions(user_filter=user_filter)
         
         results = []
         for dim in context_dims:

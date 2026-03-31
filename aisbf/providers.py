@@ -2302,8 +2302,15 @@ class ClaudeProviderHandler(BaseProviderHandler):
     Handler for Claude Code OAuth2 integration.
     
     This handler uses OAuth2 authentication to access Claude models through
-    the official Claude API with subscription-based access (claude-code).
+    the official Anthropic SDK. OAuth2 access tokens are passed as api_key
+    parameter, matching the kilocode implementation approach.
     """
+    
+    # NOTE: OAuth2 API uses its own model naming scheme that differs from standard Anthropic API
+    # OAuth2 models: claude-sonnet-4-5-20250929, claude-haiku-4-5-20251001, etc.
+    # Standard API models: claude-3-5-sonnet-20241022, claude-3-5-haiku-20241022, etc.
+    # We use model names exactly as returned by get_models() - NO normalization/mapping
+    
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
         super().__init__(provider_id, api_key)
         self.provider_config = config.get_provider(provider_id)
@@ -2314,12 +2321,345 @@ class ClaudeProviderHandler(BaseProviderHandler):
         if claude_config and isinstance(claude_config, dict):
             credentials_file = claude_config.get('credentials_file')
         
-        # Initialize ClaudeAuth with credentials file
+        # Initialize ClaudeAuth with credentials file (handles OAuth2 flow)
         from .claude_auth import ClaudeAuth
         self.auth = ClaudeAuth(credentials_file=credentials_file)
         
-        # HTTP client for making requests
+        # HTTP client for direct API requests (kilocode method)
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+    
+    def _get_auth_headers(self, stream: bool = False):
+        """
+        Get HTTP headers with OAuth2 Bearer token.
+        Matches CLIProxyAPI header structure for compatibility.
+        """
+        import logging
+        
+        # Get valid OAuth2 access token
+        access_token = self.auth.get_valid_token()
+        
+        # Build headers matching CLIProxyAPI/Claude Code implementation
+        headers = {
+            'Authorization': f'Bearer {access_token}',
+            'Content-Type': 'application/json',
+            'Anthropic-Version': '2023-06-01',
+            'Anthropic-Beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05',
+            'Anthropic-Dangerous-Direct-Browser-Access': 'true',
+            'X-App': 'cli',
+            'X-Stainless-Retry-Count': '0',
+            'X-Stainless-Runtime': 'node',
+            'X-Stainless-Lang': 'js',
+            'X-Stainless-Timeout': '600',
+            'Connection': 'keep-alive',
+        }
+        
+        # Set Accept and Accept-Encoding based on streaming mode
+        if stream:
+            headers['Accept'] = 'text/event-stream'
+            headers['Accept-Encoding'] = 'identity'
+        else:
+            headers['Accept'] = 'application/json'
+            headers['Accept-Encoding'] = 'gzip, deflate, br, zstd'
+        
+        logging.info("ClaudeProviderHandler: Created auth headers with OAuth2 Bearer token")
+        return headers
+    
+    def _convert_tool_choice_to_anthropic(self, tool_choice: Optional[Union[str, Dict]]) -> Optional[Dict]:
+        """
+        Convert OpenAI tool_choice format to Anthropic format.
+        
+        OpenAI formats:
+        - "auto" -> {"type": "auto"}
+        - "none" -> None (don't send tool_choice)
+        - "required" -> {"type": "any"}
+        - {"type": "function", "function": {"name": "tool_name"}} -> {"type": "tool", "name": "tool_name"}
+        
+        Args:
+            tool_choice: OpenAI format tool_choice
+            
+        Returns:
+            Anthropic format tool_choice or None
+        """
+        import logging
+        
+        if not tool_choice:
+            return None
+        
+        # Handle string formats
+        if isinstance(tool_choice, str):
+            if tool_choice == "auto":
+                return {"type": "auto"}
+            elif tool_choice == "none":
+                # Anthropic doesn't have "none" - return None to skip tool_choice
+                return None
+            elif tool_choice == "required":
+                return {"type": "any"}
+            else:
+                logging.warning(f"Unknown tool_choice string: {tool_choice}, using auto")
+                return {"type": "auto"}
+        
+        # Handle dict format (specific tool)
+        if isinstance(tool_choice, dict):
+            if tool_choice.get("type") == "function":
+                function = tool_choice.get("function", {})
+                tool_name = function.get("name")
+                if tool_name:
+                    return {"type": "tool", "name": tool_name}
+                else:
+                    logging.warning(f"tool_choice dict missing function name: {tool_choice}")
+                    return {"type": "auto"}
+            else:
+                # Already in Anthropic format or unknown format
+                logging.warning(f"Unknown tool_choice dict format: {tool_choice}, passing through")
+                return tool_choice
+        
+        logging.warning(f"Unknown tool_choice type: {type(tool_choice)}, using auto")
+        return {"type": "auto"}
+    
+    def _convert_tools_to_anthropic(self, tools: Optional[List[Dict]]) -> Optional[List[Dict]]:
+        """
+        Convert OpenAI tools format to Anthropic format.
+        
+        OpenAI format:
+        [{"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}]
+        
+        Anthropic format:
+        [{"name": "...", "description": "...", "input_schema": {...}}]
+        
+        Also normalizes JSON Schema types that Anthropic doesn't support:
+        - ["string", "null"] -> "string" (with nullable handling)
+        - Removes additionalProperties if false (Anthropic doesn't need it)
+        
+        Args:
+            tools: OpenAI format tools
+            
+        Returns:
+            Anthropic format tools or None
+        """
+        import logging
+        
+        if not tools:
+            return None
+        
+        def normalize_schema(schema: Dict) -> Dict:
+            """Recursively normalize JSON Schema for Anthropic compatibility."""
+            if not isinstance(schema, dict):
+                return schema
+            
+            result = {}
+            for key, value in schema.items():
+                if key == "type" and isinstance(value, list):
+                    # Convert ["string", "null"] to just "string"
+                    # Anthropic handles optional fields via 'required' array
+                    non_null_types = [t for t in value if t != "null"]
+                    if len(non_null_types) == 1:
+                        result[key] = non_null_types[0]
+                    elif len(non_null_types) > 1:
+                        # Multiple non-null types - keep as-is (rare case)
+                        result[key] = non_null_types
+                    else:
+                        # Only null type - default to string
+                        result[key] = "string"
+                elif key == "properties" and isinstance(value, dict):
+                    # Recursively normalize nested properties
+                    result[key] = {k: normalize_schema(v) for k, v in value.items()}
+                elif key == "items" and isinstance(value, dict):
+                    # Recursively normalize array items
+                    result[key] = normalize_schema(value)
+                elif key == "additionalProperties" and value is False:
+                    # Skip additionalProperties: false (Anthropic doesn't need it)
+                    continue
+                elif key == "required" and isinstance(value, list):
+                    # Clean up required array - only keep fields that exist in properties
+                    # and don't have nullable types
+                    properties = schema.get("properties", {})
+                    cleaned_required = []
+                    for field in value:
+                        if field in properties:
+                            field_schema = properties[field]
+                            if isinstance(field_schema, dict):
+                                field_type = field_schema.get("type")
+                                # Skip fields with nullable types (they're optional)
+                                if isinstance(field_type, list) and "null" in field_type:
+                                    continue
+                            cleaned_required.append(field)
+                    if cleaned_required:
+                        result[key] = cleaned_required
+                    # If empty, don't add required key (all fields are optional)
+                else:
+                    result[key] = value
+            
+            return result
+        
+        anthropic_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                function = tool.get("function", {})
+                parameters = function.get("parameters", {})
+                
+                # Normalize the input schema for Anthropic compatibility
+                normalized_schema = normalize_schema(parameters)
+                
+                anthropic_tool = {
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "input_schema": normalized_schema
+                }
+                anthropic_tools.append(anthropic_tool)
+                logging.info(f"Converted tool to Anthropic format: {anthropic_tool['name']}")
+            else:
+                # Unknown tool type, log warning
+                logging.warning(f"Unknown tool type: {tool.get('type')}, skipping")
+        
+        return anthropic_tools if anthropic_tools else None
+    
+    def _convert_messages_to_anthropic(self, messages: List[Dict]) -> tuple[Optional[str], List[Dict]]:
+        """
+        Convert OpenAI messages format to Anthropic format.
+        
+        Key differences:
+        1. System messages are extracted to a separate 'system' parameter
+        2. Tool role messages must be converted to user messages with tool_result content blocks
+        3. Assistant messages with tool_calls must have tool_use content blocks
+        4. Messages must alternate between user and assistant roles
+        
+        Args:
+            messages: OpenAI format messages
+            
+        Returns:
+            Tuple of (system_message, anthropic_messages)
+        """
+        import logging
+        import json
+        
+        system_message = None
+        anthropic_messages = []
+        
+        for msg in messages:
+            role = msg.get('role')
+            content = msg.get('content')
+            
+            if role == 'system':
+                # Extract system message
+                system_message = content
+                logging.info(f"Extracted system message: {len(content) if content else 0} chars")
+            
+            elif role == 'tool':
+                # Convert tool message to user message with tool_result content block
+                tool_call_id = msg.get('tool_call_id', msg.get('name', 'unknown'))
+                
+                # Build tool_result content block
+                tool_result_block = {
+                    'type': 'tool_result',
+                    'tool_use_id': tool_call_id,
+                    'content': content or ""
+                }
+                
+                # Check if last message is a user message - if so, append to it
+                if anthropic_messages and anthropic_messages[-1]['role'] == 'user':
+                    # Append to existing user message
+                    last_content = anthropic_messages[-1]['content']
+                    if isinstance(last_content, str):
+                        # Convert string content to list
+                        anthropic_messages[-1]['content'] = [
+                            {'type': 'text', 'text': last_content},
+                            tool_result_block
+                        ]
+                    elif isinstance(last_content, list):
+                        # Append to existing list
+                        anthropic_messages[-1]['content'].append(tool_result_block)
+                    logging.info(f"Appended tool_result to existing user message")
+                else:
+                    # Create new user message with tool_result
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': [tool_result_block]
+                    })
+                    logging.info(f"Created new user message with tool_result")
+            
+            elif role == 'assistant':
+                # Check if message has tool_calls
+                tool_calls = msg.get('tool_calls')
+                
+                if tool_calls:
+                    # Convert to Anthropic format with tool_use content blocks
+                    content_blocks = []
+                    
+                    # Add text content if present
+                    if content:
+                        content_blocks.append({
+                            'type': 'text',
+                            'text': content
+                        })
+                    
+                    # Add tool_use blocks
+                    for tc in tool_calls:
+                        tool_id = tc.get('id', f"toolu_{len(content_blocks)}")
+                        function = tc.get('function', {})
+                        tool_name = function.get('name', '')
+                        
+                        # Parse arguments (may be string or dict)
+                        arguments = function.get('arguments', {})
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                logging.warning(f"Failed to parse tool arguments as JSON: {arguments}")
+                                arguments = {}
+                        
+                        tool_use_block = {
+                            'type': 'tool_use',
+                            'id': tool_id,
+                            'name': tool_name,
+                            'input': arguments
+                        }
+                        content_blocks.append(tool_use_block)
+                        logging.info(f"Converted tool_call to tool_use block: {tool_name}")
+                    
+                    anthropic_messages.append({
+                        'role': 'assistant',
+                        'content': content_blocks
+                    })
+                else:
+                    # Regular assistant message
+                    # Handle case where content might already be an array (from previous API responses)
+                    if isinstance(content, list):
+                        # Extract text from content blocks
+                        text_parts = []
+                        for block in content:
+                            if isinstance(block, dict):
+                                if block.get('type') == 'text':
+                                    text_parts.append(block.get('text', ''))
+                                elif 'text' in block:
+                                    text_parts.append(block['text'])
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        content_str = '\n'.join(text_parts) if text_parts else ""
+                        logging.info(f"Normalized assistant message content from array to string ({len(text_parts)} blocks)")
+                    else:
+                        content_str = content or ""
+                    
+                    anthropic_messages.append({
+                        'role': 'assistant',
+                        'content': content_str
+                    })
+            
+            elif role == 'user':
+                # Regular user message
+                anthropic_messages.append({
+                    'role': 'user',
+                    'content': content or ""
+                })
+            
+            else:
+                logging.warning(f"Unknown message role: {role}, treating as user")
+                anthropic_messages.append({
+                    'role': 'user',
+                    'content': content or ""
+                })
+        
+        logging.info(f"Converted {len(messages)} OpenAI messages to {len(anthropic_messages)} Anthropic messages")
+        return system_message, anthropic_messages
     
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
@@ -2329,7 +2669,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
         try:
             import logging
+            import json
             logging.info(f"ClaudeProviderHandler: Handling request for model {model}")
+            
             if AISBF_DEBUG:
                 logging.info(f"ClaudeProviderHandler: Messages: {messages}")
             else:
@@ -2337,64 +2679,80 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
             # Apply rate limiting
             await self.apply_rate_limit()
-
-            # Get valid access token (will refresh or re-authenticate if needed)
-            access_token = self.auth.get_valid_token()
             
-            # Prepare messages for Anthropic API format
-            # Extract system message if present
-            system_message = None
-            anthropic_messages = []
+            # Convert messages to Anthropic format (handles tool messages properly)
+            system_message, anthropic_messages = self._convert_messages_to_anthropic(messages)
             
-            for msg in messages:
-                if msg['role'] == 'system':
-                    system_message = msg['content']
-                else:
-                    anthropic_messages.append({
-                        'role': msg['role'],
-                        'content': msg['content']
-                    })
-            
-            # Build request payload
-            request_payload = {
+            # Build request payload for direct HTTP request (kilocode method)
+            # IMPORTANT: OAuth2 API uses its own model naming scheme (e.g., claude-sonnet-4-5-20250929)
+            # which is DIFFERENT from standard Anthropic API (e.g., claude-3-5-sonnet-20241022)
+            # DO NOT normalize - use the model name exactly as provided by get_models()
+            payload = {
                 'model': model,
                 'messages': anthropic_messages,
                 'max_tokens': max_tokens or 4096,
-                'temperature': temperature,
-                'stream': stream
             }
+            
+            # Only add temperature if not None
+            if temperature is not None:
+                payload['temperature'] = temperature
             
             if system_message:
-                request_payload['system'] = system_message
+                payload['system'] = system_message
             
+            # Convert OpenAI tools to Anthropic format
             if tools:
-                request_payload['tools'] = tools
+                anthropic_tools = self._convert_tools_to_anthropic(tools)
+                if anthropic_tools:
+                    payload['tools'] = anthropic_tools
             
-            if tool_choice:
-                request_payload['tool_choice'] = tool_choice
+            # Convert OpenAI tool_choice format to Anthropic format
+            if tool_choice and tools:  # Only add tool_choice if we have tools
+                anthropic_tool_choice = self._convert_tool_choice_to_anthropic(tool_choice)
+                if anthropic_tool_choice:
+                    payload['tool_choice'] = anthropic_tool_choice
             
-            # Prepare headers
-            headers = {
-                'Authorization': f'Bearer {access_token}',
-                'anthropic-version': '2023-06-01',
-                'anthropic-beta': 'claude-code-20250219',  # Required for subscription usage
-                'Content-Type': 'application/json'
-            }
+            # Add stream parameter
+            payload['stream'] = stream
             
-            if AISBF_DEBUG:
-                logging.info(f"ClaudeProviderHandler: Request payload: {request_payload}")
+            # TEMPORARY: Always log payload for debugging 400 errors
+            logging.info(f"ClaudeProviderHandler: Request payload: {json.dumps(payload, indent=2)}")
             
-            # Make request to Claude API
+            # Use api.anthropic.com endpoint (correct endpoint for OAuth2 tokens)
+            api_url = 'https://api.anthropic.com/v1/messages'
+            logging.info(f"ClaudeProviderHandler: Making request to {api_url}")
+            
+            # Make request using direct HTTP (kilocode method)
             if stream:
-                logging.info(f"ClaudeProviderHandler: Using streaming mode")
-                return await self._handle_streaming_request(headers, request_payload, model)
+                logging.info(f"ClaudeProviderHandler: Using streaming mode with direct HTTP")
+                # Get auth headers with Bearer token (streaming mode)
+                headers = self._get_auth_headers(stream=True)
+                
+                # Log the full request for debugging
+                if AISBF_DEBUG:
+                    logging.info(f"=== STREAMING REQUEST DEBUG ===")
+                    logging.info(f"URL: {api_url}")
+                    logging.info(f"Headers: {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
+                    logging.info(f"Payload: {json.dumps(payload, indent=2)}")
+                    logging.info(f"=== END STREAMING REQUEST DEBUG ===")
+                
+                return self._handle_streaming_request(api_url, payload, headers, model)
+            
+            # Get auth headers with Bearer token (non-streaming mode)
+            headers = self._get_auth_headers(stream=False)
+            
+            # Log the full request for debugging
+            if AISBF_DEBUG:
+                logging.info(f"=== NON-STREAMING REQUEST DEBUG ===")
+                logging.info(f"URL: {api_url}")
+                logging.info(f"Headers (auth redacted): {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
+                logging.info(f"Payload: {json.dumps(payload, indent=2)}")
+                logging.info(f"=== END NON-STREAMING REQUEST DEBUG ===")
             
             # Non-streaming request
-            response = await self.client.post(
-                'https://api.anthropic.com/v1/messages',
-                headers=headers,
-                json=request_payload
-            )
+            response = await self.client.post(api_url, headers=headers, json=payload)
+            
+            logging.info(f"ClaudeProviderHandler: Response status: {response.status_code}")
             
             # Check for 429 rate limit error before raising
             if response.status_code == 429:
@@ -2403,24 +2761,33 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 except Exception:
                     response_data = response.text
                 
-                # Handle 429 error with intelligent parsing
                 self.handle_429_error(response_data, dict(response.headers))
-                
-                # Re-raise the error after handling
                 response.raise_for_status()
+            
+            # Log error details for non-2xx responses
+            if response.status_code >= 400:
+                try:
+                    error_body = response.json()
+                    error_message = error_body.get('error', {}).get('message', 'Unknown error')
+                    error_type = error_body.get('error', {}).get('type', 'unknown')
+                    logging.error(f"ClaudeProviderHandler: API error response: {json.dumps(error_body, indent=2)}")
+                    logging.error(f"ClaudeProviderHandler: Error type: {error_type}")
+                    logging.error(f"ClaudeProviderHandler: Error message: {error_message}")
+                except Exception:
+                    logging.error(f"ClaudeProviderHandler: API error response (text): {response.text}")
             
             response.raise_for_status()
             
-            response_data = response.json()
+            claude_response = response.json()
             
             if AISBF_DEBUG:
-                logging.info(f"ClaudeProviderHandler: Raw response: {response_data}")
+                logging.info(f"ClaudeProviderHandler: API response: {json.dumps(claude_response, indent=2)}")
             
-            logging.info(f"ClaudeProviderHandler: Response received successfully")
+            logging.info(f"ClaudeProviderHandler: Response received successfully via direct HTTP")
             self.record_success()
             
-            # Convert to OpenAI format
-            openai_response = self._convert_to_openai_format(response_data, model)
+            # Convert Claude API response to OpenAI format
+            openai_response = self._convert_to_openai_format(claude_response, model)
             
             return openai_response
             
@@ -2430,18 +2797,26 @@ class ClaudeProviderHandler(BaseProviderHandler):
             self.record_failure()
             raise e
     
-    async def _handle_streaming_request(self, headers: Dict, payload: Dict, model: str):
-        """Handle streaming request to Claude API."""
+    async def _handle_streaming_request(self, api_url: str, payload: Dict, headers: Dict, model: str):
+        """Handle streaming request to Claude API using direct HTTP (kilocode method)."""
         import logging
         import json
         
         logger = logging.getLogger(__name__)
-        logger.info(f"ClaudeProviderHandler: Starting streaming request")
+        logger.info(f"ClaudeProviderHandler: Starting streaming request to {api_url}")
+        
+        # Log full request for debugging
+        if AISBF_DEBUG:
+            logger.info(f"=== STREAMING REQUEST DETAILS ===")
+            logger.info(f"URL: {api_url}")
+            logger.info(f"Headers (auth redacted): {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
+            logger.info(f"Payload: {json.dumps(payload, indent=2)}")
+            logger.info(f"=== END STREAMING REQUEST DETAILS ===")
         
         async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as streaming_client:
             async with streaming_client.stream(
                 "POST",
-                "https://api.anthropic.com/v1/messages",
+                api_url,
                 headers=headers,
                 json=payload
             ) as response:
@@ -2449,8 +2824,19 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 
                 if response.status_code >= 400:
                     error_text = await response.aread()
-                    logger.error(f"ClaudeProviderHandler: Streaming error: {error_text}")
-                    raise Exception(f"Claude API error: {response.status_code}")
+                    logger.error(f"ClaudeProviderHandler: Streaming error response: {error_text}")
+                    
+                    # Try to parse error as JSON for better error message
+                    try:
+                        error_json = json.loads(error_text)
+                        error_message = error_json.get('error', {}).get('message', 'Unknown error')
+                        error_type = error_json.get('error', {}).get('type', 'unknown')
+                        logger.error(f"ClaudeProviderHandler: Error type: {error_type}")
+                        logger.error(f"ClaudeProviderHandler: Error message: {error_message}")
+                        raise Exception(f"Claude API error ({response.status_code}): {error_message}")
+                    except (json.JSONDecodeError, Exception) as e:
+                        logger.error(f"ClaudeProviderHandler: Could not parse error response: {e}")
+                        raise Exception(f"Claude API error: {response.status_code} - {error_text}")
                 
                 # Generate completion ID and timestamps
                 completion_id = f"claude-{int(time.time())}"
@@ -2589,6 +2975,151 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         return openai_response
     
+    def _convert_sdk_response_to_openai(self, response, model: str) -> Dict:
+        """
+        Convert Anthropic SDK response object to OpenAI format.
+        The SDK returns a Message object, not a dict.
+        """
+        import logging
+        import json
+        
+        # Build message content from SDK response
+        message_content = ""
+        tool_calls = []
+        
+        # SDK response has content as a list of ContentBlock objects
+        for block in response.content:
+            if hasattr(block, 'text'):
+                message_content += block.text
+            elif hasattr(block, 'type') and block.type == 'tool_use':
+                tool_calls.append({
+                    'id': block.id,
+                    'type': 'function',
+                    'function': {
+                        'name': block.name,
+                        'arguments': json.dumps(block.input)
+                    }
+                })
+        
+        # Map stop reason
+        stop_reason_map = {
+            'end_turn': 'stop',
+            'max_tokens': 'length',
+            'stop_sequence': 'stop',
+            'tool_use': 'tool_calls'
+        }
+        stop_reason = response.stop_reason or 'end_turn'
+        finish_reason = stop_reason_map.get(stop_reason, 'stop')
+        
+        # Build OpenAI-compatible response
+        openai_response = {
+            'id': response.id,
+            'object': 'chat.completion',
+            'created': int(time.time()),
+            'model': f'{self.provider_id}/{model}',
+            'choices': [{
+                'index': 0,
+                'message': {
+                    'role': 'assistant',
+                    'content': message_content if not tool_calls else None,
+                },
+                'finish_reason': finish_reason
+            }],
+            'usage': {
+                'prompt_tokens': response.usage.input_tokens,
+                'completion_tokens': response.usage.output_tokens,
+                'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+            }
+        }
+        
+        # Add tool_calls if present
+        if tool_calls:
+            openai_response['choices'][0]['message']['tool_calls'] = tool_calls
+        
+        return openai_response
+    
+    async def _handle_streaming_request_sdk(self, request_kwargs: Dict, model: str):
+        """Handle streaming request using Anthropic SDK."""
+        import logging
+        import json
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"ClaudeProviderHandler: Starting SDK streaming request")
+        
+        # Generate completion ID and timestamps
+        completion_id = f"claude-{int(time.time())}"
+        created_time = int(time.time())
+        
+        # Track state for streaming
+        first_chunk = True
+        accumulated_content = ""
+        
+        # Create SDK client for streaming (managed within generator)
+        sdk_client = self._get_sdk_client()
+        
+        try:
+            # Use SDK's streaming API
+            async with sdk_client.messages.stream(**request_kwargs) as stream:
+                async for event in stream:
+                    # Handle different event types from SDK
+                    if hasattr(event, 'type'):
+                        event_type = event.type
+                        
+                        if event_type == 'content_block_delta':
+                            # Text delta event
+                            if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
+                                text = event.delta.text
+                                accumulated_content += text
+                                
+                                # Build OpenAI chunk
+                                openai_delta = {'content': text}
+                                if first_chunk:
+                                    openai_delta['role'] = 'assistant'
+                                    first_chunk = False
+                                
+                                openai_chunk = {
+                                    'id': completion_id,
+                                    'object': 'chat.completion.chunk',
+                                    'created': created_time,
+                                    'model': f'{self.provider_id}/{model}',
+                                    'choices': [{
+                                        'index': 0,
+                                        'delta': openai_delta,
+                                        'finish_reason': None
+                                    }]
+                                }
+                                
+                                yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                        
+                        elif event_type == 'message_stop':
+                            # Final chunk
+                            finish_reason = 'stop'
+                            
+                            final_chunk = {
+                                'id': completion_id,
+                                'object': 'chat.completion.chunk',
+                                'created': created_time,
+                                'model': f'{self.provider_id}/{model}',
+                                'choices': [{
+                                    'index': 0,
+                                    'delta': {},
+                                    'finish_reason': finish_reason
+                                }]
+                            }
+                            
+                            yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                            yield b"data: [DONE]\n\n"
+            
+            logger.info(f"ClaudeProviderHandler: SDK streaming completed successfully")
+            self.record_success()
+            
+        except Exception as e:
+            logger.error(f"ClaudeProviderHandler: SDK streaming error: {str(e)}")
+            raise
+        finally:
+            # Close SDK client after streaming completes
+            await sdk_client.close()
+    
     def _get_models_cache_path(self) -> str:
         """Get the path to the models cache file."""
         import os
@@ -2699,22 +3230,13 @@ class ClaudeProviderHandler(BaseProviderHandler):
             try:
                 logging.info("ClaudeProviderHandler: [1/3] Attempting primary API endpoint...")
                 
-                # Get valid access token
-                access_token = self.auth.get_valid_token()
-                logging.info("ClaudeProviderHandler: Access token obtained successfully")
-                
-                # Prepare headers
-                headers = {
-                    'Authorization': f'Bearer {access_token}',
-                    'anthropic-version': '2023-06-01',
-                    'anthropic-beta': 'claude-code-20250219',
-                    'Content-Type': 'application/json'
-                }
+                # Use the same auth headers as handle_request for consistency
+                headers = self._get_auth_headers(stream=False)
                 
                 # Log the API endpoint being called
                 api_endpoint = 'https://api.anthropic.com/v1/models'
                 logging.info(f"ClaudeProviderHandler: Calling API endpoint: {api_endpoint}")
-                logging.info(f"ClaudeProviderHandler: Using OAuth2 authentication with claude-code beta")
+                logging.info(f"ClaudeProviderHandler: Using OAuth2 authentication with full headers")
                 
                 # Query the models endpoint
                 response = await self.client.get(api_endpoint, headers=headers)

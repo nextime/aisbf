@@ -624,15 +624,22 @@ class DatabaseManager:
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old token usage records")
     
-    def get_all_context_dimensions(self) -> List[Dict]:
+    def get_all_context_dimensions(self, user_filter: Optional[int] = None) -> List[Dict]:
         """
         Get all context dimension configurations.
+
+        Args:
+            user_filter: Optional user ID to filter by
 
         Returns:
             List of dictionaries with context configurations
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
+            
+            # Note: context_dimensions table doesn't have user_id, so we can't filter by user
+            # This method returns all context dimensions regardless of user_filter
+            # User-specific filtering happens at the token_usage level in other methods
             cursor.execute('''
                 SELECT provider_id, model_name, context_size, condense_context, condense_method, effective_context, last_updated
                 FROM context_dimensions
