@@ -1,12 +1,8 @@
-# Claude Provider Comparison: AISBF vs Original Claude Code vs KiloCode vs Kiro Gateway
+# Claude Provider Comparison: AISBF vs Original Claude Code vs KiloCode
 
 **Date:** 2026-03-31  
 **Reviewed by:** AI Assistant  
-**AISBF Files:** 
-- [`aisbf/providers.py`](aisbf/providers.py:2300) - Claude provider
-- [`aisbf/kiro_converters.py`](aisbf/kiro_converters.py) - Kiro core converters
-- [`aisbf/kiro_converters_openai.py`](aisbf/kiro_converters_openai.py) - Kiro OpenAI adapters
-- [`aisbf/kiro_parsers.py`](aisbf/kiro_parsers.py) - Kiro response parser
+**AISBF File:** [`aisbf/providers.py`](aisbf/providers.py:2300) - Claude provider  
 **Original Source:** `vendors/claude/src/`  
 **KiloCode Source:** `vendors/kilocode/packages/opencode/src/provider/`
 
@@ -14,31 +10,29 @@
 
 ## Overview
 
-This document compares four implementations:
+This document compares three Claude provider implementations:
 
 1. **AISBF Claude Provider** - Direct HTTP implementation using OAuth2 tokens
 2. **Original Claude Code** - TypeScript/React implementation from Anthropic
 3. **KiloCode** - TypeScript implementation using AI SDK (`@ai-sdk/anthropic`)
-4. **Kiro Gateway** - Python implementation for Amazon Q Developer (Claude-based)
 
 ---
 
 ## 1. Architecture & Approach
 
-| Aspect | AISBF Claude | Original Claude Code | KiloCode | Kiro Gateway |
-|--------|-------------|---------------------|----------|--------------|
-| **Language** | Python | TypeScript/React | TypeScript | Python |
-| **API Method** | Direct HTTP via `httpx.AsyncClient` | Anthropic SDK + internal `callModel` | AI SDK (`@ai-sdk/anthropic`) | AWS Event Stream via `httpx` |
-| **Authentication** | OAuth2 via `ClaudeAuth` class | Internal OAuth2 + session management | API key / OAuth via Auth system | AWS SSO OIDC / Kiro Desktop |
-| **Endpoint** | `https://api.anthropic.com/v1/messages` | Internal SDK routing | Configurable (baseURL) | `https://q.{region}.amazonaws.com/generateAssistantResponse` |
-| **Response Format** | Standard JSON / SSE | SDK streaming | AI SDK streaming | AWS Event Stream binary |
-| **Protocol** | Anthropic Messages API | Anthropic Messages API | AI SDK (unified) | AWS CodeWhisperer API |
-| **Beta Headers** | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,...` | Internal | `claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14` | N/A |
+| Aspect | AISBF Claude | Original Claude Code | KiloCode |
+|--------|-------------|---------------------|----------|
+| **Language** | Python | TypeScript/React | TypeScript |
+| **API Method** | Direct HTTP via `httpx.AsyncClient` | Anthropic SDK + internal `callModel` | AI SDK (`@ai-sdk/anthropic`) |
+| **Authentication** | OAuth2 via `ClaudeAuth` class | Internal OAuth2 + session management | API key / OAuth via Auth system |
+| **Endpoint** | `https://api.anthropic.com/v1/messages` | Internal SDK routing | Configurable (baseURL) |
+| **Response Format** | Standard JSON / SSE | SDK streaming | AI SDK streaming |
+| **Protocol** | Anthropic Messages API | Anthropic Messages API | AI SDK (unified) |
+| **Beta Headers** | `claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,...` | Internal | `claude-code-20250219,interleaved-thinking-2025-05-14,fine-grained-tool-streaming-2025-05-14` |
 
 **Assessment:** 
-- AISBF uses the direct HTTP approach (kilocode method) appropriate for OAuth2 tokens
+- AISBF uses the direct HTTP approach appropriate for OAuth2 tokens
 - KiloCode uses the AI SDK (`@ai-sdk/anthropic`) which provides a unified interface across providers
-- Kiro uses a completely different API (AWS CodeWhisperer) with binary Event Stream responses
 - KiloCode's custom loader for Anthropic ([`provider.ts:125`](vendors/kilocode/packages/opencode/src/provider/provider.ts:125)) sets beta headers similar to AISBF
 
 ---
@@ -62,17 +56,6 @@ This document compares four implementations:
 - **Provider option remapping**: Remaps providerOptions keys from stored providerID to expected SDK key
 - **Duplicate reasoning fix**: Removes duplicate reasoning_details from OpenRouter responses
 
-### Kiro Gateway: [`convert_openai_messages_to_unified()`](aisbf/kiro_converters_openai.py:249) + [`build_kiro_history()`](aisbf/kiro_converters.py:1256)
-
-**What it does well:**
-- Uses a **unified intermediate format** (`UnifiedMessage`) for API-agnostic processing
-- Extracts images from both OpenAI and Anthropic formats
-- Handles tool results from both field and content block formats
-- **Message merging**: Merges adjacent messages with same role
-- **Role normalization**: Normalizes unknown roles to 'user'
-- **Alternating roles**: Inserts synthetic assistant messages when needed
-- **First message validation**: Ensures conversation starts with user message
-
 ### Differences from original:
 The original ([`normalizeMessagesForAPI()`](vendors/claude/src/utils/messages.ts)) has more sophisticated handling including:
 - Thinking block preservation rules
@@ -81,13 +64,13 @@ The original ([`normalizeMessagesForAPI()`](vendors/claude/src/utils/messages.ts
 - Message UUID tracking for caching
 
 ### Key Architectural Difference:
-| Feature | AISBF Claude | KiloCode | Kiro Gateway |
-|---------|-------------|----------|--------------|
-| **Conversion Strategy** | Direct OpenAI → Anthropic | AI SDK message normalization | OpenAI → Unified → Kiro |
-| **Image Support** | No | Via AI SDK | Yes (full multimodal) |
-| **Message Validation** | Basic | Empty content filtering, ID sanitization | Comprehensive (role normalization, merging, alternation) |
-| **Synthetic Messages** | No | No | Yes (for role alternation, first message) |
-| **Caching** | No | Yes (ephemeral cache on system/last 2 msgs) | N/A (different API) |
+| Feature | AISBF Claude | KiloCode |
+|---------|-------------|----------|
+| **Conversion Strategy** | Direct OpenAI → Anthropic | AI SDK message normalization |
+| **Image Support** | No | Via AI SDK |
+| **Message Validation** | Basic | Empty content filtering, ID sanitization |
+| **Synthetic Messages** | No | No |
+| **Caching** | No | Yes (ephemeral cache on system/last 2 msgs) |
 
 ---
 
@@ -107,14 +90,6 @@ The original ([`normalizeMessagesForAPI()`](vendors/claude/src/utils/messages.ts
 - Uses `@ai-sdk/anthropic` which handles OpenAI → Anthropic tool conversion internally
 - Tool schemas pass through [`schema()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:954) for Gemini/Google models (integer enum → string enum conversion)
 - No explicit Anthropic-specific tool conversion needed (SDK handles it)
-
-### Kiro Gateway: [`convert_tools_to_kiro_format()`](aisbf/kiro_converters.py:537) + [`sanitize_json_schema()`](aisbf/kiro_converters.py:374)
-
-**What it does well:**
-- **JSON Schema sanitization**: Removes `additionalProperties` and empty `required` arrays
-- **Long description handling**: Moves descriptions > 1000 chars to system prompt
-- **Tool name validation**: Validates against 64-character limit
-- **Kiro-specific format**: Converts to `toolSpecification` with `inputSchema.json`
 
 ### Missing from original:
 The original has additional tool validation including:
@@ -138,9 +113,6 @@ The original has additional tool validation including:
 - Uses AI SDK's unified tool choice handling
 - No explicit tool_choice conversion needed
 
-### Kiro Gateway:
-Kiro doesn't use tool_choice in the same way - tools are specified in `userInputMessageContext.tools` and the model decides which to use.
-
 ---
 
 ## 5. Streaming Implementation
@@ -162,25 +134,15 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 - Supports `fine-grained-tool-streaming-2025-05-14` beta header for streaming tool calls
 - Custom fetch wrapper with timeout handling ([`provider.ts:1138`](vendors/kilocode/packages/opencode/src/provider/provider.ts:1138))
 
-### Kiro Gateway: [`AwsEventStreamParser`](aisbf/kiro_parsers.py:220)
-
-**What it does:**
-- Parses **AWS Event Stream binary format** (not SSE)
-- Handles multiple event types: `content`, `tool_start`, `tool_input`, `tool_stop`, `usage`, `context_usage`
-- **Tool call assembly**: Accumulates tool input across multiple events
-- **Content deduplication**: Skips repeating content chunks
-- **JSON truncation detection**: Diagnoses truncated tool arguments
-- **Tool call deduplication**: Removes duplicate tool calls by ID and name+args
-
 ### Key Differences:
-| Feature | AISBF Claude | KiloCode | Kiro Gateway |
-|---------|-------------|----------|--------------|
-| **Protocol** | SSE (text) | AI SDK (abstracted) | AWS Event Stream (binary) |
-| **Tool Streaming** | No | Yes (via fine-grained-tool-streaming beta) | Yes (tool_start/input/stop events) |
-| **Thinking Blocks** | No | Yes (via SDK) | N/A |
-| **Usage Tracking** | No | Yes (via SDK) | Yes (usage + context_usage events) |
-| **Error Recovery** | Basic | SDK-level | Truncation detection and diagnosis |
-| **Content Dedup** | No | No | Yes |
+| Feature | AISBF Claude | KiloCode |
+|---------|-------------|----------|
+| **Protocol** | SSE (text) | AI SDK (abstracted) |
+| **Tool Streaming** | No | Yes (via fine-grained-tool-streaming beta) |
+| **Thinking Blocks** | No | Yes (via SDK) |
+| **Usage Tracking** | No | Yes (via SDK) |
+| **Error Recovery** | Basic | SDK-level |
+| **Content Dedup** | No | No |
 
 ---
 
@@ -199,13 +161,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 - No manual response conversion needed
 - Usage metadata includes cache tokens via SDK
 - Cost calculation handles provider-specific differences ([`session/index.ts:860`](vendors/kilocode/packages/opencode/src/session/index.ts:860))
-
-### Kiro Gateway: [`AwsEventStreamParser.get_content()`](aisbf/kiro_parsers.py:557) + [`get_tool_calls()`](aisbf/kiro_parsers.py:561)
-
-**What it does:**
-- Accumulates content chunks into single string
-- Finalizes and deduplicates tool calls
-- Returns OpenAI-compatible tool call format
 
 ---
 
@@ -227,13 +182,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 - Custom fetch wrapper with timeout handling
 - TODO comment for adaptive thinking headers: `adaptive-thinking-2026-01-28,effort-2025-11-24,max-effort-2026-01-24`
 
-### Kiro Gateway: AWS SigV4 / OAuth2
-
-**Uses:**
-- AWS authentication (SSO OIDC or desktop credentials)
-- `profileArn` for user identification
-- Region-based endpoint routing
-
 ---
 
 ## 8. Model Name Resolution
@@ -247,15 +195,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 - Model variants generated via [`variants()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:381) for reasoning efforts
 - Model sorting via [`sort()`](vendors/kilocode/packages/opencode/src/provider/provider.ts:1348) with priority: `gpt-5`, `claude-sonnet-4`, `big-pickle`, `gemini-3-pro`
 - Small model selection via [`getSmallModel()`](vendors/kilocode/packages/opencode/src/provider/provider.ts:1277) with priority list including `claude-haiku-4-5`
-
-### Kiro Gateway: [`normalize_model_name()`](aisbf/kiro_converters_openai.py:52) + [`get_model_id_for_kiro()`](aisbf/kiro_converters_openai.py:130)
-
-**Sophisticated normalization:**
-- `claude-haiku-4-5` → `claude-haiku-4.5` (dash to dot)
-- `claude-haiku-4-5-20251001` → `claude-haiku-4.5` (strip date)
-- `claude-3-7-sonnet` → `claude-3.7-sonnet` (legacy format)
-- `claude-4.5-opus-high` → `claude-opus-4.5` (inverted format)
-- **Hidden models**: Maps display names to internal API IDs
 
 ---
 
@@ -271,13 +210,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 - **Budget-based thinking** for other Claude models: `thinking: { type: "enabled", budgetTokens: N }`
 - Effort levels: `low`, `medium`, `high`, `max`
 - Temperature returns `undefined` for Claude models (let SDK decide)
-
-### Kiro Gateway: Thinking mode injection
-
-**Features:**
-- Injects `<thinking_mode>enabled</thinking_mode>` tags into user messages
-- Configurable max thinking tokens (default 32000)
-- System prompt addition to legitimize thinking tags
 
 ---
 
@@ -299,8 +231,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
   - OpenAI Compatible: `cache_control: { type: "ephemeral" }`
   - GitHub Copilot: `copilot_cache_control: { type: "ephemeral" }`
 
-### Kiro Gateway: N/A (different API)
-
 ---
 
 ## 11. Advanced Features
@@ -317,16 +247,6 @@ Kiro doesn't use tool_choice in the same way - tools are specified in `userInput
 | **Provider Option Remapping** | Remaps providerOptions keys to match SDK expectations | [`message()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:318) |
 | **Gemini Schema Sanitization** | Converts integer enums to string enums for Google models | [`schema()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:954) |
 | **Unsupported Part Handling** | Converts unsupported media types to error text | [`unsupportedParts()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:217) |
-
-### Kiro Gateway Exclusive Features:
-
-| Feature | Description | Location |
-|---------|-------------|----------|
-| **Thinking Mode Injection** | Injects `<thinking_mode>` tags for extended reasoning | [`inject_thinking_tags()`](aisbf/kiro_converters.py:329) |
-| **Tool Content Stripping** | Converts tool content to text when no tools defined | [`strip_all_tool_content()`](aisbf/kiro_converters.py:846) |
-| **Orphaned Tool Result Handling** | Converts orphaned tool_results to text | [`ensure_assistant_before_tool_results()`](aisbf/kiro_converters.py:930) |
-| **Image Extraction** | Full multimodal support (OpenAI + Anthropic formats) | [`extract_images_from_content()`](aisbf/kiro_converters.py:154) |
-| **JSON Truncation Recovery** | Detects and diagnoses truncated tool arguments | [`_diagnose_json_truncation()`](aisbf/kiro_parsers.py:471) |
 
 ---
 
@@ -369,31 +289,18 @@ The original Claude Code has many features that are out of scope for a provider 
 7. **Robust error handling**: Duplicate reasoning fix, unsupported part handling
 8. **Model management**: Small model selection, priority sorting
 
-### Strengths of Kiro Gateway implementation:
-1. **Unified intermediate format** for API-agnostic processing
-2. **Comprehensive message validation** (role normalization, merging, alternation)
-3. **Full multimodal support** (image extraction from multiple formats)
-4. **Sophisticated tool handling** (long descriptions, name validation, content stripping)
-5. **AWS Event Stream parsing** with tool call assembly
-6. **Model name normalization** for multiple Claude naming conventions
-7. **Thinking mode injection** for extended reasoning
-8. **Error recovery** (truncation detection, orphaned tool result handling)
-
 ### Areas for improvement (AISBF):
 1. Add thinking block support for models that use it
 2. Add tool call streaming (fine-grained-tool-streaming beta)
 3. Add more detailed usage metadata (cache tokens)
 4. Consider adding model fallback support
 5. Add tool result size validation
-6. Consider adopting Kiro's unified message format approach
-7. Add message role normalization and validation
-8. Add image/multimodal support
-9. Add prompt caching (ephemeral cache on system/last 2 messages)
-10. Add tool call ID sanitization for Claude compatibility
+6. Add message role normalization and validation
+7. Add image/multimodal support
+8. Add prompt caching (ephemeral cache on system/last 2 messages)
+9. Add tool call ID sanitization for Claude compatibility
 
 ### Overall assessment:
 The AISBF Claude provider is a solid implementation that correctly handles the core API communication, message conversion, and tool handling. It appropriately focuses on the provider-level concerns (API translation) while leaving higher-level concerns (conversation management, compaction) to the rest of the framework.
 
 The KiloCode implementation demonstrates the power of using the AI SDK (`@ai-sdk/anthropic`) for provider abstraction, with automatic handling of thinking, caching, and tool conversion. Its message validation pipeline (empty content filtering, ID sanitization, duplicate reasoning fix) provides robustness that AISBF could benefit from.
-
-The Kiro Gateway implementation demonstrates more sophisticated message handling with its unified intermediate format, comprehensive validation, and multimodal support. Several of these patterns (particularly the message validation pipeline and unified format approach) could be valuable additions to the AISBF codebase.
