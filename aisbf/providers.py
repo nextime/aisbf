@@ -2796,6 +2796,97 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         return anthropic_tools if anthropic_tools else None
     
+    def _extract_images_from_content(self, content: Union[str, List, None]) -> List[Dict]:
+        """
+        Extract images from OpenAI message content format.
+        
+        Handles OpenAI image formats:
+        - {"type": "image_url", "image_url": {"url": "data:image/jpeg;base64,..."}}
+        - {"type": "image_url", "image_url": {"url": "https://..."}}
+        
+        Converts to Anthropic image source format:
+        - {"type": "image", "source": {"type": "base64", "media_type": "image/jpeg", "data": "..."}}
+        - {"type": "image", "source": {"type": "url", "url": "https://..."}}
+        
+        Args:
+            content: Message content (string or list of content blocks)
+            
+        Returns:
+            List of image content blocks in Anthropic format
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not isinstance(content, list):
+            return []
+        
+        images = []
+        max_image_size = 5 * 1024 * 1024  # 5MB limit for base64 images
+        
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            
+            block_type = block.get('type', '')
+            
+            if block_type == 'image_url':
+                image_url_obj = block.get('image_url', {})
+                url = image_url_obj.get('url', '') if isinstance(image_url_obj, dict) else ''
+                
+                if not url:
+                    logger.warning("ClaudeProviderHandler: Empty image URL in content block")
+                    continue
+                
+                if url.startswith('data:'):
+                    # Handle base64 data URL
+                    try:
+                        # Parse data URL: data:image/jpeg;base64,/9j/4AAQ...
+                        header, data = url.split(',', 1)
+                        media_part = header.split(';')[0]  # "data:image/jpeg"
+                        media_type = media_part.replace('data:', '')  # "image/jpeg"
+                        
+                        # Validate image size
+                        if len(data) > max_image_size:
+                            logger.warning(f"ClaudeProviderHandler: Image too large ({len(data)} bytes), skipping")
+                            continue
+                        
+                        image_block = {
+                            'type': 'image',
+                            'source': {
+                                'type': 'base64',
+                                'media_type': media_type,
+                                'data': data
+                            }
+                        }
+                        images.append(image_block)
+                        logger.debug(f"ClaudeProviderHandler: Extracted base64 image ({media_type}, {len(data)} bytes)")
+                        
+                    except (ValueError, IndexError) as e:
+                        logger.warning(f"ClaudeProviderHandler: Failed to parse data URL: {e}")
+                
+                elif url.startswith(('http://', 'https://')):
+                    # Handle URL-based image
+                    image_block = {
+                        'type': 'image',
+                        'source': {
+                            'type': 'url',
+                            'url': url
+                        }
+                    }
+                    images.append(image_block)
+                    logger.debug(f"ClaudeProviderHandler: Extracted URL image: {url[:80]}...")
+                
+                else:
+                    logger.warning(f"ClaudeProviderHandler: Unsupported image URL format: {url[:80]}...")
+            
+            elif block_type == 'image':
+                # Already in Anthropic-like format, pass through
+                if 'source' in block:
+                    images.append(block)
+                    logger.debug("ClaudeProviderHandler: Passed through existing image block")
+        
+        return images
+    
     def _convert_messages_to_anthropic(self, messages: List[Dict]) -> tuple[Optional[str], List[Dict]]:
         """
         Convert OpenAI messages format to Anthropic format.
@@ -2805,6 +2896,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
         2. Tool role messages must be converted to user messages with tool_result content blocks
         3. Assistant messages with tool_calls must have tool_use content blocks
         4. Messages must alternate between user and assistant roles
+        5. Image content blocks are converted to Anthropic image source format (Phase 4.1)
         
         Args:
             messages: OpenAI format messages
@@ -2948,11 +3040,48 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         })
             
             elif role == 'user':
-                # Regular user message
-                anthropic_messages.append({
-                    'role': 'user',
-                    'content': content or ""
-                })
+                # Regular user message - handle images (Phase 4.1)
+                content_blocks = []
+                
+                if isinstance(content, list):
+                    # Extract images from content
+                    images = self._extract_images_from_content(content)
+                    
+                    # Extract text content
+                    for block in content:
+                        if isinstance(block, dict):
+                            block_type = block.get('type', '')
+                            if block_type == 'text':
+                                content_blocks.append(block)
+                            elif block_type == 'image_url':
+                                # Images are handled separately via _extract_images_from_content
+                                pass
+                            else:
+                                # Pass through other block types
+                                content_blocks.append(block)
+                        elif isinstance(block, str):
+                            content_blocks.append({'type': 'text', 'text': block})
+                    
+                    # Add image blocks
+                    content_blocks.extend(images)
+                    
+                    # If we have content blocks, use them; otherwise use original content
+                    if content_blocks:
+                        anthropic_messages.append({
+                            'role': 'user',
+                            'content': content_blocks
+                        })
+                    else:
+                        anthropic_messages.append({
+                            'role': 'user',
+                            'content': content or ""
+                        })
+                else:
+                    # String content - no images
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': content or ""
+                    })
             
             else:
                 logging.warning(f"Unknown message role: {role}, treating as user")
@@ -3048,24 +3177,24 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         # Convert messages to Anthropic format (handles tool messages properly)
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
-            
-            # Build request payload for direct HTTP request (kilocode method)
-            # IMPORTANT: OAuth2 API uses its own model naming scheme (e.g., claude-sonnet-4-5-20250929)
-            # which is DIFFERENT from standard Anthropic API (e.g., claude-3-5-sonnet-20241022)
-            # DO NOT normalize - use the model name exactly as provided by get_models()
-            payload = {
-                'model': model,
-                'messages': anthropic_messages,
-                'max_tokens': max_tokens or 4096,
-            }
-            
-            # Only add temperature if not None
-            if temperature is not None:
-                payload['temperature'] = temperature
-            
-            if system_message:
-                payload['system'] = system_message
-            
+        
+        # Build request payload for direct HTTP request (kilocode method)
+        # IMPORTANT: OAuth2 API uses its own model naming scheme (e.g., claude-sonnet-4-5-20250929)
+        # which is DIFFERENT from standard Anthropic API (e.g., claude-3-5-sonnet-20241022)
+        # DO NOT normalize - use the model name exactly as provided by get_models()
+        payload = {
+            'model': model,
+            'messages': anthropic_messages,
+            'max_tokens': max_tokens or 4096,
+        }
+        
+        # Only add temperature if not None
+        if temperature is not None:
+            payload['temperature'] = temperature
+        
+        if system_message:
+            payload['system'] = system_message
+        
         # Convert OpenAI tools to Anthropic format
         if tools:
             anthropic_tools = self._convert_tools_to_anthropic(tools)
@@ -3083,7 +3212,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         # TEMPORARY: Always log payload for debugging 400 errors
         logger.info(f"ClaudeProviderHandler: Request payload: {json.dumps(payload, indent=2)}")
-            
+        
         # Use api.anthropic.com endpoint (correct endpoint for OAuth2 tokens)
         api_url = 'https://api.anthropic.com/v1/messages'
         logger.info(f"ClaudeProviderHandler: Making request to {api_url}")
