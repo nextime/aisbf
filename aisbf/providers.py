@@ -2350,32 +2350,32 @@ class ClaudeProviderHandler(BaseProviderHandler):
     
     def _get_sdk_client(self):
         """
-        Get or create an Anthropic SDK client configured with OAuth2 token.
+        Get or create an Anthropic SDK client configured with API key.
         
         The SDK handles proper message formatting, retries, and streaming.
-        We pass the OAuth2 token as the api_key parameter.
+        We use the API key obtained from the OAuth2 token exchange,
+        matching the Claude Code flow (see createAndStoreApiKey in client.ts).
         """
         import logging
         logger = logging.getLogger(__name__)
         
-        # Get valid OAuth2 access token
-        access_token = self.auth.get_valid_token()
+        # Get API key from OAuth2 token exchange
+        # This matches the Claude Code flow: OAuth2 token → API key → API requests
+        api_key = self.auth.get_api_key()
         
-        # Create SDK client with OAuth2 token
-        # The SDK uses api_key for authentication - we pass our OAuth2 token
+        if not api_key:
+            logger.error("ClaudeProviderHandler: Failed to get API key from OAuth2 token")
+            raise Exception("Failed to get API key. Please re-authenticate with /login")
+        
+        # Create SDK client with API key
         self._sdk_client = Anthropic(
-            api_key=access_token,
+            api_key=api_key,
             base_url="https://api.anthropic.com",
             max_retries=3,  # SDK handles automatic retries
             timeout=httpx.Timeout(300.0, connect=30.0),
         )
         
-        # Set beta headers for Claude Code compatibility
-        self._sdk_client._custom_headers = {
-            'Anthropic-Beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05',
-        }
-        
-        logger.info("ClaudeProviderHandler: Created SDK client with OAuth2 token")
+        logger.info("ClaudeProviderHandler: Created SDK client with API key")
         return self._sdk_client
     
     def _get_auth_headers(self, stream: bool = False):
