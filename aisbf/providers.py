@@ -2350,52 +2350,57 @@ class ClaudeProviderHandler(BaseProviderHandler):
     
     def _get_sdk_client(self):
         """
-        Get or create an Anthropic SDK client configured with API key.
+        Get or create an Anthropic SDK client configured with OAuth2 auth token.
         
-        The SDK handles proper message formatting, retries, and streaming.
-        We use the API key obtained from the OAuth2 token exchange,
-        matching the Claude Code flow (see createAndStoreApiKey in client.ts).
+        Claude Code uses the SDK with authToken parameter (not apiKey).
+        See vendors/claude/src/services/api/client.ts lines 300-315:
+        
+            const clientConfig = {
+              apiKey: isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey(),
+              authToken: isClaudeAISubscriber()
+                ? getClaudeAIOAuthTokens()?.accessToken
+                : undefined,
+            }
+            return new Anthropic(clientConfig)
         """
         import logging
         logger = logging.getLogger(__name__)
         
-        # Get API key from OAuth2 token exchange
-        # This matches the Claude Code flow: OAuth2 token → API key → API requests
-        api_key = self.auth.get_api_key()
+        # Get valid OAuth2 access token
+        access_token = self.auth.get_valid_token()
         
-        if not api_key:
-            logger.error("ClaudeProviderHandler: Failed to get API key from OAuth2 token")
-            raise Exception("Failed to get API key. Please re-authenticate with /login")
+        if not access_token:
+            logger.error("ClaudeProviderHandler: No OAuth2 access token available")
+            raise Exception("No OAuth2 access token. Please re-authenticate with /login")
         
-        # Create SDK client with API key
+        # Create SDK client with OAuth2 auth token (not API key)
+        # This matches the Claude Code implementation exactly
         self._sdk_client = Anthropic(
-            api_key=api_key,
-            base_url="https://api.anthropic.com",
+            auth_token=access_token,  # OAuth2 token, not API key
             max_retries=3,  # SDK handles automatic retries
             timeout=httpx.Timeout(300.0, connect=30.0),
         )
         
-        logger.info("ClaudeProviderHandler: Created SDK client with API key")
+        logger.info("ClaudeProviderHandler: Created SDK client with OAuth2 auth token")
         return self._sdk_client
     
     def _get_auth_headers(self, stream: bool = False):
         """
         Get HTTP headers with OAuth2 Bearer token.
-        Matches CLIProxyAPI header structure for compatibility.
-        Kept for backward compatibility with direct HTTP calls.
+        Used for direct HTTP calls (not SDK).
         """
         import logging
+        logger = logging.getLogger(__name__)
         
         # Get valid OAuth2 access token
         access_token = self.auth.get_valid_token()
         
-        # Build headers matching CLIProxyAPI/Claude Code implementation
+        # Build headers matching Claude Code implementation
         headers = {
             'Authorization': f'Bearer {access_token}',
             'Content-Type': 'application/json',
             'Anthropic-Version': '2023-06-01',
             'Anthropic-Beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05',
-            'Anthropic-Dangerous-Direct-Browser-Access': 'true',
             'X-App': 'cli',
             'X-Stainless-Retry-Count': '0',
             'X-Stainless-Runtime': 'node',
@@ -2412,7 +2417,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
             headers['Accept'] = 'application/json'
             headers['Accept-Encoding'] = 'gzip, deflate, br, zstd'
         
-        logging.info("ClaudeProviderHandler: Created auth headers with OAuth2 Bearer token")
+        logger.info("ClaudeProviderHandler: Created auth headers with OAuth2 Bearer token")
         return headers
     
     def _sanitize_tool_call_id(self, tool_call_id: str) -> str:
