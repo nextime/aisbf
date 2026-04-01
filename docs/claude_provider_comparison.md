@@ -2,11 +2,12 @@
 
 **Date:** 2026-03-31  
 **Reviewed by:** AI Assistant  
+**Updated:** 2026-04-01 - Deep dive into vendors/claude/src/services/api/claude.ts (3419 lines)
 
 **Sources compared:**
 - **AISBF:** [`aisbf/providers.py`](aisbf/providers.py:2300) - `ClaudeProviderHandler` class
 - **vendors/kilocode:** `vendors/kilocode/packages/opencode/src/provider/` - Provider transform + SDK integration
-- **vendors/claude:** `vendors/claude/src/` - Original Claude Code TypeScript source
+- **vendors/claude:** `vendors/claude/src/` - Original Claude Code TypeScript source (3419-line `claude.ts` + `messages.ts`)
 
 ---
 
@@ -41,13 +42,14 @@ This document compares three Claude provider implementations found in the codeba
 
 ## 2. Message Format Conversion
 
-### AISBF: [`_convert_messages_to_anthropic()`](aisbf/providers.py:2516)
+### AISBF: [`_convert_messages_to_anthropic()`](aisbf/providers.py:2890)
 
 **What it does well:**
 - Correctly extracts system messages to separate `system` parameter
 - Handles tool messages by converting to `tool_result` content blocks
 - Converts assistant `tool_calls` to Anthropic `tool_use` blocks
 - Handles message role alternation requirements
+- Extracts images from OpenAI format content blocks
 
 ### vendors/kilocode: [`normalizeMessages()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:49) + [`applyCaching()`](vendors/kilocode/packages/opencode/src/provider/transform.ts:177)
 
@@ -58,22 +60,31 @@ This document compares three Claude provider implementations found in the codeba
 - **Provider option remapping**: Remaps providerOptions keys from stored providerID to expected SDK key
 - **Duplicate reasoning fix**: Removes duplicate reasoning_details from OpenRouter responses
 
-### vendors/claude: [`normalizeMessagesForAPI()`](vendors/claude/src/utils/messages.ts)
+### vendors/claude: [`normalizeMessagesForAPI()`](vendors/claude/src/utils/messages.ts:1989)
 
-**What it does well:**
-- Thinking block preservation rules
-- Protected thinking block signatures
-- More complex tool result merging
-- Message UUID tracking for caching
+**What it does well (3419-line implementation):**
+- **Thinking block preservation**: Walking backward to merge thinking blocks with their parent assistant messages
+- **Protected thinking block signatures**: Preserves `signature` field on thinking blocks
+- **Tool result pairing**: `ensureToolResultPairing()` inserts synthetic errors for orphaned tool_uses
+- **Message UUID tracking**: Uses `message.id` for merging fragmented assistant messages
+- **Tool input normalization**: `normalizeToolInputForAPI()` validates tool arguments
+- **Caller field stripping**: Removes `caller` field from tool_use blocks for non-tool-search models
+- **Advisor block stripping**: Removes advisor blocks when beta header not present
+- **Media limit enforcement**: `stripExcessMediaItems()` caps at 100 media items per request
+- **Empty content handling**: Inserts placeholder content for empty assistant messages
+- **Tool use deduplication**: Prevents duplicate tool_use IDs across merged assistant messages
+- **Orphan tool result handling**: Converts orphaned tool_results to user messages with error text
 
 ### Key Architectural Difference:
 | Feature | AISBF | vendors/kilocode | vendors/claude |
 |---------|-------|------------------|----------------|
 | **Conversion Strategy** | Direct OpenAI → Anthropic | AI SDK message normalization | Internal SDK normalization |
-| **Image Support** | No | Via AI SDK | Yes (native) |
-| **Message Validation** | Basic | Empty content filtering, ID sanitization | Thinking block preservation, UUID tracking |
-| **Synthetic Messages** | No | No | No |
-| **Caching** | No | Yes (ephemeral cache on system/last 2 msgs) | Yes (internal) |
+| **Image Support** | Yes (Phase 4.1) | Via AI SDK | Yes (native, with 100-item cap) |
+| **Message Validation** | Basic role normalization | Empty content filtering, ID sanitization | Thinking preservation, UUID tracking, media limits |
+| **Tool Result Pairing** | No | No | Yes (ensureToolResultPairing) |
+| **Synthetic Messages** | No | No | Yes (orphan tool_result → user error) |
+| **Caching** | Yes (ephemeral cache on last 2 msgs) | Yes (ephemeral cache on system/last 2 msgs) | Yes (sophisticated cache_control with 1h TTL) |
+| **Media Stripping** | No | No | Yes (stripExcessMediaItems at 100) |
 
 ---
 
@@ -124,13 +135,16 @@ This document compares three Claude provider implementations found in the codeba
 
 ## 5. Streaming Implementation
 
-### AISBF: [`_handle_streaming_request()`](aisbf/providers.py:2800)
+### AISBF: [`_handle_streaming_request()`](aisbf/providers.py:3369)
 
 **What it does:**
 - Uses SSE format parsing (`data:` prefixed lines)
 - Handles `content_block_delta` events with `text_delta`
+- Handles `input_json_delta` for tool call argument streaming (Phase 2.2)
+- Handles `content_block_stop` to emit tool calls
 - Handles `message_stop` for final chunk
 - Yields OpenAI-compatible chunks
+- Streaming retry with fallback models via `_wrap_streaming_with_retry()`
 
 ### vendors/kilocode: AI SDK streaming
 
@@ -141,25 +155,65 @@ This document compares three Claude provider implementations found in the codeba
 - Supports `fine-grained-tool-streaming-2025-05-14` beta header for streaming tool calls
 - Custom fetch wrapper with timeout handling ([`provider.ts:1138`](vendors/kilocode/packages/opencode/src/provider/provider.ts:1138))
 
-### vendors/claude: Internal SDK streaming ([`callModel()`](vendors/claude/src/query.ts:659))
+### vendors/claude: Raw stream via Anthropic SDK ([`queryModel()`](vendors/claude/src/services/api/claude.ts:1017))
 
-**What it does:**
-- Handles thinking blocks during streaming
-- Has streaming tool executor (`StreamingToolExecutor`)
-- Supports fallback model switching mid-stream
-- Has token budget tracking during streaming
-- Handles `tool_use` blocks during streaming (not just text)
-- Has message backfill for tool inputs
+**What it does (3419-line implementation):**
+- **Raw stream access**: Uses `anthropic.beta.messages.create({ stream: true }).withResponse()` instead of BetaMessageStream to avoid O(n²) partial JSON parsing
+- **Streaming idle watchdog**: `STREAM_IDLE_TIMEOUT_MS` (default 90s) aborts hung streams via setTimeout
+- **Stall detection**: Tracks gaps between events, logs stalls >30s with analytics
+- **Content block accumulation**: Manually accumulates `input_json_delta` into tool_use blocks
+- **Thinking block streaming**: Handles `thinking_delta` and `signature_delta` events
+- **Connector text support**: Custom `connector_text_delta` event type for internal use
+- **Advisor tool tracking**: Tracks `advisor` server_tool_use blocks with analytics
+- **Research field capture**: Internal-only `research` field from message_start/content_block_delta
+- **Non-streaming fallback**: Automatic fallback on stream errors with `executeNonStreamingRequest()`
+- **Fallback timeout**: `getNonstreamingFallbackTimeoutMs()` (300s default, 120s for remote)
+- **Stream resource cleanup**: `releaseStreamResources()` cancels Response body to prevent native memory leaks
+- **Request ID tracking**: Generates `clientRequestId` for correlating timeout errors with server logs
+- **Cache break detection**: `checkResponseForCacheBreak()` compares cache tokens across requests
+- **Quota status extraction**: `extractQuotaStatusFromHeaders()` parses rate limit headers
+- **Cost tracking**: `calculateUSDCost()` + `addToTotalSessionCost()` for session billing
+- **Fast mode support**: Dynamic `speed='fast'` parameter with latched beta header
+- **Task budget support**: `output_config.task_budget` for API-side token budgeting
+- **Context management**: `getAPIContextManagement()` for API-side context compression
+- **LSP tool deferral**: `shouldDeferLspTool()` defers tools until LSP init completes
+- **Dynamic tool loading**: Only includes discovered deferred tools, not all upfront
+- **Tool search beta**: Provider-specific beta headers (1P vs Bedrock vs Vertex)
+- **Cache editing beta**: Latched `cache-editing` beta header for cached microcompact
+- **AFK mode beta**: Latched `afk-mode` beta header for auto mode sessions
+- **Thinking clear latch**: Latched `thinking-clear` beta after 1h idle to bust cache
+- **Effort params**: `configureEffortParams()` for adaptive/budget thinking modes
+- **Structured outputs**: `output_config.format` with `structured-outputs-2025-05-22` beta
+- **Media stripping**: `stripExcessMediaItems()` caps at 100 media items before API call
+- **Fingerprint computation**: `computeFingerprintFromMessages()` for attribution headers
+- **System prompt building**: `buildSystemPromptBlocks()` with cache_control per block
+- **Cache breakpoints**: `addCacheBreakpoints()` with cache_edits and pinned edits support
+- **Global cache strategy**: `shouldUseGlobalCacheScope()` for prompt_caching_scope beta
+- **MCP tool cache gating**: Disables global cache when MCP tools present (dynamic schemas)
+- **1h TTL caching**: `should1hCacheTTL()` for eligible users with GrowthBook allowlist
+- **Bedrock 1h TTL**: `ENABLE_PROMPT_CACHING_1H_BEDROCK` for 3P Bedrock users
+- **Prompt cache break detection**: `recordPromptState()` hashes everything affecting cache key
+- **LLM span tracing**: `startLLMRequestSpan()` for beta tracing integration
+- **Session activity**: `startSessionActivity('api_call')` for OS-level activity indicators
+- **VCR recording**: `withStreamingVCR()` for recording/replaying API responses
+- **Anti-distillation**: `fake_tools` opt-in for 1P CLI only
 
 ### Key Differences:
 | Feature | AISBF | vendors/kilocode | vendors/claude |
 |---------|-------|------------------|----------------|
-| **Protocol** | SSE (text) | AI SDK (abstracted) | SDK streaming |
-| **Tool Streaming** | No | Yes (via fine-grained-tool-streaming beta) | Yes (StreamingToolExecutor) |
-| **Thinking Blocks** | No | Yes (via SDK) | Yes (native) |
-| **Usage Tracking** | No | Yes (via SDK) | Yes (native) |
-| **Error Recovery** | Basic | SDK-level | Fallback model, token budget |
-| **Content Dedup** | No | No | No |
+| **Protocol** | SSE (text) | AI SDK (abstracted) | Raw SDK stream |
+| **Tool Streaming** | Yes (Phase 2.2) | Yes (via fine-grained-tool-streaming beta) | Yes (manual accumulation) |
+| **Thinking Blocks** | Yes (Phase 2.1) | Yes (via SDK) | Yes (native, with signature) |
+| **Usage Tracking** | Yes (Phase 2.3) | Yes (via SDK) | Yes (cumulative, with cache_creation) |
+| **Error Recovery** | Fallback models | SDK-level | Non-streaming fallback + model fallback |
+| **Content Dedup** | No | No | Yes (text block dedup) |
+| **Idle Watchdog** | No | No | Yes (90s timeout) |
+| **Stall Detection** | No | No | Yes (30s threshold) |
+| **Memory Cleanup** | Basic | SDK-level | Explicit Response body cancel |
+| **Request ID** | No | No | Yes (client-generated UUID) |
+| **Cache Tracking** | No | No | Yes (cache_break detection) |
+| **Cost Tracking** | No | Yes (via SDK) | Yes (session-level USD) |
+| **VCR Support** | No | No | Yes (record/replay) |
 
 ---
 
