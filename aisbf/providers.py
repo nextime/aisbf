@@ -2299,11 +2299,19 @@ class AnthropicProviderHandler(BaseProviderHandler):
 
 class ClaudeProviderHandler(BaseProviderHandler):
     """
-    Handler for Claude Code OAuth2 integration.
+    Handler for Claude Code OAuth2 integration using Anthropic SDK.
     
     This handler uses OAuth2 authentication to access Claude models through
-    the official Anthropic SDK. OAuth2 access tokens are passed as api_key
-    parameter, matching the kilocode implementation approach.
+    the official Anthropic Python SDK. OAuth2 access tokens are passed as
+    the api_key parameter to the SDK, which handles proper message formatting,
+    retries, and streaming.
+    
+    Key benefits of using the SDK:
+    - Proper message format conversion (OpenAI -> Anthropic)
+    - Automatic retries with exponential backoff
+    - Proper streaming event handling
+    - Correct headers and beta features
+    - Better error handling and rate limit management
     """
     
     # NOTE: OAuth2 API uses its own model naming scheme that differs from standard Anthropic API
@@ -2325,8 +2333,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
         from .claude_auth import ClaudeAuth
         self.auth = ClaudeAuth(credentials_file=credentials_file)
         
-        # HTTP client for direct API requests (kilocode method)
-        self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+        # Anthropic SDK client - created lazily with OAuth2 token
+        self._sdk_client = None
         
         # Streaming idle watchdog configuration (Phase 1.3)
         self.stream_idle_timeout = 90.0  # seconds - matches vendors/claude
@@ -2340,10 +2348,41 @@ class ClaudeProviderHandler(BaseProviderHandler):
             'total_requests': 0,
         }
     
+    def _get_sdk_client(self):
+        """
+        Get or create an Anthropic SDK client configured with OAuth2 token.
+        
+        The SDK handles proper message formatting, retries, and streaming.
+        We pass the OAuth2 token as the api_key parameter.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Get valid OAuth2 access token
+        access_token = self.auth.get_valid_token()
+        
+        # Create SDK client with OAuth2 token
+        # The SDK uses api_key for authentication - we pass our OAuth2 token
+        self._sdk_client = Anthropic(
+            api_key=access_token,
+            base_url="https://api.anthropic.com",
+            max_retries=3,  # SDK handles automatic retries
+            timeout=httpx.Timeout(300.0, connect=30.0),
+        )
+        
+        # Set beta headers for Claude Code compatibility
+        self._sdk_client._custom_headers = {
+            'Anthropic-Beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05',
+        }
+        
+        logger.info("ClaudeProviderHandler: Created SDK client with OAuth2 token")
+        return self._sdk_client
+    
     def _get_auth_headers(self, stream: bool = False):
         """
         Get HTTP headers with OAuth2 Bearer token.
         Matches CLIProxyAPI header structure for compatibility.
+        Kept for backward compatibility with direct HTTP calls.
         """
         import logging
         
@@ -3224,16 +3263,21 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                         temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                                         tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
         """
-        Handle request with a specific model, including validation and truncation.
+        Handle request with a specific model using the Anthropic SDK.
         
-        This is the internal method that does the actual request handling.
-        The public handle_request() wraps this with fallback retry logic.
+        The SDK handles:
+        - Proper message format conversion
+        - Automatic retries with exponential backoff
+        - Correct headers and beta features
+        - Better error handling and rate limit management
+        
+        This fixes the rate limiting issues we were seeing with direct HTTP calls.
         """
         import logging
         import json
         logger = logging.getLogger(__name__)
         
-        logger.info(f"ClaudeProviderHandler: Handling request for model {model}")
+        logger.info(f"ClaudeProviderHandler: Handling request for model {model} (SDK mode)")
         
         if AISBF_DEBUG:
             logger.info(f"ClaudeProviderHandler: Messages: {messages}")
@@ -3249,91 +3293,62 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # Convert messages to Anthropic format (handles tool messages properly)
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
         
-        # Build request payload for direct HTTP request (kilocode method)
-        # IMPORTANT: OAuth2 API uses its own model naming scheme (e.g., claude-sonnet-4-5-20250929)
-        # which is DIFFERENT from standard Anthropic API (e.g., claude-3-5-sonnet-20241022)
-        # DO NOT normalize - use the model name exactly as provided by get_models()
-        payload = {
+        # Get SDK client with OAuth2 token
+        client = self._get_sdk_client()
+        
+        # Build request parameters for SDK
+        # The SDK handles proper message formatting and headers
+        request_kwargs = {
             'model': model,
             'messages': anthropic_messages,
             'max_tokens': max_tokens or 4096,
         }
         
         # Only add temperature if not None and not 0.0
-        # Claude API requires temperature: 1.0 when thinking is enabled (interleaved-thinking beta)
-        # Sending temperature: 0.0 with thinking beta causes API errors
+        # Claude API requires temperature: 1.0 when thinking is enabled
         if temperature is not None and temperature > 0:
-            payload['temperature'] = temperature
+            request_kwargs['temperature'] = temperature
         
         if system_message:
-            payload['system'] = system_message
+            request_kwargs['system'] = system_message
         
         # Convert OpenAI tools to Anthropic format
         if tools:
             anthropic_tools = self._convert_tools_to_anthropic(tools)
             if anthropic_tools:
-                payload['tools'] = anthropic_tools
+                request_kwargs['tools'] = anthropic_tools
         
         # Convert OpenAI tool_choice format to Anthropic format
-        if tool_choice and tools:  # Only add tool_choice if we have tools
+        if tool_choice and tools:
             anthropic_tool_choice = self._convert_tool_choice_to_anthropic(tool_choice)
             if anthropic_tool_choice:
-                payload['tool_choice'] = anthropic_tool_choice
+                request_kwargs['tool_choice'] = anthropic_tool_choice
         
-        # Add stream parameter
-        payload['stream'] = stream
+        # Log request for debugging
+        logger.info(f"ClaudeProviderHandler: SDK request kwargs: {json.dumps({k: str(v)[:200] for k, v in request_kwargs.items()}, indent=2)}")
         
-        # TEMPORARY: Always log payload for debugging 400 errors
-        logger.info(f"ClaudeProviderHandler: Request payload: {json.dumps(payload, indent=2)}")
-        
-        # Use api.anthropic.com endpoint (correct endpoint for OAuth2 tokens)
-        api_url = 'https://api.anthropic.com/v1/messages'
-        logger.info(f"ClaudeProviderHandler: Making request to {api_url}")
-        
-        # Make request using direct HTTP (kilocode method)
-        if stream:
-            logger.info(f"ClaudeProviderHandler: Using streaming mode with direct HTTP")
-            # Get auth headers with Bearer token (streaming mode)
-            headers = self._get_auth_headers(stream=True)
-            
-            # Log the full request for debugging
-            if AISBF_DEBUG:
-                logger.info(f"=== STREAMING REQUEST DEBUG ===")
-                logger.info(f"URL: {api_url}")
-                logger.info(f"Headers: {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
-                logger.info(f"Payload: {json.dumps(payload, indent=2)}")
-                logger.info(f"=== END STREAMING REQUEST DEBUG ===")
-            
-            # Check for 429 before starting streaming (pre-check rate limit status)
-            # Note: 429 during streaming will be caught when generator is consumed
-            return self._handle_streaming_request_with_retry(api_url, payload, headers, model)
-        
-        # Get auth headers with Bearer token (non-streaming mode)
-        headers = self._get_auth_headers(stream=False)
-        
-        # Log the full request for debugging
-        if AISBF_DEBUG:
-            logger.info(f"=== NON-STREAMING REQUEST DEBUG ===")
-            logger.info(f"URL: {api_url}")
-            logger.info(f"Headers (auth redacted): {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
-            logger.info(f"Payload: {json.dumps(payload, indent=2)}")
-            logger.info(f"=== END NON-STREAMING REQUEST DEBUG ===")
-        
-        # Non-streaming request with automatic retry (Phase 1.2)
-        response = await self._request_with_retry(api_url, headers, payload, max_retries=3)
-        
-        claude_response = response.json()
-        
-        if AISBF_DEBUG:
-            logger.info(f"ClaudeProviderHandler: API response: {json.dumps(claude_response, indent=2)}")
-        
-        logger.info(f"ClaudeProviderHandler: Response received successfully via direct HTTP")
-        self.record_success()
-        
-        # Convert Claude API response to OpenAI format
-        openai_response = self._convert_to_openai_format(claude_response, model)
-        
-        return openai_response
+        try:
+            if stream:
+                # Streaming request using SDK
+                logger.info(f"ClaudeProviderHandler: Using SDK streaming mode")
+                return self._handle_streaming_request_sdk(client, request_kwargs, model)
+            else:
+                # Non-streaming request using SDK
+                # The SDK handles automatic retries (max_retries=3)
+                logger.info(f"ClaudeProviderHandler: Using SDK non-streaming mode")
+                response = await client.messages.create(**request_kwargs)
+                
+                logger.info(f"ClaudeProviderHandler: SDK response received successfully")
+                self.record_success()
+                
+                # Convert SDK response to OpenAI format
+                openai_response = self._convert_sdk_response_to_openai(response, model)
+                
+                return openai_response
+                
+        except Exception as e:
+            logger.error(f"ClaudeProviderHandler: SDK request failed: {e}", exc_info=True)
+            raise
     
     async def _request_with_retry(self, api_url: str, headers: Dict, payload: Dict, max_retries: int = 3):
         """
@@ -3821,24 +3836,33 @@ class ClaudeProviderHandler(BaseProviderHandler):
         """
         import logging
         import json
+        logger = logging.getLogger(__name__)
         
         # Build message content from SDK response
         message_content = ""
         tool_calls = []
+        thinking_text = ""
         
         # SDK response has content as a list of ContentBlock objects
         for block in response.content:
-            if hasattr(block, 'text'):
-                message_content += block.text
-            elif hasattr(block, 'type') and block.type == 'tool_use':
+            block_type = getattr(block, 'type', '')
+            
+            if block_type == 'text' or hasattr(block, 'text'):
+                message_content += getattr(block, 'text', '')
+            elif block_type == 'tool_use':
                 tool_calls.append({
-                    'id': block.id,
+                    'id': getattr(block, 'id', f"call_{len(tool_calls)}"),
                     'type': 'function',
                     'function': {
-                        'name': block.name,
-                        'arguments': json.dumps(block.input)
+                        'name': getattr(block, 'name', ''),
+                        'arguments': json.dumps(getattr(block, 'input', {}))
                     }
                 })
+            elif block_type == 'thinking':
+                thinking_text = getattr(block, 'thinking', '')
+                logger.debug(f"ClaudeProviderHandler: Extracted thinking block ({len(thinking_text)} chars)")
+            elif block_type == 'redacted_thinking':
+                logger.debug(f"ClaudeProviderHandler: Found redacted_thinking block")
         
         # Map stop reason
         stop_reason_map = {
@@ -3847,12 +3871,23 @@ class ClaudeProviderHandler(BaseProviderHandler):
             'stop_sequence': 'stop',
             'tool_use': 'tool_calls'
         }
-        stop_reason = response.stop_reason or 'end_turn'
+        stop_reason = getattr(response, 'stop_reason', 'end_turn') or 'end_turn'
         finish_reason = stop_reason_map.get(stop_reason, 'stop')
+        
+        # Extract usage metadata
+        usage = getattr(response, 'usage', None)
+        input_tokens = getattr(usage, 'input_tokens', 0) if usage else 0
+        output_tokens = getattr(usage, 'output_tokens', 0) if usage else 0
+        cache_read_tokens = getattr(usage, 'cache_read_input_tokens', 0) if usage else 0
+        cache_creation_tokens = getattr(usage, 'cache_creation_input_tokens', 0) if usage else 0
+        
+        # Log cache usage for analytics
+        if cache_read_tokens or cache_creation_tokens:
+            logger.info(f"ClaudeProviderHandler: Cache usage - read: {cache_read_tokens}, creation: {cache_creation_tokens}")
         
         # Build OpenAI-compatible response
         openai_response = {
-            'id': response.id,
+            'id': getattr(response, 'id', f"claude-{model}-{int(time.time())}"),
             'object': 'chat.completion',
             'created': int(time.time()),
             'model': f'{self.provider_id}/{model}',
@@ -3865,9 +3900,18 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 'finish_reason': finish_reason
             }],
             'usage': {
-                'prompt_tokens': response.usage.input_tokens,
-                'completion_tokens': response.usage.output_tokens,
-                'total_tokens': response.usage.input_tokens + response.usage.output_tokens
+                'prompt_tokens': input_tokens,
+                'completion_tokens': output_tokens,
+                'total_tokens': input_tokens + output_tokens,
+                # Extended cache usage metadata (Phase 2.3)
+                'prompt_tokens_details': {
+                    'cached_tokens': cache_read_tokens,
+                    'audio_tokens': 0
+                },
+                'completion_tokens_details': {
+                    'reasoning_tokens': 0,
+                    'audio_tokens': 0
+                }
             }
         }
         
@@ -3875,14 +3919,28 @@ class ClaudeProviderHandler(BaseProviderHandler):
         if tool_calls:
             openai_response['choices'][0]['message']['tool_calls'] = tool_calls
         
+        # Add thinking content to message if present
+        if thinking_text:
+            openai_response['choices'][0]['message']['provider_options'] = {
+                'anthropic': {
+                    'thinking': thinking_text
+                }
+            }
+            logger.debug(f"ClaudeProviderHandler: Added thinking content to response ({len(thinking_text)} chars)")
+        
         return openai_response
     
-    async def _handle_streaming_request_sdk(self, request_kwargs: Dict, model: str):
-        """Handle streaming request using Anthropic SDK."""
+    async def _handle_streaming_request_sdk(self, client, request_kwargs: Dict, model: str):
+        """
+        Handle streaming request using Anthropic SDK.
+        
+        The SDK handles proper streaming event parsing and retries.
+        We convert SDK events to OpenAI-compatible SSE chunks.
+        """
         import logging
         import json
-        
         logger = logging.getLogger(__name__)
+        
         logger.info(f"ClaudeProviderHandler: Starting SDK streaming request")
         
         # Generate completion ID and timestamps
@@ -3892,25 +3950,72 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # Track state for streaming
         first_chunk = True
         accumulated_content = ""
+        accumulated_thinking = ""
+        thinking_signature = ""
+        is_redacted_thinking = False
+        content_block_index = 0
+        current_tool_calls = []
         
-        # Create SDK client for streaming (managed within generator)
-        sdk_client = self._get_sdk_client()
+        # Streaming idle watchdog
+        last_event_time = time.time()
+        idle_timeout = self.stream_idle_timeout
         
         try:
-            # Use SDK's streaming API
-            async with sdk_client.messages.stream(**request_kwargs) as stream:
+            # Use SDK's streaming API with context manager
+            async with client.messages.stream(**request_kwargs) as stream:
                 async for event in stream:
+                    # Update idle watchdog
+                    last_event_time = time.time()
+                    
+                    # Check for idle timeout
+                    if time.time() - last_event_time > idle_timeout:
+                        logger.error(f"ClaudeProviderHandler: Stream idle timeout ({idle_timeout}s)")
+                        raise TimeoutError(f"Stream idle for {idle_timeout}s")
+                    
                     # Handle different event types from SDK
-                    if hasattr(event, 'type'):
-                        event_type = event.type
-                        
-                        if event_type == 'content_block_delta':
-                            # Text delta event
-                            if hasattr(event, 'delta') and hasattr(event.delta, 'text'):
-                                text = event.delta.text
+                    event_type = getattr(event, 'type', None)
+                    
+                    if event_type == 'content_block_start':
+                        content_block = getattr(event, 'content_block', None)
+                        if content_block:
+                            block_type = getattr(content_block, 'type', '')
+                            
+                            if block_type == 'tool_use':
+                                tool_call = {
+                                    'index': content_block_index,
+                                    'id': getattr(content_block, 'id', ''),
+                                    'type': 'function',
+                                    'function': {
+                                        'name': getattr(content_block, 'name', ''),
+                                        'arguments': ''
+                                    }
+                                }
+                                current_tool_calls.append(tool_call)
+                                logger.debug(f"ClaudeProviderHandler: Tool use block started: {tool_call['function']['name']}")
+                            
+                            elif block_type == 'thinking':
+                                accumulated_thinking = ""
+                                is_redacted_thinking = False
+                                thinking_signature = ""
+                                logger.debug(f"ClaudeProviderHandler: Thinking block started")
+                            
+                            elif block_type == 'redacted_thinking':
+                                accumulated_thinking = ""
+                                is_redacted_thinking = True
+                                thinking_signature = ""
+                                logger.debug(f"ClaudeProviderHandler: Redacted thinking block started")
+                            
+                            content_block_index += 1
+                    
+                    elif event_type == 'content_block_delta':
+                        delta = getattr(event, 'delta', None)
+                        if delta:
+                            delta_type = getattr(delta, 'type', '')
+                            
+                            if delta_type == 'text_delta':
+                                text = getattr(delta, 'text', '')
                                 accumulated_content += text
                                 
-                                # Build OpenAI chunk
                                 openai_delta = {'content': text}
                                 if first_chunk:
                                     openai_delta['role'] = 'assistant'
@@ -3929,35 +4034,114 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 }
                                 
                                 yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
-                        
-                        elif event_type == 'message_stop':
-                            # Final chunk
-                            finish_reason = 'stop'
                             
-                            final_chunk = {
+                            elif delta_type == 'input_json_delta':
+                                partial_json = getattr(delta, 'partial_json', '')
+                                if current_tool_calls:
+                                    current_tool_calls[-1]['function']['arguments'] += partial_json
+                            
+                            elif delta_type == 'thinking_delta':
+                                thinking_text = getattr(delta, 'thinking', '')
+                                accumulated_thinking += thinking_text
+                                logger.debug(f"ClaudeProviderHandler: Thinking delta: {len(thinking_text)} chars")
+                            
+                            elif delta_type == 'signature_delta':
+                                signature = getattr(delta, 'signature', '')
+                                thinking_signature = signature
+                                logger.debug(f"ClaudeProviderHandler: Thinking signature received")
+                    
+                    elif event_type == 'content_block_stop':
+                        if current_tool_calls:
+                            tool_call = current_tool_calls[-1]
+                            try:
+                                args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                tool_call['function']['arguments'] = json.dumps(args)
+                            except json.JSONDecodeError:
+                                logger.warning(f"ClaudeProviderHandler: Invalid tool call arguments JSON")
+                                tool_call['function']['arguments'] = '{}'
+                            
+                            tool_call_chunk = {
                                 'id': completion_id,
                                 'object': 'chat.completion.chunk',
                                 'created': created_time,
                                 'model': f'{self.provider_id}/{model}',
                                 'choices': [{
                                     'index': 0,
-                                    'delta': {},
-                                    'finish_reason': finish_reason
+                                    'delta': {
+                                        'tool_calls': [{
+                                            'index': tool_call['index'],
+                                            'id': tool_call['id'],
+                                            'type': tool_call['type'],
+                                            'function': tool_call['function']
+                                        }]
+                                    },
+                                    'finish_reason': None
                                 }]
                             }
                             
-                            yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
-                            yield b"data: [DONE]\n\n"
+                            yield f"data: {json.dumps(tool_call_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                            logger.debug(f"ClaudeProviderHandler: Emitted tool call: {tool_call['function']['name']}")
+                        
+                        elif accumulated_thinking:
+                            block_type = "redacted_thinking" if is_redacted_thinking else "thinking"
+                            logger.info(f"ClaudeProviderHandler: {block_type} block completed ({len(accumulated_thinking)} chars)")
+                            accumulated_thinking = ""
+                            is_redacted_thinking = False
+                            thinking_signature = ""
+                    
+                    elif event_type == 'message_delta':
+                        usage = getattr(event, 'usage', None)
+                        if usage:
+                            logger.debug(f"ClaudeProviderHandler: Streaming usage update: {usage}")
+                            
+                            # Track cache tokens for analytics
+                            cache_read = getattr(usage, 'cache_read_input_tokens', 0)
+                            cache_creation = getattr(usage, 'cache_creation_input_tokens', 0)
+                            if cache_read > 0:
+                                self.cache_stats['cache_hits'] += 1
+                                self.cache_stats['cache_tokens_read'] += cache_read
+                            if cache_creation > 0:
+                                self.cache_stats['cache_misses'] += 1
+                                self.cache_stats['cache_tokens_created'] += cache_creation
+                    
+                    elif event_type == 'message_stop':
+                        final_chunk = {
+                            'id': completion_id,
+                            'object': 'chat.completion.chunk',
+                            'created': created_time,
+                            'model': f'{self.provider_id}/{model}',
+                            'choices': [{
+                                'index': 0,
+                                'delta': {},
+                                'finish_reason': 'stop'
+                            }]
+                        }
+                        
+                        yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                        yield b"data: [DONE]\n\n"
             
             logger.info(f"ClaudeProviderHandler: SDK streaming completed successfully")
             self.record_success()
             
         except Exception as e:
-            logger.error(f"ClaudeProviderHandler: SDK streaming error: {str(e)}")
+            logger.error(f"ClaudeProviderHandler: SDK streaming error: {str(e)}", exc_info=True)
             raise
-        finally:
-            # Close SDK client after streaming completes
-            await sdk_client.close()
+    
+    def get_cache_stats(self) -> Dict:
+        """
+        Get cache usage statistics (Phase 2.3).
+        
+        Returns:
+            Dict with cache statistics including hits, misses, and token counts.
+        """
+        total = self.cache_stats['cache_hits'] + self.cache_stats['cache_misses']
+        hit_rate = (self.cache_stats['cache_hits'] / total * 100) if total > 0 else 0
+        
+        return {
+            **self.cache_stats,
+            'total_cache_events': total,
+            'cache_hit_rate_percent': round(hit_rate, 2),
+        }
     
     def get_cache_stats(self) -> Dict:
         """
