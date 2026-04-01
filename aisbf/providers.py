@@ -3247,8 +3247,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
             'max_tokens': max_tokens or 4096,
         }
         
-        # Only add temperature if not None
-        if temperature is not None:
+        # Only add temperature if not None and not 0.0
+        # Claude API requires temperature: 1.0 when thinking is enabled (interleaved-thinking beta)
+        # Sending temperature: 0.0 with thinking beta causes API errors
+        if temperature is not None and temperature > 0:
             payload['temperature'] = temperature
         
         if system_message:
