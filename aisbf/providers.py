@@ -2996,6 +2996,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 accumulated_tool_calls = []
                 
                 # Process the streaming response (SSE format)
+                # Track content blocks for tool call streaming (Phase 2.2)
+                content_block_index = 0
+                current_tool_calls = []
+                
                 async for line in response.aiter_lines():
                     if not line or not line.startswith('data: '):
                         continue
@@ -3012,9 +3016,32 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         # Handle different event types
                         event_type = chunk_data.get('type')
                         
-                        if event_type == 'content_block_delta':
+                        if event_type == 'content_block_start':
+                            # Track new content blocks for tool call streaming (Phase 2.2)
+                            content_block = chunk_data.get('content_block', {})
+                            block_type = content_block.get('type', '')
+                            
+                            if block_type == 'tool_use':
+                                # Start of a tool use block - track for streaming
+                                tool_call = {
+                                    'index': content_block_index,
+                                    'id': content_block.get('id', ''),
+                                    'type': 'function',
+                                    'function': {
+                                        'name': content_block.get('name', ''),
+                                        'arguments': ''
+                                    }
+                                }
+                                current_tool_calls.append(tool_call)
+                                logger.debug(f"ClaudeProviderHandler: Tool use block started: {tool_call['function']['name']}")
+                            
+                            content_block_index += 1
+                        
+                        elif event_type == 'content_block_delta':
                             delta = chunk_data.get('delta', {})
-                            if delta.get('type') == 'text_delta':
+                            delta_type = delta.get('type', '')
+                            
+                            if delta_type == 'text_delta':
                                 text = delta.get('text', '')
                                 accumulated_content += text
                                 
@@ -3037,6 +3064,54 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 }
                                 
                                 yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                            
+                            elif delta_type == 'input_json_delta':
+                                # Tool call argument streaming (Phase 2.2)
+                                partial_json = delta.get('partial_json', '')
+                                # Find the current tool call to append arguments
+                                if current_tool_calls:
+                                    current_tool_calls[-1]['function']['arguments'] += partial_json
+                        
+                        elif event_type == 'content_block_stop':
+                            # End of a content block - emit tool call if present (Phase 2.2)
+                            if current_tool_calls:
+                                tool_call = current_tool_calls[-1]
+                                # Parse and validate the arguments
+                                try:
+                                    args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                                    tool_call['function']['arguments'] = json.dumps(args)
+                                except json.JSONDecodeError:
+                                    logger.warning(f"ClaudeProviderHandler: Invalid tool call arguments JSON")
+                                    tool_call['function']['arguments'] = '{}'
+                                
+                                # Emit tool call in streaming format
+                                tool_call_chunk = {
+                                    'id': completion_id,
+                                    'object': 'chat.completion.chunk',
+                                    'created': created_time,
+                                    'model': f'{self.provider_id}/{model}',
+                                    'choices': [{
+                                        'index': 0,
+                                        'delta': {
+                                            'tool_calls': [{
+                                                'index': tool_call['index'],
+                                                'id': tool_call['id'],
+                                                'type': tool_call['type'],
+                                                'function': tool_call['function']
+                                            }]
+                                        },
+                                        'finish_reason': None
+                                    }]
+                                }
+                                
+                                yield f"data: {json.dumps(tool_call_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                                logger.debug(f"ClaudeProviderHandler: Emitted tool call: {tool_call['function']['name']}")
+                        
+                        elif event_type == 'message_delta':
+                            # Handle usage metadata in streaming (Phase 2.3)
+                            usage = chunk_data.get('usage', {})
+                            if usage:
+                                logger.debug(f"ClaudeProviderHandler: Streaming usage update: {usage}")
                         
                         elif event_type == 'message_stop':
                             # Final chunk
@@ -3064,16 +3139,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
     def _convert_to_openai_format(self, claude_response: Dict, model: str) -> Dict:
         """Convert Claude API response to OpenAI format."""
         import logging
+        logger = logging.getLogger(__name__)
         
         # Extract content
         content_text = ""
         tool_calls = []
+        thinking_text = ""
         
         if 'content' in claude_response:
             for block in claude_response['content']:
-                if block.get('type') == 'text':
+                block_type = block.get('type', '')
+                
+                if block_type == 'text':
                     content_text += block.get('text', '')
-                elif block.get('type') == 'tool_use':
+                elif block_type == 'tool_use':
                     tool_calls.append({
                         'id': block.get('id', f"call_{len(tool_calls)}"),
                         'type': 'function',
@@ -3082,6 +3161,13 @@ class ClaudeProviderHandler(BaseProviderHandler):
                             'arguments': json.dumps(block.get('input', {}))
                         }
                     })
+                elif block_type == 'thinking':
+                    # Extract thinking/reasoning content (Phase 2.1)
+                    thinking_text = block.get('thinking', '')
+                    logger.debug(f"ClaudeProviderHandler: Extracted thinking block ({len(thinking_text)} chars)")
+                elif block_type == 'redacted_thinking':
+                    # Handle redacted thinking blocks
+                    logger.debug(f"ClaudeProviderHandler: Found redacted_thinking block")
         
         # Map stop reason
         stop_reason_map = {
@@ -3093,7 +3179,18 @@ class ClaudeProviderHandler(BaseProviderHandler):
         stop_reason = claude_response.get('stop_reason', 'end_turn')
         finish_reason = stop_reason_map.get(stop_reason, 'stop')
         
-        # Build OpenAI-style response
+        # Extract detailed usage metadata including cache tokens (Phase 2.3)
+        usage = claude_response.get('usage', {})
+        input_tokens = usage.get('input_tokens', 0)
+        output_tokens = usage.get('output_tokens', 0)
+        cache_read_tokens = usage.get('cache_read_input_tokens', 0)
+        cache_creation_tokens = usage.get('cache_creation_input_tokens', 0)
+        
+        # Log cache usage for analytics
+        if cache_read_tokens or cache_creation_tokens:
+            logger.info(f"ClaudeProviderHandler: Cache usage - read: {cache_read_tokens}, creation: {cache_creation_tokens}")
+        
+        # Build OpenAI-style response with extended usage metadata
         openai_response = {
             'id': f"claude-{model}-{int(time.time())}",
             'object': 'chat.completion',
@@ -3108,18 +3205,34 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 'finish_reason': finish_reason
             }],
             'usage': {
-                'prompt_tokens': claude_response.get('usage', {}).get('input_tokens', 0),
-                'completion_tokens': claude_response.get('usage', {}).get('output_tokens', 0),
-                'total_tokens': (
-                    claude_response.get('usage', {}).get('input_tokens', 0) +
-                    claude_response.get('usage', {}).get('output_tokens', 0)
-                )
+                'prompt_tokens': input_tokens,
+                'completion_tokens': output_tokens,
+                'total_tokens': input_tokens + output_tokens,
+                # Extended cache usage metadata (Phase 2.3)
+                'prompt_tokens_details': {
+                    'cached_tokens': cache_read_tokens,
+                    'audio_tokens': 0
+                },
+                'completion_tokens_details': {
+                    'reasoning_tokens': 0,
+                    'audio_tokens': 0
+                }
             }
         }
         
         # Add tool_calls if present
         if tool_calls:
             openai_response['choices'][0]['message']['tool_calls'] = tool_calls
+        
+        # Add thinking content to message if present (Phase 2.1)
+        if thinking_text:
+            # Store thinking in provider_options for downstream access
+            openai_response['choices'][0]['message']['provider_options'] = {
+                'anthropic': {
+                    'thinking': thinking_text
+                }
+            }
+            logger.debug(f"ClaudeProviderHandler: Added thinking content to response ({len(thinking_text)} chars)")
         
         return openai_response
     
