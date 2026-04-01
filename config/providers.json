@@ -286,7 +286,7 @@
       "api_key_required": false,
       "nsfw": false,
       "privacy": false,
-      "rate_limit": 0,
+      "rate_limit": 5,
       "claude_config": {
         "_comment": "Uses OAuth2 authentication flow (claude-cli compatible)",
         "credentials_file": "~/.claude_credentials.json"
@@ -296,7 +296,7 @@
           "name": "claude-3-7-sonnet-20250219",
           "nsfw": false,
           "privacy": false,
-          "rate_limit": 0,
+          "rate_limit": 5,
           "max_request_tokens": 200000,
           "context_size": 200000,
           "capabilities": ["t2t", "vision", "function_calling"]
@@ -305,7 +305,7 @@
           "name": "claude-3-5-sonnet-20241022",
           "nsfw": false,
           "privacy": false,
-          "rate_limit": 0,
+          "rate_limit": 5,
           "max_request_tokens": 200000,
           "context_size": 200000,
           "capabilities": ["t2t", "vision", "function_calling"]
@@ -314,7 +314,7 @@
           "name": "claude-3-5-haiku-20241022",
           "nsfw": false,
           "privacy": false,
-          "rate_limit": 0,
+          "rate_limit": 5,
           "max_request_tokens": 200000,
           "context_size": 200000,
           "capabilities": ["t2t", "vision", "function_calling"]
