@@ -3426,6 +3426,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 accumulated_content = ""
                 accumulated_tool_calls = []
                 
+                # Track thinking blocks for streaming (Phase 2.1 extended)
+                accumulated_thinking = ""
+                thinking_signature = ""
+                is_redacted_thinking = False
+                
                 # Process the streaming response (SSE format)
                 # Track content blocks for tool call streaming (Phase 2.2)
                 content_block_index = 0
@@ -3466,6 +3471,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 current_tool_calls.append(tool_call)
                                 logger.debug(f"ClaudeProviderHandler: Tool use block started: {tool_call['function']['name']}")
                             
+                            elif block_type == 'thinking':
+                                # Start of a thinking block - track for streaming (Phase 2.1 extended)
+                                accumulated_thinking = ""
+                                is_redacted_thinking = False
+                                thinking_signature = ""
+                                logger.debug(f"ClaudeProviderHandler: Thinking block started")
+                            
+                            elif block_type == 'redacted_thinking':
+                                # Start of a redacted thinking block
+                                accumulated_thinking = ""
+                                is_redacted_thinking = True
+                                thinking_signature = ""
+                                logger.debug(f"ClaudeProviderHandler: Redacted thinking block started")
+                            
                             content_block_index += 1
                         
                         elif event_type == 'content_block_delta':
@@ -3502,6 +3521,18 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 # Find the current tool call to append arguments
                                 if current_tool_calls:
                                     current_tool_calls[-1]['function']['arguments'] += partial_json
+                            
+                            elif delta_type == 'thinking_delta':
+                                # Thinking content streaming (Phase 2.1 extended)
+                                thinking_text = delta.get('thinking', '')
+                                accumulated_thinking += thinking_text
+                                logger.debug(f"ClaudeProviderHandler: Thinking delta: {len(thinking_text)} chars")
+                            
+                            elif delta_type == 'signature_delta':
+                                # Thinking block signature (Phase 2.1 extended)
+                                signature = delta.get('signature', '')
+                                thinking_signature = signature
+                                logger.debug(f"ClaudeProviderHandler: Thinking signature received")
                         
                         elif event_type == 'content_block_stop':
                             # End of a content block - emit tool call if present (Phase 2.2)
@@ -3537,6 +3568,16 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 
                                 yield f"data: {json.dumps(tool_call_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
                                 logger.debug(f"ClaudeProviderHandler: Emitted tool call: {tool_call['function']['name']}")
+                            
+                            elif accumulated_thinking:
+                                # End of a thinking block - log but don't emit to client
+                                # Thinking content is accumulated for the final response
+                                block_type = "redacted_thinking" if is_redacted_thinking else "thinking"
+                                logger.info(f"ClaudeProviderHandler: {block_type} block completed ({len(accumulated_thinking)} chars)")
+                                # Reset for next thinking block
+                                accumulated_thinking = ""
+                                is_redacted_thinking = False
+                                thinking_signature = ""
                         
                         elif event_type == 'message_delta':
                             # Handle usage metadata in streaming (Phase 2.3)
