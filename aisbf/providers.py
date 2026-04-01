@@ -3932,10 +3932,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
     
     async def _handle_streaming_request_sdk(self, client, request_kwargs: Dict, model: str):
         """
-        Handle streaming request using Anthropic SDK.
+        Handle streaming request using Anthropic SDK's async streaming API.
         
-        The SDK handles proper streaming event parsing and retries.
-        We convert SDK events to OpenAI-compatible SSE chunks.
+        Uses client.messages.create(..., stream=True) which returns an async iterator
+        of ServerSentEvent objects. We parse these events and convert to OpenAI SSE chunks.
         """
         import logging
         import json
@@ -3961,164 +3961,165 @@ class ClaudeProviderHandler(BaseProviderHandler):
         idle_timeout = self.stream_idle_timeout
         
         try:
-            # Use SDK's streaming API with context manager
-            async with client.messages.stream(**request_kwargs) as stream:
-                async for event in stream:
-                    # Update idle watchdog
-                    last_event_time = time.time()
-                    
-                    # Check for idle timeout
-                    if time.time() - last_event_time > idle_timeout:
-                        logger.error(f"ClaudeProviderHandler: Stream idle timeout ({idle_timeout}s)")
-                        raise TimeoutError(f"Stream idle for {idle_timeout}s")
-                    
-                    # Handle different event types from SDK
-                    event_type = getattr(event, 'type', None)
-                    
-                    if event_type == 'content_block_start':
-                        content_block = getattr(event, 'content_block', None)
-                        if content_block:
-                            block_type = getattr(content_block, 'type', '')
-                            
-                            if block_type == 'tool_use':
-                                tool_call = {
-                                    'index': content_block_index,
-                                    'id': getattr(content_block, 'id', ''),
-                                    'type': 'function',
-                                    'function': {
-                                        'name': getattr(content_block, 'name', ''),
-                                        'arguments': ''
-                                    }
+            # Use SDK's async streaming API - create(stream=True) returns async iterator
+            stream = await client.messages.create(**request_kwargs, stream=True)
+            
+            async for event in stream:
+                # Update idle watchdog
+                last_event_time = time.time()
+                
+                # Check for idle timeout
+                if time.time() - last_event_time > idle_timeout:
+                    logger.error(f"ClaudeProviderHandler: Stream idle timeout ({idle_timeout}s)")
+                    raise TimeoutError(f"Stream idle for {idle_timeout}s")
+                
+                # Handle different event types from SDK
+                event_type = getattr(event, 'type', None)
+                
+                if event_type == 'content_block_start':
+                    content_block = getattr(event, 'content_block', None)
+                    if content_block:
+                        block_type = getattr(content_block, 'type', '')
+                        
+                        if block_type == 'tool_use':
+                            tool_call = {
+                                'index': content_block_index,
+                                'id': getattr(content_block, 'id', ''),
+                                'type': 'function',
+                                'function': {
+                                    'name': getattr(content_block, 'name', ''),
+                                    'arguments': ''
                                 }
-                                current_tool_calls.append(tool_call)
-                                logger.debug(f"ClaudeProviderHandler: Tool use block started: {tool_call['function']['name']}")
+                            }
+                            current_tool_calls.append(tool_call)
+                            logger.debug(f"ClaudeProviderHandler: Tool use block started: {tool_call['function']['name']}")
+                        
+                        elif block_type == 'thinking':
+                            accumulated_thinking = ""
+                            is_redacted_thinking = False
+                            thinking_signature = ""
+                            logger.debug(f"ClaudeProviderHandler: Thinking block started")
+                        
+                        elif block_type == 'redacted_thinking':
+                            accumulated_thinking = ""
+                            is_redacted_thinking = True
+                            thinking_signature = ""
+                            logger.debug(f"ClaudeProviderHandler: Redacted thinking block started")
+                        
+                        content_block_index += 1
+                
+                elif event_type == 'content_block_delta':
+                    delta = getattr(event, 'delta', None)
+                    if delta:
+                        delta_type = getattr(delta, 'type', '')
+                        
+                        if delta_type == 'text_delta':
+                            text = getattr(delta, 'text', '')
+                            accumulated_content += text
                             
-                            elif block_type == 'thinking':
-                                accumulated_thinking = ""
-                                is_redacted_thinking = False
-                                thinking_signature = ""
-                                logger.debug(f"ClaudeProviderHandler: Thinking block started")
+                            openai_delta = {'content': text}
+                            if first_chunk:
+                                openai_delta['role'] = 'assistant'
+                                first_chunk = False
                             
-                            elif block_type == 'redacted_thinking':
-                                accumulated_thinking = ""
-                                is_redacted_thinking = True
-                                thinking_signature = ""
-                                logger.debug(f"ClaudeProviderHandler: Redacted thinking block started")
-                            
-                            content_block_index += 1
-                    
-                    elif event_type == 'content_block_delta':
-                        delta = getattr(event, 'delta', None)
-                        if delta:
-                            delta_type = getattr(delta, 'type', '')
-                            
-                            if delta_type == 'text_delta':
-                                text = getattr(delta, 'text', '')
-                                accumulated_content += text
-                                
-                                openai_delta = {'content': text}
-                                if first_chunk:
-                                    openai_delta['role'] = 'assistant'
-                                    first_chunk = False
-                                
-                                openai_chunk = {
-                                    'id': completion_id,
-                                    'object': 'chat.completion.chunk',
-                                    'created': created_time,
-                                    'model': f'{self.provider_id}/{model}',
-                                    'choices': [{
-                                        'index': 0,
-                                        'delta': openai_delta,
-                                        'finish_reason': None
-                                    }]
-                                }
-                                
-                                yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
-                            
-                            elif delta_type == 'input_json_delta':
-                                partial_json = getattr(delta, 'partial_json', '')
-                                if current_tool_calls:
-                                    current_tool_calls[-1]['function']['arguments'] += partial_json
-                            
-                            elif delta_type == 'thinking_delta':
-                                thinking_text = getattr(delta, 'thinking', '')
-                                accumulated_thinking += thinking_text
-                                logger.debug(f"ClaudeProviderHandler: Thinking delta: {len(thinking_text)} chars")
-                            
-                            elif delta_type == 'signature_delta':
-                                signature = getattr(delta, 'signature', '')
-                                thinking_signature = signature
-                                logger.debug(f"ClaudeProviderHandler: Thinking signature received")
-                    
-                    elif event_type == 'content_block_stop':
-                        if current_tool_calls:
-                            tool_call = current_tool_calls[-1]
-                            try:
-                                args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
-                                tool_call['function']['arguments'] = json.dumps(args)
-                            except json.JSONDecodeError:
-                                logger.warning(f"ClaudeProviderHandler: Invalid tool call arguments JSON")
-                                tool_call['function']['arguments'] = '{}'
-                            
-                            tool_call_chunk = {
+                            openai_chunk = {
                                 'id': completion_id,
                                 'object': 'chat.completion.chunk',
                                 'created': created_time,
                                 'model': f'{self.provider_id}/{model}',
                                 'choices': [{
                                     'index': 0,
-                                    'delta': {
-                                        'tool_calls': [{
-                                            'index': tool_call['index'],
-                                            'id': tool_call['id'],
-                                            'type': tool_call['type'],
-                                            'function': tool_call['function']
-                                        }]
-                                    },
+                                    'delta': openai_delta,
                                     'finish_reason': None
                                 }]
                             }
                             
-                            yield f"data: {json.dumps(tool_call_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
-                            logger.debug(f"ClaudeProviderHandler: Emitted tool call: {tool_call['function']['name']}")
+                            yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
                         
-                        elif accumulated_thinking:
-                            block_type = "redacted_thinking" if is_redacted_thinking else "thinking"
-                            logger.info(f"ClaudeProviderHandler: {block_type} block completed ({len(accumulated_thinking)} chars)")
-                            accumulated_thinking = ""
-                            is_redacted_thinking = False
-                            thinking_signature = ""
-                    
-                    elif event_type == 'message_delta':
-                        usage = getattr(event, 'usage', None)
-                        if usage:
-                            logger.debug(f"ClaudeProviderHandler: Streaming usage update: {usage}")
-                            
-                            # Track cache tokens for analytics
-                            cache_read = getattr(usage, 'cache_read_input_tokens', 0)
-                            cache_creation = getattr(usage, 'cache_creation_input_tokens', 0)
-                            if cache_read > 0:
-                                self.cache_stats['cache_hits'] += 1
-                                self.cache_stats['cache_tokens_read'] += cache_read
-                            if cache_creation > 0:
-                                self.cache_stats['cache_misses'] += 1
-                                self.cache_stats['cache_tokens_created'] += cache_creation
-                    
-                    elif event_type == 'message_stop':
-                        final_chunk = {
+                        elif delta_type == 'input_json_delta':
+                            partial_json = getattr(delta, 'partial_json', '')
+                            if current_tool_calls:
+                                current_tool_calls[-1]['function']['arguments'] += partial_json
+                        
+                        elif delta_type == 'thinking_delta':
+                            thinking_text = getattr(delta, 'thinking', '')
+                            accumulated_thinking += thinking_text
+                            logger.debug(f"ClaudeProviderHandler: Thinking delta: {len(thinking_text)} chars")
+                        
+                        elif delta_type == 'signature_delta':
+                            signature = getattr(delta, 'signature', '')
+                            thinking_signature = signature
+                            logger.debug(f"ClaudeProviderHandler: Thinking signature received")
+                
+                elif event_type == 'content_block_stop':
+                    if current_tool_calls:
+                        tool_call = current_tool_calls[-1]
+                        try:
+                            args = json.loads(tool_call['function']['arguments']) if tool_call['function']['arguments'] else {}
+                            tool_call['function']['arguments'] = json.dumps(args)
+                        except json.JSONDecodeError:
+                            logger.warning(f"ClaudeProviderHandler: Invalid tool call arguments JSON")
+                            tool_call['function']['arguments'] = '{}'
+                        
+                        tool_call_chunk = {
                             'id': completion_id,
                             'object': 'chat.completion.chunk',
                             'created': created_time,
                             'model': f'{self.provider_id}/{model}',
                             'choices': [{
                                 'index': 0,
-                                'delta': {},
-                                'finish_reason': 'stop'
+                                'delta': {
+                                    'tool_calls': [{
+                                        'index': tool_call['index'],
+                                        'id': tool_call['id'],
+                                        'type': tool_call['type'],
+                                        'function': tool_call['function']
+                                    }]
+                                },
+                                'finish_reason': None
                             }]
                         }
                         
-                        yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
-                        yield b"data: [DONE]\n\n"
+                        yield f"data: {json.dumps(tool_call_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                        logger.debug(f"ClaudeProviderHandler: Emitted tool call: {tool_call['function']['name']}")
+                    
+                    elif accumulated_thinking:
+                        block_type = "redacted_thinking" if is_redacted_thinking else "thinking"
+                        logger.info(f"ClaudeProviderHandler: {block_type} block completed ({len(accumulated_thinking)} chars)")
+                        accumulated_thinking = ""
+                        is_redacted_thinking = False
+                        thinking_signature = ""
+                
+                elif event_type == 'message_delta':
+                    usage = getattr(event, 'usage', None)
+                    if usage:
+                        logger.debug(f"ClaudeProviderHandler: Streaming usage update: {usage}")
+                        
+                        # Track cache tokens for analytics
+                        cache_read = getattr(usage, 'cache_read_input_tokens', 0)
+                        cache_creation = getattr(usage, 'cache_creation_input_tokens', 0)
+                        if cache_read > 0:
+                            self.cache_stats['cache_hits'] += 1
+                            self.cache_stats['cache_tokens_read'] += cache_read
+                        if cache_creation > 0:
+                            self.cache_stats['cache_misses'] += 1
+                            self.cache_stats['cache_tokens_created'] += cache_creation
+                
+                elif event_type == 'message_stop':
+                    final_chunk = {
+                        'id': completion_id,
+                        'object': 'chat.completion.chunk',
+                        'created': created_time,
+                        'model': f'{self.provider_id}/{model}',
+                        'choices': [{
+                            'index': 0,
+                            'delta': {},
+                            'finish_reason': 'stop'
+                        }]
+                    }
+                    
+                    yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                    yield b"data: [DONE]\n\n"
             
             logger.info(f"ClaudeProviderHandler: SDK streaming completed successfully")
             self.record_success()
