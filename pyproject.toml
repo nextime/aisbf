@@ -49,6 +49,7 @@ Documentation = "https://git.nexlab.net/nexlab/aisbf.git"
 
 [tool.setuptools]
 packages = ["aisbf", "aisbf.auth", "aisbf.providers", "aisbf.providers.kiro"]
+# Note: Provider handler modules (base, google, openai, anthropic, claude, kilo, ollama) are in aisbf.providers package
 py-modules = ["cli"]
 
 [tool.setuptools.package-data]

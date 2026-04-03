@@ -39,12 +39,16 @@ from .providers import (
     GoogleProviderHandler,
     OpenAIProviderHandler,
     AnthropicProviderHandler,
+    ClaudeProviderHandler,
+    KiloProviderHandler,
     OllamaProviderHandler,
     get_provider_handler,
     PROVIDER_HANDLERS
 )
 from .providers.kiro import KiroProviderHandler
 from .auth.kiro import KiroAuthManager
+from .auth.claude import ClaudeAuth
+from .auth.kilo import KiloOAuth2
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
@@ -73,11 +77,15 @@ __all__ = [
     "OpenAIProviderHandler",
     "AnthropicProviderHandler",
     "OllamaProviderHandler",
+    "ClaudeProviderHandler",
+    "KiloProviderHandler",
     "KiroProviderHandler",
     "get_provider_handler",
     "PROVIDER_HANDLERS",
     # Auth
     "KiroAuthManager",
+    "ClaudeAuth",
+    "KiloOAuth2",
     # Handlers
     "RequestHandler",
     "RotationHandler",

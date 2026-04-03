@@ -44,13 +44,34 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 ## Directory Structure
 
 ```
-geminiproxy/
+aisbf/
 ├── aisbf/                    # Main Python module
 │   ├── __init__.py          # Module initialization with exports
 │   ├── config.py            # Configuration management
 │   ├── models.py            # Pydantic models
-│   ├── providers.py         # Provider handlers
-│   └── handlers.py          # Request handlers
+│   ├── handlers.py          # Request handlers
+│   ├── auth/                # Authentication modules
+│   │   ├── __init__.py      # Auth module exports
+│   │   ├── kiro.py          # Kiro auth manager
+│   │   ├── claude.py        # Claude OAuth2 auth (was claude_auth.py)
+│   │   └── kilo.py          # Kilo OAuth2 auth (was kilo_oauth2.py)
+│   └── providers/           # Provider handlers (split into individual modules)
+│       ├── __init__.py      # Re-exports, PROVIDER_HANDLERS, get_provider_handler()
+│       ├── base.py          # BaseProviderHandler, AnthropicFormatConverter, AdaptiveRateLimiter
+│       ├── google.py        # GoogleProviderHandler
+│       ├── openai.py        # OpenAIProviderHandler
+│       ├── anthropic.py     # AnthropicProviderHandler
+│       ├── claude.py        # ClaudeProviderHandler (OAuth2-based)
+│       ├── kilo.py          # KiloProviderHandler (OAuth2-based)
+│       ├── ollama.py        # OllamaProviderHandler
+│       └── kiro/            # Kiro provider (subpackage)
+│           ├── __init__.py
+│           ├── handler.py
+│           ├── converters.py
+│           ├── converters_openai.py
+│           ├── models.py
+│           ├── parsers.py
+│           └── utils.py
 ├── config/                   # Configuration files directory
 │   ├── providers.json       # Default provider configurations
 │   └── rotations.json       # Default rotation configurations
@@ -63,7 +84,6 @@ geminiproxy/
 ├── start_proxy.sh           # Development start script
 ├── aisbf.sh                 # Alternative start script
 ├── requirements.txt         # Python dependencies
-├── INSTALL.md               # Installation guide
 ├── PYPI.md                 # PyPI publishing guide
 ├── DOCUMENTATION.md          # Complete API documentation
 └── README.md                # Project documentation
@@ -95,14 +115,23 @@ Pydantic models for data validation:
 - `Provider` - Provider information
 - `ErrorTracking` - Error tracking data
 
-### aisbf/providers.py
-Provider handler implementations:
-- `BaseProviderHandler` - Base class with rate limiting and error tracking
-- `GoogleProviderHandler` - Google GenAI integration
-- `OpenAIProviderHandler` - OpenAI API integration
-- `AnthropicProviderHandler` - Anthropic API integration
-- `OllamaProviderHandler` - Ollama local integration
-- `get_provider_handler()` - Factory function to get appropriate handler
+### aisbf/providers/ (package)
+Provider handler implementations, split into individual modules:
+- `base.py` - `BaseProviderHandler`, `AnthropicFormatConverter`, `AdaptiveRateLimiter`, shared utilities
+- `google.py` - `GoogleProviderHandler` - Google GenAI integration
+- `openai.py` - `OpenAIProviderHandler` - OpenAI API integration
+- `anthropic.py` - `AnthropicProviderHandler` - Anthropic API key integration
+- `claude.py` - `ClaudeProviderHandler` - Claude OAuth2 integration
+- `kilo.py` - `KiloProviderHandler` - Kilo Gateway OAuth2 integration
+- `ollama.py` - `OllamaProviderHandler` - Ollama local integration
+- `kiro/` - `KiroProviderHandler` - Kiro/Amazon Q Developer integration (subpackage)
+- `__init__.py` - Re-exports all handlers, `PROVIDER_HANDLERS` dict, `get_provider_handler()` factory
+
+### aisbf/auth/ (package)
+Authentication modules:
+- `kiro.py` - `KiroAuthManager` for Kiro/Amazon Q Developer auth
+- `claude.py` - `ClaudeAuth` for Claude OAuth2 PKCE flow (was `aisbf/claude_auth.py`)
+- `kilo.py` - `KiloOAuth2` for Kilo Device Authorization Grant (was `aisbf/kilo_oauth2.py`)
 
 ### aisbf/handlers.py
 Request handling logic:
@@ -327,8 +356,8 @@ When making changes:
 ## Common Tasks
 
 ### Adding a New Provider
-1. Create handler class in `aisbf/providers.py` inheriting from `BaseProviderHandler`
-2. Add to `PROVIDER_HANDLERS` dictionary
+1. Create a new file `aisbf/providers/<provider_name>.py` with a handler class inheriting from `BaseProviderHandler`
+2. Import and add the handler to `PROVIDER_HANDLERS` in `aisbf/providers/__init__.py`
 3. Add provider configuration to `config/providers.json`
 
 ### Configuration Architecture
@@ -538,8 +567,8 @@ Claude Code is an OAuth2-based authentication method for accessing Claude models
 - Supports all Claude features: streaming, tools, vision, extended thinking
 
 **Integration Architecture:**
-- [`ClaudeAuth`](aisbf/claude_auth.py) class handles OAuth2 PKCE flow
-- [`ClaudeProviderHandler`](aisbf/providers.py) in [`aisbf/providers.py`](aisbf/providers.py) manages API requests
+- [`ClaudeAuth`](aisbf/auth/claude.py) class handles OAuth2 PKCE flow
+- [`ClaudeProviderHandler`](aisbf/providers/claude.py) in [`aisbf/providers/claude.py`](aisbf/providers/claude.py) manages API requests
 - Supports all standard AISBF features: streaming, tools, rate limiting, error tracking
 
 **Configuration:**
@@ -701,6 +730,18 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
 
 ### Recent Updates
+
+**2026-04-03 - Provider Module Refactoring (Phase 2)**
+- Split monolithic `aisbf/providers/__init__.py` (301K chars) into individual module files
+- Created `aisbf/providers/base.py` with shared utilities: `BaseProviderHandler`, `AnthropicFormatConverter`, `AdaptiveRateLimiter`, `AISBF_DEBUG`
+- Created individual handler files: `google.py`, `openai.py`, `anthropic.py`, `claude.py`, `kilo.py`, `ollama.py`
+- Moved auth modules: `aisbf/claude_auth.py` → `aisbf/auth/claude.py`, `aisbf/kilo_oauth2.py` → `aisbf/auth/kilo.py`
+- Updated `aisbf/auth/__init__.py` to export `ClaudeAuth` and `KiloOAuth2`
+- Rewrote `aisbf/providers/__init__.py` as slim re-export module with `PROVIDER_HANDLERS` dict and `get_provider_handler()` factory
+- Updated `aisbf/__init__.py` to import new handler classes (`ClaudeProviderHandler`, `KiloProviderHandler`)
+- Updated `pyproject.toml` and `setup.py` with new file paths
+- All existing `from aisbf.providers import X` imports continue to work (backward compatible)
+- Deleted old `aisbf/claude_auth.py` and `aisbf/kilo_oauth2.py` (now in `aisbf/auth/`)
 
 **2026-03-23 - TOR Hidden Service Support**
 - Added full TOR hidden service support for exposing AISBF over TOR network
