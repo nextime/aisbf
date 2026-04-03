@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.9.6",
+    version="0.9.7",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -161,6 +161,30 @@ setup(
             'templates/dashboard/user_autoselects.html',
             'templates/dashboard/user_tokens.html',
             'templates/dashboard/rate_limits.html',
+        ]),
+        # Install static files (extension)
+        ('share/aisbf/static', [
+            'static/aisbf-oauth2-extension.zip',
+        ]),
+        ('share/aisbf/static/extension', [
+            'static/extension/background.js',
+            'static/extension/build.sh',
+            'static/extension/content.js',
+            'static/extension/generate_icons.py',
+            'static/extension/manifest.json',
+            'static/extension/options.html',
+            'static/extension/options.js',
+            'static/extension/popup.html',
+            'static/extension/popup.js',
+            'static/extension/README.md',
+        ]),
+        ('share/aisbf/static/extension/icons', [
+            'static/extension/icons/icon16.png',
+            'static/extension/icons/icon16.svg',
+            'static/extension/icons/icon48.png',
+            'static/extension/icons/icon48.svg',
+            'static/extension/icons/icon128.png',
+            'static/extension/icons/icon128.svg',
         ]),
     ],
     entry_points={

@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.7] - 2026-04-03
+
+### Fixed
+- **PyPI Package Extension Files**: Fixed missing static/extension files in PyPI package
+  - Added static/ directory and all extension files to setup.py data_files
+  - Includes aisbf-oauth2-extension.zip and all extension source files
+  - Extension download endpoint now works correctly after pip install
+  - Fixes "Extension files not found" error when downloading from dashboard
+
+### Changed
+- **Version Bump**: Updated version to 0.9.7 in setup.py and pyproject.toml
+
 ## [0.9.6] - 2026-04-03
 
 ### Fixed
