@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.6] - 2026-04-03
+
+### Fixed
+- **aisbf.json Installation Path**: Fixed aisbf.json not being copied to ~/.aisbf/ directory on first run
+  - Updated _ensure_config_directory() in aisbf/config.py to include aisbf.json in the list of files to copy
+  - Previously only providers.json, rotations.json, and autoselect.json were copied
+  - This caused aisbf.json to remain in ~/.local/share/aisbf/ instead of being accessible in ~/.aisbf/
+  - Now all configuration files are properly copied to the user's home directory for easy editing
+
+### Changed
+- **Version Bump**: Updated version to 0.9.6 in setup.py and pyproject.toml
+
 ## [0.9.4] - 2026-04-03
 
 ### Added

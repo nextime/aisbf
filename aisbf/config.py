@@ -302,7 +302,7 @@ class Config:
             return
         
         # Copy default config files if they don't exist
-        for config_file in ['providers.json', 'rotations.json', 'autoselect.json']:
+        for config_file in ['providers.json', 'rotations.json', 'autoselect.json', 'aisbf.json']:
             src = source_dir / config_file
             dst = config_dir / config_file
             

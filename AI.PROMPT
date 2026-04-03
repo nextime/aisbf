@@ -738,6 +738,14 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 
 ### Recent Updates
 
+**2026-04-03 - Version 0.9.6 - Fixed aisbf.json Installation Path**
+- Fixed aisbf.json not being copied to ~/.aisbf/ directory on first run
+- Updated _ensure_config_directory() in aisbf/config.py to include aisbf.json in the list of files to copy
+- Previously only providers.json, rotations.json, and autoselect.json were copied
+- This caused aisbf.json to remain in ~/.local/share/aisbf/ instead of being accessible in ~/.aisbf/
+- Now all configuration files are properly copied to the user's home directory for easy editing
+- Version bumped to 0.9.6 in setup.py and pyproject.toml
+
 **2026-04-03 - Version 0.9.4 - Setup.py Fixes and Documentation Updates**
 - Fixed setup.py data_files structure to preserve subdirectory structure during installation
 - Split data_files into separate entries for each subpackage (aisbf/, aisbf/providers/, aisbf/providers/kiro/, aisbf/auth/)

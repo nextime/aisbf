@@ -97,6 +97,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             var currentIndex = 0;
             
             document.addEventListener('keydown', function(e) {
+                // Don't activate easter egg when typing in input fields
+                var activeElement = document.activeElement;
+                if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA' || activeElement.tagName === 'SELECT')) {
+                    return;
+                }
+                
                 var now = Date.now();
                 
                 // Reset if too much time passed

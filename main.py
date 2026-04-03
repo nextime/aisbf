@@ -471,6 +471,8 @@ def setup_template_globals():
     """Setup Jinja2 template globals for proxy-aware URLs"""
     templates.env.globals['url_for'] = url_for
     templates.env.globals['get_base_url'] = get_base_url
+    # Clear the template cache to avoid stale cache issues
+    templates.env.cache.clear()
 
 # Call setup after templates are initialized
 setup_template_globals()
@@ -941,7 +943,7 @@ async def startup_event():
                 # Check 2: OAuth2 credentials file
                 if not has_valid_auth:
                     try:
-                        from aisbf.kilo_oauth2 import KiloOAuth2
+                        from aisbf.auth.kilo import KiloOAuth2
                         kilo_config = getattr(provider_config, 'kilo_config', None)
                         credentials_file = None
                         api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
@@ -1320,7 +1322,10 @@ async def dashboard_analytics(
         end = to_datetime or datetime.now()
         date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end)
     
-    return templates.TemplateResponse("dashboard/analytics.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/analytics.html",
+        context={
         "request": request,
         "session": request.session,
         "provider_stats": provider_stats,
@@ -1342,12 +1347,32 @@ async def dashboard_analytics(
         "selected_rotation": rotation_filter,
         "selected_autoselect": autoselect_filter,
         "selected_user": user_filter
-    })
+    }
+    )
 
 @app.get("/dashboard/login", response_class=HTMLResponse)
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
-    return templates.TemplateResponse("dashboard/login.html", {"request": request})
+    import logging
+    from jinja2 import Environment, FileSystemLoader, DictLoader
+    
+    logger = logging.getLogger(__name__)
+    try:
+        # Create a completely fresh Jinja2 environment to avoid any caching issues
+        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+        
+        # Add the required globals
+        env.globals['url_for'] = url_for
+        env.globals['get_base_url'] = get_base_url
+        
+        # Get and render template
+        template = env.get_template("dashboard/login.html")
+        html_content = template.render(request=request)
+        
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error rendering login page: {e}", exc_info=True)
+        raise
 
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
@@ -1381,7 +1406,11 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['user_id'] = None  # Config admin has no user_id
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
     
-    return templates.TemplateResponse("dashboard/login.html", {"request": request, "error": "Invalid credentials"})
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/login.html",
+        context={"request": request, "error": "Invalid credentials"}
+    )
 
 @app.get("/dashboard/logout")
 async def dashboard_logout(request: Request):
@@ -1407,20 +1436,27 @@ def require_admin(request: Request):
 @app.get("/dashboard", response_class=HTMLResponse)
 async def dashboard_index(request: Request):
     """Dashboard overview page"""
+    # Clear template cache to prevent unhashable dict errors
+    templates.env.cache.clear()
+    
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
 
     if request.session.get('role') == 'admin':
         # Admin dashboard
-        return templates.TemplateResponse("dashboard/index.html", {
-            "request": request,
-            "session": request.session,
-            "providers_count": len(config.providers) if config else 0,
-            "rotations_count": len(config.rotations) if config else 0,
-            "autoselect_count": len(config.autoselect) if config else 0,
-            "server_config": server_config or {}
-        })
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/index.html",
+            context={
+                "request": request,
+                "session": request.session,
+                "providers_count": len(config.providers) if config else 0,
+                "rotations_count": len(config.rotations) if config else 0,
+                "autoselect_count": len(config.autoselect) if config else 0,
+                "server_config": server_config or {}
+            }
+        )
     else:
         # User dashboard - show user stats
         from aisbf.database import get_database
@@ -1459,7 +1495,10 @@ async def dashboard_index(request: Request):
             autoselects_count = 0
             recent_activity = []
         
-        return templates.TemplateResponse("dashboard/user_index.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_index.html",
+        context={
             "request": request,
             "session": request.session,
             "usage_stats": usage_stats,
@@ -1467,7 +1506,8 @@ async def dashboard_index(request: Request):
             "rotations_count": rotations_count,
             "autoselects_count": autoselects_count,
             "recent_activity": recent_activity
-        })
+        }
+    )
 
 @app.get("/dashboard/providers", response_class=HTMLResponse)
 async def dashboard_providers(request: Request):
@@ -1494,12 +1534,16 @@ async def dashboard_providers(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse("dashboard/providers.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/providers.html",
+        context={
         "request": request,
         "session": request.session,
         "providers_json": json.dumps(providers_data),
         "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    })
+    }
+    )
 
 async def _auto_detect_provider_models(provider_key: str, provider: dict) -> list:
     """
@@ -1543,7 +1587,7 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
         
         # For Kilo providers, try to get OAuth2 token
         if is_kilo_provider:
-            from aisbf.kilo_oauth2 import KiloOAuth2
+            from aisbf.auth.kilo import KiloOAuth2
             kilo_config = provider.get('kilo_config', {})
             credentials_file = kilo_config.get('credentials_file', '~/.kilo_credentials.json')
             oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=endpoint)
@@ -1690,12 +1734,16 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         if auto_detected_count > 0:
             success_msg = f"Configuration saved successfully! Auto-detected models for {auto_detected_count} provider(s). Restart server for changes to take effect."
         
-        return templates.TemplateResponse("dashboard/providers.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/providers.html",
+        context={
             "request": request,
             "session": request.session,
             "providers_json": json.dumps(providers_data),
             "success": success_msg
-        })
+        }
+    )
     except json.JSONDecodeError as e:
         # Reload current config on error
         config_path = Path.home() / '.aisbf' / 'providers.json'
@@ -1710,12 +1758,16 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         else:
             providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
         
-        return templates.TemplateResponse("dashboard/providers.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/providers.html",
+        context={
             "request": request,
             "session": request.session,
             "providers_json": json.dumps(providers_data),
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.post("/dashboard/providers/get-models")
 async def dashboard_providers_get_models(request: Request):
@@ -1814,13 +1866,17 @@ async def dashboard_rotations(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse("dashboard/rotations.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/rotations.html",
+        context={
         "request": request,
         "session": request.session,
         "rotations_json": json.dumps(rotations_data),
         "available_providers": json.dumps(available_providers),
         "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    })
+    }
+    )
 
 @app.post("/dashboard/rotations")
 async def dashboard_rotations_save(request: Request, config: str = Form(...)):
@@ -1850,13 +1906,17 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         
         available_providers = list(config.providers.keys()) if config else []
         
-        return templates.TemplateResponse("dashboard/rotations.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/rotations.html",
+        context={
             "request": request,
             "session": request.session,
             "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
             "success": "Configuration saved successfully! Restart server for changes to take effect."
-        })
+        }
+    )
     except json.JSONDecodeError as e:
         # Reload current config on error
         config_path = Path.home() / '.aisbf' / 'rotations.json'
@@ -1867,13 +1927,17 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         
         available_providers = list(config.providers.keys()) if config else []
         
-        return templates.TemplateResponse("dashboard/rotations.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/rotations.html",
+        context={
             "request": request,
             "session": request.session,
             "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.get("/dashboard/autoselect", response_class=HTMLResponse)
 async def dashboard_autoselect(request: Request):
@@ -1926,14 +1990,18 @@ async def dashboard_autoselect(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse("dashboard/autoselect.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/autoselect.html",
+        context={
         "request": request,
         "session": request.session,
         "autoselect_json": json.dumps(autoselect_data),
         "available_rotations": json.dumps(available_rotations),
         "available_models": json.dumps(available_models),
         "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    })
+    }
+    )
 
 @app.post("/dashboard/autoselect")
 async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
@@ -1951,13 +2019,17 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         
         available_rotations = list(config.rotations.keys()) if config else []
         
-        return templates.TemplateResponse("dashboard/autoselect.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/autoselect.html",
+        context={
             "request": request,
             "session": request.session,
             "autoselect_json": json.dumps(autoselect_data),
             "available_rotations": json.dumps(available_rotations),
             "success": "Configuration saved successfully! Restart server for changes to take effect."
-        })
+        }
+    )
     except json.JSONDecodeError as e:
         # Reload current config on error
         config_path = Path.home() / '.aisbf' / 'autoselect.json'
@@ -1968,13 +2040,17 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         
         available_rotations = list(config.rotations.keys()) if config else []
         
-        return templates.TemplateResponse("dashboard/autoselect.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/autoselect.html",
+        context={
             "request": request,
             "session": request.session,
             "autoselect_json": json.dumps(autoselect_data),
             "available_rotations": json.dumps(available_rotations),
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.get("/dashboard/prompts", response_class=HTMLResponse)
 async def dashboard_prompts(request: Request):
@@ -2043,13 +2119,17 @@ async def dashboard_prompts(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse("dashboard/prompts.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/prompts.html",
+        context={
         "request": request,
         "session": request.session,
         "prompts": prompt_files,
         "prompts_data": json.dumps(prompts_data),
         "success": "Prompt saved successfully!" if success else None
-    })
+    }
+    )
 
 @app.post("/dashboard/prompts")
 async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), prompt_content: str = Form(...)):
@@ -2066,13 +2146,17 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
     }
     
     if prompt_key not in prompt_map:
-        return templates.TemplateResponse("dashboard/prompts.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/prompts.html",
+        context={
             "request": request,
             "session": request.session,
             "prompts": [],
             "prompts_data": "[]",
             "error": "Invalid prompt key"
-        })
+        }
+    )
     
     filename = prompt_map[prompt_key]
     config_path = Path.home() / '.aisbf' / filename
@@ -2152,11 +2236,15 @@ async def dashboard_settings(request: Request):
             'fullconfig_tokens': []
         }
     
-    return templates.TemplateResponse("dashboard/settings.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/settings.html",
+        context={
         "request": request,
         "session": request.session,
         "config": aisbf_config
-    })
+    }
+    )
 
 @app.post("/dashboard/settings")
 async def dashboard_settings_save(
@@ -2269,19 +2357,27 @@ async def dashboard_settings_save(
     with open(config_path, 'w') as f:
         json.dump(aisbf_config, f, indent=2)
     
-    return templates.TemplateResponse("dashboard/settings.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/settings.html",
+        context={
         "request": request,
         "session": request.session,
         "config": aisbf_config,
         "success": "Settings saved successfully! Restart server for changes to take effect."
-    })
+    }
+    )
 
-    return templates.TemplateResponse("dashboard/settings.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/settings.html",
+        context={
         "request": request,
         "session": request.session,
         "config": aisbf_config,
         "success": "Settings saved successfully! Restart server for changes to take effect."
-    })
+    }
+    )
 
 # Admin user management routes
 @app.get("/dashboard/users", response_class=HTMLResponse)
@@ -2297,11 +2393,15 @@ async def dashboard_users(request: Request):
     # Get all users
     users = db.get_users()
     
-    return templates.TemplateResponse("dashboard/users.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/users.html",
+        context={
         "request": request,
         "session": request.session,
         "users": users
-    })
+    }
+    )
 
 @app.post("/dashboard/users/add")
 async def dashboard_users_add(request: Request, username: str = Form(...), password: str = Form(...), role: str = Form("user")):
@@ -2323,12 +2423,16 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
         return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
     except Exception as e:
         users = db.get_users()
-        return templates.TemplateResponse("dashboard/users.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/users.html",
+        context={
             "request": request,
             "session": request.session,
             "users": users,
             "error": f"Failed to create user: {str(e)}"
-        })
+        }
+    )
 
 @app.post("/dashboard/users/{user_id}/edit")
 async def dashboard_users_edit(request: Request, user_id: int, username: str = Form(...), password: str = Form(""), role: str = Form("user"), is_active: bool = Form(True)):
@@ -2350,12 +2454,16 @@ async def dashboard_users_edit(request: Request, user_id: int, username: str = F
         return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
     except Exception as e:
         users = db.get_users()
-        return templates.TemplateResponse("dashboard/users.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/users.html",
+        context={
             "request": request,
             "session": request.session,
             "users": users,
             "error": f"Failed to update user: {str(e)}"
-        })
+        }
+    )
 
 @app.post("/dashboard/users/{user_id}/toggle")
 async def dashboard_users_toggle(request: Request, user_id: int):
@@ -2435,12 +2543,16 @@ async def dashboard_user_providers(request: Request):
     # Get user-specific providers
     user_providers = db.get_user_providers(user_id)
 
-    return templates.TemplateResponse("dashboard/user_providers.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_providers.html",
+        context={
         "request": request,
         "session": request.session,
         "user_providers_json": json.dumps(user_providers),
         "user_id": user_id
-    })
+    }
+    )
 
 @app.post("/dashboard/user/providers")
 async def dashboard_user_providers_save(request: Request, provider_name: str = Form(...), provider_config: str = Form(...)):
@@ -2467,13 +2579,17 @@ async def dashboard_user_providers_save(request: Request, provider_name: str = F
     except json.JSONDecodeError as e:
         # Reload current providers on error
         user_providers = db.get_user_providers(user_id)
-        return templates.TemplateResponse("dashboard/user_providers.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_providers.html",
+        context={
             "request": request,
             "session": request.session,
             "user_providers_json": json.dumps(user_providers),
             "user_id": user_id,
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.delete("/dashboard/user/providers/{provider_name}")
 async def dashboard_user_providers_delete(request: Request, provider_name: str):
@@ -2819,12 +2935,16 @@ async def dashboard_user_rotations(request: Request):
     # Get user-specific rotations
     user_rotations = db.get_user_rotations(user_id)
 
-    return templates.TemplateResponse("dashboard/user_rotations.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_rotations.html",
+        context={
         "request": request,
         "session": request.session,
         "user_rotations_json": json.dumps(user_rotations),
         "user_id": user_id
-    })
+    }
+    )
 
 @app.post("/dashboard/user/rotations")
 async def dashboard_user_rotations_save(request: Request, rotation_name: str = Form(...), rotation_config: str = Form(...)):
@@ -2851,13 +2971,17 @@ async def dashboard_user_rotations_save(request: Request, rotation_name: str = F
     except json.JSONDecodeError as e:
         # Reload current rotations on error
         user_rotations = db.get_user_rotations(user_id)
-        return templates.TemplateResponse("dashboard/user_rotations.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_rotations.html",
+        context={
             "request": request,
             "session": request.session,
             "user_rotations_json": json.dumps(user_rotations),
             "user_id": user_id,
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.delete("/dashboard/user/rotations/{rotation_name}")
 async def dashboard_user_rotations_delete(request: Request, rotation_name: str):
@@ -2897,12 +3021,16 @@ async def dashboard_user_autoselects(request: Request):
     # Get user-specific autoselects
     user_autoselects = db.get_user_autoselects(user_id)
 
-    return templates.TemplateResponse("dashboard/user_autoselects.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_autoselects.html",
+        context={
         "request": request,
         "session": request.session,
         "user_autoselects_json": json.dumps(user_autoselects),
         "user_id": user_id
-    })
+    }
+    )
 
 @app.post("/dashboard/user/autoselects")
 async def dashboard_user_autoselects_save(request: Request, autoselect_name: str = Form(...), autoselect_config: str = Form(...)):
@@ -2929,13 +3057,17 @@ async def dashboard_user_autoselects_save(request: Request, autoselect_name: str
     except json.JSONDecodeError as e:
         # Reload current autoselects on error
         user_autoselects = db.get_user_autoselects(user_id)
-        return templates.TemplateResponse("dashboard/user_autoselects.html", {
+        return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_autoselects.html",
+        context={
             "request": request,
             "session": request.session,
             "user_autoselects_json": json.dumps(user_autoselects),
             "user_id": user_id,
             "error": f"Invalid JSON: {str(e)}"
-        })
+        }
+    )
 
 @app.delete("/dashboard/user/autoselects/{autoselect_name}")
 async def dashboard_user_autoselects_delete(request: Request, autoselect_name: str):
@@ -2975,12 +3107,16 @@ async def dashboard_user_tokens(request: Request):
     # Get user API tokens
     user_tokens = db.get_user_api_tokens(user_id)
 
-    return templates.TemplateResponse("dashboard/user_tokens.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_tokens.html",
+        context={
         "request": request,
         "session": request.session,
         "user_tokens": user_tokens,
         "user_id": user_id
-    })
+    }
+    )
 
 @app.post("/dashboard/user/tokens")
 async def dashboard_user_tokens_create(request: Request, description: str = Form("")):
@@ -3088,10 +3224,14 @@ async def dashboard_rate_limits(request: Request):
     if auth_check:
         return auth_check
     
-    return templates.TemplateResponse("dashboard/rate_limits.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/rate_limits.html",
+        context={
         "request": request,
         "session": request.session
-    })
+    }
+    )
 
 @app.get("/dashboard/rate-limits/data")
 async def dashboard_rate_limits_data(request: Request):
@@ -3184,12 +3324,16 @@ async def dashboard_docs(request: Request):
     else:
         html_content = "<p>Documentation file not found.</p>"
     
-    return templates.TemplateResponse("dashboard/docs.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/docs.html",
+        context={
         "request": request,
         "session": request.session,
         "content": html_content,
         "title": "Documentation"
-    })
+    }
+    )
 
 @app.get("/dashboard/about", response_class=HTMLResponse)
 async def dashboard_about(request: Request):
@@ -3223,12 +3367,16 @@ async def dashboard_about(request: Request):
     else:
         html_content = "<p>README file not found.</p>"
     
-    return templates.TemplateResponse("dashboard/docs.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/docs.html",
+        context={
         "request": request,
         "session": request.session,
         "content": html_content,
         "title": "About"
-    })
+    }
+    )
 
 @app.get("/dashboard/license", response_class=HTMLResponse)
 async def dashboard_license(request: Request):
@@ -3259,12 +3407,16 @@ async def dashboard_license(request: Request):
     else:
         html_content = "<p>License file not found.</p>"
     
-    return templates.TemplateResponse("dashboard/docs.html", {
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/docs.html",
+        context={
         "request": request,
         "session": request.session,
         "content": html_content,
         "title": "License"
-    })
+    }
+    )
 
 def parse_provider_from_model(model: str) -> tuple[str, str]:
     """
@@ -5909,7 +6061,7 @@ async def dashboard_claude_auth_start(request: Request):
             )
         
         # Import ClaudeAuth
-        from aisbf.claude_auth import ClaudeAuth
+        from aisbf.auth.claude import ClaudeAuth
         
         # Create auth instance
         auth = ClaudeAuth()
@@ -6016,7 +6168,7 @@ async def dashboard_claude_auth_complete(request: Request):
             )
         
         # Import ClaudeAuth
-        from aisbf.claude_auth import ClaudeAuth
+        from aisbf.auth.claude import ClaudeAuth
         
         # Create auth instance
         auth = ClaudeAuth()
@@ -6110,7 +6262,7 @@ async def dashboard_claude_auth_status(request: Request):
             )
         
         # Import ClaudeAuth
-        from aisbf.claude_auth import ClaudeAuth
+        from aisbf.auth.claude import ClaudeAuth
         
         # Create auth instance
         auth = ClaudeAuth(credentials_file=credentials_file)
@@ -6169,7 +6321,7 @@ async def dashboard_kilo_auth_start(request: Request):
             )
         
         # Import KiloOAuth2
-        from aisbf.kilo_oauth2 import KiloOAuth2
+        from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
         auth = KiloOAuth2(credentials_file=credentials_file)
@@ -6240,7 +6392,7 @@ async def dashboard_kilo_auth_poll(request: Request):
             })
         
         # Import KiloOAuth2
-        from aisbf.kilo_oauth2 import KiloOAuth2
+        from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
         auth = KiloOAuth2(credentials_file=credentials_file)
@@ -6345,7 +6497,7 @@ async def dashboard_kilo_auth_status(request: Request):
             )
         
         # Import KiloOAuth2
-        from aisbf.kilo_oauth2 import KiloOAuth2
+        from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
         auth = KiloOAuth2(credentials_file=credentials_file)
@@ -6395,7 +6547,7 @@ async def dashboard_kilo_auth_logout(request: Request):
             )
         
         # Import KiloOAuth2
-        from aisbf.kilo_oauth2 import KiloOAuth2
+        from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
         auth = KiloOAuth2(credentials_file=credentials_file)
