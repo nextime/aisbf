@@ -87,6 +87,304 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 });
             }
         }
+        
+        // Snake Game Easter Egg
+        (function() {
+            var keyHistory = [];
+            var lastKeyTime = 0;
+            var timeout = 10000; // 10 seconds window
+            var sequence = ['ArrowUp', 'ArrowDown', 'ArrowUp'];
+            var currentIndex = 0;
+            
+            document.addEventListener('keydown', function(e) {
+                var now = Date.now();
+                
+                // Reset if too much time passed
+                if (now - lastKeyTime > timeout) {
+                    keyHistory = [];
+                    currentIndex = 0;
+                }
+                lastKeyTime = now;
+                
+                // Only track ArrowUp and ArrowDown
+                if (e.key === 'ArrowUp' || e.key === 'ArrowDown') {
+                    keyHistory.push(e.key);
+                    
+                    // Check if current sequence matches target
+                    if (keyHistory[currentIndex] === sequence[currentIndex]) {
+                        currentIndex++;
+                        if (currentIndex === sequence.length) {
+                            // Sequence complete! Open the game
+                            openSnakeGame();
+                            keyHistory = [];
+                            currentIndex = 0;
+                        }
+                    } else {
+                        // Wrong key, reset
+                        keyHistory = [];
+                        currentIndex = 0;
+                    }
+                }
+            });
+            
+            function openSnakeGame() {
+                var gameHtml = `
+                <!DOCTYPE html>
+                <html>
+                <head>
+                    <title>Snake Game - AISBF Easter Egg</title>
+                    <style>
+                        @import url('https://fonts.googleapis.com/css2?family=Press+Start+2P&display=swap');
+                        * { box-sizing: border-box; margin: 0; padding: 0; }
+                        html, body {
+                            width: 100%; height: 100%;
+                            background: #09080a;
+                            font-family: 'Press Start 2P', cursive;
+                            overflow: hidden;
+                            display: flex;
+                            justify-content: center;
+                            align-items: center;
+                        }
+                        #game-container {
+                            position: relative;
+                            display: flex;
+                            flex-direction: column;
+                            align-items: center;
+                        }
+                        #start-screen {
+                            position: absolute;
+                            background: #120d18;
+                            padding: 30px;
+                            border: 5px solid #0d0a12;
+                            box-shadow: 0 50px 50px -30px rgba(0,0,0,0.3);
+                            text-align: center;
+                            z-index: 10;
+                            border-radius: 10px;
+                        }
+                        #start-screen h1 {
+                            color: #ff76ff;
+                            font-size: 24px;
+                            margin-bottom: 20px;
+                            text-shadow: 0 0 10px #ff76ff;
+                        }
+                        #start-screen .difficulty {
+                            margin: 20px 0;
+                        }
+                        #start-screen .difficulty button {
+                            background: #0d0a12;
+                            border: 2px solid #3e3f43;
+                            color: #e9eaee;
+                            padding: 10px 15px;
+                            margin: 5px;
+                            cursor: pointer;
+                            font-family: 'Press Start 2P', cursive;
+                            font-size: 10px;
+                        }
+                        #start-screen .difficulty button:hover,
+                        #start-screen .difficulty button.active {
+                            border-color: #ff76ff;
+                            color: #ff76ff;
+                        }
+                        #start-screen .play-btn {
+                            background: #ff76ff;
+                            border: none;
+                            color: #0d0a12;
+                            padding: 15px 30px;
+                            font-family: 'Press Start 2P', cursive;
+                            font-size: 14px;
+                            cursor: pointer;
+                            margin-top: 20px;
+                        }
+                        #start-screen .play-btn:hover {
+                            background: #ff5acc;
+                        }
+                        canvas {
+                            background: #09080a;
+                            border: 2px solid #0d0a12;
+                        }
+                        #score {
+                            position: fixed;
+                            top: 20px;
+                            right: 20px;
+                            color: #ff76ff;
+                            font-size: 30px;
+                            display: none;
+                        }
+                        .hidden { display: none !important; }
+                    </style>
+                </head>
+                <body>
+                    <div id="score">0</div>
+                    <div id="game-container">
+                        <div id="start-screen">
+                            <h1>🐍 AISBF Snake 🐍</h1>
+                            <div class="difficulty">
+                                <button data-speed="150" class="active">Easy</button>
+                                <button data-speed="100">Medium</button>
+                                <button data-speed="50">Hard</button>
+                            </div>
+                            <button class="play-btn" onclick="startGame()">Play</button>
+                        </div>
+                        <canvas id="game-canvas"></canvas>
+                    </div>
+                    <script>
+                        const canvas = document.getElementById('game-canvas');
+                        const ctx = canvas.getContext('2d');
+                        const startScreen = document.getElementById('start-screen');
+                        const scoreDisplay = document.getElementById('score');
+                        
+                        // Set canvas size
+                        canvas.width = 600;
+                        canvas.height = 400;
+                        
+                        let snake = [];
+                        let food = {};
+                        let direction = 'right';
+                        let nextDirection = 'right';
+                        let gameLoop = null;
+                        let score = 0;
+                        let speed = 150;
+                        
+                        // Difficulty buttons
+                        document.querySelectorAll('.difficulty button').forEach(btn => {
+                            btn.addEventListener('click', function() {
+                                document.querySelectorAll('.difficulty button').forEach(b => b.classList.remove('active'));
+                                this.classList.add('active');
+                                speed = parseInt(this.dataset.speed);
+                            });
+                        });
+                        
+                        function initGame() {
+                            snake = [
+                                {x: 300, y: 200},
+                                {x: 280, y: 200},
+                                {x: 260, y: 200}
+                            ];
+                            direction = 'right';
+                            nextDirection = 'right';
+                            score = 0;
+                            scoreDisplay.textContent = score;
+                            placeFood();
+                        }
+                        
+                        function placeFood() {
+                            food = {
+                                x: Math.floor(Math.random() * (canvas.width - 20)) + 10,
+                                y: Math.floor(Math.random() * (canvas.height - 20)) + 10
+                            };
+                            // Align to grid
+                            food.x = Math.floor(food.x / 20) * 20 + 10;
+                            food.y = Math.floor(food.y / 20) * 20 + 10;
+                        }
+                        
+                        function startGame() {
+                            startScreen.classList.add('hidden');
+                            scoreDisplay.style.display = 'block';
+                            initGame();
+                            if (gameLoop) clearInterval(gameLoop);
+                            gameLoop = setInterval(update, speed);
+                        }
+                        
+                        function update() {
+                            direction = nextDirection;
+                            
+                            const head = {x: snake[0].x, y: snake[0].y};
+                            
+                            switch(direction) {
+                                case 'up': head.y -= 20; break;
+                                case 'down': head.y += 20; break;
+                                case 'left': head.x -= 20; break;
+                                case 'right': head.x += 20; break;
+                            }
+                            
+                            // Check wall collision
+                            if (head.x < 0 || head.x >= canvas.width || head.y < 0 || head.y >= canvas.height) {
+                                gameOver();
+                                return;
+                            }
+                            
+                            // Check self collision
+                            for (let i = 0; i < snake.length; i++) {
+                                if (head.x === snake[i].x && head.y === snake[i].y) {
+                                    gameOver();
+                                    return;
+                                }
+                            }
+                            
+                            snake.unshift(head);
+                            
+                            // Check food collision
+                            if (head.x === food.x && head.y === food.y) {
+                                score += 10;
+                                scoreDisplay.textContent = score;
+                                placeFood();
+                            } else {
+                                snake.pop();
+                            }
+                            
+                            draw();
+                        }
+                        
+                        function draw() {
+                            // Clear canvas
+                            ctx.fillStyle = '#09080a';
+                            ctx.fillRect(0, 0, canvas.width, canvas.height);
+                            
+                            // Draw snake
+                            ctx.fillStyle = '#fac020';
+                            snake.forEach((segment, i) => {
+                                ctx.fillStyle = i === 0 ? '#ffd700' : '#fac020';
+                                ctx.fillRect(segment.x - 9, segment.y - 9, 18, 18);
+                            });
+                            
+                            // Draw food
+                            ctx.fillStyle = '#ee6b71';
+                            ctx.beginPath();
+                            ctx.arc(food.x, food.y, 8, 0, Math.PI * 2);
+                            ctx.fill();
+                        }
+                        
+                        function gameOver() {
+                            clearInterval(gameLoop);
+                            alert('Game Over! Score: ' + score + '\nPress OK to play again.');
+                            startScreen.classList.remove('hidden');
+                            scoreDisplay.style.display = 'none';
+                        }
+                        
+                        // Keyboard controls
+                        document.addEventListener('keydown', function(e) {
+                            switch(e.key) {
+                                case 'ArrowUp':
+                                    if (direction !== 'down') nextDirection = 'up';
+                                    e.preventDefault();
+                                    break;
+                                case 'ArrowDown':
+                                    if (direction !== 'up') nextDirection = 'down';
+                                    e.preventDefault();
+                                    break;
+                                case 'ArrowLeft':
+                                    if (direction !== 'right') nextDirection = 'left';
+                                    e.preventDefault();
+                                    break;
+                                case 'ArrowRight':
+                                    if (direction !== 'left') nextDirection = 'right';
+                                    e.preventDefault();
+                                    break;
+                            }
+                        });
+                        
+                        // Initial draw
+                        draw();
+                    <\/script>
+                </body>
+                </html>
+                `;
+                
+                var gameWindow = window.open('', 'SnakeGame', 'width=650,height=500');
+                gameWindow.document.write(gameHtml);
+                gameWindow.document.close();
+            }
+        })();
     </script>
 </head>
 <body>
