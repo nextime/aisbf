@@ -6136,6 +6136,202 @@ class KiroProviderHandler(BaseProviderHandler):
             logging.error(f"KiroProviderHandler: Error details:", exc_info=True)
             raise e
 
+class KiloProviderHandler(BaseProviderHandler):
+    """
+    Handler for Kilo Gateway (OpenAI-compatible with OAuth2 support).
+    
+    Kilo Gateway is an OpenAI-compatible API that supports OAuth2 Device Authorization
+    Grant flow for authentication. This handler extends OpenAI compatibility with
+    OAuth2 authentication support.
+    """
+    
+    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+        super().__init__(provider_id, api_key)
+        self.provider_config = config.get_provider(provider_id)
+        
+        # Get kilo-specific configuration
+        kilo_config = getattr(self.provider_config, 'kilo_config', None)
+        
+        # Initialize OAuth2 client
+        credentials_file = None
+        api_base = None
+        
+        if kilo_config and isinstance(kilo_config, dict):
+            credentials_file = kilo_config.get('credentials_file')
+            api_base = kilo_config.get('api_base')
+        
+        from .kilo_oauth2 import KiloOAuth2
+        self.oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+        
+        # Get endpoint from config
+        endpoint = getattr(self.provider_config, 'endpoint', 'https://api.kilo.ai')
+        
+        # Initialize OpenAI client (will use OAuth2 token as API key)
+        self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
+    
+    async def _ensure_authenticated(self) -> str:
+        """
+        Ensure user is authenticated and return valid token.
+        
+        Returns:
+            Valid access token
+            
+        Raises:
+            Exception: If authentication fails
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check if we have a valid token
+        token = self.oauth2.get_valid_token()
+        
+        if token:
+            logger.info("KiloProviderHandler: Using existing OAuth2 token")
+            return token
+        
+        # Check if API key was provided (alternative auth method)
+        if self.api_key and self.api_key != "placeholder":
+            logger.info("KiloProviderHandler: Using API key authentication")
+            return self.api_key
+        
+        # Need to authenticate with OAuth2
+        logger.info("KiloProviderHandler: No valid token, initiating OAuth2 flow")
+        result = await self.oauth2.authenticate_with_device_flow()
+        
+        if result.get("type") == "success":
+            token = result.get("token")
+            logger.info(f"KiloProviderHandler: OAuth2 authentication successful")
+            return token
+        
+        raise Exception("OAuth2 authentication failed")
+    
+    async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
+                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
+                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
+        if self.is_rate_limited():
+            raise Exception("Provider rate limited")
+
+        try:
+            import logging
+            logging.info(f"KiloProviderHandler: Handling request for model {model}")
+            if AISBF_DEBUG:
+                logging.info(f"KiloProviderHandler: Messages: {messages}")
+                logging.info(f"KiloProviderHandler: Tools: {tools}")
+            else:
+                logging.info(f"KiloProviderHandler: Messages count: {len(messages)}")
+                logging.info(f"KiloProviderHandler: Tools count: {len(tools) if tools else 0}")
+
+            # Ensure we have a valid token
+            token = await self._ensure_authenticated()
+            
+            # Update client with valid token
+            self.client.api_key = token
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            # Build request parameters (same as OpenAI)
+            request_params = {
+                "model": model,
+                "messages": [],
+                "temperature": temperature,
+                "stream": stream
+            }
+            
+            # Only add max_tokens if it's not None
+            if max_tokens is not None:
+                request_params["max_tokens"] = max_tokens
+            
+            # Build messages with all fields
+            for msg in messages:
+                message = {"role": msg["role"]}
+                
+                # For tool role, tool_call_id is required
+                if msg["role"] == "tool":
+                    if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                        message["tool_call_id"] = msg["tool_call_id"]
+                    else:
+                        # Skip tool messages without tool_call_id
+                        logging.warning(f"Skipping tool message without tool_call_id: {msg}")
+                        continue
+                
+                if "content" in msg and msg["content"] is not None:
+                    message["content"] = msg["content"]
+                if "tool_calls" in msg and msg["tool_calls"] is not None:
+                    message["tool_calls"] = msg["tool_calls"]
+                if "name" in msg and msg["name"] is not None:
+                    message["name"] = msg["name"]
+                
+                request_params["messages"].append(message)
+            
+            # Add tools and tool_choice if provided
+            if tools is not None:
+                request_params["tools"] = tools
+            if tool_choice is not None:
+                request_params["tool_choice"] = tool_choice
+
+            response = self.client.chat.completions.create(**request_params)
+            logging.info(f"KiloProviderHandler: Response received: {response}")
+            self.record_success()
+            
+            # Dump raw response if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== RAW KILO RESPONSE ===")
+                logging.info(f"Raw response type: {type(response)}")
+                logging.info(f"Raw response: {response}")
+                logging.info(f"=== END RAW KILO RESPONSE ===")
+            
+            # Return raw response without any parsing or modification
+            logging.info(f"KiloProviderHandler: Returning raw response without parsing")
+            return response
+        except Exception as e:
+            import logging
+            logging.error(f"KiloProviderHandler: Error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise e
+
+    async def get_models(self) -> List[Model]:
+        try:
+            import logging
+            logging.info("KiloProviderHandler: Getting models list")
+
+            # Ensure we have a valid token
+            token = await self._ensure_authenticated()
+            
+            # Update client with valid token
+            self.client.api_key = token
+
+            # Apply rate limiting
+            await self.apply_rate_limit()
+
+            models = self.client.models.list()
+            logging.info(f"KiloProviderHandler: Models received: {models}")
+
+            result = []
+            for model in models:
+                # Extract context size if available
+                context_size = None
+                if hasattr(model, 'context_window') and model.context_window:
+                    context_size = model.context_window
+                elif hasattr(model, 'context_length') and model.context_length:
+                    context_size = model.context_length
+                elif hasattr(model, 'max_context_length') and model.max_context_length:
+                    context_size = model.max_context_length
+                
+                result.append(Model(
+                    id=model.id,
+                    name=model.id,
+                    provider_id=self.provider_id,
+                    context_size=context_size,
+                    context_length=context_size
+                ))
+            
+            return result
+        except Exception as e:
+            import logging
+            logging.error(f"KiloProviderHandler: Error getting models: {str(e)}", exc_info=True)
+            raise e
+
 class OllamaProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: Optional[str] = None):
         super().__init__(provider_id, api_key)
@@ -6328,7 +6524,9 @@ PROVIDER_HANDLERS = {
     'anthropic': AnthropicProviderHandler,
     'ollama': OllamaProviderHandler,
     'kiro': KiroProviderHandler,
-    'claude': ClaudeProviderHandler
+    'claude': ClaudeProviderHandler,
+    'kilo': KiloProviderHandler,
+    'kilocode': KiloProviderHandler  # Kilocode provider with OAuth2 support
 }
 
 def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:
