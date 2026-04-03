@@ -48,7 +48,7 @@ Documentation = "https://git.nexlab.net/nexlab/aisbf.git"
 "Bug Tracker" = "https://git.nexlab.net/nexlab/aisbf.git/issues"
 
 [tool.setuptools]
-packages = ["aisbf"]
+packages = ["aisbf", "aisbf.auth", "aisbf.providers", "aisbf.providers.kiro"]
 py-modules = ["cli"]
 
 [tool.setuptools.package-data]

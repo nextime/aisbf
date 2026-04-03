@@ -43,6 +43,8 @@ from .providers import (
     get_provider_handler,
     PROVIDER_HANDLERS
 )
+from .providers.kiro import KiroProviderHandler
+from .auth.kiro import KiroAuthManager
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
@@ -71,8 +73,11 @@ __all__ = [
     "OpenAIProviderHandler",
     "AnthropicProviderHandler",
     "OllamaProviderHandler",
+    "KiroProviderHandler",
     "get_provider_handler",
     "PROVIDER_HANDLERS",
+    # Auth
+    "KiroAuthManager",
     # Handlers
     "RequestHandler",
     "RotationHandler",

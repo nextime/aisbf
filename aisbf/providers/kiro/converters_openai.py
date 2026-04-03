@@ -37,7 +37,7 @@ from typing import Any, Dict, List, Optional, Tuple
 logger = logging.getLogger(__name__)
 
 # Import Kiro models for type hints
-from .kiro_models import ChatMessage, Tool
+from .models import ChatMessage, Tool
 
 # Hidden models - not returned by Kiro /ListAvailableModels API but still functional.
 # These need special internal IDs that differ from their display names.
@@ -147,7 +147,7 @@ def get_model_id_for_kiro(model: str, hidden_models: dict) -> str:
     return hidden_models.get(normalized, normalized)
 
 # Import from core - reuse shared logic
-from .kiro_converters import (
+from .converters import (
     extract_text_content,
     extract_images_from_content,
     UnifiedMessage,
@@ -431,7 +431,7 @@ def build_kiro_payload_from_dict(
     Raises:
         ValueError: If there are no messages to send
     """
-    from .kiro_models import create_chat_completion_request
+    from .models import create_chat_completion_request
     
     # Convert dicts to dataclasses
     request_data = create_chat_completion_request(
