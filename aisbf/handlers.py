@@ -41,8 +41,8 @@ from .utils import (
 )
 from .context import ContextManager, get_context_config_for_model
 from .classifier import content_classifier
-from .semantic_classifier import SemanticClassifier
-from .response_cache import get_response_cache
+from .classifier import SemanticClassifier
+from .cache import get_response_cache
 import time as time_module
 from .analytics import get_analytics
 from .streaming_optimization import (

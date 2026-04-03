@@ -7,7 +7,7 @@ Tests cache hit/miss scenarios, TTL expiration, and multi-user isolation.
 import time
 import json
 import hashlib
-from aisbf.response_cache import ResponseCache, get_response_cache
+from aisbf.cache import ResponseCache, get_response_cache
 
 def test_cache_basic_operations():
     """Test basic cache set/get operations"""

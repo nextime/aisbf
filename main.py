@@ -863,7 +863,7 @@ async def startup_event():
 
         # Initialize response cache
         try:
-            from aisbf.response_cache import initialize_response_cache
+            from aisbf.cache import initialize_response_cache
             response_cache_config = config.aisbf.response_cache if config.aisbf and config.aisbf.response_cache else None
             if response_cache_config:
                 initialize_response_cache(response_cache_config.model_dump() if hasattr(response_cache_config, 'model_dump') else response_cache_config)
@@ -3062,7 +3062,7 @@ async def dashboard_response_cache_stats(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.response_cache import get_response_cache
+    from aisbf.cache import get_response_cache
     
     try:
         cache = get_response_cache()
@@ -3142,7 +3142,7 @@ async def dashboard_response_cache_clear(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.response_cache import get_response_cache
+    from aisbf.cache import get_response_cache
     
     try:
         cache = get_response_cache()
