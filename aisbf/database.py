@@ -141,6 +141,26 @@ class DatabaseManager:
                 )
             ''')
 
+            # Migration: Add user_id column to token_usage if it doesn't exist
+            # This handles databases created before the user_id column was added
+            try:
+                if self.db_type == 'sqlite':
+                    cursor.execute("PRAGMA table_info(token_usage)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    if 'user_id' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN user_id INTEGER')
+                        logger.info("Migration: Added user_id column to token_usage table")
+                else:  # mysql
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'user_id'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN user_id INTEGER')
+                        logger.info("Migration: Added user_id column to token_usage table")
+            except Exception as e:
+                logger.warning(f"Migration check for token_usage.user_id: {e}")
+
             # Create indexes for token_usage
             try:
                 cursor.execute('''

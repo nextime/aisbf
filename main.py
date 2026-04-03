@@ -42,11 +42,14 @@ import time
 import logging
 import sys
 import os
+import signal
+import atexit
 import argparse
 import secrets
 import hashlib
 import asyncio
 import httpx
+import multiprocessing
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -1040,6 +1043,44 @@ async def startup_event():
     logger.info(f"Available rotations: {list(config.rotations.keys()) if config else []}")
     logger.info(f"Available autoselect: {list(config.autoselect.keys()) if config else []}")
 
+def _cleanup_multiprocessing_children():
+    """Terminate any lingering multiprocessing child processes."""
+    try:
+        active_children = multiprocessing.active_children()
+        if active_children:
+            logger.info(f"Terminating {len(active_children)} multiprocessing child process(es)...")
+            for child in active_children:
+                logger.debug(f"  Terminating child process: {child.name} (PID {child.pid})")
+                child.terminate()
+            # Give them a moment to terminate gracefully
+            for child in active_children:
+                child.join(timeout=2)
+            # Force kill any still alive
+            for child in multiprocessing.active_children():
+                logger.warning(f"  Force killing child process: {child.name} (PID {child.pid})")
+                child.kill()
+    except Exception as e:
+        logger.warning(f"Error cleaning up multiprocessing children: {e}")
+
+
+def _signal_handler(signum, frame):
+    """Handle SIGINT/SIGTERM for clean shutdown including multiprocessing children."""
+    sig_name = signal.Signals(signum).name
+    logger.info(f"Received {sig_name}, shutting down...")
+    _cleanup_multiprocessing_children()
+    # Re-raise the signal so uvicorn can handle its own shutdown
+    signal.signal(signum, signal.SIG_DFL)
+    os.kill(os.getpid(), signum)
+
+
+# Register signal handlers for clean shutdown
+signal.signal(signal.SIGINT, _signal_handler)
+signal.signal(signal.SIGTERM, _signal_handler)
+
+# Also register atexit handler as a safety net
+atexit.register(_cleanup_multiprocessing_children)
+
+
 @app.on_event("shutdown")
 async def shutdown_event():
     """Cleanup on shutdown"""
@@ -1050,6 +1091,9 @@ async def shutdown_event():
         logger.info("Shutting down TOR hidden service...")
         tor_service.disconnect()
         logger.info("TOR hidden service shutdown complete")
+    
+    # Cleanup multiprocessing children (sentence-transformers, torch, etc.)
+    _cleanup_multiprocessing_children()
 
 # Authentication middleware
 @app.middleware("http")

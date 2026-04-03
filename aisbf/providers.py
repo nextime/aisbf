@@ -6163,8 +6163,17 @@ class KiloProviderHandler(BaseProviderHandler):
         from .kilo_oauth2 import KiloOAuth2
         self.oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
         
-        # Get endpoint from config
-        endpoint = getattr(self.provider_config, 'endpoint', 'https://api.kilo.ai')
+        # Use the configured endpoint, falling back to the canonical kilo.ai/api/openrouter/v1
+        configured_endpoint = getattr(self.provider_config, 'endpoint', None)
+        if configured_endpoint:
+            # Ensure endpoint ends with /v1 for OpenAI SDK compatibility
+            endpoint = configured_endpoint.rstrip('/')
+            if not endpoint.endswith('/v1'):
+                endpoint = endpoint + '/v1'
+        else:
+            endpoint = 'https://kilo.ai/api/openrouter/v1'
+        
+        self._kilo_endpoint = endpoint
         
         # Initialize OpenAI client (will use OAuth2 token as API key)
         self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
@@ -6213,6 +6222,7 @@ class KiloProviderHandler(BaseProviderHandler):
 
         try:
             import logging
+            import json
             logging.info(f"KiloProviderHandler: Handling request for model {model}")
             if AISBF_DEBUG:
                 logging.info(f"KiloProviderHandler: Messages: {messages}")
@@ -6270,6 +6280,13 @@ class KiloProviderHandler(BaseProviderHandler):
             if tool_choice is not None:
                 request_params["tool_choice"] = tool_choice
 
+            # For streaming requests, use httpx async streaming directly
+            # to avoid blocking the event loop with the synchronous OpenAI SDK
+            if stream:
+                logging.info(f"KiloProviderHandler: Using async httpx streaming mode")
+                return await self._handle_streaming_request(request_params, token, model)
+
+            # Non-streaming: use the synchronous OpenAI SDK client
             response = self.client.chat.completions.create(**request_params)
             logging.info(f"KiloProviderHandler: Response received: {response}")
             self.record_success()
@@ -6290,42 +6307,234 @@ class KiloProviderHandler(BaseProviderHandler):
             self.record_failure()
             raise e
 
+    async def _handle_streaming_request(self, request_params: Dict, token: str, model: str):
+        """
+        Handle streaming request to Kilo API using httpx async streaming.
+        
+        This method pre-validates the upstream response status BEFORE returning
+        the streaming generator. This ensures that errors (404, 400, etc.) are
+        raised immediately and returned as proper error responses to the client,
+        rather than being swallowed after a 200 OK has already been sent.
+        
+        Uses direct async HTTP instead of the synchronous OpenAI SDK to avoid
+        blocking the event loop and to provide better control over SSE parsing.
+        
+        Args:
+            request_params: The OpenAI-compatible request parameters (with stream=True)
+            token: The OAuth2/API key token for authentication
+            model: The model name being used
+            
+        Returns:
+            Async generator that yields OpenAI-compatible SSE chunks as bytes
+            
+        Raises:
+            Exception: If the upstream provider returns an error response
+        """
+        import logging
+        import json
+        
+        logger = logging.getLogger(__name__)
+        logger.info(f"KiloProviderHandler: Starting async streaming request to {self._kilo_endpoint}")
+        
+        # Build the full URL for chat completions
+        api_url = f"{self._kilo_endpoint}/chat/completions"
+        
+        # Build headers
+        headers = {
+            'Authorization': f'Bearer {token}',
+            'Content-Type': 'application/json',
+            'Accept': 'text/event-stream',
+        }
+        
+        if AISBF_DEBUG:
+            logger.info(f"=== KILO STREAMING REQUEST DETAILS ===")
+            logger.info(f"URL: {api_url}")
+            logger.info(f"Payload: {json.dumps(request_params, indent=2)}")
+            logger.info(f"=== END KILO STREAMING REQUEST DETAILS ===")
+        
+        # Phase 1: Open connection and validate status BEFORE returning generator.
+        # This ensures errors are raised immediately (before 200 OK is sent to client),
+        # not lazily when the generator is consumed.
+        streaming_client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+        
+        try:
+            request = streaming_client.build_request("POST", api_url, headers=headers, json=request_params)
+            response = await streaming_client.send(request, stream=True)
+            
+            logger.info(f"KiloProviderHandler: Streaming response status: {response.status_code}")
+            
+            if response.status_code >= 400:
+                error_text = await response.aread()
+                await response.aclose()
+                await streaming_client.aclose()
+                logger.error(f"KiloProviderHandler: Streaming error response: {error_text}")
+                
+                try:
+                    error_json = json.loads(error_text)
+                    error_message = error_json.get('error', {}).get('message', 'Unknown error') if isinstance(error_json.get('error'), dict) else str(error_json.get('error', 'Unknown error'))
+                except (json.JSONDecodeError, Exception):
+                    error_message = error_text.decode('utf-8') if isinstance(error_text, bytes) else str(error_text)
+                
+                if response.status_code == 429:
+                    self.handle_429_error(
+                        error_json if 'error_json' in locals() else error_message,
+                        dict(response.headers)
+                    )
+                
+                self.record_failure()
+                raise Exception(f"Kilo API streaming error ({response.status_code}): {error_message}")
+        except Exception:
+            # Ensure client is closed on any error during connection setup
+            await streaming_client.aclose()
+            raise
+        
+        # Phase 2: Connection is validated (2xx status), return the streaming generator.
+        # The generator takes ownership of streaming_client and response and will close
+        # them when done.
+        return self._stream_kilo_response(streaming_client, response, model)
+    
+    async def _stream_kilo_response(self, streaming_client, response, model: str):
+        """
+        Yield SSE chunks from an already-validated Kilo streaming response.
+        
+        This generator is only called after the upstream response status has been
+        verified as 2xx, so it only handles the happy path of streaming data.
+        
+        Takes ownership of streaming_client and response, closing them when done.
+        
+        Args:
+            streaming_client: The httpx.AsyncClient that owns the connection
+            response: The already-opened httpx streaming response (status validated)
+            model: The model name being used
+            
+        Yields:
+            OpenAI-compatible SSE chunks as bytes
+        """
+        import logging
+        import json
+        
+        logger = logging.getLogger(__name__)
+        
+        try:
+            # Process the SSE stream line by line
+            async for line in response.aiter_lines():
+                if not line:
+                    continue
+                
+                # SSE format: lines starting with "data: "
+                if line.startswith('data: '):
+                    data_str = line[6:]
+                    
+                    if data_str.strip() == '[DONE]':
+                        yield b"data: [DONE]\n\n"
+                        break
+                    
+                    try:
+                        chunk_data = json.loads(data_str)
+                        
+                        # Pass through the chunk as-is (it's already in OpenAI format)
+                        yield f"data: {json.dumps(chunk_data, ensure_ascii=False)}\n\n".encode('utf-8')
+                        
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"KiloProviderHandler: Failed to parse streaming chunk: {e}")
+                        continue
+                elif line.startswith(':'):
+                    # SSE comment (keep-alive), skip
+                    continue
+            
+            logger.info(f"KiloProviderHandler: Streaming completed successfully")
+            self.record_success()
+        finally:
+            # Always close response and client when generator is done or on error
+            await response.aclose()
+            await streaming_client.aclose()
+
     async def get_models(self) -> List[Model]:
         try:
             import logging
+            import json
             logging.info("KiloProviderHandler: Getting models list")
 
             # Ensure we have a valid token
             token = await self._ensure_authenticated()
-            
-            # Update client with valid token
-            self.client.api_key = token
 
             # Apply rate limiting
             await self.apply_rate_limit()
 
-            models = self.client.models.list()
-            logging.info(f"KiloProviderHandler: Models received: {models}")
+            # Use the correct Kilo models endpoint directly
+            # The OpenAI SDK appends /models to the base_url (which includes /v1),
+            # but Kilo's models endpoint is at the base path /models (without /v1)
+            # Derive models_url from the configured endpoint by stripping /v1
+            base_endpoint = self._kilo_endpoint.rstrip('/')
+            if base_endpoint.endswith('/v1'):
+                models_url = base_endpoint[:-3] + '/models'
+            else:
+                models_url = base_endpoint + '/models'
+            logging.info(f"KiloProviderHandler: Fetching models from {models_url}")
+
+            headers = {
+                'Authorization': f'Bearer {token}',
+                'Content-Type': 'application/json',
+            }
+
+            async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                response = await client.get(models_url, headers=headers)
+
+            logging.info(f"KiloProviderHandler: Models response status: {response.status_code}")
+
+            if response.status_code != 200:
+                logging.warning(f"KiloProviderHandler: Models endpoint returned {response.status_code}")
+                try:
+                    error_body = response.json()
+                    logging.warning(f"KiloProviderHandler: Error response: {error_body}")
+                except Exception:
+                    logging.warning(f"KiloProviderHandler: Error response (text): {response.text[:200]}")
+                response.raise_for_status()
+
+            models_data = response.json()
+            logging.info(f"KiloProviderHandler: Models received: {models_data}")
+
+            # Parse response - expect OpenAI-compatible format with 'data' array
+            models_list = models_data.get('data', []) if isinstance(models_data, dict) else models_data
 
             result = []
-            for model in models:
-                # Extract context size if available
-                context_size = None
-                if hasattr(model, 'context_window') and model.context_window:
-                    context_size = model.context_window
-                elif hasattr(model, 'context_length') and model.context_length:
-                    context_size = model.context_length
-                elif hasattr(model, 'max_context_length') and model.max_context_length:
-                    context_size = model.max_context_length
-                
-                result.append(Model(
-                    id=model.id,
-                    name=model.id,
-                    provider_id=self.provider_id,
-                    context_size=context_size,
-                    context_length=context_size
-                ))
-            
+            for model_entry in models_list:
+                if isinstance(model_entry, dict):
+                    model_id = model_entry.get('id', '')
+                    model_name = model_entry.get('name', model_id) or model_id
+
+                    # Extract context size if available
+                    context_size = (
+                        model_entry.get('context_window') or
+                        model_entry.get('context_length') or
+                        model_entry.get('max_context_length')
+                    )
+
+                    if model_id:
+                        result.append(Model(
+                            id=model_id,
+                            name=model_name,
+                            provider_id=self.provider_id,
+                            context_size=context_size,
+                            context_length=context_size
+                        ))
+                elif hasattr(model_entry, 'id'):
+                    # Handle OpenAI SDK model objects (fallback)
+                    context_size = None
+                    if hasattr(model_entry, 'context_window') and model_entry.context_window:
+                        context_size = model_entry.context_window
+                    elif hasattr(model_entry, 'context_length') and model_entry.context_length:
+                        context_size = model_entry.context_length
+
+                    result.append(Model(
+                        id=model_entry.id,
+                        name=model_entry.id,
+                        provider_id=self.provider_id,
+                        context_size=context_size,
+                        context_length=context_size
+                    ))
+
+            logging.info(f"KiloProviderHandler: Parsed {len(result)} models")
             return result
         except Exception as e:
             import logging

@@ -174,13 +174,18 @@
     "kilo": {
       "id": "kilo",
       "name": "KiloCode",
-      "endpoint": "https://kilocode.ai/api/openrouter",
-      "type": "openai",
-      "api_key_required": true,
-      "api_key": "YOUR_KILO_API_KEY",
+      "endpoint": "https://kilo.ai/api/openrouter/v1",
+      "type": "kilo",
+      "api_key_required": false,
+      "api_key": "",
       "nsfw": false,
       "privacy": false,
-      "rate_limit": 0
+      "rate_limit": 0,
+      "kilo_config": {
+        "_comment": "Uses Kilo OAuth2 Device Authorization Grant flow",
+        "credentials_file": "~/.kilo_credentials.json",
+        "api_base": "https://api.kilo.ai"
+      }
     },
     "perplexity": {
       "id": "perplexity",

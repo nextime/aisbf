@@ -589,10 +589,84 @@ class RequestHandler:
                 # This is more reliable than checking response iterability which can cause false positives
                 is_google_stream = provider_config.type == 'google'
                 is_kiro_stream = provider_config.type == 'kiro'
+                is_kilo_stream = provider_config.type in ('kilo', 'kilocode')
                 logger.info(f"Is Google streaming response: {is_google_stream} (provider type: {provider_config.type})")
                 logger.info(f"Is Kiro streaming response: {is_kiro_stream} (provider type: {provider_config.type})")
+                logger.info(f"Is Kilo streaming response: {is_kilo_stream} (provider type: {provider_config.type})")
 
-                if is_kiro_stream:
+                if is_kilo_stream:
+                    # Handle Kilo/KiloCode streaming response
+                    # Kilo returns an async generator that yields OpenAI-compatible SSE bytes directly
+                    # We parse these and pass through with minimal processing
+                    
+                    accumulated_response_text = ""  # Track full response for token counting
+                    chunk_count = 0
+                    tool_calls_from_stream = []  # Track tool calls from stream
+
+                    async for chunk in response:
+                        chunk_count += 1
+                        try:
+                            logger.debug(f"Kilo chunk type: {type(chunk)}")
+
+                            # Parse SSE chunk to extract JSON data
+                            chunk_data = None
+                            
+                            if isinstance(chunk, bytes):
+                                try:
+                                    chunk_str = chunk.decode('utf-8')
+                                    # May contain multiple SSE lines
+                                    for sse_line in chunk_str.split('\n'):
+                                        sse_line = sse_line.strip()
+                                        if sse_line.startswith('data: '):
+                                            data_str = sse_line[6:].strip()
+                                            if data_str and data_str != '[DONE]':
+                                                try:
+                                                    chunk_data = json.loads(data_str)
+                                                except json.JSONDecodeError:
+                                                    pass
+                                except (UnicodeDecodeError, Exception) as e:
+                                    logger.warning(f"Failed to parse Kilo bytes chunk: {e}")
+                            elif isinstance(chunk, str):
+                                if chunk.startswith('data: '):
+                                    data_str = chunk[6:].strip()
+                                    if data_str and data_str != '[DONE]':
+                                        try:
+                                            chunk_data = json.loads(data_str)
+                                        except json.JSONDecodeError:
+                                            pass
+                            
+                            if chunk_data:
+                                # Extract content and tool calls from chunk
+                                choices = chunk_data.get('choices', [])
+                                if choices:
+                                    delta = choices[0].get('delta', {})
+                                    
+                                    # Track content
+                                    delta_content = delta.get('content', '')
+                                    if delta_content:
+                                        accumulated_response_text += delta_content
+                                    
+                                    # Track tool calls
+                                    delta_tool_calls = delta.get('tool_calls', [])
+                                    if delta_tool_calls:
+                                        for tc in delta_tool_calls:
+                                            tool_calls_from_stream.append(tc)
+                            
+                            # Pass through the chunk as-is
+                            if isinstance(chunk, bytes):
+                                yield chunk
+                            elif isinstance(chunk, str):
+                                yield chunk.encode('utf-8')
+                            else:
+                                yield f"data: {json.dumps(chunk)}\n\n".encode('utf-8')
+
+                        except Exception as chunk_error:
+                            logger.warning(f"Error processing Kilo chunk: {chunk_error}")
+                            continue
+
+                    logger.info(f"Kilo streaming processed {chunk_count} chunks total")
+
+                elif is_kiro_stream:
                     # Handle Kiro streaming response
                     # Kiro returns an async generator that yields OpenAI-compatible SSE strings directly
                     # We need to parse these and handle tool calls properly
@@ -2753,9 +2827,10 @@ class RotationHandler:
         import json
         logger = logging.getLogger(__name__)
         
-        # Check if this is a Google provider based on configuration
+        # Check if this is a Google or Kilo provider based on configuration
         is_google_provider = provider_type == 'google'
-        logger.info(f"Creating streaming response for provider type: {provider_type}, is_google: {is_google_provider}")
+        is_kilo_provider = provider_type in ('kilo', 'kilocode')
+        logger.info(f"Creating streaming response for provider type: {provider_type}, is_google: {is_google_provider}, is_kilo: {is_kilo_provider}")
         
         # Generate system_fingerprint for this request
         # If seed is present in request, generate unique fingerprint per request
@@ -3031,6 +3106,47 @@ class RotationHandler:
                         }]
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+                elif is_kilo_provider:
+                    # Handle Kilo/KiloCode streaming response
+                    # Kilo returns an async generator that yields OpenAI-compatible SSE bytes
+                    accumulated_response_text = ""
+                    chunk_count = 0
+
+                    async for chunk in response:
+                        chunk_count += 1
+                        try:
+                            # Pass through the chunk as-is (already in SSE format)
+                            if isinstance(chunk, bytes):
+                                # Parse to track content for token counting
+                                try:
+                                    chunk_str = chunk.decode('utf-8')
+                                    for sse_line in chunk_str.split('\n'):
+                                        sse_line = sse_line.strip()
+                                        if sse_line.startswith('data: '):
+                                            data_str = sse_line[6:].strip()
+                                            if data_str and data_str != '[DONE]':
+                                                try:
+                                                    chunk_data = json.loads(data_str)
+                                                    choices = chunk_data.get('choices', [])
+                                                    if choices:
+                                                        delta = choices[0].get('delta', {})
+                                                        delta_content = delta.get('content', '')
+                                                        if delta_content:
+                                                            accumulated_response_text += delta_content
+                                                except json.JSONDecodeError:
+                                                    pass
+                                except (UnicodeDecodeError, Exception):
+                                    pass
+                                yield chunk
+                            elif isinstance(chunk, str):
+                                yield chunk.encode('utf-8')
+                            else:
+                                yield f"data: {json.dumps(chunk)}\n\n".encode('utf-8')
+                        except Exception as chunk_error:
+                            logger.warning(f"Error processing Kilo chunk: {chunk_error}")
+                            continue
+
+                    logger.info(f"Kilo streaming processed {chunk_count} chunks total")
                 else:
                     # Handle OpenAI/Anthropic/Kiro streaming responses
                     # Some providers return async generators, others return sync iterables

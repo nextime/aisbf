@@ -152,7 +152,7 @@ function renderProviderDetails(key) {
     if (isKiloProvider && !provider.kilo_config) {
         provider.kilo_config = {
             credentials_file: '~/.kilo_credentials.json',
-            api_base: 'https://kilocode.ai/api/openrouter'
+            api_base: 'https://api.kilo.ai/api/gateway'
         };
     }
     
@@ -253,7 +253,7 @@ function renderProviderDetails(key) {
                 
                 <div class="form-group">
                     <label>API Base URL</label>
-                    <input type="text" value="${kiloConfig.api_base || 'https://kilocode.ai/api/openrouter'}" readonly style="background: #0f2840; cursor: not-allowed;" placeholder="https://kilocode.ai/api/openrouter">
+                    <input type="text" value="${kiloConfig.api_base || 'https://api.kilo.ai/api/gateway'}" readonly style="background: #0f2840; cursor: not-allowed;" placeholder="https://api.kilo.ai/api/gateway">
                     <small style="color: #a0a0a0; display: block; margin-top: 5px;">Kilocode API base URL (fixed)</small>
                 </div>
                 
@@ -591,7 +591,7 @@ function updateNewProviderDefaults() {
         'ollama': 'Ollama local provider. No API key required by default. Endpoint: http://localhost:11434/api',
         'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com',
         'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1',
-        'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://kilocode.ai/api/openrouter'
+        'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway'
     };
     
     descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
@@ -653,11 +653,11 @@ function confirmAddProvider() {
             credentials_file: '~/.claude_credentials.json'
         };
     } else if (providerType === 'kilocode') {
-        newProvider.endpoint = 'https://kilocode.ai/api/openrouter';
+        newProvider.endpoint = 'https://api.kilo.ai/api/gateway';
         newProvider.name = key + ' (Kilocode OAuth2)';
         newProvider.kilo_config = {
             credentials_file: '~/.kilo_credentials.json',
-            api_base: 'https://kilocode.ai/api/openrouter'
+            api_base: 'https://api.kilo.ai/api/gateway'
         };
     } else if (providerType === 'openai') {
         newProvider.endpoint = 'https://api.openai.com/v1';
@@ -772,12 +772,12 @@ function updateProviderType(key, newType) {
         providersData[key].api_key_required = false;
         providersData[key].kilo_config = {
             credentials_file: '~/.kilo_credentials.json',
-            api_base: 'https://kilocode.ai/api/openrouter'
+            api_base: 'https://api.kilo.ai/api/gateway'
         };
         delete providersData[key].kiro_config;
         delete providersData[key].claude_config;
         // Set endpoint for kilocode (fixed, not modifiable)
-        providersData[key].endpoint = 'https://kilocode.ai/api/openrouter';
+        providersData[key].endpoint = 'https://api.kilo.ai/api/gateway';
     } else if (newType !== 'kiro' && newType !== 'claude' && newType !== 'kilocode' && (oldType === 'kiro' || oldType === 'claude' || oldType === 'kilocode')) {
         // Transitioning FROM kiro/claude/kilocode: remove special configs, set api_key_required to true
         providersData[key].api_key_required = true;
