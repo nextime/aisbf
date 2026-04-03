@@ -5699,12 +5699,13 @@ async def dashboard_claude_auth_start(request: Request):
         
         # Build OAuth2 URL (Claude requires full scope set)
         auth_params = {
+            "code": "true",
             "client_id": auth.CLIENT_ID,
             "response_type": "code",
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "redirect_uri": auth.REDIRECT_URI,
-            "scope": "user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
+            "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
             "state": state
         }
         auth_url = f"{auth.AUTH_URL}?{'&'.join(f'{k}={v}' for k, v in auth_params.items())}"

@@ -8,14 +8,17 @@ A modular proxy server for managing multiple AI provider integrations with unifi
 
 AISBF includes a comprehensive web-based dashboard for easy configuration and management:
 
-- **Provider Management**: Configure API keys, endpoints, and model settings
+- **Provider Management**: Configure API keys, endpoints, and model settings with automatic metadata extraction
 - **Rotation Configuration**: Set up weighted load balancing across providers
 - **Autoselect Configuration**: Configure AI-powered model selection
 - **Server Settings**: Manage SSL/TLS, authentication, and TOR hidden service
 - **User Management**: Create/manage users with role-based access control (admin users only)
 - **Multi-User Support**: Isolated configurations per user with API token management
 - **Real-time Monitoring**: View provider status and configuration
-- **Token Usage Analytics**: Track token usage, costs, and performance with charts and export functionality
+- **Token Usage Analytics**: Track token usage, costs, and performance with charts, filtering by provider/model/rotation, and export functionality
+- **Rate Limits Dashboard**: Monitor adaptive rate limiting with real-time statistics, 429 counts, success rates, and recovery progress
+- **Model Metadata Display**: View detailed model information including pricing, rate limits, and supported parameters
+- **Cache Management**: View cache statistics and clear cache via dashboard endpoints
 
 Access the dashboard at `http://localhost:17765/dashboard` (default credentials: admin/admin)
 
@@ -29,7 +32,7 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 - **Content Classification**: NSFW/privacy content filtering with configurable classification windows
 - **Streaming Support**: Full support for streaming responses from all providers
 - **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
-- **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses with exponential backoff and gradual recovery
+- **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses with exponential backoff, gradual recovery, and dashboard monitoring
 - **Rate Limiting**: Built-in rate limiting and graceful error handling
 - **Request Splitting**: Automatic splitting of large requests when exceeding `max_request_tokens` limit
 - **Token Rate Limiting**: Per-model token usage tracking with TPM (tokens per minute), TPH (tokens per hour), and TPD (tokens per day) limits
@@ -48,14 +51,15 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
   - Dashboard endpoints for cache management
 - **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window with provider-specific configurations
 - **Streaming Response Optimization**: 10-20% memory reduction with chunk pooling, backpressure handling, and provider-specific streaming optimizations for Google and Kiro providers
-- **Token Usage Analytics**: Comprehensive analytics dashboard with charts, cost estimation, performance tracking, and export functionality
+- **Token Usage Analytics**: Comprehensive analytics dashboard with charts, cost estimation, performance tracking, filtering by provider/model/rotation, and export functionality
+- **Model Metadata Extraction**: Automatic extraction of pricing, rate limits, and model information from provider responses with dashboard display
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **Self-Signed Certificates**: Automatic generation of self-signed certificates for development/testing
 - **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service (ephemeral and persistent)
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access (SSE and HTTP streaming)
 - **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
-- **User-Specific API Endpoints**: Dedicated API endpoints for authenticated users to access their own configurations
+- **User-Specific API Endpoints**: Dedicated API endpoints for authenticated users to access their own configurations with Bearer token authentication
 - **Database Integration**: SQLite/MySQL-based persistent storage for user configurations, token usage tracking, and context management
 - **User-Specific Configurations**: Each user can have their own providers, rotations, and autoselect configurations stored in the database
 - **Flexible Caching System**: Multi-backend caching for model embeddings and performance optimization
@@ -613,6 +617,57 @@ Users can create and manage their own:
 - **User Dashboard**: Personal configuration management and usage statistics
 - **API Token Management**: Create, view, and delete API tokens with usage analytics
 
+### Adaptive Rate Limiting
+
+AISBF includes intelligent rate limit management that learns from provider 429 responses and automatically adjusts request rates:
+
+#### Features
+- **Learning from 429 Responses**: Automatically detects rate limits from provider error responses
+- **Exponential Backoff with Jitter**: Configurable backoff strategy to avoid thundering herd
+- **Rate Limit Headroom**: Stays 10% below learned limits to prevent hitting rate limits
+- **Gradual Recovery**: Slowly increases rate after consecutive successful requests
+- **Per-Provider Tracking**: Independent rate limiters for each provider
+- **Dashboard Monitoring**: Real-time view of current limits, 429 counts, success rates, and recovery progress
+
+#### Configuration
+
+**Via Dashboard:**
+1. Navigate to Dashboard → Rate Limits
+2. View current rate limits and statistics for each provider
+3. Reset individual provider limits or reset all
+4. Monitor 429 response patterns and success rates
+
+**Via Configuration File:**
+Edit `~/.aisbf/aisbf.json`:
+```json
+{
+  "adaptive_rate_limiting": {
+    "enabled": true,
+    "learning_rate": 0.1,
+    "headroom_percent": 10,
+    "recovery_rate": 0.05,
+    "base_backoff": 1.0,
+    "jitter_factor": 0.1,
+    "history_window": 100
+  }
+}
+```
+
+#### Configuration Fields
+- **`enabled`**: Enable adaptive rate limiting (default: true)
+- **`learning_rate`**: How quickly to adjust limits (0.0-1.0, default: 0.1)
+- **`headroom_percent`**: Safety margin below learned limit (default: 10%)
+- **`recovery_rate`**: Rate of limit increase after successes (default: 0.05)
+- **`base_backoff`**: Base backoff time in seconds (default: 1.0)
+- **`jitter_factor`**: Random jitter to prevent synchronized retries (default: 0.1)
+- **`history_window`**: Number of recent requests to track (default: 100)
+
+#### Benefits
+- **Automatic Optimization**: No manual rate limit configuration needed
+- **Reduced 429 Errors**: Learns optimal request rates for each provider
+- **Better Resource Utilization**: Maximizes throughput while respecting limits
+- **Provider-Specific**: Each provider has independent rate limit tracking
+
 ### Content Classification and Semantic Selection
 
 AISBF provides advanced content filtering and intelligent model selection based on content analysis:
@@ -785,11 +840,22 @@ Authorization: Bearer YOUR_API_TOKEN
 | `POST /api/user/chat/completions` | Chat completions using user's own models |
 | `GET /api/user/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
 
+#### Access Control
+
 **Admin Users** have access to both global and user configurations when using user API endpoints.
 
 **Regular Users** can only access their own configurations.
 
 **Global Tokens** (configured in aisbf.json) have full access to all configurations.
+
+#### Token Management
+
+Users can create and manage API tokens through the dashboard:
+1. Navigate to Dashboard → User Dashboard → API Tokens
+2. Click "Generate New Token" to create a token
+3. Copy the token immediately (it won't be shown again)
+4. Use the token in API requests via Bearer authentication
+5. View token usage statistics and delete tokens as needed
 
 #### Example: Using User API with cURL
 
@@ -802,7 +868,20 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model": "your-rotation/model", "messages": [{"role": "user", "content": "Hello"}]}' \
   http://localhost:17765/api/user/chat/completions
+
+# List user's providers
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+
+# List user's rotations
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations
 ```
+
+#### MCP Integration
+
+User tokens also work with MCP (Model Context Protocol) endpoints:
+- Admin users get access to both global and user-specific MCP tools
+- Regular users get access to user-only MCP tools
+- Tools include model access, configuration management, and usage statistics
 
 ### MCP (Model Context Protocol)
 

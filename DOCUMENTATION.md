@@ -630,6 +630,30 @@ User tokens authenticate MCP requests, with admin users getting full access and 
 
 AISBF supports the following AI providers:
 
+### Model Metadata Extraction
+
+AISBF automatically extracts and tracks model metadata from provider responses:
+
+**Automatic Extraction:**
+- **Pricing Information**: `rate_multiplier`, `rate_unit` (e.g., "per million tokens")
+- **Token Usage**: `prompt_tokens`, `completion_tokens` from API responses
+- **Rate Limits**: Auto-configures rate limits from 429 responses with retry-after headers
+- **Model Details**: `description`, `context_length`, `architecture`, `supported_parameters`
+
+**Dashboard Features:**
+- **"Get Models" Button**: Fetches and displays comprehensive model metadata
+- **Real-time Display**: Shows pricing, rate limits, and capabilities for each model
+- **Extended Fields**: OpenRouter-style metadata including top_provider, pricing details, and architecture
+
+**Configuration:**
+Model metadata is automatically extracted from provider responses and stored in the database. No manual configuration required.
+
+**Benefits:**
+- Automatic rate limit configuration from provider responses
+- Cost estimation based on actual pricing data
+- Better model selection with detailed capability information
+- Reduced manual configuration overhead
+
 ### Google
 - Uses google-genai SDK
 - Requires API key
@@ -1179,6 +1203,58 @@ In this example:
 ```
 
 ### Rate Limiting
+
+#### Adaptive Rate Limiting
+
+AISBF includes intelligent rate limit management that learns from provider 429 responses and automatically adjusts request rates:
+
+**Features:**
+- **Learning from 429 Responses**: Automatically detects rate limits from provider error responses
+- **Exponential Backoff with Jitter**: Configurable backoff strategy to avoid thundering herd
+- **Rate Limit Headroom**: Stays 10% below learned limits to prevent hitting rate limits
+- **Gradual Recovery**: Slowly increases rate after consecutive successful requests
+- **Per-Provider Tracking**: Independent rate limiters for each provider
+- **Dashboard Monitoring**: Real-time view of current limits, 429 counts, success rates, and recovery progress
+
+**Configuration:**
+
+Via Dashboard:
+1. Navigate to Dashboard → Rate Limits
+2. View current rate limits and statistics for each provider
+3. Reset individual provider limits or reset all
+4. Monitor 429 response patterns and success rates
+
+Via Configuration File (`~/.aisbf/aisbf.json`):
+```json
+{
+  "adaptive_rate_limiting": {
+    "enabled": true,
+    "learning_rate": 0.1,
+    "headroom_percent": 10,
+    "recovery_rate": 0.05,
+    "base_backoff": 1.0,
+    "jitter_factor": 0.1,
+    "history_window": 100
+  }
+}
+```
+
+**Configuration Fields:**
+- `enabled`: Enable adaptive rate limiting (default: true)
+- `learning_rate`: How quickly to adjust limits (0.0-1.0, default: 0.1)
+- `headroom_percent`: Safety margin below learned limit (default: 10%)
+- `recovery_rate`: Rate of limit increase after successes (default: 0.05)
+- `base_backoff`: Base backoff time in seconds (default: 1.0)
+- `jitter_factor`: Random jitter to prevent synchronized retries (default: 0.1)
+- `history_window`: Number of recent requests to track (default: 100)
+
+**Benefits:**
+- Automatic optimization without manual rate limit configuration
+- Reduced 429 errors by learning optimal request rates
+- Better resource utilization by maximizing throughput while respecting limits
+- Provider-specific tracking for independent rate limit management
+
+#### Traditional Rate Limiting
 - Automatic provider disabling when rate limited
 - Intelligent parsing of 429 responses to determine wait time
 - Graceful error handling

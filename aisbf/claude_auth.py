@@ -77,7 +77,7 @@ def _generate_client_id():
 # Claude OAuth2 Configuration
 # These values match the official claude-cli implementation
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Official Claude Code client ID
-AUTH_URL = "https://claude.ai/oauth/authorize"  # Authorization endpoint
+AUTH_URL = "https://claude.com/cai/oauth/authorize"  # Authorization endpoint (note: /cai path is required)
 TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"  # Token exchange endpoint
 REDIRECT_URI = "http://localhost:54545/callback"  # OAuth2 callback URI
 CLI_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -141,6 +141,9 @@ class ClaudeAuth:
         """Save credentials to file with file locking to prevent race conditions."""
         try:
             self.tokens = data
+            # Store id_token if received (contains account info)
+            if 'id_token' in data:
+                self.tokens['id_token'] = data['id_token']
             # Add local expiry timestamp for easier checking
             self.tokens['expires_at'] = time.time() + data.get('expires_in', 3600)
             
@@ -281,14 +284,24 @@ class ClaudeAuth:
         logger.error(f"Token refresh failed after {max_retries} attempts")
         return False
     
-    def get_valid_token(self) -> str:
+    def get_valid_token(self, auto_login: bool = False) -> str:
         """
         Get a valid access token, refreshing it if necessary.
         
+        Args:
+            auto_login: If True, automatically trigger login flow when no credentials exist.
+                       If False, raise an exception instead (default: False for security).
+        
         Returns:
             Valid access token
+            
+        Raises:
+            Exception: If no credentials exist and auto_login is False
         """
         if not self.tokens:
+            if not auto_login:
+                logger.error("No Claude credentials available. Please authenticate via dashboard or MCP.")
+                raise Exception("Claude authentication required. Please authenticate via /dashboard/claude/auth/start or MCP tool.")
             logger.info("No tokens available, starting login flow")
             self.login()
         
@@ -296,10 +309,51 @@ class ClaudeAuth:
         if time.time() > (self.tokens.get('expires_at', 0) - 300):
             logger.info("Token expiring soon, refreshing...")
             if not self.refresh_token():
+                if not auto_login:
+                    logger.error("Token refresh failed and auto_login is disabled")
+                    raise Exception("Claude token refresh failed. Please re-authenticate via /dashboard/claude/auth/start or MCP tool.")
                 logger.warning("Refresh failed, re-authenticating...")
                 self.login()
         
         return self.tokens['access_token']
+
+    def get_account_id(self) -> Optional[str]:
+        """
+        Get account_id from OAuth2 credentials.
+        
+        Returns:
+            Account ID if available, None otherwise
+        """
+        if not self.tokens:
+            return None
+        
+        # First check for account.uuid in token response (Claude OAuth2 format)
+        account = self.tokens.get('account')
+        if account and isinstance(account, dict):
+            account_uuid = account.get('uuid')
+            if account_uuid:
+                return account_uuid
+        
+        # Then try to get from id_token (JWT claim)
+        id_token = self.tokens.get('id_token')
+        if id_token:
+            try:
+                import base64
+                import json
+                # Decode JWT payload (second part of JWT)
+                parts = id_token.split('.')
+                if len(parts) >= 2:
+                    # Add padding if needed
+                    payload = parts[1] + '=' * (4 - len(parts[1]) % 4)
+                    decoded = base64.urlsafe_b64decode(payload)
+                    claims = json.loads(decoded)
+                    # Try sub claim first, then account_id
+                    return claims.get('sub') or claims.get('account_id')
+            except Exception:
+                pass
+        
+        # Fall back to direct account_id field in token response
+        return self.tokens.get('account_id') or self.tokens.get('account_uuid')
     
     def login(self, use_local_server=True):
         """
@@ -333,7 +387,7 @@ class ClaudeAuth:
                 "client_id": CLIENT_ID,
                 "response_type": "code",
                 "redirect_uri": REDIRECT_URI,
-                "scope": "org:create_api_key user:profile user:inference",
+                "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
                 "state": state
@@ -442,7 +496,7 @@ class ClaudeAuth:
             "client_id": CLIENT_ID,
             "response_type": "code",
             "redirect_uri": REDIRECT_URI,
-            "scope": "org:create_api_key user:profile user:inference",
+            "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
             "code_challenge": challenge,
             "code_challenge_method": "S256",
             "state": state

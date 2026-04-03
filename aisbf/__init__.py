@@ -46,7 +46,7 @@ from .providers import (
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
-__version__ = "0.3.3"
+__version__ = "0.9.2"
 __all__ = [
     # Config
     "config",

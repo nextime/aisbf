@@ -43,6 +43,482 @@ from .batching import get_request_batcher
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
 
+class AnthropicFormatConverter:
+    """
+    Shared utility class for converting between OpenAI and Anthropic message formats.
+    Used by both AnthropicProviderHandler and ClaudeProviderHandler.
+    
+    All methods are static to allow usage without instantiation.
+    """
+    
+    # Anthropic stop_reason → OpenAI finish_reason mapping
+    STOP_REASON_MAP = {
+        'end_turn': 'stop',
+        'max_tokens': 'length',
+        'stop_sequence': 'stop',
+        'tool_use': 'tool_calls'
+    }
+    
+    @staticmethod
+    def sanitize_tool_call_id(tool_call_id: str) -> str:
+        """Sanitize tool call ID for Anthropic API (alphanumeric, underscore, hyphen only)."""
+        import re
+        return re.sub(r'[^a-zA-Z0-9_-]', '_', tool_call_id)
+    
+    @staticmethod
+    def filter_empty_content(content) -> Union[str, list, None]:
+        """Filter empty content from messages for Anthropic API compatibility."""
+        if content is None:
+            return None
+        if isinstance(content, str):
+            return None if content.strip() == "" else content
+        if isinstance(content, list):
+            filtered = []
+            for block in content:
+                if isinstance(block, dict):
+                    if block.get('type') == 'text':
+                        text = block.get('text', '')
+                        if text and text.strip():
+                            filtered.append(block)
+                    else:
+                        filtered.append(block)
+                else:
+                    filtered.append(block)
+            return filtered if filtered else None
+        return content
+    
+    @staticmethod
+    def extract_images_from_content(content) -> list:
+        """
+        Convert OpenAI image_url content blocks to Anthropic image source format.
+        
+        Handles:
+        - data:image/jpeg;base64,... → {"type": "image", "source": {"type": "base64", ...}}
+        - https://... → {"type": "image", "source": {"type": "url", ...}}
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if not isinstance(content, list):
+            return []
+        
+        images = []
+        max_image_size = 5 * 1024 * 1024  # 5MB
+        
+        for block in content:
+            if not isinstance(block, dict):
+                continue
+            if block.get('type') != 'image_url':
+                continue
+            
+            image_url_obj = block.get('image_url', {})
+            url = image_url_obj.get('url', '') if isinstance(image_url_obj, dict) else ''
+            if not url:
+                continue
+            
+            if url.startswith('data:'):
+                try:
+                    header, data = url.split(',', 1)
+                    media_type = header.split(';')[0].replace('data:', '')
+                    if len(data) > max_image_size:
+                        logger.warning(f"Image too large ({len(data)} bytes), skipping")
+                        continue
+                    images.append({
+                        'type': 'image',
+                        'source': {'type': 'base64', 'media_type': media_type, 'data': data}
+                    })
+                except (ValueError, IndexError) as e:
+                    logger.warning(f"Failed to parse data URL: {e}")
+            elif url.startswith(('http://', 'https://')):
+                images.append({
+                    'type': 'image',
+                    'source': {'type': 'url', 'url': url}
+                })
+            elif block.get('type') == 'image' and 'source' in block:
+                images.append(block)
+        
+        return images
+    
+    @staticmethod
+    def convert_messages_to_anthropic(messages: list, sanitize_ids: bool = True) -> tuple:
+        """
+        Convert OpenAI messages to Anthropic format.
+        
+        Handles:
+        - System message extraction (separate 'system' parameter)
+        - Tool role → user message with tool_result content blocks
+        - Assistant tool_calls → tool_use content blocks
+        - Multimodal content (images)
+        - Empty content filtering
+        
+        Args:
+            messages: OpenAI format messages
+            sanitize_ids: Whether to sanitize tool call IDs
+            
+        Returns:
+            Tuple of (system_message: str|None, anthropic_messages: list)
+        """
+        import logging
+        import json
+        
+        system_message = None
+        anthropic_messages = []
+        
+        for msg in messages:
+            role = msg.get('role')
+            content = msg.get('content')
+            
+            if role == 'system':
+                system_message = content
+                logging.info(f"AnthropicFormatConverter: Extracted system message ({len(content) if content else 0} chars)")
+            
+            elif role == 'tool':
+                tool_call_id = msg.get('tool_call_id', msg.get('name', 'unknown'))
+                tool_result_block = {
+                    'type': 'tool_result',
+                    'tool_use_id': tool_call_id,
+                    'content': content or ""
+                }
+                
+                if anthropic_messages and anthropic_messages[-1]['role'] == 'user':
+                    last_content = anthropic_messages[-1]['content']
+                    if isinstance(last_content, str):
+                        anthropic_messages[-1]['content'] = [
+                            {'type': 'text', 'text': last_content},
+                            tool_result_block
+                        ]
+                    elif isinstance(last_content, list):
+                        anthropic_messages[-1]['content'].append(tool_result_block)
+                else:
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': [tool_result_block]
+                    })
+            
+            elif role == 'assistant':
+                tool_calls = msg.get('tool_calls')
+                
+                if tool_calls:
+                    content_blocks = []
+                    filtered = AnthropicFormatConverter.filter_empty_content(content)
+                    if filtered:
+                        if isinstance(filtered, str):
+                            content_blocks.append({'type': 'text', 'text': filtered})
+                        elif isinstance(filtered, list):
+                            content_blocks.extend(filtered)
+                    
+                    for tc in tool_calls:
+                        raw_id = tc.get('id', f"toolu_{len(content_blocks)}")
+                        tool_id = AnthropicFormatConverter.sanitize_tool_call_id(raw_id) if sanitize_ids else raw_id
+                        function = tc.get('function', {})
+                        arguments = function.get('arguments', {})
+                        if isinstance(arguments, str):
+                            try:
+                                arguments = json.loads(arguments)
+                            except json.JSONDecodeError:
+                                arguments = {}
+                        
+                        content_blocks.append({
+                            'type': 'tool_use',
+                            'id': tool_id,
+                            'name': function.get('name', ''),
+                            'input': arguments
+                        })
+                    
+                    if content_blocks:
+                        anthropic_messages.append({
+                            'role': 'assistant',
+                            'content': content_blocks
+                        })
+                else:
+                    filtered = AnthropicFormatConverter.filter_empty_content(content)
+                    if filtered is None:
+                        continue
+                    
+                    if isinstance(filtered, list):
+                        text_parts = []
+                        for block in filtered:
+                            if isinstance(block, dict):
+                                text_parts.append(block.get('text', ''))
+                            elif isinstance(block, str):
+                                text_parts.append(block)
+                        content_str = '\n'.join(text_parts)
+                    else:
+                        content_str = filtered or ""
+                    
+                    if content_str:
+                        anthropic_messages.append({
+                            'role': 'assistant',
+                            'content': content_str
+                        })
+            
+            elif role == 'user':
+                if isinstance(content, list):
+                    content_blocks = []
+                    images = AnthropicFormatConverter.extract_images_from_content(content)
+                    
+                    for block in content:
+                        if isinstance(block, dict):
+                            btype = block.get('type', '')
+                            if btype == 'text':
+                                content_blocks.append(block)
+                            elif btype not in ('image_url', 'image'):
+                                content_blocks.append(block)
+                        elif isinstance(block, str):
+                            content_blocks.append({'type': 'text', 'text': block})
+                    
+                    content_blocks.extend(images)
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': content_blocks if content_blocks else content or ""
+                    })
+                else:
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': content or ""
+                    })
+            
+            else:
+                logging.warning(f"AnthropicFormatConverter: Unknown role '{role}', treating as user")
+                anthropic_messages.append({
+                    'role': 'user',
+                    'content': content or ""
+                })
+        
+        logging.info(f"AnthropicFormatConverter: Converted {len(messages)} OpenAI → {len(anthropic_messages)} Anthropic messages")
+        return system_message, anthropic_messages
+    
+    @staticmethod
+    def convert_tools_to_anthropic(tools: list) -> Optional[list]:
+        """
+        Convert OpenAI tools to Anthropic format with schema normalization.
+        
+        Normalizes:
+        - ["string", "null"] → "string"
+        - Removes additionalProperties: false
+        - Cleans up required array for nullable fields
+        """
+        import logging
+        
+        if not tools:
+            return None
+        
+        def normalize_schema(schema):
+            if not isinstance(schema, dict):
+                return schema
+            result = {}
+            for key, value in schema.items():
+                if key == "type" and isinstance(value, list):
+                    non_null = [t for t in value if t != "null"]
+                    result[key] = non_null[0] if len(non_null) == 1 else (non_null if non_null else "string")
+                elif key == "properties" and isinstance(value, dict):
+                    result[key] = {k: normalize_schema(v) for k, v in value.items()}
+                elif key == "items" and isinstance(value, dict):
+                    result[key] = normalize_schema(value)
+                elif key == "additionalProperties" and value is False:
+                    continue
+                elif key == "required" and isinstance(value, list):
+                    props = schema.get("properties", {})
+                    cleaned = [f for f in value if f in props and not (isinstance(props.get(f, {}), dict) and isinstance(props[f].get("type"), list) and "null" in props[f]["type"])]
+                    if cleaned:
+                        result[key] = cleaned
+                else:
+                    result[key] = value
+            return result
+        
+        anthropic_tools = []
+        for tool in tools:
+            if tool.get("type") == "function":
+                function = tool.get("function", {})
+                anthropic_tools.append({
+                    "name": function.get("name", ""),
+                    "description": function.get("description", ""),
+                    "input_schema": normalize_schema(function.get("parameters", {}))
+                })
+                logging.info(f"AnthropicFormatConverter: Converted tool: {function.get('name')}")
+        
+        return anthropic_tools if anthropic_tools else None
+    
+    @staticmethod
+    def convert_tool_choice_to_anthropic(tool_choice) -> Optional[dict]:
+        """
+        Convert OpenAI tool_choice to Anthropic format.
+        
+        "auto" → {"type": "auto"}
+        "none" → None
+        "required" → {"type": "any"}
+        {"type": "function", "function": {"name": "X"}} → {"type": "tool", "name": "X"}
+        """
+        import logging
+        
+        if not tool_choice:
+            return None
+        
+        if isinstance(tool_choice, str):
+            if tool_choice == "auto":
+                return {"type": "auto"}
+            elif tool_choice == "none":
+                return None
+            elif tool_choice == "required":
+                return {"type": "any"}
+            else:
+                logging.warning(f"Unknown tool_choice: {tool_choice}")
+                return {"type": "auto"}
+        
+        if isinstance(tool_choice, dict):
+            if tool_choice.get("type") == "function":
+                name = tool_choice.get("function", {}).get("name")
+                return {"type": "tool", "name": name} if name else {"type": "auto"}
+            return tool_choice
+        
+        return {"type": "auto"}
+    
+    @staticmethod
+    def convert_anthropic_response_to_openai(response_data: dict, provider_id: str, model: str) -> dict:
+        """
+        Convert Anthropic API response (dict) to OpenAI chat completion format.
+        
+        Handles text blocks, tool_use blocks, thinking blocks, usage metadata, stop reasons.
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        content_text = ""
+        tool_calls = []
+        thinking_text = ""
+        
+        for block in response_data.get('content', []):
+            btype = block.get('type', '')
+            if btype == 'text':
+                content_text += block.get('text', '')
+            elif btype == 'tool_use':
+                tool_calls.append({
+                    'id': block.get('id', f"call_{len(tool_calls)}"),
+                    'type': 'function',
+                    'function': {
+                        'name': block.get('name', ''),
+                        'arguments': json.dumps(block.get('input', {}))
+                    }
+                })
+            elif btype == 'thinking':
+                thinking_text = block.get('thinking', '')
+            elif btype == 'redacted_thinking':
+                logger.debug("Found redacted_thinking block")
+        
+        stop_reason = response_data.get('stop_reason', 'end_turn')
+        finish_reason = AnthropicFormatConverter.STOP_REASON_MAP.get(stop_reason, 'stop')
+        
+        usage = response_data.get('usage', {})
+        input_tokens = usage.get('input_tokens', 0)
+        output_tokens = usage.get('output_tokens', 0)
+        cache_read = usage.get('cache_read_input_tokens', 0)
+        cache_creation = usage.get('cache_creation_input_tokens', 0)
+        
+        openai_response = {
+            'id': f"{provider_id}-{model}-{int(time.time())}",
+            'object': 'chat.completion',
+            'created': int(time.time()),
+            'model': f'{provider_id}/{model}',
+            'choices': [{
+                'index': 0,
+                'message': {
+                    'role': 'assistant',
+                    'content': content_text if content_text else None
+                },
+                'finish_reason': finish_reason
+            }],
+            'usage': {
+                'prompt_tokens': input_tokens,
+                'completion_tokens': output_tokens,
+                'total_tokens': input_tokens + output_tokens,
+                'prompt_tokens_details': {'cached_tokens': cache_read, 'audio_tokens': 0},
+                'completion_tokens_details': {'reasoning_tokens': 0, 'audio_tokens': 0}
+            }
+        }
+        
+        if tool_calls:
+            openai_response['choices'][0]['message']['tool_calls'] = tool_calls
+        
+        if thinking_text:
+            openai_response['choices'][0]['message']['provider_options'] = {
+                'anthropic': {'thinking': thinking_text}
+            }
+        
+        return openai_response
+    
+    @staticmethod
+    def convert_anthropic_sdk_response_to_openai(response, provider_id: str, model: str) -> dict:
+        """
+        Convert Anthropic SDK response object (with attributes) to OpenAI format.
+        """
+        import json
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        content_text = ""
+        tool_calls = []
+        thinking_text = ""
+        
+        for block in getattr(response, 'content', []):
+            btype = getattr(block, 'type', '')
+            if btype == 'text' or hasattr(block, 'text'):
+                content_text += getattr(block, 'text', '')
+            elif btype == 'tool_use':
+                raw_input = getattr(block, 'input', {})
+                tool_calls.append({
+                    'id': getattr(block, 'id', f"call_{len(tool_calls)}"),
+                    'type': 'function',
+                    'function': {
+                        'name': getattr(block, 'name', ''),
+                        'arguments': json.dumps(raw_input) if isinstance(raw_input, dict) else str(raw_input)
+                    }
+                })
+            elif btype == 'thinking':
+                thinking_text = getattr(block, 'thinking', '')
+        
+        stop_reason = getattr(response, 'stop_reason', 'end_turn') or 'end_turn'
+        finish_reason = AnthropicFormatConverter.STOP_REASON_MAP.get(stop_reason, 'stop')
+        
+        usage_obj = getattr(response, 'usage', None)
+        input_tokens = getattr(usage_obj, 'input_tokens', 0) or 0 if usage_obj else 0
+        output_tokens = getattr(usage_obj, 'output_tokens', 0) or 0 if usage_obj else 0
+        cache_read = getattr(usage_obj, 'cache_read_input_tokens', 0) or 0 if usage_obj else 0
+        cache_creation = getattr(usage_obj, 'cache_creation_input_tokens', 0) or 0 if usage_obj else 0
+        
+        openai_response = {
+            'id': getattr(response, 'id', f"{provider_id}-{model}-{int(time.time())}"),
+            'object': 'chat.completion',
+            'created': int(time.time()),
+            'model': f'{provider_id}/{model}',
+            'choices': [{
+                'index': 0,
+                'message': {
+                    'role': 'assistant',
+                    'content': content_text if content_text else None
+                },
+                'finish_reason': finish_reason
+            }],
+            'usage': {
+                'prompt_tokens': input_tokens,
+                'completion_tokens': output_tokens,
+                'total_tokens': input_tokens + output_tokens,
+                'prompt_tokens_details': {'cached_tokens': cache_read, 'audio_tokens': 0},
+                'completion_tokens_details': {'reasoning_tokens': 0, 'audio_tokens': 0}
+            }
+        }
+        
+        if tool_calls:
+            openai_response['choices'][0]['message']['tool_calls'] = tool_calls
+        
+        if thinking_text:
+            openai_response['choices'][0]['message']['provider_options'] = {
+                'anthropic': {'thinking': thinking_text}
+            }
+        
+        return openai_response
+
+
 class AdaptiveRateLimiter:
     """
     Adaptive Rate Limiter that learns optimal rate limits from 429 responses.
@@ -2031,39 +2507,261 @@ class AnthropicProviderHandler(BaseProviderHandler):
             if enable_native_caching:
                 logging.info(f"AnthropicProviderHandler: Min cacheable tokens: {min_cacheable_tokens}")
 
-            # Prepare messages with cache_control if enabled
+            # Convert OpenAI messages to Anthropic format
+            # Key differences:
+            # 1. System messages extracted to separate 'system' parameter
+            # 2. Tool role messages → user messages with tool_result content blocks
+            # 3. Assistant messages with tool_calls → tool_use content blocks
+            # 4. Images: OpenAI image_url → Anthropic image source format
+            system_message = None
             anthropic_messages = []
-            if enable_native_caching:
-                # Count cumulative tokens for cache decision
-                cumulative_tokens = 0
-                for i, msg in enumerate(messages):
-                    # Count tokens in this message
-                    message_tokens = count_messages_tokens([msg], model)
-                    cumulative_tokens += message_tokens
-
-                    # Convert to Anthropic message format
-                    anthropic_msg = {"role": msg["role"], "content": msg["content"]}
-
-                    # Apply cache_control based on position and token count
-                    # Cache system messages and long conversation prefixes
-                    if (msg["role"] == "system" or
-                        (i < len(messages) - 2 and cumulative_tokens >= min_cacheable_tokens)):
-                        anthropic_msg["cache_control"] = {"type": "ephemeral"}
-                        logging.info(f"AnthropicProviderHandler: Applied cache_control to message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+            
+            for msg in messages:
+                role = msg.get('role')
+                content = msg.get('content')
+                
+                if role == 'system':
+                    # Extract system message (Anthropic uses separate 'system' parameter)
+                    system_message = content
+                    logging.info(f"AnthropicProviderHandler: Extracted system message ({len(content) if content else 0} chars)")
+                
+                elif role == 'tool':
+                    # Convert tool message to user message with tool_result content block
+                    tool_call_id = msg.get('tool_call_id', msg.get('name', 'unknown'))
+                    tool_result_block = {
+                        'type': 'tool_result',
+                        'tool_use_id': tool_call_id,
+                        'content': content or ""
+                    }
+                    
+                    # Merge into existing user message if last message is user
+                    if anthropic_messages and anthropic_messages[-1]['role'] == 'user':
+                        last_content = anthropic_messages[-1]['content']
+                        if isinstance(last_content, str):
+                            anthropic_messages[-1]['content'] = [
+                                {'type': 'text', 'text': last_content},
+                                tool_result_block
+                            ]
+                        elif isinstance(last_content, list):
+                            anthropic_messages[-1]['content'].append(tool_result_block)
+                        logging.info(f"AnthropicProviderHandler: Appended tool_result to existing user message")
                     else:
-                        logging.info(f"AnthropicProviderHandler: Not caching message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
-
-                    anthropic_messages.append(anthropic_msg)
+                        anthropic_messages.append({
+                            'role': 'user',
+                            'content': [tool_result_block]
+                        })
+                        logging.info(f"AnthropicProviderHandler: Created new user message with tool_result")
+                
+                elif role == 'assistant':
+                    tool_calls = msg.get('tool_calls')
+                    
+                    if tool_calls:
+                        # Convert to Anthropic format with tool_use content blocks
+                        content_blocks = []
+                        
+                        # Add text content if present
+                        if content and isinstance(content, str) and content.strip():
+                            content_blocks.append({'type': 'text', 'text': content})
+                        elif content and isinstance(content, list):
+                            content_blocks.extend(content)
+                        
+                        # Add tool_use blocks
+                        import json as _json
+                        for tc in tool_calls:
+                            tool_id = tc.get('id', f"toolu_{len(content_blocks)}")
+                            function = tc.get('function', {})
+                            tool_name = function.get('name', '')
+                            arguments = function.get('arguments', {})
+                            if isinstance(arguments, str):
+                                try:
+                                    arguments = _json.loads(arguments)
+                                except _json.JSONDecodeError:
+                                    logging.warning(f"AnthropicProviderHandler: Failed to parse tool arguments: {arguments}")
+                                    arguments = {}
+                            
+                            content_blocks.append({
+                                'type': 'tool_use',
+                                'id': tool_id,
+                                'name': tool_name,
+                                'input': arguments
+                            })
+                            logging.info(f"AnthropicProviderHandler: Converted tool_call to tool_use: {tool_name}")
+                        
+                        if content_blocks:
+                            anthropic_messages.append({
+                                'role': 'assistant',
+                                'content': content_blocks
+                            })
+                    else:
+                        # Regular assistant message - handle potentially None content
+                        if content is not None:
+                            anthropic_messages.append({
+                                'role': 'assistant',
+                                'content': content
+                            })
+                        else:
+                            # Skip assistant messages with None content (tool_calls-only messages
+                            # that were already handled above shouldn't reach here)
+                            logging.info(f"AnthropicProviderHandler: Skipping assistant message with None content")
+                
+                elif role == 'user':
+                    # Handle multimodal content (images)
+                    if isinstance(content, list):
+                        content_blocks = []
+                        for block in content:
+                            if isinstance(block, dict):
+                                block_type = block.get('type', '')
+                                if block_type == 'text':
+                                    content_blocks.append(block)
+                                elif block_type == 'image_url':
+                                    # Convert OpenAI image_url to Anthropic image source
+                                    image_url_obj = block.get('image_url', {})
+                                    url = image_url_obj.get('url', '') if isinstance(image_url_obj, dict) else ''
+                                    if url.startswith('data:'):
+                                        try:
+                                            header, data = url.split(',', 1)
+                                            media_type = header.split(';')[0].replace('data:', '')
+                                            content_blocks.append({
+                                                'type': 'image',
+                                                'source': {
+                                                    'type': 'base64',
+                                                    'media_type': media_type,
+                                                    'data': data
+                                                }
+                                            })
+                                        except (ValueError, IndexError) as e:
+                                            logging.warning(f"AnthropicProviderHandler: Failed to parse data URL: {e}")
+                                    elif url.startswith(('http://', 'https://')):
+                                        content_blocks.append({
+                                            'type': 'image',
+                                            'source': {
+                                                'type': 'url',
+                                                'url': url
+                                            }
+                                        })
+                                else:
+                                    content_blocks.append(block)
+                            elif isinstance(block, str):
+                                content_blocks.append({'type': 'text', 'text': block})
+                        
+                        anthropic_messages.append({
+                            'role': 'user',
+                            'content': content_blocks if content_blocks else content or ""
+                        })
+                    else:
+                        anthropic_messages.append({
+                            'role': 'user',
+                            'content': content or ""
+                        })
+                
+                else:
+                    logging.warning(f"AnthropicProviderHandler: Unknown message role '{role}', treating as user")
+                    anthropic_messages.append({
+                        'role': 'user',
+                        'content': content or ""
+                    })
+            
+            logging.info(f"AnthropicProviderHandler: Converted {len(messages)} OpenAI messages to {len(anthropic_messages)} Anthropic messages")
+            if system_message:
+                logging.info(f"AnthropicProviderHandler: System message extracted ({len(system_message)} chars)")
+            
+            # Apply cache_control if native caching is enabled
+            if enable_native_caching:
+                cumulative_tokens = 0
+                for i, msg in enumerate(anthropic_messages):
+                    message_tokens = count_messages_tokens([{'role': msg['role'], 'content': msg['content'] if isinstance(msg['content'], str) else str(msg['content'])}], model)
+                    cumulative_tokens += message_tokens
+                    
+                    if i < len(anthropic_messages) - 2 and cumulative_tokens >= min_cacheable_tokens:
+                        content = msg.get('content')
+                        if isinstance(content, str) and content.strip():
+                            msg['content'] = [
+                                {
+                                    'type': 'text',
+                                    'text': content,
+                                    'cache_control': {'type': 'ephemeral'}
+                                }
+                            ]
+                        elif isinstance(content, list) and content:
+                            content[-1]['cache_control'] = {'type': 'ephemeral'}
+                        logging.info(f"AnthropicProviderHandler: Applied cache_control to message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+                
+                # Also apply cache_control to system message if present
+                if system_message:
+                    system_message_param = [{
+                        'type': 'text',
+                        'text': system_message,
+                        'cache_control': {'type': 'ephemeral'}
+                    }]
+                else:
+                    system_message_param = None
             else:
-                # Standard message formatting without caching
-                anthropic_messages = [{"role": msg["role"], "content": msg["content"]} for msg in messages]
-
-            response = self.client.messages.create(
-                model=model,
-                messages=anthropic_messages,
-                max_tokens=max_tokens,
-                temperature=temperature
-            )
+                system_message_param = system_message
+            
+            # Convert OpenAI tools to Anthropic format
+            anthropic_tools = None
+            if tools:
+                anthropic_tools = []
+                for tool in tools:
+                    if tool.get("type") == "function":
+                        function = tool.get("function", {})
+                        anthropic_tools.append({
+                            "name": function.get("name", ""),
+                            "description": function.get("description", ""),
+                            "input_schema": function.get("parameters", {})
+                        })
+                        logging.info(f"AnthropicProviderHandler: Converted tool to Anthropic format: {function.get('name')}")
+                if not anthropic_tools:
+                    anthropic_tools = None
+            
+            # Convert OpenAI tool_choice to Anthropic format
+            anthropic_tool_choice = None
+            if tool_choice and anthropic_tools:
+                if isinstance(tool_choice, str):
+                    if tool_choice == "auto":
+                        anthropic_tool_choice = {"type": "auto"}
+                    elif tool_choice == "required":
+                        anthropic_tool_choice = {"type": "any"}
+                    elif tool_choice == "none":
+                        anthropic_tool_choice = None
+                elif isinstance(tool_choice, dict):
+                    if tool_choice.get("type") == "function":
+                        func_name = tool_choice.get("function", {}).get("name")
+                        if func_name:
+                            anthropic_tool_choice = {"type": "tool", "name": func_name}
+            
+            # Build API call parameters
+            api_params = {
+                'model': model,
+                'messages': anthropic_messages,
+                'max_tokens': max_tokens or 4096,
+                'temperature': temperature,
+            }
+            
+            if system_message_param:
+                api_params['system'] = system_message_param
+            
+            if anthropic_tools:
+                api_params['tools'] = anthropic_tools
+            
+            if anthropic_tool_choice:
+                api_params['tool_choice'] = anthropic_tool_choice
+            
+            if AISBF_DEBUG:
+                import json as _json
+                logging.info(f"=== ANTHROPIC API REQUEST PAYLOAD ===")
+                # Sanitize for logging (don't log full base64 images)
+                debug_params = dict(api_params)
+                logging.info(f"Request keys: {list(debug_params.keys())}")
+                logging.info(f"Model: {debug_params.get('model')}")
+                logging.info(f"Messages count: {len(debug_params.get('messages', []))}")
+                logging.info(f"Tools count: {len(debug_params.get('tools', []) or [])}")
+                logging.info(f"Tool choice: {debug_params.get('tool_choice')}")
+                logging.info(f"System: {'present' if debug_params.get('system') else 'none'}")
+                logging.info(f"Full payload: {_json.dumps(debug_params, indent=2, default=str)}")
+                logging.info(f"=== END ANTHROPIC API REQUEST PAYLOAD ===")
+            
+            response = self.client.messages.create(**api_params)
             logging.info(f"AnthropicProviderHandler: Response received: {response}")
             self.record_success()
             
@@ -2112,13 +2810,17 @@ class AnthropicProviderHandler(BaseProviderHandler):
                             logging.info(f"Tool use block: {block}")
                             
                             try:
+                                import json as _json_tc
                                 # Convert Anthropic tool_use to OpenAI tool_calls format
+                                # OpenAI requires arguments to be a JSON string, not a dict
+                                raw_input = block.input if hasattr(block, 'input') else {}
+                                arguments_str = _json_tc.dumps(raw_input) if isinstance(raw_input, dict) else str(raw_input)
                                 openai_tool_call = {
-                                    "id": f"call_{call_id}",
+                                    "id": block.id if hasattr(block, 'id') else f"call_{call_id}",
                                     "type": "function",
                                     "function": {
                                         "name": block.name if hasattr(block, 'name') else "",
-                                        "arguments": block.input if hasattr(block, 'input') else {}
+                                        "arguments": arguments_str
                                     }
                                 }
                                 openai_tool_calls.append(openai_tool_call)
@@ -2176,9 +2878,9 @@ class AnthropicProviderHandler(BaseProviderHandler):
                     "finish_reason": finish_reason
                 }],
                 "usage": {
-                    "prompt_tokens": getattr(response, "usage", {}).get("input_tokens", 0),
-                    "completion_tokens": getattr(response, "usage", {}).get("output_tokens", 0),
-                    "total_tokens": getattr(response, "usage", {}).get("input_tokens", 0) + getattr(response, "usage", {}).get("output_tokens", 0)
+                    "prompt_tokens": getattr(getattr(response, "usage", None), "input_tokens", 0) or 0,
+                    "completion_tokens": getattr(getattr(response, "usage", None), "output_tokens", 0) or 0,
+                    "total_tokens": (getattr(getattr(response, "usage", None), "input_tokens", 0) or 0) + (getattr(getattr(response, "usage", None), "output_tokens", 0) or 0)
                 }
             }
             
@@ -2333,8 +3035,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
         from .claude_auth import ClaudeAuth
         self.auth = ClaudeAuth(credentials_file=credentials_file)
         
-        # Anthropic SDK client - created lazily with OAuth2 token
-        self._sdk_client = None
+        # HTTP client for direct API requests (OAuth2 requires direct HTTP, not SDK)
+        self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
         
         # Streaming idle watchdog configuration (Phase 1.3)
         self.stream_idle_timeout = 90.0  # seconds - matches vendors/claude
@@ -2347,6 +3049,184 @@ class ClaudeProviderHandler(BaseProviderHandler):
             'cache_tokens_created': 0,
             'total_requests': 0,
         }
+        
+        # Session management for quota tracking
+        self.session_state = {
+            'initialized': False,
+            'session_id': None,
+            'device_id': None,
+            'account_uuid': None,
+            'organization_id': None,
+            'last_initialized': None,
+            'quota_5h_reset': None,
+            'quota_5h_utilization': None,
+            'quota_7d_reset': None,
+            'quota_7d_utilization': None,
+            'representative_claim': None,
+            'status': None,
+            'session_timeout': 3600,  # 1 hour session timeout
+        }
+        
+        # Initialize persistent identifiers for metadata
+        self._init_session_identifiers()
+    
+    def _init_session_identifiers(self):
+        """Initialize persistent session identifiers (device_id, account_uuid, session_id)."""
+        import uuid
+        import hashlib
+        
+        # Generate device_id (consistent hash based on provider_id)
+        if not self.session_state.get('device_id'):
+            device_seed = f"{self.provider_id}-{time.time()}"
+            self.session_state['device_id'] = hashlib.sha256(device_seed.encode()).hexdigest()
+        
+        # Get account_uuid from OAuth2 credentials (persistent per user)
+        if not self.session_state.get('account_uuid'):
+            # Try to get from OAuth2 credentials first
+            account_id = self.auth.get_account_id()
+            if account_id:
+                self.session_state['account_uuid'] = account_id
+            else:
+                # Fall back to UUID if not available
+                self.session_state['account_uuid'] = str(uuid.uuid4())
+        
+        # Session ID will be generated on first use in _get_auth_headers
+    
+    async def _initialize_session(self):
+        """
+        Initialize session by sending a quota request to get rate limit information.
+        
+        This matches the claude-cli behavior of sending an initial "quota" request
+        to obtain subscriber quota information from the API headers.
+        """
+        import logging
+        import json
+        
+        logger = logging.getLogger(__name__)
+        logger.info("ClaudeProviderHandler: Initializing session for quota tracking")
+        
+        try:
+            # Get auth headers (this will initialize session_id if needed)
+            headers = self._get_auth_headers(stream=False)
+            
+            # Build minimal quota request (matching claude-cli)
+            # Use persistent identifiers from session_state
+            payload = {
+                'model': 'claude-haiku-4-5-20251001',  # Use cheapest model for quota check
+                'max_tokens': 1,
+                'messages': [
+                    {
+                        'role': 'user',
+                        'content': 'quota'
+                    }
+                ],
+                'metadata': {
+                    'user_id': json.dumps({
+                        'device_id': self.session_state['device_id'],
+                        'account_uuid': self.session_state['account_uuid'],
+                        'session_id': self.session_state['session_id']
+                    })
+                }
+            }
+            
+            # Send quota request
+            api_url = 'https://api.anthropic.com/v1/messages?beta=true'
+            response = await self.client.post(api_url, headers=headers, json=payload)
+            
+            if response.status_code == 200:
+                # Parse rate limit headers
+                headers_dict = dict(response.headers)
+                
+                self.session_state.update({
+                    'initialized': True,
+                    'last_initialized': time.time(),
+                    'organization_id': headers_dict.get('anthropic-organization-id'),
+                    'quota_5h_reset': headers_dict.get('anthropic-ratelimit-unified-5h-reset'),
+                    'quota_5h_utilization': headers_dict.get('anthropic-ratelimit-unified-5h-utilization'),
+                    'quota_7d_reset': headers_dict.get('anthropic-ratelimit-unified-7d-reset'),
+                    'quota_7d_utilization': headers_dict.get('anthropic-ratelimit-unified-7d-utilization'),
+                    'representative_claim': headers_dict.get('anthropic-ratelimit-unified-representative-claim'),
+                    'status': headers_dict.get('anthropic-ratelimit-unified-status'),
+                })
+                
+                logger.info(f"ClaudeProviderHandler: Session initialized successfully")
+                logger.info(f"  Organization ID: {self.session_state['organization_id']}")
+                logger.info(f"  5h utilization: {self.session_state['quota_5h_utilization']}")
+                logger.info(f"  7d utilization: {self.session_state['quota_7d_utilization']}")
+                logger.info(f"  Representative claim: {self.session_state['representative_claim']}")
+                logger.info(f"  Status: {self.session_state['status']}")
+                
+                return True
+            else:
+                logger.warning(f"ClaudeProviderHandler: Session initialization failed: {response.status_code}")
+                return False
+                
+        except Exception as e:
+            logger.error(f"ClaudeProviderHandler: Session initialization error: {e}", exc_info=True)
+            return False
+    
+    def _should_refresh_session(self) -> bool:
+        """
+        Check if session should be refreshed based on timeout or rate limit status.
+        
+        Returns:
+            True if session needs refresh, False otherwise
+        """
+        if not self.session_state['initialized']:
+            return True
+        
+        # Check session timeout
+        if self.session_state['last_initialized']:
+            age = time.time() - self.session_state['last_initialized']
+            if age > self.session_state['session_timeout']:
+                return True
+        
+        # Check if rate limited
+        if self.session_state['status'] != 'allowed':
+            return True
+        
+        return False
+    
+    async def _ensure_session(self):
+        """
+        Ensure session is initialized and valid before making requests.
+        
+        This is called before each request to maintain quota tracking.
+        """
+        if self._should_refresh_session():
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info("ClaudeProviderHandler: Session needs refresh, initializing...")
+            await self._initialize_session()
+    
+    def _update_session_from_headers(self, headers: Dict):
+        """
+        Update session state from response headers.
+        
+        This is called after each request to keep quota information current.
+        
+        Args:
+            headers: Response headers dict
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Update quota information from headers
+        if 'anthropic-ratelimit-unified-5h-utilization' in headers:
+            old_util = self.session_state.get('quota_5h_utilization')
+            new_util = headers.get('anthropic-ratelimit-unified-5h-utilization')
+            
+            self.session_state.update({
+                'quota_5h_reset': headers.get('anthropic-ratelimit-unified-5h-reset'),
+                'quota_5h_utilization': new_util,
+                'quota_7d_reset': headers.get('anthropic-ratelimit-unified-7d-reset'),
+                'quota_7d_utilization': headers.get('anthropic-ratelimit-unified-7d-utilization'),
+                'representative_claim': headers.get('anthropic-ratelimit-unified-representative-claim'),
+                'status': headers.get('anthropic-ratelimit-unified-status'),
+            })
+            
+            if old_util != new_util:
+                logger.debug(f"ClaudeProviderHandler: Quota utilization updated: {old_util} -> {new_util}")
     
     def _get_sdk_client(self):
         """
@@ -2388,36 +3268,61 @@ class ClaudeProviderHandler(BaseProviderHandler):
         """
         Get HTTP headers with OAuth2 Bearer token.
         Used for direct HTTP calls (not SDK).
+        
+        Headers match the original claude-cli client exactly.
         """
         import logging
+        import uuid
+        import platform
         logger = logging.getLogger(__name__)
         
         # Get valid OAuth2 access token
         access_token = self.auth.get_valid_token()
         
-        # Build headers matching Claude Code implementation
+        # Use stored session ID (consistent across requests in the same session)
+        # Generate new one only if not initialized
+        if not self.session_state.get('session_id'):
+            self.session_state['session_id'] = str(uuid.uuid4())
+        
+        session_id = self.session_state['session_id']
+        request_id = str(uuid.uuid4())  # Request ID is unique per request
+        
+        # Build headers matching claude-cli implementation exactly
+        # Reference: original claude code client request headers
         headers = {
-            'Authorization': f'Bearer {access_token}',
-            'Content-Type': 'application/json',
-            'Anthropic-Version': '2023-06-01',
-            'Anthropic-Beta': 'claude-code-20250219,oauth-2025-04-20,interleaved-thinking-2025-05-14,context-management-2025-06-27,prompt-caching-scope-2026-01-05',
-            'X-App': 'cli',
-            'X-Stainless-Retry-Count': '0',
-            'X-Stainless-Runtime': 'node',
-            'X-Stainless-Lang': 'js',
-            'X-Stainless-Timeout': '600',
-            'Connection': 'keep-alive',
+            'accept': 'application/json',
+            'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,structured-outputs-2025-12-15',
+            'anthropic-dangerous-direct-browser-access': 'true',
+            'anthropic-version': '2023-06-01',
+            'authorization': f'Bearer {access_token}',
+            'content-type': 'application/json',
+            'user-agent': 'claude-cli/99.0.0 (undefined, cli)',
+            'x-app': 'cli',
+            'x-claude-code-session-id': session_id,
+            'x-client-request-id': request_id,
+            'x-stainless-arch': platform.machine() or 'x64',
+            'x-stainless-lang': 'js',
+            'x-stainless-os': platform.system() or 'Linux',
+            'x-stainless-package-version': '0.81.0',
+            'x-stainless-retry-count': '0',
+            'x-stainless-runtime': 'node',
+            'x-stainless-runtime-version': 'v22.22.0',
+            'x-stainless-timeout': '600',
         }
         
-        # Set Accept and Accept-Encoding based on streaming mode
+        # Override Accept and Accept-Encoding for streaming mode
         if stream:
-            headers['Accept'] = 'text/event-stream'
-            headers['Accept-Encoding'] = 'identity'
+            headers['accept'] = 'text/event-stream'
+            headers['accept-encoding'] = 'identity'
         else:
-            headers['Accept'] = 'application/json'
-            headers['Accept-Encoding'] = 'gzip, deflate, br, zstd'
+            headers['accept-encoding'] = 'gzip, deflate, br, zstd'
         
-        logger.info("ClaudeProviderHandler: Created auth headers with OAuth2 Bearer token")
+        logger.info("ClaudeProviderHandler: Created auth headers matching claude-cli client")
+        logger.debug(f"ClaudeProviderHandler: Session ID: {session_id}, Request ID: {request_id}")
+        
+        # Log full headers for debugging
+        import json
+        logger.debug(f"ClaudeProviderHandler: Full headers: {json.dumps(headers, indent=2)}")
         return headers
     
     def _sanitize_tool_call_id(self, tool_call_id: str) -> str:
@@ -2946,208 +3851,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
     def _convert_messages_to_anthropic(self, messages: List[Dict]) -> tuple[Optional[str], List[Dict]]:
         """
         Convert OpenAI messages format to Anthropic format.
-        
-        Key differences:
-        1. System messages are extracted to a separate 'system' parameter
-        2. Tool role messages must be converted to user messages with tool_result content blocks
-        3. Assistant messages with tool_calls must have tool_use content blocks
-        4. Messages must alternate between user and assistant roles
-        5. Image content blocks are converted to Anthropic image source format (Phase 4.1)
-        
-        Args:
-            messages: OpenAI format messages
-            
-        Returns:
-            Tuple of (system_message, anthropic_messages)
+        Delegates to shared AnthropicFormatConverter.convert_messages_to_anthropic().
         """
-        import logging
-        import json
-        
-        system_message = None
-        anthropic_messages = []
-        
-        for msg in messages:
-            role = msg.get('role')
-            content = msg.get('content')
-            
-            if role == 'system':
-                # Extract system message
-                system_message = content
-                logging.info(f"Extracted system message: {len(content) if content else 0} chars")
-            
-            elif role == 'tool':
-                # Convert tool message to user message with tool_result content block
-                tool_call_id = msg.get('tool_call_id', msg.get('name', 'unknown'))
-                
-                # Build tool_result content block
-                tool_result_block = {
-                    'type': 'tool_result',
-                    'tool_use_id': tool_call_id,
-                    'content': content or ""
-                }
-                
-                # Check if last message is a user message - if so, append to it
-                if anthropic_messages and anthropic_messages[-1]['role'] == 'user':
-                    # Append to existing user message
-                    last_content = anthropic_messages[-1]['content']
-                    if isinstance(last_content, str):
-                        # Convert string content to list
-                        anthropic_messages[-1]['content'] = [
-                            {'type': 'text', 'text': last_content},
-                            tool_result_block
-                        ]
-                    elif isinstance(last_content, list):
-                        # Append to existing list
-                        anthropic_messages[-1]['content'].append(tool_result_block)
-                    logging.info(f"Appended tool_result to existing user message")
-                else:
-                    # Create new user message with tool_result
-                    anthropic_messages.append({
-                        'role': 'user',
-                        'content': [tool_result_block]
-                    })
-                    logging.info(f"Created new user message with tool_result")
-            
-            elif role == 'assistant':
-                # Check if message has tool_calls
-                tool_calls = msg.get('tool_calls')
-                
-                if tool_calls:
-                    # Convert to Anthropic format with tool_use content blocks
-                    content_blocks = []
-                    
-                    # Add text content if present (filter empty content)
-                    filtered_content = self._filter_empty_content(content)
-                    if filtered_content:
-                        if isinstance(filtered_content, str):
-                            content_blocks.append({
-                                'type': 'text',
-                                'text': filtered_content
-                            })
-                        elif isinstance(filtered_content, list):
-                            content_blocks.extend(filtered_content)
-                    
-                    # Add tool_use blocks
-                    for tc in tool_calls:
-                        # Sanitize tool call ID for Claude API compatibility
-                        raw_tool_id = tc.get('id', f"toolu_{len(content_blocks)}")
-                        tool_id = self._sanitize_tool_call_id(raw_tool_id)
-                        if tool_id != raw_tool_id:
-                            logging.info(f"ClaudeProviderHandler: Sanitized tool call ID: {raw_tool_id} -> {tool_id}")
-                        
-                        function = tc.get('function', {})
-                        tool_name = function.get('name', '')
-                        
-                        # Parse arguments (may be string or dict)
-                        arguments = function.get('arguments', {})
-                        if isinstance(arguments, str):
-                            try:
-                                arguments = json.loads(arguments)
-                            except json.JSONDecodeError:
-                                logging.warning(f"Failed to parse tool arguments as JSON: {arguments}")
-                                arguments = {}
-                        
-                        tool_use_block = {
-                            'type': 'tool_use',
-                            'id': tool_id,
-                            'name': tool_name,
-                            'input': arguments
-                        }
-                        content_blocks.append(tool_use_block)
-                        logging.info(f"Converted tool_call to tool_use block: {tool_name}")
-                    
-                    # Only add message if we have content blocks
-                    if content_blocks:
-                        anthropic_messages.append({
-                            'role': 'assistant',
-                            'content': content_blocks
-                        })
-                else:
-                    # Regular assistant message
-                    # Filter empty content before processing
-                    filtered_content = self._filter_empty_content(content)
-                    if filtered_content is None:
-                        # Skip empty assistant messages
-                        logging.info(f"ClaudeProviderHandler: Skipping empty assistant message")
-                        continue
-                    
-                    # Handle case where content might already be an array (from previous API responses)
-                    if isinstance(filtered_content, list):
-                        # Extract text from content blocks
-                        text_parts = []
-                        for block in filtered_content:
-                            if isinstance(block, dict):
-                                if block.get('type') == 'text':
-                                    text_parts.append(block.get('text', ''))
-                                elif 'text' in block:
-                                    text_parts.append(block['text'])
-                            elif isinstance(block, str):
-                                text_parts.append(block)
-                        content_str = '\n'.join(text_parts) if text_parts else ""
-                        logging.info(f"Normalized assistant message content from array to string ({len(text_parts)} blocks)")
-                    else:
-                        content_str = filtered_content or ""
-                    
-                    # Only add non-empty assistant messages
-                    if content_str:
-                        anthropic_messages.append({
-                            'role': 'assistant',
-                            'content': content_str
-                        })
-            
-            elif role == 'user':
-                # Regular user message - handle images (Phase 4.1)
-                content_blocks = []
-                
-                if isinstance(content, list):
-                    # Extract images from content
-                    images = self._extract_images_from_content(content)
-                    
-                    # Extract text content
-                    for block in content:
-                        if isinstance(block, dict):
-                            block_type = block.get('type', '')
-                            if block_type == 'text':
-                                content_blocks.append(block)
-                            elif block_type == 'image_url':
-                                # Images are handled separately via _extract_images_from_content
-                                pass
-                            else:
-                                # Pass through other block types
-                                content_blocks.append(block)
-                        elif isinstance(block, str):
-                            content_blocks.append({'type': 'text', 'text': block})
-                    
-                    # Add image blocks
-                    content_blocks.extend(images)
-                    
-                    # If we have content blocks, use them; otherwise use original content
-                    if content_blocks:
-                        anthropic_messages.append({
-                            'role': 'user',
-                            'content': content_blocks
-                        })
-                    else:
-                        anthropic_messages.append({
-                            'role': 'user',
-                            'content': content or ""
-                        })
-                else:
-                    # String content - no images
-                    anthropic_messages.append({
-                        'role': 'user',
-                        'content': content or ""
-                    })
-            
-            else:
-                logging.warning(f"Unknown message role: {role}, treating as user")
-                anthropic_messages.append({
-                    'role': 'user',
-                    'content': content or ""
-                })
-        
-        logging.info(f"Converted {len(messages)} OpenAI messages to {len(anthropic_messages)} Anthropic messages")
-        return system_message, anthropic_messages
+        return AnthropicFormatConverter.convert_messages_to_anthropic(messages, sanitize_ids=True)
     
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
@@ -3268,26 +3974,24 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                         temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                                         tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
         """
-        Handle request with a specific model using the Anthropic SDK.
+        Handle request with a specific model using direct HTTP requests.
         
-        The SDK handles:
-        - Proper message format conversion
-        - Automatic retries with exponential backoff
-        - Correct headers and beta features
-        - Better error handling and rate limit management
-        
-        This fixes the rate limiting issues we were seeing with direct HTTP calls.
+        OAuth2 authentication requires direct HTTP requests with Bearer token,
+        as the Anthropic SDK doesn't support OAuth2 via auth_token parameter.
         """
         import logging
         import json
         logger = logging.getLogger(__name__)
         
-        logger.info(f"ClaudeProviderHandler: Handling request for model {model} (SDK mode)")
+        logger.info(f"ClaudeProviderHandler: Handling request for model {model} (Direct HTTP mode)")
         
         if AISBF_DEBUG:
             logger.info(f"ClaudeProviderHandler: Messages: {messages}")
         else:
             logger.info(f"ClaudeProviderHandler: Messages count: {len(messages)}")
+
+        # Ensure session is initialized for quota tracking
+        await self._ensure_session()
 
         # Apply rate limiting
         await self.apply_rate_limit()
@@ -3298,61 +4002,107 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # Convert messages to Anthropic format (handles tool messages properly)
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
         
-        # Get SDK client with OAuth2 token
-        client = self._get_sdk_client()
-        
-        # Build request parameters for SDK
-        # The SDK handles proper message formatting and headers
-        request_kwargs = {
+        # Build request payload
+        payload = {
             'model': model,
             'messages': anthropic_messages,
             'max_tokens': max_tokens or 4096,
         }
         
         # Only add temperature if not None and not 0.0
-        # Claude API requires temperature: 1.0 when thinking is enabled
         if temperature is not None and temperature > 0:
-            request_kwargs['temperature'] = temperature
+            payload['temperature'] = temperature
         
         if system_message:
-            request_kwargs['system'] = system_message
+            # Format system message as Anthropic blocks with billing header
+            # Matches claude-cli format for billing/tracking
+            billing_header = {
+                'type': 'text',
+                'text': 'x-anthropic-billing-header: cc_version=99.0.0.e8c; cc_entrypoint=cli;'
+            }
+            claude_intro = {
+                'type': 'text',
+                'text': 'You are Claude Code, Anthropic\'s official CLI for Claude.'
+            }
+            user_system = {
+                'type': 'text',
+                'text': system_message
+            }
+            payload['system'] = [billing_header, claude_intro, user_system]
+        
+        # Add metadata with user_id (matching claude-cli format)
+        payload['metadata'] = {
+            'user_id': json.dumps({
+                'device_id': self.session_state['device_id'],
+                'account_uuid': self.session_state['account_uuid'],
+                'session_id': self.session_state['session_id']
+            })
+        }
         
         # Convert OpenAI tools to Anthropic format
         if tools:
             anthropic_tools = self._convert_tools_to_anthropic(tools)
             if anthropic_tools:
-                request_kwargs['tools'] = anthropic_tools
+                payload['tools'] = anthropic_tools
         
         # Convert OpenAI tool_choice format to Anthropic format
         if tool_choice and tools:
             anthropic_tool_choice = self._convert_tool_choice_to_anthropic(tool_choice)
             if anthropic_tool_choice:
-                request_kwargs['tool_choice'] = anthropic_tool_choice
+                payload['tool_choice'] = anthropic_tool_choice
+        
+        # Get auth headers with OAuth2 Bearer token
+        headers = self._get_auth_headers(stream=stream)
+        
+        # API endpoint
+        api_url = 'https://api.anthropic.com/v1/messages?beta=true'
         
         # Log request for debugging
-        logger.info(f"ClaudeProviderHandler: SDK request kwargs: {json.dumps({k: str(v)[:200] for k, v in request_kwargs.items()}, indent=2)}")
+        logger.info(f"ClaudeProviderHandler: Request payload keys: {list(payload.keys())}")
+        if AISBF_DEBUG:
+            logger.info(f"ClaudeProviderHandler: Full payload: {json.dumps(payload, indent=2)}")
         
         try:
             if stream:
-                # Streaming request using SDK
-                logger.info(f"ClaudeProviderHandler: Using SDK streaming mode")
-                return self._handle_streaming_request_sdk(client, request_kwargs, model)
+                # Add stream: true to payload for Anthropic API
+                payload['stream'] = True
+                # Streaming request using direct HTTP
+                logger.info(f"ClaudeProviderHandler: Using direct HTTP streaming mode")
+                return self._handle_streaming_request_with_retry(api_url, payload, headers, model)
             else:
-                # Non-streaming request using SDK
-                # The SDK handles automatic retries (max_retries=3)
-                logger.info(f"ClaudeProviderHandler: Using SDK non-streaming mode")
-                response = await client.messages.create(**request_kwargs)
+                # Non-streaming request using direct HTTP
+                logger.info(f"ClaudeProviderHandler: Using direct HTTP non-streaming mode")
+                response = await self._request_with_retry(api_url, headers, payload, max_retries=3)
                 
-                logger.info(f"ClaudeProviderHandler: SDK response received successfully")
+                logger.info(f"ClaudeProviderHandler: HTTP response received successfully")
+                
+                # Update session state from response headers
+                self._update_session_from_headers(dict(response.headers))
+                
                 self.record_success()
                 
-                # Convert SDK response to OpenAI format
-                openai_response = self._convert_sdk_response_to_openai(response, model)
+                # Parse response
+                response_data = response.json()
+                
+                # Dump raw response if AISBF_DEBUG is enabled
+                if AISBF_DEBUG:
+                    logger.info(f"=== RAW CLAUDE RESPONSE ===")
+                    logger.info(f"Raw response data: {json.dumps(response_data, indent=2, default=str)}")
+                    logger.info(f"=== END RAW CLAUDE RESPONSE ===")
+                
+                # Convert to OpenAI format
+                openai_response = self._convert_to_openai_format(response_data, model)
+                
+                # Dump final response dict if AISBF_DEBUG is enabled
+                if AISBF_DEBUG:
+                    logger.info(f"=== FINAL CLAUDE RESPONSE DICT ===")
+                    logger.info(f"Final response: {json.dumps(openai_response, indent=2, default=str)}")
+                    logger.info(f"=== END FINAL CLAUDE RESPONSE DICT ===")
                 
                 return openai_response
                 
         except Exception as e:
-            logger.error(f"ClaudeProviderHandler: SDK request failed: {e}", exc_info=True)
+            logger.error(f"ClaudeProviderHandler: HTTP request failed: {e}", exc_info=True)
             raise
     
     async def _request_with_retry(self, api_url: str, headers: Dict, payload: Dict, max_retries: int = 3):
@@ -3495,6 +4245,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
             ) as response:
                 logger.info(f"ClaudeProviderHandler: Streaming response status: {response.status_code}")
                 
+                # Update session state from response headers (available at stream start)
+                self._update_session_from_headers(dict(response.headers))
+                
                 if response.status_code >= 400:
                     error_text = await response.aread()
                     logger.error(f"ClaudeProviderHandler: Streaming error response: {error_text}")
@@ -3543,6 +4296,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 # Streaming idle watchdog (Phase 1.3)
                 last_event_time = time.time()
                 idle_timeout = self.stream_idle_timeout
+                
+                # Track stop_reason from message_delta events
+                stream_stop_reason = None
                 
                 async for line in response.aiter_lines():
                     # Check for idle timeout (Phase 1.3)
@@ -3696,8 +4452,15 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 thinking_signature = ""
                         
                         elif event_type == 'message_delta':
-                            # Handle usage metadata in streaming (Phase 2.3)
+                            # Handle usage metadata and stop_reason in streaming (Phase 2.3)
+                            delta_data = chunk_data.get('delta', {})
                             usage = chunk_data.get('usage', {})
+                            
+                            # Extract stop_reason from message_delta (Anthropic sends it here)
+                            stream_stop_reason = delta_data.get('stop_reason')
+                            if stream_stop_reason:
+                                logger.debug(f"ClaudeProviderHandler: Stream stop_reason: {stream_stop_reason}")
+                            
                             if usage:
                                 logger.debug(f"ClaudeProviderHandler: Streaming usage update: {usage}")
                                 
@@ -3712,8 +4475,21 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                     self.cache_stats['cache_tokens_created'] += cache_creation
                         
                         elif event_type == 'message_stop':
-                            # Final chunk
-                            finish_reason = 'stop'
+                            # Final chunk - map Anthropic stop_reason to OpenAI finish_reason
+                            stop_reason_map = {
+                                'end_turn': 'stop',
+                                'max_tokens': 'length',
+                                'stop_sequence': 'stop',
+                                'tool_use': 'tool_calls'
+                            }
+                            # Use stop_reason from message_delta if available, otherwise check tool_calls
+                            if stream_stop_reason:
+                                finish_reason = stop_reason_map.get(stream_stop_reason, 'stop')
+                            elif current_tool_calls:
+                                finish_reason = 'tool_calls'
+                            else:
+                                finish_reason = 'stop'
+                            logger.debug(f"ClaudeProviderHandler: Final finish_reason: {finish_reason}")
                             
                             final_chunk = {
                                 'id': completion_id,
@@ -3735,9 +4511,24 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         continue
     
     def _convert_to_openai_format(self, claude_response: Dict, model: str) -> Dict:
-        """Convert Claude API response to OpenAI format."""
+        """Convert Claude API response to OpenAI format.
+        
+        This converts the raw Claude API response (in Anthropic format) to OpenAI chat
+        completion format so it can be used seamlessly with other providers.
+        
+        Handles:
+        - Text content blocks
+        - Tool use blocks (function calls)
+        - Thinking blocks (reasoning)
+        - Redacted thinking blocks
+        - Usage metadata including cache tokens
+        - Stop reason mapping
+        """
         import logging
+        import json
         logger = logging.getLogger(__name__)
+        
+        logger.info(f"ClaudeProviderHandler: Converting response to OpenAI format")
         
         # Extract content
         content_text = ""
@@ -3798,7 +4589,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 'index': 0,
                 'message': {
                     'role': 'assistant',
-                    'content': content_text if not tool_calls else None
+                    'content': content_text if content_text else None
                 },
                 'finish_reason': finish_reason
             }],
@@ -3900,7 +4691,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 'index': 0,
                 'message': {
                     'role': 'assistant',
-                    'content': message_content if not tool_calls else None,
+                    'content': message_content if message_content else None,
                 },
                 'finish_reason': finish_reason
             }],
@@ -4685,6 +5476,12 @@ class KiroProviderHandler(BaseProviderHandler):
             
             # Build OpenAI-format response
             openai_response = self._build_openai_response(model, content, tool_calls)
+            
+            # Dump final response dict if AISBF_DEBUG is enabled
+            if AISBF_DEBUG:
+                logging.info(f"=== FINAL KIRO RESPONSE DICT ===")
+                logging.info(f"Final response: {json.dumps(openai_response, indent=2, default=str)}")
+                logging.info(f"=== END FINAL KIRO RESPONSE DICT ===")
             
             self.record_success()
             return openai_response

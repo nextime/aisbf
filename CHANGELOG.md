@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.2] - 2026-04-03
+
 ### Added
 - **User-Specific API Endpoints**: New API endpoints for authenticated users to access their own configurations
   - `GET /api/user/models` - List user's own models
@@ -56,6 +58,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Per-provider reset functionality and reset-all button
   - Configurable via aisbf.json with learning_rate, headroom_percent, recovery_rate, etc.
   - Integration with BaseProviderHandler.apply_rate_limit() and handle_429_error()
+
+### Changed
+- **Documentation Updates**: Updated README.md and DOCUMENTATION.md with comprehensive coverage of new features
+  - Enhanced User-Specific API Endpoints documentation
+  - Added Adaptive Rate Limiting configuration guide
+  - Updated Web Dashboard feature list
+  - Added Model Metadata Extraction details
+  - Improved Analytics Filtering documentation
+
+## [0.9.1] - 2026-03-XX
 - **Token Usage Analytics**: Comprehensive analytics dashboard for tracking token usage, costs, and performance
   - Analytics module (`aisbf/analytics.py`) with token usage tracking, cost estimation, and optimization recommendations
   - Dashboard page with charts for token usage over time (1h, 6h, 24h, 7d)
