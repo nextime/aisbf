@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.2] - 2026-04-03
+## [0.9.4] - 2026-04-03
+
+### Added
+- **Provider Module Refactoring (Phase 2)**: Split monolithic providers module into individual files for better maintainability
+  - Created aisbf/providers/base.py with shared utilities (BaseProviderHandler, AnthropicFormatConverter, AdaptiveRateLimiter)
+  - Created individual handler files: google.py, openai.py, anthropic.py, claude.py, kilo.py, ollama.py
+  - Moved auth modules to aisbf/auth/ subpackage (claude.py, kilo.py, kiro.py)
+  - Created kiro subpackage with handler, converters, models, parsers, utils
+  - All existing imports continue to work (backward compatible)
+- **Kiro-cli Provider Support**: Full support for Kiro (Amazon Q Developer) CLI authentication
+  - Device Authorization Grant flow matching official kiro-cli
+  - SQLite database-based credential storage
+  - Dashboard integration with authentication UI
+- **Claude Code (OAuth2) Enhancements**: Fully working OAuth2 PKCE authentication
+  - Automatic token refresh with refresh token rotation
+  - Chrome extension for remote server callback interception
+  - Proxy-aware extension serving for reverse proxy deployments
+  - Support for nginx, caddy, and other reverse proxies
+- **Kilocode OAuth2 Support**: OAuth2 Device Authorization Grant for Kilo Code
+  - Automatic token refresh
+  - Dashboard integration with authentication UI
+- **Multi-User Dashboard Templates**: Added missing dashboard templates for user management
+  - user_index.html, user_providers.html, user_rotations.html
+  - user_autoselects.html, user_tokens.html, rate_limits.html
+
+### Fixed
+- **Setup.py Data Files Structure**: Fixed incorrect file path handling in data_files that caused files to be installed flat instead of preserving subdirectory structure
+  - Split data_files into separate entries for each subpackage (aisbf/, aisbf/providers/, aisbf/providers/kiro/, aisbf/auth/)
+  - Properly preserves module structure during installation
+- **Missing Template Files**: Added 6 missing dashboard templates to setup.py data_files
+- **Virtual Environment Dependencies**: Removed install_requires from setup.py since pypy creates a virtualenv with its own dependencies
+- **aisbf.sh Update Logic**: Removed automatic update_venv calls from start_server() and start_daemon() functions
+- **Documentation Duplicates**: Removed duplicate entries for Token Usage Analytics and Claude OAuth2 in documentation
+
+### Changed
+- **Version Bump**: Updated version to 0.9.4 in setup.py and pyproject.toml
+
+## [0.9.3] - 2026-04-03
+- **Setup.py Data Files Structure**: Fixed incorrect file path handling in data_files that caused files to be installed flat instead of preserving subdirectory structure
+  - Split data_files into separate entries for each subpackage (aisbf/, aisbf/providers/, aisbf/providers/kiro/, aisbf/auth/)
+  - Properly preserves module structure during installation
+- **Missing Template Files**: Added 6 missing dashboard templates to setup.py data_files
+  - user_index.html, user_providers.html, user_rotations.html, user_autoselects.html, user_tokens.html, rate_limits.html
+- **Virtual Environment Dependencies**: Removed install_requires from setup.py since pypy creates a virtualenv with its own dependencies
+- **aisbf.sh Update Logic**: Removed automatic update_venv calls from start_server() and start_daemon() functions
+  - Dependencies from requirements.txt now only installed when creating venv for the first time
+  - Existing venv remains unchanged unless explicitly upgraded
+
+### Changed
+- **Version Bump**: Updated version to 0.9.3 in setup.py and pyproject.toml
 
 ### Added
 - **User-Specific API Endpoints**: New API endpoints for authenticated users to access their own configurations

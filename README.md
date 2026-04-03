@@ -24,8 +24,9 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), and Claude Code (OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), Kiro-cli, Claude Code (OAuth2), and Kilocode (OAuth2)
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh and Chrome extension for remote servers
+- **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
 - **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
@@ -131,7 +132,92 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - Claude Code (OAuth2 authentication via claude.ai)
 - Ollama (direct HTTP)
 - Kiro (Amazon Q Developer / AWS CodeWhisperer)
+- Kiro-cli (Amazon Q Developer CLI authentication)
 - Kilocode (OAuth2 Device Authorization Grant)
+
+### Kiro-cli Provider Support
+
+AISBF supports Kiro (Amazon Q Developer) via kiro-cli authentication using Device Authorization Grant flow:
+
+#### Features
+- Full OAuth2 Device Authorization Grant flow matching official kiro-cli
+- Automatic token refresh
+- SQLite database-based credential storage
+- Dashboard integration with authentication UI
+- Credentials stored in user-configured SQLite database path
+
+#### Setup
+1. Add kiro-cli provider to configuration (via dashboard or `~/.aisbf/providers.json`)
+2. Configure sqlite_db path pointing to kiro-cli credentials database
+3. Use kiro-cli models via API: `kiro-cli/anthropic.claude-3-5-sonnet-20241022-v2:0`
+
+#### Configuration Example
+```json
+{
+  "providers": {
+    "kiro-cli": {
+      "id": "kiro-cli",
+      "name": "Kiro-cli (Amazon Q Developer)",
+      "endpoint": "https://q.us-east-1.amazonaws.com",
+      "type": "kiro",
+      "api_key_required": false,
+      "kiro_config": {
+        "region": "us-east-1",
+        "sqlite_db": "~/.config/kiro/kiro.db"
+      },
+      "models": [
+        {
+          "name": "anthropic.claude-3-5-sonnet-20241022-v2:0",
+          "context_size": 200000
+        }
+      ]
+    }
+  }
+}
+```
+
+### Kilocode OAuth2 Authentication
+
+AISBF supports Kilo Code as a provider using OAuth2 Device Authorization Grant:
+
+#### Features
+- Full OAuth2 Device Authorization Grant flow
+- Automatic token refresh with refresh token rotation
+- Dashboard integration with authentication UI
+- Proxy-aware callback handling
+- Credentials stored in `~/.aisbf/kilo_credentials.json`
+
+#### Setup
+1. Add kilocode provider to configuration (via dashboard or `~/.aisbf/providers.json`)
+2. Click "Authenticate with Kilo" in dashboard
+3. Complete device authorization flow
+4. Use kilocode models via API: `kilocode/<model>`
+
+#### Configuration Example
+```json
+{
+  "providers": {
+    "kilocode": {
+      "id": "kilocode",
+      "name": "Kilo Code (OAuth2)",
+      "endpoint": "https://api.kilo.dev/v1",
+      "type": "kilo",
+      "api_key_required": false,
+      "kilo_config": {
+        "credentials_file": "~/.aisbf/kilo_credentials.json"
+      },
+      "models": [
+        {
+          "name": "kilo/free",
+          "context_size": 100000
+        }
+      ]
+    }
+  }
+}
+```
+
+See [`KILO_OAUTH2.md`](KILO_OAUTH2.md) for detailed setup instructions.
 ## Configuration
 
 ### SSL/TLS Configuration

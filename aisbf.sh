@@ -140,9 +140,6 @@ start_server() {
     # Ensure venv exists
     ensure_venv
     
-    # Update venv packages silently
-    update_venv
-    
     # Get port from config
     PORT=$(get_port)
     
@@ -185,9 +182,6 @@ start_daemon() {
     
     # Ensure venv exists
     ensure_venv
-    
-    # Update venv packages silently
-    update_venv
     
     # Get port from config
     PORT=$(get_port)

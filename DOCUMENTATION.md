@@ -6,8 +6,10 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, and Kiro (Amazon Q Developer)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, Kiro (Amazon Q Developer), Kiro-cli, and Kilocode (OAuth2)
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh, Chrome extension for remote servers, and curl_cffi TLS fingerprinting support
+- **Kiro-cli Support**: Full support for Amazon Q Developer CLI authentication with Device Authorization Grant
+- **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
 - **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
 - **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
 - **Streaming Support**: Full support for streaming responses from all providers with proper serialization
@@ -17,8 +19,7 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 - **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 - **Security**: Default localhost-only access for improved security
-- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, model performance comparison, and optimization recommendations
-- **Token Usage Analytics**: Comprehensive analytics dashboard for tracking token usage, costs, and performance with charts and export functionality
+- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, model performance comparison, and export functionality
 
 ## Author
 

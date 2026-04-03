@@ -62,9 +62,9 @@ aisbf/
 │       ├── openai.py        # OpenAIProviderHandler
 │       ├── anthropic.py     # AnthropicProviderHandler
 │       ├── claude.py        # ClaudeProviderHandler (OAuth2-based)
-│       ├── kilo.py          # KiloProviderHandler (OAuth2-based)
+│       ├── kilo.py          # KiloProviderHandler (OAuth2-based, supports Kilocode)
 │       ├── ollama.py        # OllamaProviderHandler
-│       └── kiro/            # Kiro provider (subpackage)
+│       └── kiro/            # Kiro provider (subpackage, supports kiro-cli)
 │           ├── __init__.py
 │           ├── handler.py
 │           ├── converters.py
@@ -74,7 +74,8 @@ aisbf/
 │           └── utils.py
 ├── config/                   # Configuration files directory
 │   ├── providers.json       # Default provider configurations
-│   └── rotations.json       # Default rotation configurations
+│   ├── rotations.json       # Default rotation configurations
+│   └── autoselect.json      # Default autoselect configurations
 ├── main.py                   # FastAPI application entry point
 ├── setup.py                  # Installation script with custom install logic
 ├── pyproject.toml            # Modern packaging configuration for PyPI
@@ -82,11 +83,13 @@ aisbf/
 ├── build.sh                  # Build script for PyPI packages
 ├── clean.sh                  # Clean script for build artifacts
 ├── start_proxy.sh           # Development start script
-├── aisbf.sh                 # Alternative start script
+├── aisbf.sh                 # Production start script with venv support
 ├── requirements.txt         # Python dependencies
 ├── PYPI.md                 # PyPI publishing guide
 ├── DOCUMENTATION.md          # Complete API documentation
-└── README.md                # Project documentation
+├── README.md                # Project documentation
+├── CHANGELOG.md             # Version history
+└── AI.PROMPT                # AI-assisted development guidelines
 ```
 
 ## Module Structure
@@ -96,7 +99,7 @@ Exports all main components:
 - `config`, `Config`, `ProviderConfig`, `RotationConfig`, `AppConfig`
 - `Message`, `ChatCompletionRequest`, `ChatCompletionResponse`, `Model`, `Provider`, `ErrorTracking`
 - `BaseProviderHandler`, `GoogleProviderHandler`, `OpenAIProviderHandler`, `AnthropicProviderHandler`, `OllamaProviderHandler`, `get_provider_handler`, `PROVIDER_HANDLERS`
-- `RequestHandler`, `RotationHandler`
+- `RequestHandler`, `RotationHandler`, `AutoselectHandler`
 
 ### aisbf/config.py
 Configuration management with smart file location detection:
@@ -121,22 +124,23 @@ Provider handler implementations, split into individual modules:
 - `google.py` - `GoogleProviderHandler` - Google GenAI integration
 - `openai.py` - `OpenAIProviderHandler` - OpenAI API integration
 - `anthropic.py` - `AnthropicProviderHandler` - Anthropic API key integration
-- `claude.py` - `ClaudeProviderHandler` - Claude OAuth2 integration
-- `kilo.py` - `KiloProviderHandler` - Kilo Gateway OAuth2 integration
+- `claude.py` - `ClaudeProviderHandler` - Claude OAuth2 integration (fully working)
+- `kilo.py` - `KiloProviderHandler` - Kilo OAuth2/Device Authorization Grant integration
 - `ollama.py` - `OllamaProviderHandler` - Ollama local integration
-- `kiro/` - `KiroProviderHandler` - Kiro/Amazon Q Developer integration (subpackage)
+- `kiro/` - `KiroProviderHandler` - Kiro/Amazon Q Developer integration (subpackage, supports kiro-cli)
 - `__init__.py` - Re-exports all handlers, `PROVIDER_HANDLERS` dict, `get_provider_handler()` factory
 
 ### aisbf/auth/ (package)
 Authentication modules:
 - `kiro.py` - `KiroAuthManager` for Kiro/Amazon Q Developer auth
-- `claude.py` - `ClaudeAuth` for Claude OAuth2 PKCE flow (was `aisbf/claude_auth.py`)
-- `kilo.py` - `KiloOAuth2` for Kilo Device Authorization Grant (was `aisbf/kilo_oauth2.py`)
+- `claude.py` - `ClaudeAuth` for Claude OAuth2 PKCE flow (fully working with token refresh)
+- `kilo.py` - `KiloOAuth2` for Kilo Device Authorization Grant (Kilocode support)
 
 ### aisbf/handlers.py
 Request handling logic:
 - `RequestHandler` - Handles chat completions and model lists
 - `RotationHandler` - Handles provider rotation
+- `AutoselectHandler` - Handles AI-powered model selection
 - Supports both streaming and non-streaming responses
 
 ### main.py
@@ -147,6 +151,7 @@ FastAPI application:
   - `POST /api/{provider_id}/chat/completions` - Chat completions
   - `GET /api/{provider_id}/models` - List models
 - Supports both providers and rotations
+- Multi-user support with user-specific API endpoints
 - CORS enabled for all origins
 
 ## Installation Process
@@ -162,11 +167,13 @@ python setup.py install
 ```
 Automatically adds `--user` flag for non-root users.
 
-Installs to:
-- `~/.local/lib/python*/site-packages/aisbf/` - Package
-- `~/.local/aisbf-venv/` - Virtual environment
-- `~/.local/share/aisbf/` - Config files and main.py
-- `~/.local/bin/aisbf` - Executable script
+**Installation Structure:**
+- Package files installed to: `~/.local/share/aisbf/aisbf/` (preserves subdirectory structure)
+- Config files and main.py: `~/.local/share/aisbf/`
+- Virtual environment: `~/.local/share/aisbf/venv/`
+- Requirements installed only on first venv creation
+
+**Note:** Dependencies from requirements.txt are only installed when creating the virtual environment for the first time. Subsequent starts do not re-run pip install to avoid unnecessary upgrades. The venv is only recreated if it doesn't exist.
 
 ### System-wide Installation from Source (requires root)
 ```bash
@@ -730,6 +737,19 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 8. **Documentation Updates**: When README.md, DOCUMENTATION.md, or other documentation files are significantly updated
 
 ### Recent Updates
+
+**2026-04-03 - Version 0.9.4 - Setup.py Fixes and Documentation Updates**
+- Fixed setup.py data_files structure to preserve subdirectory structure during installation
+- Split data_files into separate entries for each subpackage (aisbf/, aisbf/providers/, aisbf/providers/kiro/, aisbf/auth/)
+- Added 6 missing dashboard templates to setup.py (user_index.html, user_providers.html, etc.)
+- Removed install_requires from setup.py since pypy creates a virtualenv with its own dependencies
+- Updated aisbf.sh to only install requirements on first venv creation
+- Provider module refactoring: Split monolithic providers into individual files
+- Added Kiro-cli provider support, enhanced Claude Code OAuth2, and Kilocode OAuth2 support
+- Updated README.md with Kiro-cli and Kilocode configuration examples
+- Removed duplicate entries in documentation (Token Usage Analytics, Claude OAuth2)
+- Updated CHANGELOG.md with all new features and fixes
+- Version bumped to 0.9.4
 
 **2026-04-03 - Provider Module Refactoring (Phase 2)**
 - Split monolithic `aisbf/providers/__init__.py` (301K chars) into individual module files

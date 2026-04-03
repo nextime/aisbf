@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.9.1",
+    version="0.9.4",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -71,7 +71,8 @@ setup(
         "Operating System :: OS Independent",
     ],
     python_requires=">=3.8",
-    install_requires=requirements,
+    # Dependencies are installed separately via requirements.txt (e.g., in virtualenv)
+    # install_requires=requirements,
     include_package_data=True,
     package_data={
         "aisbf": ["*.json"],
@@ -94,10 +95,25 @@ setup(
             'config/aisbf.json',
         ]),
         # Install aisbf package to share directory for venv installation
+        # Main aisbf module files
         ('share/aisbf/aisbf', [
             'aisbf/__init__.py',
             'aisbf/config.py',
             'aisbf/models.py',
+            'aisbf/handlers.py',
+            'aisbf/context.py',
+            'aisbf/utils.py',
+            'aisbf/database.py',
+            'aisbf/mcp.py',
+            'aisbf/tor.py',
+            'aisbf/batching.py',
+            'aisbf/cache.py',
+            'aisbf/classifier.py',
+            'aisbf/streaming_optimization.py',
+            'aisbf/analytics.py',
+        ]),
+        # aisbf.providers subpackage
+        ('share/aisbf/aisbf/providers', [
             'aisbf/providers/__init__.py',
             'aisbf/providers/base.py',
             'aisbf/providers/google.py',
@@ -106,16 +122,9 @@ setup(
             'aisbf/providers/claude.py',
             'aisbf/providers/kilo.py',
             'aisbf/providers/ollama.py',
-            'aisbf/handlers.py',
-            'aisbf/context.py',
-            'aisbf/utils.py',
-            'aisbf/database.py',
-            'aisbf/mcp.py',
-            'aisbf/tor.py',
-            'aisbf/auth/__init__.py',
-            'aisbf/auth/kiro.py',
-            'aisbf/auth/claude.py',
-            'aisbf/auth/kilo.py',
+        ]),
+        # aisbf.providers.kiro subpackage
+        ('share/aisbf/aisbf/providers/kiro', [
             'aisbf/providers/kiro/__init__.py',
             'aisbf/providers/kiro/handler.py',
             'aisbf/providers/kiro/converters.py',
@@ -123,11 +132,13 @@ setup(
             'aisbf/providers/kiro/models.py',
             'aisbf/providers/kiro/parsers.py',
             'aisbf/providers/kiro/utils.py',
-            'aisbf/batching.py',
-            'aisbf/cache.py',
-            'aisbf/classifier.py',
-            'aisbf/streaming_optimization.py',
-            'aisbf/analytics.py',
+        ]),
+        # aisbf.auth subpackage
+        ('share/aisbf/aisbf/auth', [
+            'aisbf/auth/__init__.py',
+            'aisbf/auth/kiro.py',
+            'aisbf/auth/claude.py',
+            'aisbf/auth/kilo.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
@@ -144,6 +155,12 @@ setup(
             'templates/dashboard/prompts.html',
             'templates/dashboard/docs.html',
             'templates/dashboard/analytics.html',
+            'templates/dashboard/user_index.html',
+            'templates/dashboard/user_providers.html',
+            'templates/dashboard/user_rotations.html',
+            'templates/dashboard/user_autoselects.html',
+            'templates/dashboard/user_tokens.html',
+            'templates/dashboard/rate_limits.html',
         ]),
     ],
     entry_points={
