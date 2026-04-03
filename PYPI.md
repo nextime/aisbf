@@ -137,6 +137,34 @@ pip install aisbf
 sudo pip install aisbf
 ```
 
+## Post-Installation OAuth2 Setup
+
+AISBF supports OAuth2 authentication for several providers:
+
+### Claude (Anthropic)
+- Full OAuth2 PKCE flow for Claude Code (claude.ai)
+- Chrome extension for remote server deployments
+- Proxy-aware: automatically detects reverse proxy deployments
+- Dashboard integration for easy authentication
+
+### Kiro (Amazon Q Developer)
+- Native OAuth2 support for AWS CodeWhisperer
+- Multiple authentication methods (IDE credentials, kiro-cli, direct refresh token)
+- Automatic credential management
+
+### Kilocode
+- Device Authorization Grant OAuth2 flow
+- Seamless integration with Kilocode services
+
+**Setup Instructions:**
+1. Start AISBF: `aisbf`
+2. Access dashboard: `http://localhost:17765/dashboard`
+3. Navigate to Providers section
+4. Configure OAuth2 providers and follow authentication prompts
+5. For remote deployments: Install Chrome extension from dashboard
+
+For detailed OAuth2 setup, see README.md and DOCUMENTATION.md in the installed package.
+
 ## Troubleshooting
 
 ### Build Errors

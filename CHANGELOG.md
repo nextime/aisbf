@@ -140,6 +140,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - OAuth2 endpoints: `/dashboard/claude/auth/start`, `/dashboard/claude/auth/complete`, `/dashboard/claude/auth/status`
   - Extension endpoints: `/dashboard/extension/download`, `/dashboard/oauth2/callback`
   - Comprehensive documentation in CLAUDE_OAUTH2_SETUP.md and CLAUDE_OAUTH2_DEEP_DIVE.md
+  - Proxy-aware OAuth2 extension serving: detects X-Forwarded-For, X-Forwarded-Host, X-Real-IP headers
+  - Force interception mechanism: extension activates for localhost when OAuth flow initiated from dashboard
+  - Supports reverse proxy deployments (nginx, caddy, etc.) with automatic proxy detection
 - **Kiro Provider Integration**: Native support for Kiro (Amazon Q Developer / AWS CodeWhisperer)
   - KiroAuth class (`aisbf/kiro_auth.py`) for AWS credential management
   - Support for multiple authentication methods:

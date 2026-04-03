@@ -46,6 +46,7 @@ import argparse
 import secrets
 import hashlib
 import asyncio
+import httpx
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -918,10 +919,62 @@ async def startup_event():
                 logger.warning("TOR hidden service initialization failed")
     
     # Pre-fetch models at startup for providers without local model config
+    # For Kilo providers, check API key, OAuth2 file credentials, and database-stored credentials
     logger.info("Pre-fetching models from providers with dynamic model lists...")
     prefetch_count = 0
     for provider_id, provider_config in config.providers.items():
         if not (hasattr(provider_config, 'models') and provider_config.models):
+            # For Kilo providers, check if any authentication method is available
+            provider_type = getattr(provider_config, 'type', '')
+            if provider_type in ('kilo', 'kilocode'):
+                has_valid_auth = False
+                
+                # Check 1: API key
+                api_key = getattr(provider_config, 'api_key', None)
+                if api_key and not api_key.startswith('YOUR_'):
+                    has_valid_auth = True
+                    logger.info(f"Kilo provider '{provider_id}' has API key configured, fetching models...")
+                
+                # Check 2: OAuth2 credentials file
+                if not has_valid_auth:
+                    try:
+                        from aisbf.kilo_oauth2 import KiloOAuth2
+                        kilo_config = getattr(provider_config, 'kilo_config', None)
+                        credentials_file = None
+                        api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
+                        if kilo_config and isinstance(kilo_config, dict):
+                            credentials_file = kilo_config.get('credentials_file')
+                        oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+                        if oauth2.is_authenticated():
+                            has_valid_auth = True
+                            logger.info(f"Kilo provider '{provider_id}' has valid OAuth2 credentials file, fetching models...")
+                    except Exception as e:
+                        logger.debug(f"Kilo provider '{provider_id}' OAuth2 file check failed: {e}")
+                
+                # Check 3: Database-stored credentials (uploaded via dashboard)
+                if not has_valid_auth:
+                    try:
+                        from aisbf.database import get_database
+                        db = get_database()
+                        if db:
+                            # Check for uploaded credentials files for this provider
+                            auth_files = db.get_user_auth_files(0, provider_id)  # 0 for admin/global
+                            if auth_files:
+                                for auth_file in auth_files:
+                                    file_type = auth_file.get('file_type', '')
+                                    file_path = auth_file.get('file_path', '')
+                                    if file_type in ('credentials', 'kilo_credentials', 'config') and file_path:
+                                        if os.path.exists(file_path):
+                                            has_valid_auth = True
+                                            logger.info(f"Kilo provider '{provider_id}' has uploaded credentials in database, fetching models...")
+                                            break
+                    except Exception as e:
+                        logger.debug(f"Kilo provider '{provider_id}' database credentials check failed: {e}")
+                
+                if not has_valid_auth:
+                    logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no API key, OAuth2 file, or uploaded credentials)")
+                    continue
+            
             try:
                 models = await fetch_provider_models(provider_id)
                 if models:
@@ -1404,6 +1457,137 @@ async def dashboard_providers(request: Request):
         "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
     })
 
+async def _auto_detect_provider_models(provider_key: str, provider: dict) -> list:
+    """
+    Auto-detect models from a provider's API endpoint.
+    
+    Tries to fetch models from the provider's /v1/models or /models endpoint.
+    For Kilo providers, uses OAuth2 authentication if available.
+    
+    Args:
+        provider_key: Provider identifier (e.g., 'kilo', 'my-openai-provider')
+        provider: Provider configuration dict
+        
+    Returns:
+        List of model dicts, or empty list if detection fails
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    
+    try:
+        endpoint = provider.get('endpoint', '')
+        if not endpoint:
+            logger.debug(f"No endpoint for provider '{provider_key}', skipping auto-detection")
+            return []
+        
+        provider_type = provider.get('type', 'openai')
+        api_key = provider.get('api_key', '')
+        
+        # Skip if API key is a placeholder
+        if api_key and api_key.startswith('YOUR_'):
+            api_key = ''
+        
+        # Check if this is a Kilo provider (by type or by endpoint URL)
+        is_kilo_provider = provider_type in ('kilo', 'kilocode')
+        if not is_kilo_provider:
+            # Also check endpoint URL for Kilo domains
+            kilo_domains = ['kilocode.ai', 'api.kilo.ai', 'kilo.ai']
+            for domain in kilo_domains:
+                if domain in endpoint:
+                    is_kilo_provider = True
+                    break
+        
+        # For Kilo providers, try to get OAuth2 token
+        if is_kilo_provider:
+            from aisbf.kilo_oauth2 import KiloOAuth2
+            kilo_config = provider.get('kilo_config', {})
+            credentials_file = kilo_config.get('credentials_file', '~/.kilo_credentials.json')
+            oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=endpoint)
+            token = oauth2.get_valid_token()
+            if token:
+                api_key = token
+                logger.info(f"Using OAuth2 token for Kilo provider '{provider_key}'")
+            else:
+                logger.warning(f"No OAuth2 token available for Kilo provider '{provider_key}', please authenticate first")
+                return []
+        
+        # Skip if no authentication available
+        if not api_key:
+            logger.debug(f"No API key or token for provider '{provider_key}', skipping auto-detection")
+            return []
+        
+        # Build models URL - try multiple paths
+        models_url = None
+        response_data = None
+        
+        for path in ['/v1/models', '/models']:
+            test_url = endpoint.rstrip('/') + path
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=5.0)) as client:
+                    headers = {'Authorization': f'Bearer {api_key}'}
+                    response = await client.get(test_url, headers=headers)
+                    
+                    if response.status_code == 200:
+                        models_url = test_url
+                        response_data = response.json()
+                        break
+                    elif response.status_code == 401:
+                        logger.debug(f"Authentication failed for {test_url}")
+                    else:
+                        logger.debug(f"Got status {response.status_code} from {test_url}")
+            except Exception as e:
+                logger.debug(f"Error fetching {test_url}: {e}")
+                continue
+        
+        if not models_url or not response_data:
+            logger.debug(f"Could not reach models endpoint for provider '{provider_key}'")
+            return []
+        
+        # Parse response - handle both OpenAI format {data: [...]} and array format
+        models_list = response_data.get('data', response_data) if isinstance(response_data, dict) else response_data
+        if not isinstance(models_list, list):
+            logger.debug(f"Unexpected models response format for provider '{provider_key}'")
+            return []
+        
+        # Convert to our model format
+        detected_models = []
+        for model_data in models_list:
+            if isinstance(model_data, str):
+                # Simple string model ID
+                detected_models.append({
+                    'name': model_data,
+                    'rate_limit': 0,
+                    'max_request_tokens': 100000,
+                    'context_size': 100000
+                })
+            elif isinstance(model_data, dict):
+                # Dict with id/name
+                model_id = model_data.get('id', model_data.get('model', ''))
+                if not model_id:
+                    continue
+                
+                # Extract context size
+                context_size = (
+                    model_data.get('context_window') or
+                    model_data.get('context_length') or
+                    model_data.get('max_input_tokens')
+                )
+                
+                detected_models.append({
+                    'name': model_id,
+                    'rate_limit': 0,
+                    'max_request_tokens': int(context_size) if context_size else 100000,
+                    'context_size': int(context_size) if context_size else 100000
+                })
+        
+        logger.info(f"Auto-detected {len(detected_models)} models for provider '{provider_key}' from {models_url}")
+        return detected_models
+        
+    except Exception as e:
+        logger.warning(f"Failed to auto-detect models for provider '{provider_key}': {e}")
+        return []
+
+
 @app.post("/dashboard/providers")
 async def dashboard_providers_save(request: Request, config: str = Form(...)):
     """Save providers configuration"""
@@ -1423,6 +1607,23 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                         if 'condense_context' not in model or model.get('condense_context') is None:
                             model['condense_context'] = 80
         
+        # Auto-detect models for providers with no models configured
+        auto_detected_count = 0
+        for provider_key, provider in providers_data.items():
+            # Check if provider has no models or empty models list
+            has_models = 'models' in provider and isinstance(provider.get('models'), list) and len(provider.get('models', [])) > 0
+            
+            if not has_models:
+                # Try to auto-detect models from API
+                detected_models = await _auto_detect_provider_models(provider_key, provider)
+                if detected_models:
+                    provider['models'] = detected_models
+                    auto_detected_count += 1
+                    logger.info(f"Auto-detected {len(detected_models)} models for provider '{provider_key}'")
+        
+        if auto_detected_count > 0:
+            logger.info(f"Auto-detected models for {auto_detected_count} provider(s)")
+        
         # Load existing config to preserve structure
         config_path = Path.home() / '.aisbf' / 'providers.json'
         if not config_path.exists():
@@ -1441,11 +1642,15 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         with open(save_path, 'w') as f:
             json.dump(full_config, f, indent=2)
         
+        success_msg = "Configuration saved successfully! Restart server for changes to take effect."
+        if auto_detected_count > 0:
+            success_msg = f"Configuration saved successfully! Auto-detected models for {auto_detected_count} provider(s). Restart server for changes to take effect."
+        
         return templates.TemplateResponse("dashboard/providers.html", {
             "request": request,
             "session": request.session,
             "providers_json": json.dumps(providers_data),
-            "success": "Configuration saved successfully! Restart server for changes to take effect."
+            "success": success_msg
         })
     except json.JSONDecodeError as e:
         # Reload current config on error
@@ -2152,7 +2357,6 @@ async def dashboard_restart(request: Request):
     if auth_check:
         return auth_check
     
-    import os
     import signal
     
     logger.info("Server restart requested from dashboard")
@@ -5689,8 +5893,16 @@ async def dashboard_claude_auth_start(request: Request):
         request_host = request.headers.get('host', '').split(':')[0]
         is_localhost_request = request_host in ['127.0.0.1', 'localhost', '::1']
         
-        # Use local callback if accessing from localhost
-        use_extension = not (is_local_access or is_localhost_request)
+        # Check if request is coming through a proxy
+        has_proxy_headers = (
+            'X-Forwarded-For' in request.headers or
+            'X-Forwarded-Host' in request.headers or
+            'X-Real-IP' in request.headers
+        )
+        
+        # Use local callback only if truly accessing from localhost (not behind proxy)
+        # If behind proxy, always serve extension even if request appears local
+        use_extension = not (is_local_access or is_localhost_request) or has_proxy_headers
         
         # If using localhost, start the callback server
         if not use_extension:
@@ -5890,6 +6102,273 @@ async def dashboard_claude_auth_status(request: Request):
         return JSONResponse(
             status_code=500,
             content={"authenticated": False, "error": str(e)}
+        )
+
+
+# Kilo OAuth2 authentication endpoints
+@app.post("/dashboard/kilo/auth/start")
+async def dashboard_kilo_auth_start(request: Request):
+    """Start Kilo OAuth2 Device Authorization Grant flow"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.kilo_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import KiloOAuth2
+        from aisbf.kilo_oauth2 import KiloOAuth2
+        
+        # Create auth instance
+        auth = KiloOAuth2(credentials_file=credentials_file)
+        
+        # Initiate device authorization (async method)
+        device_auth = await auth.initiate_device_auth()
+        
+        if not device_auth:
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": "Failed to initiate device authorization"}
+            )
+        
+        # Store device code in session for polling
+        request.session['kilo_device_code'] = device_auth['code']
+        request.session['kilo_provider'] = provider_key
+        request.session['kilo_credentials_file'] = credentials_file
+        request.session['kilo_expires_at'] = time.time() + device_auth['expiresIn']
+        
+        return JSONResponse({
+            "success": True,
+            "user_code": device_auth['code'],
+            "verification_uri": device_auth['verificationUrl'],
+            "expires_in": device_auth['expiresIn'],
+            "interval": 3,
+            "message": f"Please visit {device_auth['verificationUrl']} and enter code: {device_auth['code']}"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting Kilo auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/kilo/auth/poll")
+async def dashboard_kilo_auth_poll(request: Request):
+    """Poll Kilo OAuth2 device authorization status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Get device code from session
+        device_code = request.session.get('kilo_device_code')
+        credentials_file = request.session.get('kilo_credentials_file', '~/.kilo_credentials.json')
+        expires_at = request.session.get('kilo_expires_at', 0)
+        
+        if not device_code:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "status": "error", "error": "No device authorization in progress"}
+            )
+        
+        # Check if expired
+        if time.time() > expires_at:
+            # Clear session
+            request.session.pop('kilo_device_code', None)
+            request.session.pop('kilo_provider', None)
+            request.session.pop('kilo_credentials_file', None)
+            request.session.pop('kilo_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        
+        # Import KiloOAuth2
+        from aisbf.kilo_oauth2 import KiloOAuth2
+        
+        # Create auth instance
+        auth = KiloOAuth2(credentials_file=credentials_file)
+        
+        # Poll device authorization status (async method)
+        result = await auth.poll_device_auth(device_code)
+        
+        if result['status'] == 'approved':
+            # Save credentials
+            token = result.get('token')
+            user_email = result.get('userEmail')
+            
+            if token:
+                credentials = {
+                    "type": "oauth",
+                    "access": token,
+                    "refresh": token,  # Same token for both
+                    "expires": int(time.time()) + (365 * 24 * 60 * 60),  # 1 year
+                    "userEmail": user_email
+                }
+                auth._save_credentials(credentials)
+                logger.info(f"KiloOAuth2: Saved credentials for {user_email}")
+            
+            # Clear session data
+            request.session.pop('kilo_device_code', None)
+            request.session.pop('kilo_provider', None)
+            request.session.pop('kilo_credentials_file', None)
+            request.session.pop('kilo_expires_at', None)
+            
+            return JSONResponse({
+                "success": True,
+                "status": "approved",
+                "message": "Authentication completed successfully"
+            })
+        elif result['status'] == 'pending':
+            return JSONResponse({
+                "success": True,
+                "status": "pending",
+                "message": "Waiting for user authorization"
+            })
+        elif result['status'] == 'denied':
+            # Clear session
+            request.session.pop('kilo_device_code', None)
+            request.session.pop('kilo_provider', None)
+            request.session.pop('kilo_credentials_file', None)
+            request.session.pop('kilo_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "denied",
+                "error": "User denied authorization"
+            })
+        elif result['status'] == 'expired':
+            # Clear session
+            request.session.pop('kilo_device_code', None)
+            request.session.pop('kilo_provider', None)
+            request.session.pop('kilo_credentials_file', None)
+            request.session.pop('kilo_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        elif result['status'] == 'slow_down':
+            return JSONResponse({
+                "success": True,
+                "status": "slow_down",
+                "message": "Polling too frequently, slowing down"
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "status": "error",
+                "error": result.get('error', 'Unknown error')
+            })
+        
+    except Exception as e:
+        logger.error(f"Error polling Kilo auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "status": "error", "error": str(e)}
+        )
+
+
+@app.post("/dashboard/kilo/auth/status")
+async def dashboard_kilo_auth_status(request: Request):
+    """Check Kilo authentication status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.kilo_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"authenticated": False, "error": "Provider key is required"}
+            )
+        
+        # Import KiloOAuth2
+        from aisbf.kilo_oauth2 import KiloOAuth2
+        
+        # Create auth instance
+        auth = KiloOAuth2(credentials_file=credentials_file)
+        
+        # Check if authenticated
+        if auth.is_authenticated():
+            # Try to get a valid token (will refresh if needed)
+            token = auth.get_valid_token()
+            if token:
+                # Get token expiration info
+                expires_at = auth.credentials.get('expires', 0)
+                
+                return JSONResponse({
+                    "authenticated": True,
+                    "expires_in": max(0, expires_at - time.time()),
+                    "email": auth.credentials.get('userEmail')
+                })
+        
+        return JSONResponse({
+            "authenticated": False
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking Kilo auth status: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"authenticated": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/kilo/auth/logout")
+async def dashboard_kilo_auth_logout(request: Request):
+    """Logout from Kilo OAuth2 (clear stored credentials)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.kilo_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import KiloOAuth2
+        from aisbf.kilo_oauth2 import KiloOAuth2
+        
+        # Create auth instance
+        auth = KiloOAuth2(credentials_file=credentials_file)
+        
+        # Logout (clear credentials)
+        auth.logout()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Logged out successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error logging out from Kilo: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
         )
 
 

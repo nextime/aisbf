@@ -14,7 +14,8 @@ const DEFAULT_CONFIG = {
   enabled: true,
   remoteServer: '',  // Will be set from AISBF dashboard
   ports: [54545],    // Default OAuth callback ports to intercept
-  paths: ['/callback', '/oauth/callback', '/auth/callback']
+  paths: ['/callback', '/oauth/callback', '/auth/callback'],
+  forceInterception: false // Override for OAuth flows initiated from AISBF
 };
 
 // Current configuration
@@ -76,9 +77,14 @@ function generateRules() {
   
   // If the remote server is on localhost, we don't need to intercept
   // The OAuth2 callback can go directly to localhost without redirection
-  if (isRemoteLocal) {
+  // EXCEPTION: If we have an ongoing OAuth flow initiated from AISBF (forceInterception flag)
+  if (isRemoteLocal && !config.forceInterception) {
     console.log('[AISBF] Remote server is localhost - no interception needed');
     return rules;
+  }
+  
+  if (isRemoteLocal && config.forceInterception) {
+    console.log('[AISBF] Remote server is localhost but force interception is enabled for active OAuth flow');
   }
   
   for (const port of config.ports) {
@@ -217,7 +223,8 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
         enabled: true,
         remoteServer: message.remoteServer || sender.url.replace(/\/dashboard.*$/, ''),
         ports: message.ports || config.ports,
-        paths: message.paths || config.paths
+        paths: message.paths || config.paths,
+        forceInterception: message.forceInterception || false
       };
       saveConfig(newConfig).then(success => {
         sendResponse({ success, config: newConfig });

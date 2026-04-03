@@ -131,6 +131,7 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - Claude Code (OAuth2 authentication via claude.ai)
 - Ollama (direct HTTP)
 - Kiro (Amazon Q Developer / AWS CodeWhisperer)
+- Kilocode (OAuth2 Device Authorization Grant)
 ## Configuration
 
 ### SSL/TLS Configuration
@@ -287,6 +288,9 @@ AISBF supports Claude Code (claude.ai) as a provider using OAuth2 authentication
 - Automatic token refresh with refresh token rotation
 - Chrome extension for remote server OAuth2 callback interception
 - Dashboard integration with authentication UI
+- Proxy-aware extension serving: automatically detects reverse proxy deployments
+- Force interception mechanism: extension activates for localhost when OAuth flow initiated from dashboard
+- Supports nginx, caddy, and other reverse proxies with X-Forwarded-* header detection
 - Credentials stored in `~/.aisbf/claude_credentials.json`
 - Optional curl_cffi TLS fingerprinting for Cloudflare bypass
 - Compatible with official claude-cli credentials

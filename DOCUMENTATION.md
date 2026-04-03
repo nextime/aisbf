@@ -676,6 +676,9 @@ Model metadata is automatically extracted from provider responses and stored in 
 - Full OAuth2 PKCE authentication flow
 - Automatic token refresh with refresh token rotation
 - Chrome extension for remote server OAuth2 callback interception
+- Proxy-aware extension serving: automatically detects reverse proxy deployments via X-Forwarded-* headers
+- Force interception mechanism: extension activates for localhost when OAuth flow initiated from dashboard
+- Supports nginx, caddy, and other reverse proxies with automatic proxy detection
 - Dashboard integration with authentication UI
 - Credentials stored in `~/.aisbf/claude_credentials.json`
 - Optional curl_cffi TLS fingerprinting for Cloudflare bypass
@@ -694,6 +697,14 @@ Model metadata is automatically extracted from provider responses and stored in 
 - Supports IDE credentials and CLI authentication
 - Access to Claude models through Kiro
 - No separate API key required (uses Kiro credentials)
+
+### Kilocode
+- OAuth2 Device Authorization Grant flow
+- Supports both API key and OAuth2 authentication
+- Seamless integration with Kilocode services
+- Dashboard OAuth2 authentication UI
+- Credentials stored in ~/.kilo_credentials.json
+- Access to Kilocode AI models and services
 - Supports streaming, tool calling, and extended thinking
 
 ## Rotation Models
