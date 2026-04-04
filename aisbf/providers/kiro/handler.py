@@ -22,6 +22,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 """
 
 import httpx
+import asyncio
 import time
 import os
 import json
@@ -363,6 +364,8 @@ class KiroProviderHandler(BaseProviderHandler):
                         }]
                     }
                     yield f"data: {json.dumps(tool_calls_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                    # Yield control to event loop to ensure chunk is flushed to client
+                    await asyncio.sleep(0)
 
                 final_chunk = {
                     "id": completion_id,
@@ -382,7 +385,11 @@ class KiroProviderHandler(BaseProviderHandler):
                 }
 
                 yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                # Yield control to event loop to ensure chunk is flushed to client
+                await asyncio.sleep(0)
                 yield b"data: [DONE]\n\n"
+                # Final flush to ensure all buffered data reaches the client
+                await asyncio.sleep(0)
 
     def _get_models_cache_path(self) -> str:
         """Get the path to the models cache file."""

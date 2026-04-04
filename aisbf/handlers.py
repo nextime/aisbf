@@ -351,7 +351,7 @@ class RequestHandler:
             logger.info("No API key required for this provider")
 
         logger.info(f"Getting provider handler for {provider_id}")
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
         if handler.is_rate_limited():
@@ -518,7 +518,7 @@ class RequestHandler:
         else:
             api_key = None
 
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
 
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
@@ -1117,7 +1117,7 @@ class RequestHandler:
         else:
             api_key = None
 
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         try:
             # Apply rate limiting
             await handler.apply_rate_limit()
@@ -1398,7 +1398,7 @@ class RequestHandler:
         else:
             api_key = None
         
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
@@ -1427,7 +1427,7 @@ class RequestHandler:
         else:
             api_key = None
         
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
@@ -1456,7 +1456,7 @@ class RequestHandler:
         else:
             api_key = None
         
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
@@ -1489,7 +1489,7 @@ class RequestHandler:
         else:
             api_key = None
         
-        handler = get_provider_handler(provider_id, api_key)
+        handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
@@ -2025,7 +2025,7 @@ class RotationHandler:
             api_key = self._get_api_key(provider_id, provider.get('api_key'))
             
             # Check if provider is rate limited/deactivated
-            provider_handler = get_provider_handler(provider_id, api_key)
+            provider_handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
             if provider_handler.is_rate_limited():
                 logger.warning(f"  [SKIPPED] Provider {provider_id} is rate limited/deactivated")
                 logger.warning(f"  Reason: Provider has exceeded failure threshold or is in cooldown period")
@@ -2367,7 +2367,7 @@ class RotationHandler:
             model_name = current_model['name']
             
             logger.info(f"Getting provider handler for {provider_id}")
-            handler = get_provider_handler(provider_id, api_key)
+            handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
             logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
             if handler.is_rate_limited():
@@ -2800,9 +2800,13 @@ class RotationHandler:
                 })
             }
             yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+            # Yield control to event loop to ensure chunk is flushed to client
+            await asyncio.sleep(0)
             
             # Send [DONE] marker
             yield b"data: [DONE]\n\n"
+            # Final flush to ensure all buffered data reaches the client
+            await asyncio.sleep(0)
         
         return StreamingResponse(error_stream_generator(), media_type="text/event-stream", status_code=status_code)
 
@@ -3106,6 +3110,8 @@ class RotationHandler:
                         }]
                     }
                     yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+                    # Yield control to event loop to ensure final chunk is flushed to client
+                    await asyncio.sleep(0)
                 elif is_kilo_provider:
                     # Handle Kilo/KiloCode streaming response
                     # Kilo returns an async generator that yields OpenAI-compatible SSE bytes

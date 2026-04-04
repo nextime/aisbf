@@ -32,10 +32,14 @@ from .base import BaseProviderHandler, AISBF_DEBUG
 class KiloProviderHandler(BaseProviderHandler):
     """
     Handler for Kilo Gateway (OpenAI-compatible with OAuth2 support).
+    
+    For admin users (user_id=None), credentials are loaded from file.
+    For non-admin users, credentials are loaded from the database.
     """
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
         super().__init__(provider_id, api_key)
+        self.user_id = user_id
         self.provider_config = config.get_provider(provider_id)
         
         kilo_config = getattr(self.provider_config, 'kilo_config', None)
@@ -47,8 +51,14 @@ class KiloProviderHandler(BaseProviderHandler):
             credentials_file = kilo_config.get('credentials_file')
             api_base = kilo_config.get('api_base')
         
-        from ..auth.kilo import KiloOAuth2
-        self.oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+        # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
+        # All other users (including database admins with user_id) use database credentials
+        if user_id is not None:
+            self.oauth2 = self._load_oauth2_from_db(provider_id, credentials_file, api_base)
+        else:
+            # Config admin (from aisbf.json): use file-based credentials
+            from ..auth.kilo import KiloOAuth2
+            self.oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
         
         configured_endpoint = getattr(self.provider_config, 'endpoint', None)
         if configured_endpoint:
@@ -61,6 +71,39 @@ class KiloProviderHandler(BaseProviderHandler):
         self._kilo_endpoint = endpoint
         
         self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
+    
+    def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, api_base: str):
+        """
+        Load OAuth2 credentials from database for non-admin users.
+        Falls back to file-based credentials if not found in database.
+        """
+        try:
+            from ..database import get_database
+            from ..auth.kilo import KiloOAuth2
+            db = get_database()
+            if db:
+                db_creds = db.get_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=provider_id,
+                    auth_type='kilo_oauth2'
+                )
+                if db_creds and db_creds.get('credentials'):
+                    # Create OAuth2 instance with database credentials
+                    oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+                    # Override the loaded credentials with database credentials
+                    oauth2.credentials = db_creds['credentials']
+                    import logging
+                    logging.getLogger(__name__).info(f"KiloProviderHandler: Loaded credentials from database for user {self.user_id}")
+                    return oauth2
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"KiloProviderHandler: Failed to load credentials from database: {e}")
+        
+        # Fall back to file-based credentials
+        from ..auth.kilo import KiloOAuth2
+        import logging
+        logging.getLogger(__name__).info(f"KiloProviderHandler: Falling back to file-based credentials for user {self.user_id}")
+        return KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
     
     async def _ensure_authenticated(self) -> str:
         """Ensure user is authenticated and return valid token."""

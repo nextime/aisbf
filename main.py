@@ -1516,20 +1516,35 @@ async def dashboard_providers(request: Request):
     if auth_check:
         return auth_check
     
-    # Load providers.json
-    config_path = Path.home() / '.aisbf' / 'providers.json'
-    if not config_path.exists():
-        config_path = Path(__file__).parent / 'config' / 'providers.json'
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
     
-    with open(config_path) as f:
-        full_config = json.load(f)
-    
-    # Extract just the providers object (handle both nested and flat structures)
-    if 'providers' in full_config and isinstance(full_config['providers'], dict):
-        providers_data = full_config['providers']
+    if is_config_admin:
+        # Config admin: load from JSON files
+        config_path = Path.home() / '.aisbf' / 'providers.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'providers.json'
+        
+        with open(config_path) as f:
+            full_config = json.load(f)
+        
+        # Extract just the providers object (handle both nested and flat structures)
+        if 'providers' in full_config and isinstance(full_config['providers'], dict):
+            providers_data = full_config['providers']
+        else:
+            # Fallback for flat structure (backward compatibility)
+            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
     else:
-        # Fallback for flat structure (backward compatibility)
-        providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+        # Database user: load from database
+        from aisbf.database import get_database
+        db = get_database()
+        user_providers = db.get_user_providers(current_user_id)
+        
+        # Convert to the format expected by the frontend
+        providers_data = {}
+        for provider in user_providers:
+            providers_data[provider['provider_id']] = provider['config']
     
     # Check for success parameter
     success = request.query_params.get('success')
@@ -1683,6 +1698,10 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
     if auth_check:
         return auth_check
     
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+    
     try:
         # Validate JSON
         providers_data = json.loads(config)
@@ -1712,23 +1731,34 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         if auto_detected_count > 0:
             logger.info(f"Auto-detected models for {auto_detected_count} provider(s)")
         
-        # Load existing config to preserve structure
-        config_path = Path.home() / '.aisbf' / 'providers.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / 'providers.json'
-        
-        # Read existing config to preserve condensation settings
-        with open(config_path) as f:
-            full_config = json.load(f)
-        
-        # Update providers section while preserving other keys
-        full_config['providers'] = providers_data
-        
-        # Save to file with full structure
-        save_path = Path.home() / '.aisbf' / 'providers.json'
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, 'w') as f:
-            json.dump(full_config, f, indent=2)
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'providers.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'providers.json'
+            
+            # Read existing config to preserve condensation settings
+            with open(config_path) as f:
+                full_config = json.load(f)
+            
+            # Update providers section while preserving other keys
+            full_config['providers'] = providers_data
+            
+            # Save to file with full structure
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+        else:
+            # Database user: save to database
+            from aisbf.database import get_database
+            db = get_database()
+            
+            # Save each provider to database
+            for provider_key, provider_config in providers_data.items():
+                db.save_user_provider(current_user_id, provider_key, provider_config)
+            
+            logger.info(f"Saved {len(providers_data)} provider(s) to database for user {current_user_id}")
         
         success_msg = "Configuration saved successfully! Restart server for changes to take effect."
         if auto_detected_count > 0:
@@ -1853,12 +1883,28 @@ async def dashboard_rotations(request: Request):
     if auth_check:
         return auth_check
     
-    config_path = Path.home() / '.aisbf' / 'rotations.json'
-    if not config_path.exists():
-        config_path = Path(__file__).parent / 'config' / 'rotations.json'
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
     
-    with open(config_path) as f:
-        rotations_data = json.load(f)
+    if is_config_admin:
+        # Config admin: load from JSON files
+        config_path = Path.home() / '.aisbf' / 'rotations.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'rotations.json'
+        
+        with open(config_path) as f:
+            rotations_data = json.load(f)
+    else:
+        # Database user: load from database
+        from aisbf.database import get_database
+        db = get_database()
+        user_rotations = db.get_user_rotations(current_user_id)
+        
+        # Convert to the format expected by the frontend
+        rotations_data = {"rotations": {}, "notifyerrors": False}
+        for rotation in user_rotations:
+            rotations_data["rotations"][rotation['rotation_id']] = rotation['config']
     
     # Get available providers
     available_providers = list(config.providers.keys()) if config else []
@@ -1885,6 +1931,10 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     if auth_check:
         return auth_check
     
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+    
     try:
         rotations_data = json.loads(config)
         
@@ -1899,10 +1949,23 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                                     if 'condense_context' not in model or model.get('condense_context') is None:
                                         model['condense_context'] = 80
         
-        config_path = Path.home() / '.aisbf' / 'rotations.json'
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w') as f:
-            json.dump(rotations_data, f, indent=2)
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'rotations.json'
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w') as f:
+                json.dump(rotations_data, f, indent=2)
+        else:
+            # Database user: save to database
+            from aisbf.database import get_database
+            db = get_database()
+            
+            # Save each rotation to database
+            rotations = rotations_data.get('rotations', {})
+            for rotation_key, rotation_config in rotations.items():
+                db.save_user_rotation(current_user_id, rotation_key, rotation_config)
+            
+            logger.info(f"Saved {len(rotations)} rotation(s) to database for user {current_user_id}")
         
         available_providers = list(config.providers.keys()) if config else []
         
@@ -1919,11 +1982,22 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     )
     except json.JSONDecodeError as e:
         # Reload current config on error
-        config_path = Path.home() / '.aisbf' / 'rotations.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / 'rotations.json'
-        with open(config_path) as f:
-            rotations_data = json.load(f)
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if is_config_admin:
+            config_path = Path.home() / '.aisbf' / 'rotations.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'rotations.json'
+            with open(config_path) as f:
+                rotations_data = json.load(f)
+        else:
+            from aisbf.database import get_database
+            db = get_database()
+            user_rotations = db.get_user_rotations(current_user_id)
+            rotations_data = {"rotations": {}, "notifyerrors": False}
+            for rotation in user_rotations:
+                rotations_data["rotations"][rotation['rotation_id']] = rotation['config']
         
         available_providers = list(config.providers.keys()) if config else []
         
@@ -1946,12 +2020,28 @@ async def dashboard_autoselect(request: Request):
     if auth_check:
         return auth_check
     
-    config_path = Path.home() / '.aisbf' / 'autoselect.json'
-    if not config_path.exists():
-        config_path = Path(__file__).parent / 'config' / 'autoselect.json'
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
     
-    with open(config_path) as f:
-        autoselect_data = json.load(f)
+    if is_config_admin:
+        # Config admin: load from JSON files
+        config_path = Path.home() / '.aisbf' / 'autoselect.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'autoselect.json'
+        
+        with open(config_path) as f:
+            autoselect_data = json.load(f)
+    else:
+        # Database user: load from database
+        from aisbf.database import get_database
+        db = get_database()
+        user_autoselects = db.get_user_autoselects(current_user_id)
+        
+        # Convert to the format expected by the frontend
+        autoselect_data = {}
+        for autoselect in user_autoselects:
+            autoselect_data[autoselect['autoselect_id']] = autoselect['config']
     
     # Get available rotations
     available_rotations = list(config.rotations.keys()) if config else []
@@ -2010,12 +2100,29 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     if auth_check:
         return auth_check
     
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+    
     try:
         autoselect_data = json.loads(config)
-        config_path = Path.home() / '.aisbf' / 'autoselect.json'
-        config_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(config_path, 'w') as f:
-            json.dump(autoselect_data, f, indent=2)
+        
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'autoselect.json'
+            config_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(config_path, 'w') as f:
+                json.dump(autoselect_data, f, indent=2)
+        else:
+            # Database user: save to database
+            from aisbf.database import get_database
+            db = get_database()
+            
+            # Save each autoselect to database
+            for autoselect_key, autoselect_config in autoselect_data.items():
+                db.save_user_autoselect(current_user_id, autoselect_key, autoselect_config)
+            
+            logger.info(f"Saved {len(autoselect_data)} autoselect(s) to database for user {current_user_id}")
         
         available_rotations = list(config.rotations.keys()) if config else []
         
@@ -2032,11 +2139,22 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     )
     except json.JSONDecodeError as e:
         # Reload current config on error
-        config_path = Path.home() / '.aisbf' / 'autoselect.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / 'autoselect.json'
-        with open(config_path) as f:
-            autoselect_data = json.load(f)
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if is_config_admin:
+            config_path = Path.home() / '.aisbf' / 'autoselect.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'autoselect.json'
+            with open(config_path) as f:
+                autoselect_data = json.load(f)
+        else:
+            from aisbf.database import get_database
+            db = get_database()
+            user_autoselects = db.get_user_autoselects(current_user_id)
+            autoselect_data = {}
+            for autoselect in user_autoselects:
+                autoselect_data[autoselect['autoselect_id']] = autoselect['config']
         
         available_rotations = list(config.rotations.keys()) if config else []
         
@@ -2791,10 +2909,14 @@ async def dashboard_provider_upload(
     file_type: str = Form(...),
     file: UploadFile = File(...)
 ):
-    """Upload authentication file for a global provider (admin only)"""
-    auth_check = require_admin(request)
+    """Upload authentication file for a provider. Config admin saves to files, other users save to database."""
+    auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
+
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
 
     try:
         # Validate file type
@@ -2805,29 +2927,70 @@ async def dashboard_provider_upload(
                 content={"error": f"Invalid file type. Allowed: {', '.join(allowed_types)}"}
             )
 
-        # Get admin auth files directory
-        auth_files_dir = get_admin_auth_files_dir()
-        
-        # Generate unique filename
-        import uuid
-        file_ext = Path(file.filename).suffix if file.filename else '.json'
-        stored_filename = f"{provider_name}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
-        file_path = auth_files_dir / stored_filename
-
-        # Save file
+        # Read file content
         content = await file.read()
-        with open(file_path, 'wb') as f:
-            f.write(content)
 
-        logger.info(f"Admin uploaded auth file: {file_path}")
+        if is_config_admin:
+            # Config admin: save to files
+            auth_files_dir = get_admin_auth_files_dir()
+            
+            # Generate unique filename
+            import uuid
+            file_ext = Path(file.filename).suffix if file.filename else '.json'
+            stored_filename = f"{provider_name}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+            file_path = auth_files_dir / stored_filename
 
-        return JSONResponse({
-            "message": "File uploaded successfully",
-            "file_path": str(file_path),
-            "stored_filename": stored_filename
-        })
+            # Save file
+            with open(file_path, 'wb') as f:
+                f.write(content)
+
+            logger.info(f"Config admin uploaded auth file: {file_path}")
+
+            return JSONResponse({
+                "message": "File uploaded successfully",
+                "file_path": str(file_path),
+                "stored_filename": stored_filename
+            })
+        else:
+            # Database user: save to database
+            from aisbf.database import get_database
+            db = get_database()
+
+            # Get user auth files directory
+            auth_files_dir = get_user_auth_files_dir(current_user_id)
+            
+            # Generate unique filename
+            import uuid
+            file_ext = Path(file.filename).suffix if file.filename else '.json'
+            stored_filename = f"{provider_name}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+            file_path = auth_files_dir / stored_filename
+
+            # Save file
+            with open(file_path, 'wb') as f:
+                f.write(content)
+
+            # Save metadata to database
+            file_id = db.save_user_auth_file(
+                user_id=current_user_id,
+                provider_id=provider_name,
+                file_type=file_type,
+                original_filename=file.filename or stored_filename,
+                stored_filename=stored_filename,
+                file_path=str(file_path),
+                file_size=len(content),
+                mime_type=file.content_type
+            )
+
+            logger.info(f"User {current_user_id} uploaded auth file: {file_path}")
+
+            return JSONResponse({
+                "message": "File uploaded successfully",
+                "file_id": file_id,
+                "file_path": str(file_path),
+                "stored_filename": stored_filename
+            })
     except Exception as e:
-        logger.error(f"Error uploading admin file: {e}")
+        logger.error(f"Error uploading file: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
 
@@ -6179,6 +6342,37 @@ async def dashboard_claude_auth_complete(request: Request):
         success = auth.exchange_code_for_tokens(code, state, verifier)
         
         if success:
+            # Only the ONE config admin (user_id=None from aisbf.json) saves to file
+            # All other users (including database admins) save to database
+            current_user_id = request.session.get('user_id')
+            is_config_admin = current_user_id is None
+            
+            if not is_config_admin:
+                # Non-config-admin user: save credentials to database
+                try:
+                    from aisbf.database import get_database
+                    db = get_database()
+                    if db and current_user_id:
+                        # Read the credentials that were just saved to file
+                        credentials_path = Path(credentials_file).expanduser()
+                        if credentials_path.exists():
+                            with open(credentials_path, 'r') as f:
+                                db_credentials = json.load(f)
+                            
+                            # Save to database
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_key,
+                                auth_type='claude_oauth2',
+                                credentials=db_credentials
+                            )
+                            logger.info(f"ClaudeOAuth2: Saved credentials to database for user {current_user_id}")
+                            
+                            # Remove the file since we're using database storage for non-admin
+                            credentials_path.unlink(missing_ok=True)
+                except Exception as e:
+                    logger.error(f"ClaudeOAuth2: Failed to save credentials to database: {e}")
+            
             # Clear session data
             request.session.pop('oauth2_code', None)
             request.session.pop('oauth2_verifier', None)
@@ -6264,7 +6458,34 @@ async def dashboard_claude_auth_status(request: Request):
         # Import ClaudeAuth
         from aisbf.auth.claude import ClaudeAuth
         
-        # Create auth instance
+        # Check if current user is config admin
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if not is_config_admin:
+            # Non-config-admin user: check database for credentials
+            try:
+                from aisbf.database import get_database
+                db = get_database()
+                if db and current_user_id:
+                    db_creds = db.get_user_oauth2_credentials(
+                        user_id=current_user_id,
+                        provider_id=provider_key,
+                        auth_type='claude_oauth2'
+                    )
+                    if db_creds and db_creds.get('credentials'):
+                        # Check if tokens are still valid
+                        tokens = db_creds['credentials'].get('tokens', {})
+                        access_token = tokens.get('access_token')
+                        if access_token:
+                            return JSONResponse({
+                                "authenticated": True,
+                                "email": db_creds['credentials'].get('email', 'unknown')
+                            })
+            except Exception as e:
+                logger.warning(f"ClaudeOAuth2: Failed to check database credentials: {e}")
+        
+        # Config admin or no database credentials: check file
         auth = ClaudeAuth(credentials_file=credentials_file)
         
         # Check if credentials exist and are valid
@@ -6405,6 +6626,11 @@ async def dashboard_kilo_auth_poll(request: Request):
             token = result.get('token')
             user_email = result.get('userEmail')
             
+            # Only the ONE config admin (user_id=None from aisbf.json) saves to file
+            # All other users (including database admins) save to database
+            current_user_id = request.session.get('user_id')
+            is_config_admin = current_user_id is None
+            
             if token:
                 credentials = {
                     "type": "oauth",
@@ -6413,8 +6639,27 @@ async def dashboard_kilo_auth_poll(request: Request):
                     "expires": int(time.time()) + (365 * 24 * 60 * 60),  # 1 year
                     "userEmail": user_email
                 }
-                auth._save_credentials(credentials)
-                logger.info(f"KiloOAuth2: Saved credentials for {user_email}")
+                
+                if not is_config_admin:
+                    # Non-config-admin user: save credentials to database
+                    try:
+                        from aisbf.database import get_database
+                        db = get_database()
+                        if db and current_user_id:
+                            # Save to database
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_key,
+                                auth_type='kilo_oauth2',
+                                credentials=credentials
+                            )
+                            logger.info(f"KiloOAuth2: Saved credentials to database for user {current_user_id}")
+                    except Exception as e:
+                        logger.error(f"KiloOAuth2: Failed to save credentials to database: {e}")
+                else:
+                    # Config admin: save to file
+                    auth._save_credentials(credentials)
+                    logger.info(f"KiloOAuth2: Saved credentials to file for {user_email}")
             
             # Clear session data
             request.session.pop('kilo_device_code', None)
@@ -6499,7 +6744,35 @@ async def dashboard_kilo_auth_status(request: Request):
         # Import KiloOAuth2
         from aisbf.auth.kilo import KiloOAuth2
         
-        # Create auth instance
+        # Check if current user is config admin
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if not is_config_admin:
+            # Non-config-admin user: check database for credentials
+            try:
+                from aisbf.database import get_database
+                db = get_database()
+                if db and current_user_id:
+                    db_creds = db.get_user_oauth2_credentials(
+                        user_id=current_user_id,
+                        provider_id=provider_key,
+                        auth_type='kilo_oauth2'
+                    )
+                    if db_creds and db_creds.get('credentials'):
+                        # Check if tokens are still valid
+                        creds = db_creds['credentials']
+                        expires_at = creds.get('expires', 0)
+                        if time.time() < expires_at:
+                            return JSONResponse({
+                                "authenticated": True,
+                                "expires_in": max(0, expires_at - time.time()),
+                                "email": creds.get('userEmail', 'unknown')
+                            })
+            except Exception as e:
+                logger.warning(f"KiloOAuth2: Failed to check database credentials: {e}")
+        
+        # Config admin or no database credentials: check file
         auth = KiloOAuth2(credentials_file=credentials_file)
         
         # Check if authenticated
@@ -6599,6 +6872,7 @@ async def dashboard_codex_auth_start(request: Request):
         
         # Store device info in session for polling
         request.session['codex_device_auth_id'] = device_info.get('device_auth_id')
+        request.session['codex_user_code'] = device_info.get('user_code')
         request.session['codex_provider'] = provider_key
         request.session['codex_credentials_file'] = credentials_file
         request.session['codex_issuer'] = issuer
@@ -6629,10 +6903,22 @@ async def dashboard_codex_auth_poll(request: Request):
         return auth_check
     
     try:
+        # Get device auth info from session
+        device_auth_id = request.session.get('codex_device_auth_id')
+        user_code = request.session.get('codex_user_code')
+        
+        if not device_auth_id or not user_code:
+            return JSONResponse({
+                "success": False,
+                "status": "error",
+                "error": "No device authorization in progress. Please start authentication again."
+            })
+        
         # Check if expired
         expires_at = request.session.get('codex_expires_at', 0)
         if time.time() > expires_at:
             request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_user_code', None)
             request.session.pop('codex_provider', None)
             request.session.pop('codex_credentials_file', None)
             request.session.pop('codex_issuer', None)
@@ -6653,12 +6939,48 @@ async def dashboard_codex_auth_poll(request: Request):
         # Create auth instance
         auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
         
+        # Set device auth info on the instance (required for poll_device_code_completion)
+        auth._device_auth_id = device_auth_id
+        auth._device_user_code = user_code
+        
         # Poll for completion
         result = await auth.poll_device_code_completion()
         
         if result['status'] == 'approved':
+            # Only the ONE config admin (user_id=None from aisbf.json) saves to file
+            # All other users (including database admins) save to database
+            current_user_id = request.session.get('user_id')
+            is_config_admin = current_user_id is None
+            
+            if not is_config_admin:
+                # Non-admin user: save credentials to database instead of file
+                try:
+                    from aisbf.database import get_database
+                    db = get_database()
+                    if db and current_user_id:
+                        # Read the credentials that were just saved to file
+                        credentials_path = Path(credentials_file).expanduser()
+                        if credentials_path.exists():
+                            with open(credentials_path, 'r') as f:
+                                db_credentials = json.load(f)
+                            
+                            # Save to database
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_key,
+                                auth_type='codex_oauth2',
+                                credentials=db_credentials
+                            )
+                            logger.info(f"CodexOAuth2: Saved credentials to database for user {current_user_id}")
+                            
+                            # Remove the file since we're using database storage for non-admin
+                            credentials_path.unlink(missing_ok=True)
+                except Exception as e:
+                    logger.error(f"CodexOAuth2: Failed to save credentials to database: {e}")
+            
             # Clear session
             request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_user_code', None)
             request.session.pop('codex_provider', None)
             request.session.pop('codex_credentials_file', None)
             request.session.pop('codex_issuer', None)
@@ -6677,6 +6999,7 @@ async def dashboard_codex_auth_poll(request: Request):
             })
         elif result['status'] == 'denied':
             request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_user_code', None)
             request.session.pop('codex_provider', None)
             request.session.pop('codex_credentials_file', None)
             request.session.pop('codex_issuer', None)
@@ -6689,6 +7012,7 @@ async def dashboard_codex_auth_poll(request: Request):
             })
         elif result['status'] == 'expired':
             request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_user_code', None)
             request.session.pop('codex_provider', None)
             request.session.pop('codex_credentials_file', None)
             request.session.pop('codex_issuer', None)
@@ -6735,7 +7059,34 @@ async def dashboard_codex_auth_status(request: Request):
         # Import CodexOAuth2
         from aisbf.auth.codex import CodexOAuth2
         
-        # Create auth instance
+        # Check if current user is config admin
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if not is_config_admin:
+            # Non-config-admin user: check database for credentials
+            try:
+                from aisbf.database import get_database
+                db = get_database()
+                if db and current_user_id:
+                    db_creds = db.get_user_oauth2_credentials(
+                        user_id=current_user_id,
+                        provider_id=provider_key,
+                        auth_type='codex_oauth2'
+                    )
+                    if db_creds and db_creds.get('credentials'):
+                        # Check if tokens are still valid
+                        tokens = db_creds['credentials'].get('tokens', {})
+                        access_token = tokens.get('access_token')
+                        if access_token:
+                            return JSONResponse({
+                                "authenticated": True,
+                                "email": db_creds['credentials'].get('email', 'unknown')
+                            })
+            except Exception as e:
+                logger.warning(f"CodexOAuth2: Failed to check database credentials: {e}")
+        
+        # Config admin or no database credentials: check file
         auth = CodexOAuth2(credentials_file=credentials_file)
         
         # Check if authenticated

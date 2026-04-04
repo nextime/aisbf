@@ -39,12 +39,16 @@ class ClaudeProviderHandler(BaseProviderHandler):
     the official Anthropic Python SDK. OAuth2 access tokens are passed as
     the api_key parameter to the SDK, which handles proper message formatting,
     retries, and streaming.
+    
+    For admin users (user_id=None), credentials are loaded from file.
+    For non-admin users, credentials are loaded from the database.
     """
     
     # NOTE: OAuth2 API uses its own model naming scheme that differs from standard Anthropic API
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
         super().__init__(provider_id, api_key)
+        self.user_id = user_id
         self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config
@@ -53,9 +57,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
         if claude_config and isinstance(claude_config, dict):
             credentials_file = claude_config.get('credentials_file')
         
-        # Initialize ClaudeAuth with credentials file (handles OAuth2 flow)
-        from ..auth.claude import ClaudeAuth
-        self.auth = ClaudeAuth(credentials_file=credentials_file)
+        # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
+        # All other users (including database admins with user_id) use database credentials
+        if user_id is not None:
+            self.auth = self._load_auth_from_db(provider_id, credentials_file)
+        else:
+            # Config admin (from aisbf.json): use file-based credentials
+            from ..auth.claude import ClaudeAuth
+            self.auth = ClaudeAuth(credentials_file=credentials_file)
         
         # HTTP client for direct API requests (OAuth2 requires direct HTTP, not SDK)
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
@@ -91,6 +100,39 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         # Initialize persistent identifiers for metadata
         self._init_session_identifiers()
+    
+    def _load_auth_from_db(self, provider_id: str, credentials_file: str):
+        """
+        Load OAuth2 credentials from database for non-admin users.
+        Falls back to file-based credentials if not found in database.
+        """
+        try:
+            from ..database import get_database
+            from ..auth.claude import ClaudeAuth
+            db = get_database()
+            if db:
+                db_creds = db.get_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=provider_id,
+                    auth_type='claude_oauth2'
+                )
+                if db_creds and db_creds.get('credentials'):
+                    # Create auth instance with database credentials
+                    auth = ClaudeAuth(credentials_file=credentials_file)
+                    # Override the loaded credentials with database credentials
+                    auth.tokens = db_creds['credentials'].get('tokens', {})
+                    import logging
+                    logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
+                    return auth
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"ClaudeProviderHandler: Failed to load credentials from database: {e}")
+        
+        # Fall back to file-based credentials
+        from ..auth.claude import ClaudeAuth
+        import logging
+        logging.getLogger(__name__).info(f"ClaudeProviderHandler: Falling back to file-based credentials for user {self.user_id}")
+        return ClaudeAuth(credentials_file=credentials_file)
     
     def _init_session_identifiers(self):
         """Initialize persistent session identifiers (device_id, account_uuid, session_id)."""
@@ -1190,7 +1232,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
                             }
                             
                             yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                            # Yield control to event loop to ensure chunk is flushed to client
+                            await asyncio.sleep(0)
                             yield b"data: [DONE]\n\n"
+                            # Final flush to ensure all buffered data reaches the client
+                            await asyncio.sleep(0)
                     
                     except json.JSONDecodeError as e:
                         logger.warning(f"Failed to parse streaming chunk: {e}")
@@ -1553,7 +1599,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     }
                     
                     yield f"data: {json.dumps(final_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                    # Yield control to event loop to ensure chunk is flushed to client
+                    await asyncio.sleep(0)
                     yield b"data: [DONE]\n\n"
+                    # Final flush to ensure all buffered data reaches the client
+                    await asyncio.sleep(0)
             
             logger.info(f"ClaudeProviderHandler: SDK streaming completed successfully")
             self.record_success()

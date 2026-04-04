@@ -1,4 +1,0 @@
-Requirement already satisfied: curl_cffi in /home/nextime/aisbf/venv/lib/python3.13/site-packages (0.14.0)
-Requirement already satisfied: cffi>=1.12.0 in /home/nextime/aisbf/venv/lib/python3.13/site-packages (from curl_cffi) (2.0.0)
-Requirement already satisfied: certifi>=2024.2.2 in /home/nextime/aisbf/venv/lib/python3.13/site-packages (from curl_cffi) (2026.2.25)
-Requirement already satisfied: pycparser in /home/nextime/aisbf/venv/lib/python3.13/site-packages (from cffi>=1.12.0->curl_cffi) (3.0)

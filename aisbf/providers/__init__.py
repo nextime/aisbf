@@ -56,12 +56,13 @@ PROVIDER_HANDLERS = {
 }
 
 
-def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> BaseProviderHandler:
+def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None) -> BaseProviderHandler:
     import logging
     logger = logging.getLogger(__name__)
     logger.info(f"=== get_provider_handler START ===")
     logger.info(f"Provider ID: {provider_id}")
     logger.info(f"API key provided: {bool(api_key)}")
+    logger.info(f"User ID: {user_id}")
     
     provider_config = config.get_provider(provider_id)
     logger.info(f"Provider config: {provider_config}")
@@ -76,9 +77,15 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None) -> Bas
         logger.error(f"Unsupported provider type: {provider_config.type}")
         raise ValueError(f"Unsupported provider type: {provider_config.type}")
     
-    # All handlers now accept api_key as optional parameter
-    logger.info(f"Creating handler with provider_id and optional api_key")
-    handler = handler_class(provider_id, api_key)
+    # Check if handler supports user_id parameter (CodexProviderHandler does)
+    import inspect
+    sig = inspect.signature(handler_class.__init__)
+    if 'user_id' in sig.parameters:
+        logger.info(f"Creating handler with provider_id, optional api_key, and user_id")
+        handler = handler_class(provider_id, api_key, user_id=user_id)
+    else:
+        logger.info(f"Creating handler with provider_id and optional api_key")
+        handler = handler_class(provider_id, api_key)
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
     logger.info(f"=== get_provider_handler END ===")

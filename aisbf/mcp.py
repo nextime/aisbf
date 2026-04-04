@@ -676,13 +676,13 @@ class MCPServer:
                 'get_rotation_settings': self._get_rotation_settings,
             })
         
-        # Add fullconfig-level tools
+        # Add fullconfig-level tools (now support user_id for routing)
         if auth_level >= MCPAuthLevel.FULLCONFIG:
             handlers.update({
                 'get_providers_config': self._get_providers_config,
-                'set_autoselect_config': self._set_autoselect_config,
-                'set_rotation_config': self._set_rotation_config,
-                'set_provider_config': self._set_provider_config,
+                'set_autoselect_config': lambda args: self._set_autoselect_config(args, user_id),
+                'set_rotation_config': lambda args: self._set_rotation_config(args, user_id),
+                'set_provider_config': lambda args: self._set_provider_config(args, user_id),
                 'get_server_config': self._get_server_config,
                 'set_server_config': self._set_server_config,
                 'get_tor_status': self._get_tor_status,
@@ -719,7 +719,7 @@ class MCPServer:
             raise HTTPException(status_code=404, detail=f"Tool '{tool_name}' not found")
         
         handler = handlers[tool_name]
-        return await handler(arguments, user_id)
+        return await handler(arguments)
     
     async def _list_models(self, args: Dict) -> Dict:
         """List all available models"""
@@ -994,93 +994,122 @@ class MCPServer:
         else:
             return {"providers": providers_data}
     
-    async def _set_autoselect_config(self, args: Dict) -> Dict:
-        """Set autoselect configuration"""
+    async def _set_autoselect_config(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Set autoselect configuration. Config admin saves to files, other users save to database."""
         autoselect_id = args.get('autoselect_id')
         autoselect_data = args.get('autoselect_data')
         
         if not autoselect_id or not autoselect_data:
             raise HTTPException(status_code=400, detail="autoselect_id and autoselect_data are required")
         
-        # Load existing config
-        config_path = Path.home() / '.aisbf' / 'autoselect.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent.parent / 'config' / 'autoselect.json'
+        # Check if user is config admin (user_id is None means config admin)
+        is_config_admin = user_id is None
         
-        with open(config_path) as f:
-            full_config = json.load(f)
-        
-        if 'autoselect' not in full_config:
-            full_config['autoselect'] = {}
-        
-        full_config['autoselect'][autoselect_id] = autoselect_data
-        
-        # Save config
-        save_path = Path.home() / '.aisbf' / 'autoselect.json'
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, 'w') as f:
-            json.dump(full_config, f, indent=2)
-        
-        return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved. Restart server for changes to take effect."}
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'autoselect.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent.parent / 'config' / 'autoselect.json'
+            
+            with open(config_path) as f:
+                full_config = json.load(f)
+            
+            if 'autoselect' not in full_config:
+                full_config['autoselect'] = {}
+            
+            full_config['autoselect'][autoselect_id] = autoselect_data
+            
+            # Save config
+            save_path = Path.home() / '.aisbf' / 'autoselect.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            
+            return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved to file. Restart server for changes to take effect."}
+        else:
+            # Database user: save to database
+            from .database import get_database
+            db = get_database()
+            db.save_user_autoselect(user_id, autoselect_id, autoselect_data)
+            return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved to database for user {user_id}."}
     
-    async def _set_rotation_config(self, args: Dict) -> Dict:
-        """Set rotation configuration"""
+    async def _set_rotation_config(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Set rotation configuration. Config admin saves to files, other users save to database."""
         rotation_id = args.get('rotation_id')
         rotation_data = args.get('rotation_data')
         
         if not rotation_id or not rotation_data:
             raise HTTPException(status_code=400, detail="rotation_id and rotation_data are required")
         
-        # Load existing config
-        config_path = Path.home() / '.aisbf' / 'rotations.json'
-        if not config_path.exists():
+        # Check if user is config admin (user_id is None means config admin)
+        is_config_admin = user_id is None
+        
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'rotations.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent.parent / 'config' / 'rotations.json'
+            
             with open(config_path) as f:
                 full_config = json.load(f)
+            
+            if 'rotations' not in full_config:
+                full_config['rotations'] = {}
+            
+            full_config['rotations'][rotation_id] = rotation_data
+            
+            # Save config
+            save_path = Path.home() / '.aisbf' / 'rotations.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            
+            return {"status": "success", "message": f"Rotation '{rotation_id}' saved to file. Restart server for changes to take effect."}
         else:
-            with open(config_path) as f:
-                full_config = json.load(f)
-        
-        if 'rotations' not in full_config:
-            full_config['rotations'] = {}
-        
-        full_config['rotations'][rotation_id] = rotation_data
-        
-        # Save config
-        save_path = Path.home() / '.aisbf' / 'rotations.json'
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, 'w') as f:
-            json.dump(full_config, f, indent=2)
-        
-        return {"status": "success", "message": f"Rotation '{rotation_id}' saved. Restart server for changes to take effect."}
+            # Database user: save to database
+            from .database import get_database
+            db = get_database()
+            db.save_user_rotation(user_id, rotation_id, rotation_data)
+            return {"status": "success", "message": f"Rotation '{rotation_id}' saved to database for user {user_id}."}
     
-    async def _set_provider_config(self, args: Dict) -> Dict:
-        """Set provider configuration"""
+    async def _set_provider_config(self, args: Dict, user_id: Optional[int] = None) -> Dict:
+        """Set provider configuration. Config admin saves to files, other users save to database."""
         provider_id = args.get('provider_id')
         provider_data = args.get('provider_data')
         
         if not provider_id or not provider_data:
             raise HTTPException(status_code=400, detail="provider_id and provider_data are required")
         
-        # Load existing config
-        config_path = Path.home() / '.aisbf' / 'providers.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent.parent / 'config' / 'providers.json'
+        # Check if user is config admin (user_id is None means config admin)
+        is_config_admin = user_id is None
         
-        with open(config_path) as f:
-            full_config = json.load(f)
-        
-        if 'providers' not in full_config:
-            full_config['providers'] = {}
-        
-        full_config['providers'][provider_id] = provider_data
-        
-        # Save config
-        save_path = Path.home() / '.aisbf' / 'providers.json'
-        save_path.parent.mkdir(parents=True, exist_ok=True)
-        with open(save_path, 'w') as f:
-            json.dump(full_config, f, indent=2)
-        
-        return {"status": "success", "message": f"Provider '{provider_id}' saved. Restart server for changes to take effect."}
+        if is_config_admin:
+            # Config admin: save to JSON files
+            config_path = Path.home() / '.aisbf' / 'providers.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent.parent / 'config' / 'providers.json'
+            
+            with open(config_path) as f:
+                full_config = json.load(f)
+            
+            if 'providers' not in full_config:
+                full_config['providers'] = {}
+            
+            full_config['providers'][provider_id] = provider_data
+            
+            # Save config
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            
+            return {"status": "success", "message": f"Provider '{provider_id}' saved to file. Restart server for changes to take effect."}
+        else:
+            # Database user: save to database
+            from .database import get_database
+            db = get_database()
+            db.save_user_provider(user_id, provider_id, provider_data)
+            return {"status": "success", "message": f"Provider '{provider_id}' saved to database for user {user_id}."}
     
     async def _get_server_config(self, args: Dict) -> Dict:
         """Get server configuration"""

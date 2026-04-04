@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.9] - 2026-04-04
+
+### Added
+- **User-Based Configuration Routing**: All provider, rotation, and autoselect configurations are now saved and retrieved based on user type
+  - Config admin (defined in aisbf.json, `user_id=None`) saves configurations to JSON files (`~/.aisbf/providers.json`, `~/.aisbf/rotations.json`, `~/.aisbf/autoselect.json`)
+  - Database users (any user from the database, including admin role users) save configurations to the database via `user_providers`, `user_rotations`, and `user_autoselects` tables
+  - Dashboard endpoints (`/dashboard/providers`, `/dashboard/rotations`, `/dashboard/autoselect`) now check user type and route accordingly
+  - File upload endpoint (`/dashboard/providers/{provider_name}/upload`) supports both config admin (saves to files) and database users (saves to database with metadata)
+  - MCP server tools (`set_provider_config`, `set_rotation_config`, `set_autoselect_config`) now accept `user_id` parameter and route to appropriate storage
+  - OAuth2 credential handling already implemented this pattern (Claude, Kilo, Codex providers)
+
+### Changed
+- **Version Bump**: Updated version to 0.9.9 in setup.py and pyproject.toml
+
 ## [0.9.8] - 2026-04-04
 
 ### Added

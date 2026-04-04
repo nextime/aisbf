@@ -252,16 +252,24 @@ class CodexOAuth2:
         """
         url = f"{self.issuer}/api/accounts/deviceauth/token"
         
+        # Include client_id to properly identify the application
+        payload = {
+            "client_id": CLIENT_ID,
+            "device_auth_id": device_auth_id,
+            "user_code": user_code,
+        }
+        
+        logger.debug(f"CodexOAuth2: Polling token endpoint - URL: {url}, Payload: {payload}")
+        
         async with httpx.AsyncClient() as client:
             response = await client.post(
                 url,
                 headers={"Content-Type": "application/json"},
-                json={
-                    "device_auth_id": device_auth_id,
-                    "user_code": user_code,
-                },
+                json=payload,
                 timeout=30.0
             )
+            
+            logger.debug(f"CodexOAuth2: Poll response - Status: {response.status_code}, Body: {response.text[:500]}")
             
             if response.status_code == 200:
                 return response.json()
@@ -311,12 +319,16 @@ class CodexOAuth2:
         if not hasattr(self, '_device_auth_id') or not self._device_auth_id:
             return {"status": "error", "error": "No device authorization in progress"}
         
+        logger.debug(f"CodexOAuth2: Polling for completion - device_auth_id: {self._device_auth_id}, user_code: {self._device_user_code}")
+        
         try:
             token_resp = await self.poll_device_code_token(
                 device_auth_id=self._device_auth_id,
                 user_code=self._device_user_code,
                 interval=1,  # We control polling interval from outside
             )
+            
+            logger.info(f"CodexOAuth2: Token response received - keys: {list(token_resp.keys())}")
             
             # Step 3: Exchange for tokens
             redirect_uri = f"{self.issuer}/deviceauth/callback"
@@ -326,10 +338,13 @@ class CodexOAuth2:
                 code_verifier=token_resp["code_verifier"],
             )
             
+            logger.info(f"CodexOAuth2: Tokens exchanged successfully")
+            
             # Step 4: Optionally obtain API key
             api_key = None
             try:
                 api_key = await self.obtain_api_key(tokens["id_token"])
+                logger.info(f"CodexOAuth2: API key obtained")
             except Exception as e:
                 logger.warning(f"CodexOAuth2: Failed to obtain API key: {e}")
             
@@ -356,6 +371,7 @@ class CodexOAuth2:
             
         except Exception as e:
             error_msg = str(e)
+            logger.debug(f"CodexOAuth2: Poll exception - {type(e).__name__}: {error_msg}")
             # 403/404 means still pending
             if "403" in error_msg or "404" in error_msg or "pending" in error_msg.lower():
                 return {"status": "pending"}

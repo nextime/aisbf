@@ -327,6 +327,29 @@ class DatabaseManager:
             except:
                 pass  # Index might already exist
             
+            # Create user_oauth2_credentials table for storing OAuth2 tokens per user/provider
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS user_oauth2_credentials (
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    user_id INTEGER NOT NULL,
+                    provider_id VARCHAR(255) NOT NULL,
+                    auth_type VARCHAR(50) NOT NULL,
+                    credentials TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    UNIQUE(user_id, provider_id, auth_type)
+                )
+            ''')
+            
+            try:
+                cursor.execute('''
+                    CREATE INDEX idx_user_oauth2_user_provider
+                    ON user_oauth2_credentials(user_id, provider_id)
+                ''')
+            except:
+                pass
+            
             conn.commit()
             logger.info("User auth files table initialized")
     
@@ -1494,6 +1517,148 @@ class DatabaseManager:
                 DELETE FROM user_auth_files
                 WHERE user_id = {placeholder} AND provider_id = {placeholder}
             ''', (user_id, provider_id))
+            conn.commit()
+            return cursor.rowcount
+    
+    # User OAuth2 credential methods
+    def save_user_oauth2_credentials(self, user_id: int, provider_id: str, auth_type: str, credentials: Dict) -> int:
+        """
+        Save OAuth2 credentials for a user/provider combination.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier (e.g., 'codex', 'kilo', 'claude')
+            auth_type: Auth type (e.g., 'codex_oauth2', 'kilo_oauth2', 'claude_oauth2')
+            credentials: Credentials dictionary
+            
+        Returns:
+            Record ID
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            credentials_json = json.dumps(credentials)
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_oauth2_credentials
+                    (user_id, provider_id, auth_type, credentials, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, provider_id, auth_type, credentials_json))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_oauth2_credentials
+                    (user_id, provider_id, auth_type, credentials, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                    credentials=VALUES(credentials), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, provider_id, auth_type, credentials_json))
+            
+            conn.commit()
+            return cursor.lastrowid
+    
+    def get_user_oauth2_credentials(self, user_id: int, provider_id: str, auth_type: str = None) -> Optional[Dict]:
+        """
+        Get OAuth2 credentials for a user/provider combination.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            auth_type: Optional auth type filter
+            
+        Returns:
+            Credentials dictionary or None
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if auth_type:
+                cursor.execute(f'''
+                    SELECT id, auth_type, credentials, created_at, updated_at
+                    FROM user_oauth2_credentials
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder} AND auth_type = {placeholder}
+                ''', (user_id, provider_id, auth_type))
+            else:
+                cursor.execute(f'''
+                    SELECT id, auth_type, credentials, created_at, updated_at
+                    FROM user_oauth2_credentials
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder}
+                    ORDER BY updated_at DESC
+                    LIMIT 1
+                ''', (user_id, provider_id))
+            
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'auth_type': row[1],
+                    'credentials': json.loads(row[2]),
+                    'created_at': row[3],
+                    'updated_at': row[4]
+                }
+            return None
+    
+    def get_all_user_oauth2_credentials(self, user_id: int) -> List[Dict]:
+        """
+        Get all OAuth2 credentials for a user.
+        
+        Args:
+            user_id: User ID
+            
+        Returns:
+            List of credential dictionaries
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            cursor.execute(f'''
+                SELECT id, provider_id, auth_type, credentials, created_at, updated_at
+                FROM user_oauth2_credentials
+                WHERE user_id = {placeholder}
+                ORDER BY provider_id, auth_type
+            ''', (user_id,))
+            
+            credentials = []
+            for row in cursor.fetchall():
+                credentials.append({
+                    'id': row[0],
+                    'provider_id': row[1],
+                    'auth_type': row[2],
+                    'credentials': json.loads(row[3]),
+                    'created_at': row[4],
+                    'updated_at': row[5]
+                })
+            return credentials
+    
+    def delete_user_oauth2_credentials(self, user_id: int, provider_id: str, auth_type: str = None) -> int:
+        """
+        Delete OAuth2 credentials for a user/provider combination.
+        
+        Args:
+            user_id: User ID
+            provider_id: Provider identifier
+            auth_type: Optional auth type filter (if None, deletes all for provider)
+            
+        Returns:
+            Number of records deleted
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            if auth_type:
+                cursor.execute(f'''
+                    DELETE FROM user_oauth2_credentials
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder} AND auth_type = {placeholder}
+                ''', (user_id, provider_id, auth_type))
+            else:
+                cursor.execute(f'''
+                    DELETE FROM user_oauth2_credentials
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder}
+                ''', (user_id, provider_id))
+            
             conn.commit()
             return cursor.rowcount
 

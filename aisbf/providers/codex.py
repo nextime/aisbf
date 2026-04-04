@@ -40,10 +40,14 @@ class CodexProviderHandler(BaseProviderHandler):
     
     Uses the same OpenAI-compatible protocol but authenticates via OAuth2
     using the Codex OAuth2 flow (device code or browser-based PKCE).
+    
+    For admin users (user_id=None), credentials are loaded from file.
+    For non-admin users, credentials are loaded from the database.
     """
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
         super().__init__(provider_id, api_key)
+        self.user_id = user_id
         
         # Get provider config
         provider_config = config.providers.get(provider_id)
@@ -54,10 +58,16 @@ class CodexProviderHandler(BaseProviderHandler):
         credentials_file = codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json')
         issuer = codex_config.get('issuer', 'https://auth.openai.com')
         
-        self.oauth2 = CodexOAuth2(
-            credentials_file=credentials_file,
-            issuer=issuer,
-        )
+        # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
+        # All other users (including database admins with user_id) use database credentials
+        if user_id is not None:
+            self.oauth2 = self._load_oauth2_from_db(provider_id, credentials_file, issuer)
+        else:
+            # Config admin (from aisbf.json): use file-based credentials
+            self.oauth2 = CodexOAuth2(
+                credentials_file=credentials_file,
+                issuer=issuer,
+            )
         
         # Resolve API key: use provided key, or get from OAuth2, or use stored API key
         resolved_api_key = api_key
@@ -72,6 +82,40 @@ class CodexProviderHandler(BaseProviderHandler):
         
         self.client = OpenAI(base_url=endpoint, api_key=resolved_api_key or "dummy")
         self._oauth2_enabled = not api_key and provider_config and not provider_config.api_key_required
+    
+    def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, issuer: str) -> CodexOAuth2:
+        """
+        Load OAuth2 credentials from database for non-admin users.
+        Falls back to file-based credentials if not found in database.
+        """
+        try:
+            from ..database import get_database
+            db = get_database()
+            if db:
+                db_creds = db.get_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=provider_id,
+                    auth_type='codex_oauth2'
+                )
+                if db_creds and db_creds.get('credentials'):
+                    # Create OAuth2 instance with database credentials
+                    oauth2 = CodexOAuth2(
+                        credentials_file=credentials_file,
+                        issuer=issuer,
+                    )
+                    # Override the loaded credentials with database credentials
+                    oauth2.credentials = db_creds['credentials']
+                    logger.info(f"CodexProviderHandler: Loaded credentials from database for user {self.user_id}")
+                    return oauth2
+        except Exception as e:
+            logger.warning(f"CodexProviderHandler: Failed to load credentials from database: {e}")
+        
+        # Fall back to file-based credentials
+        logger.info(f"CodexProviderHandler: Falling back to file-based credentials for user {self.user_id}")
+        return CodexOAuth2(
+            credentials_file=credentials_file,
+            issuer=issuer,
+        )
     
     async def _get_valid_api_key(self) -> str:
         """Get a valid API key, refreshing OAuth2 if needed."""
