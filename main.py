@@ -6568,5 +6568,198 @@ async def dashboard_kilo_auth_logout(request: Request):
         )
 
 
+# Codex OAuth2 authentication endpoints
+@app.post("/dashboard/codex/auth/start")
+async def dashboard_codex_auth_start(request: Request):
+    """Start Codex OAuth2 Device Authorization Grant flow"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/codex_credentials.json')
+        issuer = data.get('issuer', 'https://auth.openai.com')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import CodexOAuth2
+        from aisbf.auth.codex import CodexOAuth2
+        
+        # Create auth instance
+        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
+        
+        # Initiate device authorization (async method)
+        device_auth = await auth.authenticate_with_device_flow()
+        
+        if not device_auth:
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": "Failed to initiate device authorization"}
+            )
+        
+        # Store device code in session for polling
+        request.session['codex_device_code'] = device_auth.get('user_code')
+        request.session['codex_provider'] = provider_key
+        request.session['codex_credentials_file'] = credentials_file
+        request.session['codex_issuer'] = issuer
+        
+        return JSONResponse({
+            "success": True,
+            "user_code": device_auth.get('user_code'),
+            "verification_uri": device_auth.get('verification_uri', f'{issuer}/codex/device'),
+            "expires_in": 900,  # 15 minutes
+            "interval": 5,
+            "message": f"Please visit {device_auth.get('verification_uri', f'{issuer}/codex/device')} and enter code: {device_auth.get('user_code')}"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting Codex auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/codex/auth/poll")
+async def dashboard_codex_auth_poll(request: Request):
+    """Poll Codex OAuth2 device authorization status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Check if authentication was completed
+        credentials_file = request.session.get('codex_credentials_file', '~/.aisbf/codex_credentials.json')
+        issuer = request.session.get('codex_issuer', 'https://auth.openai.com')
+        
+        # Import CodexOAuth2
+        from aisbf.auth.codex import CodexOAuth2
+        
+        # Create auth instance
+        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
+        
+        # Check if authenticated
+        if auth.is_authenticated():
+            # Clear session
+            request.session.pop('codex_device_code', None)
+            request.session.pop('codex_provider', None)
+            request.session.pop('codex_credentials_file', None)
+            request.session.pop('codex_issuer', None)
+            
+            return JSONResponse({
+                "success": True,
+                "status": "approved",
+                "message": "Authentication completed successfully"
+            })
+        else:
+            return JSONResponse({
+                "success": True,
+                "status": "pending",
+                "message": "Waiting for user authorization"
+            })
+        
+    except Exception as e:
+        logger.error(f"Error polling Codex auth: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "status": "error", "error": str(e)}
+        )
+
+
+@app.post("/dashboard/codex/auth/status")
+async def dashboard_codex_auth_status(request: Request):
+    """Check Codex authentication status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/codex_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"authenticated": False, "error": "Provider key is required"}
+            )
+        
+        # Import CodexOAuth2
+        from aisbf.auth.codex import CodexOAuth2
+        
+        # Create auth instance
+        auth = CodexOAuth2(credentials_file=credentials_file)
+        
+        # Check if authenticated
+        if auth.is_authenticated():
+            # Try to get a valid token (will refresh if needed)
+            token = auth.get_valid_token()
+            if token:
+                # Get user email from ID token
+                email = auth.get_user_email()
+                
+                return JSONResponse({
+                    "authenticated": True,
+                    "email": email
+                })
+        
+        return JSONResponse({
+            "authenticated": False
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking Codex auth status: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"authenticated": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/codex/auth/logout")
+async def dashboard_codex_auth_logout(request: Request):
+    """Logout from Codex OAuth2 (clear stored credentials)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/codex_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import CodexOAuth2
+        from aisbf.auth.codex import CodexOAuth2
+        
+        # Create auth instance
+        auth = CodexOAuth2(credentials_file=credentials_file)
+        
+        # Logout (clear credentials)
+        auth.logout()
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Logged out successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error logging out from Codex: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
 if __name__ == "__main__":
     main()

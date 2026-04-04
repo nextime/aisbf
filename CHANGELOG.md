@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.8] - 2026-04-04
+
+### Added
+- **Codex Provider (OAuth2)**: Full support for OpenAI Codex using OAuth2 Device Authorization Grant
+  - New `codex` provider type with OpenAI-compatible API protocol
+  - OAuth2 authentication via `aisbf/auth/codex.py` with device code flow
+  - Provider handler in `aisbf/providers/codex.py` extending OpenAI protocol
+  - Dashboard integration with authentication UI (device code flow)
+  - Token refresh with automatic retry
+  - API key exchange from ID token for direct API access
+  - Credentials stored in `~/.aisbf/codex_credentials.json`
+  - Uses OpenAI's OAuth2 endpoints (`https://auth.openai.com`)
+  - No localhost callback port needed (device code flow like Kilo)
+  - Dashboard endpoints: `/dashboard/codex/auth/start`, `/dashboard/codex/auth/poll`, `/dashboard/codex/auth/status`, `/dashboard/codex/auth/logout`
+
+### Changed
+- **Version Bump**: Updated version to 0.9.8 in setup.py and pyproject.toml
+
 ## [0.9.7] - 2026-04-03
 
 ### Fixed

@@ -24,9 +24,10 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), Kiro-cli, Claude Code (OAuth2), and Kilocode (OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), Kiro-cli, Claude Code (OAuth2), Kilocode (OAuth2), and Codex (OAuth2)
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh and Chrome extension for remote servers
 - **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
+- **Codex OAuth2 Authentication**: OAuth2 Device Authorization Grant for OpenAI Codex with automatic token refresh and API key exchange
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
 - **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
@@ -134,6 +135,7 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - Kiro (Amazon Q Developer / AWS CodeWhisperer)
 - Kiro-cli (Amazon Q Developer CLI authentication)
 - Kilocode (OAuth2 Device Authorization Grant)
+- Codex (OAuth2 Device Authorization Grant - OpenAI protocol)
 
 ### Kiro-cli Provider Support
 
@@ -218,6 +220,50 @@ AISBF supports Kilo Code as a provider using OAuth2 Device Authorization Grant:
 ```
 
 See [`KILO_OAUTH2.md`](KILO_OAUTH2.md) for detailed setup instructions.
+
+### Codex OAuth2 Authentication
+
+AISBF supports OpenAI Codex as a provider using OAuth2 Device Authorization Grant:
+
+#### Features
+- Full OAuth2 Device Authorization Grant flow (same protocol as OpenAI)
+- Automatic token refresh with refresh token rotation
+- API key exchange from ID token for direct API access
+- Dashboard integration with authentication UI
+- No localhost callback port needed (device code flow)
+- Credentials stored in `~/.aisbf/codex_credentials.json`
+
+#### Setup
+1. Add codex provider to configuration (via dashboard or `~/.aisbf/providers.json`)
+2. Click "Authenticate with Codex (Device Code)" in dashboard
+3. Complete device authorization flow at `https://auth.openai.com/codex/device`
+4. Use codex models via API: `codex/<model>`
+
+#### Configuration Example
+```json
+{
+  "providers": {
+    "codex": {
+      "id": "codex",
+      "name": "Codex (OpenAI OAuth2)",
+      "endpoint": "https://api.openai.com/v1",
+      "type": "codex",
+      "api_key_required": false,
+      "codex_config": {
+        "credentials_file": "~/.aisbf/codex_credentials.json",
+        "issuer": "https://auth.openai.com"
+      },
+      "models": [
+        {
+          "name": "gpt-4o",
+          "context_size": 128000
+        }
+      ]
+    }
+  }
+}
+```
+
 ## Configuration
 
 ### SSL/TLS Configuration

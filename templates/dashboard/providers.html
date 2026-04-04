@@ -49,6 +49,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="kiro">Kiro (Amazon Q Developer)</option>
             <option value="claude">Claude (OAuth2)</option>
             <option value="kilocode">Kilocode (OAuth2)</option>
+            <option value="codex">Codex (OpenAI OAuth2)</option>
         </select>
         <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
@@ -127,6 +128,7 @@ function renderProviderDetails(key) {
     const isKiroProvider = provider.type === 'kiro';
     const isClaudeProvider = provider.type === 'claude';
     const isKiloProvider = provider.type === 'kilocode';
+    const isCodexProvider = provider.type === 'codex';
     
     // Initialize kiro_config if this is a kiro provider and doesn't have it
     if (isKiroProvider && !provider.kiro_config) {
@@ -156,9 +158,18 @@ function renderProviderDetails(key) {
         };
     }
     
+    // Initialize codex_config if this is a codex provider and doesn't have it
+    if (isCodexProvider && !provider.codex_config) {
+        provider.codex_config = {
+            credentials_file: '~/.aisbf/codex_credentials.json',
+            issuer: 'https://auth.openai.com'
+        };
+    }
+    
     const kiroConfig = provider.kiro_config || {};
     const claudeConfig = provider.claude_config || {};
     const kiloConfig = provider.kilo_config || {};
+    const codexConfig = provider.codex_config || {};
     
     // Build authentication fields based on provider type
     let authFieldsHtml = '';
@@ -322,6 +333,55 @@ function renderProviderDetails(key) {
                 <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
         `;
+    } else if (isCodexProvider) {
+        // Codex OAuth2 authentication fields
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Codex OAuth2 Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Codex uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Click "Authenticate" to start the OAuth2 flow.
+                </small>
+                
+                <div class="form-group">
+                    <label>API Key (optional - if provided, used instead of OAuth2)</label>
+                    <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter OpenAI API key (optional)">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>OAuth2 Issuer URL</label>
+                    <input type="text" value="${codexConfig.issuer || 'https://auth.openai.com'}" onchange="updateCodexConfig('${key}', 'issuer', this.value)" placeholder="https://auth.openai.com">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth2 issuer URL (default: https://auth.openai.com)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Credentials File Path</label>
+                    <input type="text" value="${codexConfig.credentials_file || '~/.aisbf/codex_credentials.json'}" onchange="updateCodexConfig('${key}', 'credentials_file', this.value)" placeholder="~/.aisbf/codex_credentials.json">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateCodex('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Codex (Device Code)
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkCodexAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+                
+                <div id="codex-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="codex-creds-file-${key}" accept=".json" onchange="uploadCodexFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Codex OAuth2 credentials JSON file</small>
+                </div>
+                <div id="codex-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
     } else {
         // Standard API key authentication fields
         authFieldsHtml = `
@@ -355,6 +415,7 @@ function renderProviderDetails(key) {
             <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${provider.type === 'kilocode' ? 'readonly style="background: #0f2840; cursor: not-allowed;"' : ''} required>
             ${isKiroProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
             ${provider.type === 'kilocode' ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Kilocode provider</small>' : ''}
+            ${isCodexProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://api.openai.com/v1 (OpenAI-compatible)</small>' : ''}
         </div>
         
         <div class="form-group">
@@ -367,6 +428,7 @@ function renderProviderDetails(key) {
                 <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
                 <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
                 <option value="kilocode" ${provider.type === 'kilocode' ? 'selected' : ''}>Kilocode (OAuth2)</option>
+                <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
             </select>
         </div>
         
@@ -591,7 +653,8 @@ function updateNewProviderDefaults() {
         'ollama': 'Ollama local provider. No API key required by default. Endpoint: http://localhost:11434/api',
         'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com',
         'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1',
-        'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway'
+        'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
+        'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
     };
     
     descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
@@ -627,7 +690,7 @@ function confirmAddProvider() {
         name: key,
         endpoint: '',
         type: providerType,
-        api_key_required: providerType !== 'kiro' && providerType !== 'ollama' && providerType !== 'claude' && providerType !== 'kilocode',
+        api_key_required: providerType !== 'kiro' && providerType !== 'ollama' && providerType !== 'claude' && providerType !== 'kilocode' && providerType !== 'codex',
         rate_limit: 0,
         default_rate_limit: 0,
         models: []
@@ -658,6 +721,13 @@ function confirmAddProvider() {
         newProvider.kilo_config = {
             credentials_file: '~/.kilo_credentials.json',
             api_base: 'https://api.kilo.ai/api/gateway'
+        };
+    } else if (providerType === 'codex') {
+        newProvider.endpoint = 'https://api.openai.com/v1';
+        newProvider.name = key + ' (Codex OAuth2)';
+        newProvider.codex_config = {
+            credentials_file: '~/.aisbf/codex_credentials.json',
+            issuer: 'https://auth.openai.com'
         };
     } else if (providerType === 'openai') {
         newProvider.endpoint = 'https://api.openai.com/v1';
@@ -776,14 +846,30 @@ function updateProviderType(key, newType) {
         };
         delete providersData[key].kiro_config;
         delete providersData[key].claude_config;
+        delete providersData[key].codex_config;
         // Set endpoint for kilocode (fixed, not modifiable)
         providersData[key].endpoint = 'https://api.kilo.ai/api/gateway';
-    } else if (newType !== 'kiro' && newType !== 'claude' && newType !== 'kilocode' && (oldType === 'kiro' || oldType === 'claude' || oldType === 'kilocode')) {
-        // Transitioning FROM kiro/claude/kilocode: remove special configs, set api_key_required to true
+    } else if (newType === 'codex' && oldType !== 'codex') {
+        // Transitioning TO codex: initialize codex_config, set api_key_required to false
+        providersData[key].api_key_required = false;
+        providersData[key].codex_config = {
+            credentials_file: '~/.aisbf/codex_credentials.json',
+            issuer: 'https://auth.openai.com'
+        };
+        delete providersData[key].kiro_config;
+        delete providersData[key].claude_config;
+        delete providersData[key].kilo_config;
+        // Set default endpoint for codex
+        if (!providersData[key].endpoint || providersData[key].endpoint === '') {
+            providersData[key].endpoint = 'https://api.openai.com/v1';
+        }
+    } else if (newType !== 'kiro' && newType !== 'claude' && newType !== 'kilocode' && newType !== 'codex' && (oldType === 'kiro' || oldType === 'claude' || oldType === 'kilocode' || oldType === 'codex')) {
+        // Transitioning FROM kiro/claude/kilocode/codex: remove special configs, set api_key_required to true
         providersData[key].api_key_required = true;
         delete providersData[key].kiro_config;
         delete providersData[key].claude_config;
         delete providersData[key].kilo_config;
+        delete providersData[key].codex_config;
     }
     
     // Re-render to show appropriate fields
@@ -809,6 +895,184 @@ function updateKiloConfig(key, field, value) {
         providersData[key].kilo_config = {};
     }
     providersData[key].kilo_config[field] = value;
+}
+
+function updateCodexConfig(key, field, value) {
+    if (!providersData[key].codex_config) {
+        providersData[key].codex_config = {};
+    }
+    providersData[key].codex_config[field] = value;
+}
+
+async function authenticateCodex(key) {
+    const statusEl = document.getElementById(`codex-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/codex/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].codex_config?.credentials_file || '~/.aisbf/codex_credentials.json',
+                issuer: providersData[key].codex_config?.issuer || 'https://auth.openai.com'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Codex Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'codex-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/codex/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'approved') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Codex authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Codex auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function checkCodexAuth(key) {
+    const statusEl = document.getElementById(`codex-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking Codex authentication status...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/codex/auth/status', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].codex_config?.credentials_file || '~/.aisbf/codex_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            const expiresIn = data.expires_in ? ` (expires in ${Math.floor(data.expires_in / (24 * 60 * 60))} days)` : '';
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Codex authenticated${expiresIn}</p>`;
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Not authenticated. Click "Authenticate with Codex" to log in.</p>';
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function uploadCodexFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`codex-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('provider_key', providerKey);
+    formData.append('file_type', 'credentials');
+    
+    try {
+        const response = await fetch('/dashboard/providers/upload-auth-file', {
+            method: 'POST',
+            body: formData
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
+            updateCodexConfig(providerKey, 'credentials_file', data.file_path);
+        } else {
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
+        }
+    } catch (error) {
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
 }
 
 async function authenticateKilo(key) {

@@ -322,6 +322,21 @@
           "capabilities": ["t2t", "vision", "function_calling"]
         }
       ]
+    },
+    "codex": {
+      "id": "codex",
+      "name": "Codex (OpenAI OAuth2)",
+      "endpoint": "https://api.openai.com/v1",
+      "type": "codex",
+      "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
+      "rate_limit": 0,
+      "codex_config": {
+        "_comment": "Uses OAuth2 Device Authorization Grant (Codex CLI compatible)",
+        "credentials_file": "~/.aisbf/codex_credentials.json",
+        "issuer": "https://auth.openai.com"
+      }
     }
   }
 }

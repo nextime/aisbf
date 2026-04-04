@@ -156,6 +156,11 @@ AISBF supports OAuth2 authentication for several providers:
 - Device Authorization Grant OAuth2 flow
 - Seamless integration with Kilocode services
 
+### Codex (OpenAI)
+- Device Authorization Grant OAuth2 flow (same protocol as OpenAI)
+- Automatic token refresh and API key exchange
+- Dashboard integration for easy authentication
+
 **Setup Instructions:**
 1. Start AISBF: `aisbf`
 2. Access dashboard: `http://localhost:17765/dashboard`
