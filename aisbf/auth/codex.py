@@ -241,88 +241,150 @@ class CodexOAuth2:
         user_code: str,
         interval: int = 5,
     ) -> dict:
-        """Poll for device code token."""
-        url = f"{self.issuer}/api/accounts/deviceauth/token"
-        max_wait = timedelta(minutes=15)
-        start = datetime.now()
-        
-        async with httpx.AsyncClient() as client:
-            while True:
-                response = await client.post(
-                    url,
-                    headers={"Content-Type": "application/json"},
-                    json={
-                        "device_auth_id": device_auth_id,
-                        "user_code": user_code,
-                    },
-                    timeout=30.0
-                )
-                
-                if response.status_code == 200:
-                    return response.json()
-                
-                if response.status_code in (403, 404):
-                    if datetime.now() - start > max_wait:
-                        raise TimeoutError("Device auth timed out after 15 minutes")
-                    await asyncio.sleep(interval)
-                    continue
-                
-                raise Exception(f"Device auth failed with status {response.status_code}")
-    
-    async def authenticate_with_device_flow(self) -> Dict[str, Any]:
         """
-        Complete device authorization flow.
+        Poll for device code token once (non-blocking).
         
         Returns:
-            Dict with authentication result
+            Dict with token response on success
+            
+        Raises:
+            Exception on non-403/404 errors
+        """
+        url = f"{self.issuer}/api/accounts/deviceauth/token"
+        
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                url,
+                headers={"Content-Type": "application/json"},
+                json={
+                    "device_auth_id": device_auth_id,
+                    "user_code": user_code,
+                },
+                timeout=30.0
+            )
+            
+            if response.status_code == 200:
+                return response.json()
+            
+            # 403/404 means still pending - re-raise for caller to handle
+            if response.status_code in (403, 404):
+                raise Exception(f"Authorization pending (status {response.status_code})")
+            
+            raise Exception(f"Device auth failed with status {response.status_code}: {response.text}")
+    
+    async def request_device_code_flow(self) -> Dict[str, Any]:
+        """
+        Start device authorization flow - returns immediately with verification info.
+        
+        Returns:
+            Dict with verification_uri, user_code, expires_in, interval
         """
         # Step 1: Request device code
         device_resp = await self.request_device_code()
         device_auth_id = device_resp["device_auth_id"]
         user_code = device_resp["user_code"]
         interval = int(device_resp.get("interval", 5))
+        expires_in = 900  # 15 minutes
+        
+        # Store device auth info in instance for polling
+        self._device_auth_id = device_auth_id
+        self._device_user_code = user_code
+        self._device_interval = interval
         
         logger.info(f"CodexOAuth2: Device code initiated - user_code: {user_code}")
         
-        # Step 2: Poll for token
-        token_resp = await self.poll_device_code_token(device_auth_id, user_code, interval)
-        
-        # Step 3: Exchange for tokens
-        redirect_uri = f"{self.issuer}/deviceauth/callback"
-        tokens = await self.exchange_code_for_tokens(
-            code=token_resp["authorization_code"],
-            redirect_uri=redirect_uri,
-            code_verifier=token_resp["code_verifier"],
-        )
-        
-        # Step 4: Optionally obtain API key
-        api_key = None
-        try:
-            api_key = await self.obtain_api_key(tokens["id_token"])
-        except Exception as e:
-            logger.warning(f"CodexOAuth2: Failed to obtain API key: {e}")
-        
-        # Step 5: Save credentials
-        credentials = {
-            "auth_mode": "codex",
-            "tokens": {
-                "id_token": tokens["id_token"],
-                "access_token": tokens["access_token"],
-                "refresh_token": tokens["refresh_token"],
-                "account_id": tokens.get("account_id"),
-            },
-            "openai_api_key": api_key,
-            "last_refresh": datetime.utcnow().isoformat() + "Z",
-        }
-        
-        self._save_credentials(credentials)
-        
         return {
-            "type": "success",
-            "provider": "codex",
+            "device_auth_id": device_auth_id,
             "user_code": user_code,
             "verification_uri": f"{self.issuer}/codex/device",
+            "expires_in": expires_in,
+            "interval": interval,
         }
+    
+    async def poll_device_code_completion(self) -> Dict[str, Any]:
+        """
+        Poll for device authorization completion.
+        
+        Returns:
+            Dict with status: 'pending', 'approved', 'denied', 'expired'
+        """
+        if not hasattr(self, '_device_auth_id') or not self._device_auth_id:
+            return {"status": "error", "error": "No device authorization in progress"}
+        
+        try:
+            token_resp = await self.poll_device_code_token(
+                device_auth_id=self._device_auth_id,
+                user_code=self._device_user_code,
+                interval=1,  # We control polling interval from outside
+            )
+            
+            # Step 3: Exchange for tokens
+            redirect_uri = f"{self.issuer}/deviceauth/callback"
+            tokens = await self.exchange_code_for_tokens(
+                code=token_resp["authorization_code"],
+                redirect_uri=redirect_uri,
+                code_verifier=token_resp["code_verifier"],
+            )
+            
+            # Step 4: Optionally obtain API key
+            api_key = None
+            try:
+                api_key = await self.obtain_api_key(tokens["id_token"])
+            except Exception as e:
+                logger.warning(f"CodexOAuth2: Failed to obtain API key: {e}")
+            
+            # Step 5: Save credentials
+            credentials = {
+                "auth_mode": "codex",
+                "tokens": {
+                    "id_token": tokens["id_token"],
+                    "access_token": tokens["access_token"],
+                    "refresh_token": tokens["refresh_token"],
+                    "account_id": tokens.get("account_id"),
+                },
+                "openai_api_key": api_key,
+                "last_refresh": datetime.utcnow().isoformat() + "Z",
+            }
+            
+            self._save_credentials(credentials)
+            
+            # Clear device auth info
+            self._device_auth_id = None
+            self._device_user_code = None
+            
+            return {"status": "approved"}
+            
+        except Exception as e:
+            error_msg = str(e)
+            # 403/404 means still pending
+            if "403" in error_msg or "404" in error_msg or "pending" in error_msg.lower():
+                return {"status": "pending"}
+            elif "denied" in error_msg.lower():
+                return {"status": "denied", "error": "User denied authorization"}
+            elif "timed out" in error_msg.lower() or "expired" in error_msg.lower():
+                return {"status": "expired", "error": "Device authorization expired"}
+            else:
+                return {"status": "error", "error": error_msg}
+    
+    async def authenticate_with_device_flow(self) -> Dict[str, Any]:
+        """
+        Complete device authorization flow (blocking - waits for completion).
+        
+        Returns:
+            Dict with authentication result
+        """
+        # Start the flow
+        device_info = await self.request_device_code_flow()
+        
+        # Poll until completion
+        max_polls = int(device_info["expires_in"] / device_info["interval"])
+        for _ in range(max_polls):
+            await asyncio.sleep(device_info["interval"])
+            result = await self.poll_device_code_completion()
+            if result["status"] != "pending":
+                return result
+        
+        return {"status": "expired", "error": "Device authorization expired"}
     
     async def authenticate_with_browser_flow(self, port: int = DEFAULT_PORT) -> Dict[str, Any]:
         """

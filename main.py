@@ -6571,7 +6571,7 @@ async def dashboard_kilo_auth_logout(request: Request):
 # Codex OAuth2 authentication endpoints
 @app.post("/dashboard/codex/auth/start")
 async def dashboard_codex_auth_start(request: Request):
-    """Start Codex OAuth2 Device Authorization Grant flow"""
+    """Start Codex OAuth2 Device Authorization Grant flow - returns immediately with verification info"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -6594,28 +6594,23 @@ async def dashboard_codex_auth_start(request: Request):
         # Create auth instance
         auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
         
-        # Initiate device authorization (async method)
-        device_auth = await auth.authenticate_with_device_flow()
+        # Request device code (returns immediately)
+        device_info = await auth.request_device_code_flow()
         
-        if not device_auth:
-            return JSONResponse(
-                status_code=500,
-                content={"success": False, "error": "Failed to initiate device authorization"}
-            )
-        
-        # Store device code in session for polling
-        request.session['codex_device_code'] = device_auth.get('user_code')
+        # Store device info in session for polling
+        request.session['codex_device_auth_id'] = device_info.get('device_auth_id')
         request.session['codex_provider'] = provider_key
         request.session['codex_credentials_file'] = credentials_file
         request.session['codex_issuer'] = issuer
+        request.session['codex_expires_at'] = time.time() + device_info.get('expires_in', 900)
         
         return JSONResponse({
             "success": True,
-            "user_code": device_auth.get('user_code'),
-            "verification_uri": device_auth.get('verification_uri', f'{issuer}/codex/device'),
-            "expires_in": 900,  # 15 minutes
-            "interval": 5,
-            "message": f"Please visit {device_auth.get('verification_uri', f'{issuer}/codex/device')} and enter code: {device_auth.get('user_code')}"
+            "user_code": device_info.get('user_code'),
+            "verification_uri": device_info.get('verification_uri'),
+            "expires_in": device_info.get('expires_in', 900),
+            "interval": device_info.get('interval', 5),
+            "message": f"Please visit {device_info.get('verification_uri')} and enter code: {device_info.get('user_code')}"
         })
         
     except Exception as e:
@@ -6634,7 +6629,21 @@ async def dashboard_codex_auth_poll(request: Request):
         return auth_check
     
     try:
-        # Check if authentication was completed
+        # Check if expired
+        expires_at = request.session.get('codex_expires_at', 0)
+        if time.time() > expires_at:
+            request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_provider', None)
+            request.session.pop('codex_credentials_file', None)
+            request.session.pop('codex_issuer', None)
+            request.session.pop('codex_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        
         credentials_file = request.session.get('codex_credentials_file', '~/.aisbf/codex_credentials.json')
         issuer = request.session.get('codex_issuer', 'https://auth.openai.com')
         
@@ -6644,24 +6653,57 @@ async def dashboard_codex_auth_poll(request: Request):
         # Create auth instance
         auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
         
-        # Check if authenticated
-        if auth.is_authenticated():
+        # Poll for completion
+        result = await auth.poll_device_code_completion()
+        
+        if result['status'] == 'approved':
             # Clear session
-            request.session.pop('codex_device_code', None)
+            request.session.pop('codex_device_auth_id', None)
             request.session.pop('codex_provider', None)
             request.session.pop('codex_credentials_file', None)
             request.session.pop('codex_issuer', None)
+            request.session.pop('codex_expires_at', None)
             
             return JSONResponse({
                 "success": True,
                 "status": "approved",
                 "message": "Authentication completed successfully"
             })
-        else:
+        elif result['status'] == 'pending':
             return JSONResponse({
                 "success": True,
                 "status": "pending",
                 "message": "Waiting for user authorization"
+            })
+        elif result['status'] == 'denied':
+            request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_provider', None)
+            request.session.pop('codex_credentials_file', None)
+            request.session.pop('codex_issuer', None)
+            request.session.pop('codex_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "denied",
+                "error": "User denied authorization"
+            })
+        elif result['status'] == 'expired':
+            request.session.pop('codex_device_auth_id', None)
+            request.session.pop('codex_provider', None)
+            request.session.pop('codex_credentials_file', None)
+            request.session.pop('codex_issuer', None)
+            request.session.pop('codex_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        else:
+            return JSONResponse({
+                "success": False,
+                "status": "error",
+                "error": result.get('error', 'Unknown error')
             })
         
     except Exception as e:
