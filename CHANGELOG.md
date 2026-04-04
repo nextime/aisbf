@@ -7,16 +7,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.9.9] - 2026-04-04
-
-### Fixed
-- **aisbf.sh Host Configuration**: Fixed `aisbf.sh` always launching with `--host 127.0.0.1` regardless of `aisbf.json` configuration
-  - Added `find_config_file()` function that checks config locations in the correct order: `~/.aisbf/aisbf.json`, `/usr/share/aisbf/aisbf.json`, `~/.local/share/aisbf/aisbf.json`, then `$SHARE_DIR/config/aisbf.json`
-  - Added `get_host()` function that reads `server.host` from the found config file, defaulting to `127.0.0.1` if config cannot be resolved
-  - Fixed `get_port()` to correctly read from `server.port` (was reading top-level `port` which doesn't exist in the config structure)
-  - Updated `start_server()` and `start_daemon()` to use `HOST=$(get_host)` and pass `--host $HOST` to uvicorn
-  - Startup message now shows `Starting AISBF on $HOST:$PORT...` so users can see which address/port is being used
-
 ## [0.9.8] - 2026-04-04
 
 ### Added
@@ -31,6 +21,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Uses OpenAI's OAuth2 endpoints (`https://auth.openai.com`)
   - No localhost callback port needed (device code flow like Kilo)
   - Dashboard endpoints: `/dashboard/codex/auth/start`, `/dashboard/codex/auth/poll`, `/dashboard/codex/auth/status`, `/dashboard/codex/auth/logout`
+
+### Fixed
+- **aisbf.sh Host Configuration**: Fixed `aisbf.sh` always launching with `--host 127.0.0.1` regardless of `aisbf.json` configuration
+  - Added `find_config_file()` function that checks config locations in the correct order: `~/.aisbf/aisbf.json`, `/usr/share/aisbf/aisbf.json`, `~/.local/share/aisbf/aisbf.json`, then `$SHARE_DIR/config/aisbf.json`
+  - Added `get_host()` function that reads `server.host` from the found config file, defaulting to `127.0.0.1` if config cannot be resolved
+  - Fixed `get_port()` to correctly read from `server.port` (was reading top-level `port` which doesn't exist in the config structure)
+  - Updated `start_server()` and `start_daemon()` to use `HOST=$(get_host)` and pass `--host $HOST` to uvicorn
+  - Startup message now shows `Starting AISBF on $HOST:$PORT...` so users can see which address/port is being used
 
 ### Changed
 - **Version Bump**: Updated version to 0.9.8 in setup.py and pyproject.toml
