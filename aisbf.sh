@@ -41,13 +41,75 @@ fi
 # Create log directory if it doesn't exist
 mkdir -p "$LOG_DIR"
 
+# Function to find the aisbf.json config file
+# Checks user config first, then installed locations, then source tree
+find_config_file() {
+    # Check user config first (~/.aisbf/aisbf.json)
+    if [ -f "$HOME/.aisbf/aisbf.json" ]; then
+        echo "$HOME/.aisbf/aisbf.json"
+        return
+    fi
+    
+    # Check installed locations
+    if [ -f "/usr/share/aisbf/aisbf.json" ]; then
+        echo "/usr/share/aisbf/aisbf.json"
+        return
+    fi
+    
+    if [ -f "$HOME/.local/share/aisbf/aisbf.json" ]; then
+        echo "$HOME/.local/share/aisbf/aisbf.json"
+        return
+    fi
+    
+    # Check source tree config
+    if [ -f "$SHARE_DIR/config/aisbf.json" ]; then
+        echo "$SHARE_DIR/config/aisbf.json"
+        return
+    fi
+    
+    # Not found
+    echo ""
+}
+
+# Function to get host from config file
+get_host() {
+    local DEFAULT_HOST="127.0.0.1"
+    local CONFIG_FILE=$(find_config_file)
+    
+    # Check if config file was found
+    if [ -z "$CONFIG_FILE" ]; then
+        echo "$DEFAULT_HOST"
+        return
+    fi
+    
+    # Try to read host from config using Python
+    local HOST=$(python3 -c "
+import json
+import sys
+try:
+    with open('$CONFIG_FILE', 'r') as f:
+        config = json.load(f)
+        server = config.get('server', {})
+        print(server.get('host', '$DEFAULT_HOST'))
+except:
+    print('$DEFAULT_HOST')
+" 2>/dev/null)
+    
+    # Validate host is not empty
+    if [ -n "$HOST" ]; then
+        echo "$HOST"
+    else
+        echo "$DEFAULT_HOST"
+    fi
+}
+
 # Function to get port from config file
 get_port() {
-    local CONFIG_FILE="$SHARE_DIR/config/aisbf.json"
     local DEFAULT_PORT=17765
+    local CONFIG_FILE=$(find_config_file)
     
-    # Check if config file exists
-    if [ ! -f "$CONFIG_FILE" ]; then
+    # Check if config file was found
+    if [ -z "$CONFIG_FILE" ]; then
         echo "$DEFAULT_PORT"
         return
     fi
@@ -59,7 +121,8 @@ import sys
 try:
     with open('$CONFIG_FILE', 'r') as f:
         config = json.load(f)
-        print(config.get('port', $DEFAULT_PORT))
+        server = config.get('server', {})
+        print(server.get('port', $DEFAULT_PORT))
 except:
     print($DEFAULT_PORT)
 " 2>/dev/null)
@@ -140,7 +203,8 @@ start_server() {
     # Ensure venv exists
     ensure_venv
     
-    # Get port from config
+    # Get host and port from config
+    HOST=$(get_host)
     PORT=$(get_port)
     
     # Activate the virtual environment
@@ -149,7 +213,7 @@ start_server() {
     # Change to share directory where main.py is located
     cd $SHARE_DIR
     
-    echo "Starting AISBF on port $PORT..."
+    echo "Starting AISBF on $HOST:$PORT..."
     
     # Check if debug mode is enabled
     if [ "$DEBUG" = "true" ]; then
@@ -160,9 +224,9 @@ start_server() {
     # Start the proxy server - runs in foreground
     # Use exec to replace the shell process so signals are properly handled
     if [ "$DEBUG" = "true" ]; then
-        exec uvicorn main:app --host 127.0.0.1 --port $PORT --log-level debug 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
+        exec uvicorn main:app --host $HOST --port $PORT --log-level debug 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
     else
-        exec uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v -E "(--- Logging error ---|BrokenPipeError|Call stack:|Message:|Arguments:)" | tee -a "$LOG_DIR/aisbf_stdout.log"
+        exec uvicorn main:app --host $HOST --port $PORT 2>&1 | grep -v -E "(--- Logging error ---|BrokenPipeError|Call stack:|Message:|Arguments:)" | tee -a "$LOG_DIR/aisbf_stdout.log"
     fi
 }
 
@@ -183,10 +247,11 @@ start_daemon() {
     # Ensure venv exists
     ensure_venv
     
-    # Get port from config
+    # Get host and port from config
+    HOST=$(get_host)
     PORT=$(get_port)
     
-    echo "Starting AISBF on port $PORT in background..."
+    echo "Starting AISBF on $HOST:$PORT in background..."
     
     # Check if debug mode is enabled
     if [ "$DEBUG" = "true" ]; then
@@ -197,9 +262,9 @@ start_daemon() {
     # Start in background with nohup and logging
     # Filter out BrokenPipeError logging errors
     if [ "$DEBUG" = "true" ]; then
-        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT --log-level debug 2>&1" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host $HOST --port $PORT --log-level debug 2>&1" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     else
-        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host 127.0.0.1 --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host $HOST --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     fi
     PID=$!
     echo $PID > "$PIDFILE"

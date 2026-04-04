@@ -12,7 +12,7 @@
   "classify_privacy": false,
   "classify_semantic": false,
   "server": {
-    "host": "0.0.0.0",
+    "host": "127.0.0.1",
     "port": 17765,
     "protocol": "http",
     "ssl_certfile": null,
