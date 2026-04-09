@@ -105,6 +105,7 @@ class KiloOAuth2:
                 response = await client.post(
                     url,
                     headers={"Content-Type": "application/json"},
+                    json={},
                     timeout=30.0
                 )
                 
