@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.2] - 2026-04-09
+
+### Fixed
+- **Jinja2 Template Syntax**: Fixed malformed template code caused by automated URL replacements
+  - Corrected nested `{{ }}` template tags in dashboard templates
+  - All JavaScript fetch calls now use proper `url_for` syntax
+  - Dashboard templates render correctly without syntax errors
+
+### Changed
+- **Version Bump**: Updated version to 0.99.2 in setup.py, pyproject.toml, and aisbf/__init__.py
+
 ## [0.99.1] - 2026-04-09
 
 ### Fixed
