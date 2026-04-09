@@ -73,7 +73,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
          */
         function restartServer() {
             if (confirm('Are you sure you want to restart the server? This will disconnect all active connections.')) {
-                fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/restart") }}', {
+                fetch('{{ url_for(request, "/dashboard/restart") }}', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'}
                 })

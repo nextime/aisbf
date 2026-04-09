@@ -114,7 +114,7 @@ function closeModal() {
 function deleteAutoselect(autoselectName) {
     if (!confirm(`Are you sure you want to delete the autoselect "${autoselectName}"? This action cannot be undone.`)) return;
 
-    fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/user/autoselects") }}/' + encodeURIComponent(autoselectName), {
+    fetch('{{ url_for(request, "/dashboard/user/autoselects") }}/' + encodeURIComponent(autoselectName), {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json'
@@ -161,7 +161,7 @@ document.getElementById('autoselect-form').addEventListener('submit', function(e
     formData.append('autoselect_name', autoselectName);
     formData.append('autoselect_config', JSON.stringify(configObj));
 
-    const url = '{{ url_for(request, "{{ url_for(request, "/dashboard/user/autoselects") }}';
+    const url = '{{ url_for(request, "/dashboard/user/autoselects") }}';
     const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
 
     fetch(url, {

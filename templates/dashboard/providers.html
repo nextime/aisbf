@@ -912,7 +912,7 @@ async function authenticateCodex(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/start") }}', {
+        const response = await fetch('{{ url_for(request, "/dashboard/codex/auth/start") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -962,7 +962,7 @@ async function authenticateCodex(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/poll") }}', {
+                const pollResponse = await fetch('{{ url_for(request, "/dashboard/codex/auth/poll") }}', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1015,7 +1015,7 @@ async function checkCodexAuth(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking Codex authentication status...</p>';
     
     try {
-        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/status") }}', {
+        const response = await fetch('{{ url_for(request, "/dashboard/codex/auth/status") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

@@ -114,7 +114,7 @@ function closeModal() {
 function deleteRotation(rotationName) {
     if (!confirm(`Are you sure you want to delete the rotation "${rotationName}"? This action cannot be undone.`)) return;
 
-    fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/user/rotations") }}/' + encodeURIComponent(rotationName), {
+    fetch('{{ url_for(request, "/dashboard/user/rotations") }}/' + encodeURIComponent(rotationName), {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json'
@@ -161,7 +161,7 @@ document.getElementById('rotation-form').addEventListener('submit', function(e) 
     formData.append('rotation_name', rotationName);
     formData.append('rotation_config', JSON.stringify(configObj));
 
-    const url = '{{ url_for(request, "{{ url_for(request, "/dashboard/user/rotations") }}';
+    const url = '{{ url_for(request, "/dashboard/user/rotations") }}';
     const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
 
     fetch(url, {
