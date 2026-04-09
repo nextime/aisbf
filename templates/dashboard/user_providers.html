@@ -156,7 +156,7 @@ function closeModal() {
 function deleteProvider(providerName) {
     if (!confirm(`Are you sure you want to delete the provider "${providerName}"? This action cannot be undone.`)) return;
 
-    fetch('{{ url_for(request, "/dashboard/user/providers") }}/' + encodeURIComponent(providerName), {
+    fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/user/providers") }}/' + encodeURIComponent(providerName), {
         method: 'DELETE',
         headers: {
             'Content-Type': 'application/json'
@@ -203,7 +203,7 @@ document.getElementById('provider-form').addEventListener('submit', function(e) 
     formData.append('provider_name', providerName);
     formData.append('provider_config', JSON.stringify(configObj));
 
-    const url = '{{ url_for(request, "/dashboard/user/providers") }}';
+    const url = '{{ url_for(request, "{{ url_for(request, "/dashboard/user/providers") }}';
     const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
 
     fetch(url, {
@@ -347,7 +347,7 @@ async function loadAuthFiles(providerId) {
                         <span style="color: #a0a0a0; font-size: 0.9em;"> (${formatFileSize(file.file_size)})</span>
                     </span>
                     <span>
-                        <a href="/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
+                        <a href="{{ url_for(request, "/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
                         <button class="btn btn-danger btn-sm" onclick="deleteAuthFile('${providerId}', '${file.file_type}')">Delete</button>
                     </span>
                 </div>

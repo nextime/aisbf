@@ -508,7 +508,7 @@ function createPersistentService() {
 
 async function checkTorStatus() {
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/tor/status") }}');
+        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/tor/status") }}');
         const status = await response.json();
         
         const statusText = document.getElementById('tor-status-text');
@@ -550,7 +550,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function refreshCacheStats() {
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}');
+        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/response-cache/stats") }}');
         const data = await response.json();
         
         const statsText = document.getElementById('cache-stats-text');
@@ -585,7 +585,7 @@ async function clearResponseCache() {
     }
     
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
+        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/response-cache/clear") }}', {
             method: 'POST'
         });
         const data = await response.json();

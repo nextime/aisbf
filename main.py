@@ -440,21 +440,27 @@ def get_base_url(request: Request) -> str:
 def url_for(request: Request, path: str) -> str:
     """
     Generate a proxy-aware URL for the given path.
-    
+
     Args:
         request: The current request object
         path: The path to generate URL for (should start with /)
-    
+
     Returns:
-        Full URL respecting proxy configuration
+        URL respecting proxy configuration - relative if behind proxy, full otherwise
     """
-    base_url = get_base_url(request)
-    
+    root_path = request.scope.get("root_path", "")
+
     # Ensure path starts with /
     if not path.startswith("/"):
         path = "/" + path
-    
-    return f"{base_url}{path}"
+
+    if root_path:
+        # Behind proxy: return relative URL that browser resolves correctly
+        return root_path + path
+    else:
+        # Not behind proxy: return full URL
+        base_url = get_base_url(request)
+        return f"{base_url}{path}"
 
 # Note: config will be imported after parsing CLI args if --config is provided
 # For now, we'll delay the import and initialization

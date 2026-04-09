@@ -73,7 +73,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <button type="button" class="btn" id="add-provider-btn" onclick="showAddProviderForm()" style="margin-top: 20px;">Add Provider</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
     <button type="button" class="btn" onclick="saveProviders()">Save Configuration</button>
-    <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
 <script>
@@ -912,7 +912,7 @@ async function authenticateCodex(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/codex/auth/start', {
+        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/start") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -962,7 +962,7 @@ async function authenticateCodex(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('/dashboard/codex/auth/poll', {
+                const pollResponse = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/poll") }}', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1015,7 +1015,7 @@ async function checkCodexAuth(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking Codex authentication status...</p>';
     
     try {
-        const response = await fetch('/dashboard/codex/auth/status', {
+        const response = await fetch('{{ url_for(request, "{{ url_for(request, "/dashboard/codex/auth/status") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1369,7 +1369,7 @@ async function authenticateClaude(key) {
                             This extension intercepts localhost OAuth2 callbacks and redirects them to your AISBF server.
                         </p>
                         <div style="display: flex; gap: 10px; margin-top: 10px;">
-                            <a href="/dashboard/extension/download" class="btn" style="background: #4a9eff; color: white; text-decoration: none; padding: 8px 15px; border-radius: 3px; font-size: 13px;">
+                            <a href="{{ url_for(request, "/dashboard/extension/download" class="btn" style="background: #4a9eff; color: white; text-decoration: none; padding: 8px 15px; border-radius: 3px; font-size: 13px;">
                                 📥 Download Extension
                             </a>
                             <button type="button" class="btn btn-secondary" onclick="showExtensionInstructions()" style="padding: 8px 15px; font-size: 13px;">
@@ -1763,7 +1763,7 @@ function updateProviderCondenseMethod(providerKey, value) {
 
 async function saveProviders() {
     try {
-        const response = await fetch('/dashboard/providers', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -1772,7 +1772,7 @@ async function saveProviders() {
         });
         
         if (response.ok) {
-            window.location.href = '/dashboard/providers?success=1';
+            window.location.href = '{{ url_for(request, "/dashboard/providers?success=1") }}';
         } else {
             alert('Error saving configuration');
         }

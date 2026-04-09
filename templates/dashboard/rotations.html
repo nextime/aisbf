@@ -43,7 +43,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <button type="button" class="btn" onclick="addRotation()" style="margin-top: 20px;">Add Rotation</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
     <button type="button" class="btn" onclick="saveRotations()">Save Configuration</button>
-    <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
 <script>
@@ -376,7 +376,7 @@ function updateRotationModelCondenseMethod(rotationKey, providerIndex, modelInde
 
 async function saveRotations() {
     try {
-        const response = await fetch('/dashboard/rotations', {
+        const response = await fetch('{{ url_for(request, "/dashboard/rotations") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -385,7 +385,7 @@ async function saveRotations() {
         });
         
         if (response.ok) {
-            window.location.href = '/dashboard/rotations?success=1';
+            window.location.href = '{{ url_for(request, "/dashboard/rotations?success=1") }}';
         } else {
             alert('Error saving configuration');
         }

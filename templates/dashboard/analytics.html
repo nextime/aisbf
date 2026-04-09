@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <!-- Date Range Filter Section -->
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 15px;">Filter by Date Range</h3>
-    <form method="get" action="/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+    <form method="get" action="{{ url_for(request, "/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
         <div style="flex: 1; min-width: 200px;">
             <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Time Range</label>
             <select name="time_range" id="timeRangeSelect" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
@@ -78,7 +78,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <!-- Filter by Provider/Model/Rotation/Autoselect -->
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 15px;">Filter by Provider, Model, Rotation, Autoselect, or User</h3>
-    <form method="get" action="/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
+    <form method="get" action="{{ url_for(request, "/dashboard/analytics" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
         <!-- Preserve date filter parameters -->
         <input type="hidden" name="time_range" value="{{ selected_time_range }}">
         {% if from_date %}<input type="hidden" name="from_date" value="{{ from_date }}">{% endif %}
@@ -142,7 +142,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
         <div>
-            <a href="/dashboard/analytics?time_range={{ selected_time_range }}{% if from_date %}&from_date={{ from_date }}{% endif %}{% if to_date %}&to_date={{ to_date }}{% endif %}" style="padding: 10px 20px; background: #7f8c8d; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
+            <a href="{{ url_for(request, "/dashboard/analytics?time_range={{ selected_time_range }}{% if from_date %}&from_date={{ from_date }}{% endif %}{% if to_date %}&to_date={{ to_date }}{% endif %}" style="padding: 10px 20px; background: #7f8c8d; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
                 Clear Filters
             </a>
         </div>

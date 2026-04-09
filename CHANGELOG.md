@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.1] - 2026-04-09
+
+### Fixed
+- **Reverse Proxy URL Generation**: Fixed login redirect after authentication not respecting proxy subpaths
+  - Modified `url_for` function to return relative URLs when behind reverse proxy (detected via `X-Forwarded-Prefix` header)
+  - Updated login form action to use `url_for` for consistency
+  - Fixed JavaScript fetch calls in providers and rotations templates to use proxy-aware URLs
+  - Login redirects now properly go to `domain/aisbf/dashboard` instead of `domain/dashboard`
+
+### Changed
+- **Version Bump**: Updated version to 0.99.1 in setup.py, pyproject.toml
+
 ## [0.99.0] - 2026-04-09
 
 ### Added
