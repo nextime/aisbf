@@ -44,21 +44,21 @@ class KiloProviderHandler(BaseProviderHandler):
         
         kilo_config = getattr(self.provider_config, 'kilo_config', None)
         
-        credentials_file = None
-        api_base = None
+        self._credentials_file = None
+        self._api_base = None
         
         if kilo_config and isinstance(kilo_config, dict):
-            credentials_file = kilo_config.get('credentials_file')
-            api_base = kilo_config.get('api_base')
+            self._credentials_file = kilo_config.get('credentials_file')
+            self._api_base = kilo_config.get('api_base')
         
         # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
         # All other users (including database admins with user_id) use database credentials
         if user_id is not None:
-            self.oauth2 = self._load_oauth2_from_db(provider_id, credentials_file, api_base)
+            self.oauth2 = self._load_oauth2_from_db(provider_id, self._credentials_file, self._api_base)
         else:
             # Config admin (from aisbf.json): use file-based credentials
             from ..auth.kilo import KiloOAuth2
-            self.oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+            self.oauth2 = KiloOAuth2(credentials_file=self._credentials_file, api_base=self._api_base)
         
         configured_endpoint = getattr(self.provider_config, 'endpoint', None)
         if configured_endpoint:
@@ -105,9 +105,41 @@ class KiloProviderHandler(BaseProviderHandler):
         logging.getLogger(__name__).info(f"KiloProviderHandler: Falling back to file-based credentials for user {self.user_id}")
         return KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
     
+    def _save_oauth2_to_db(self, credentials: Dict) -> None:
+        """
+        Save OAuth2 credentials to database for non-admin users.
+        This is called after successful device flow authentication.
+        """
+        if self.user_id is None:
+            # Admin user uses file-based credentials, nothing to save to DB
+            return
+        
+        try:
+            from ..database import get_database
+            db = get_database()
+            if db:
+                db.save_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=self.provider_id,
+                    auth_type='kilo_oauth2',
+                    credentials=credentials
+                )
+                import logging
+                logging.getLogger(__name__).info(f"KiloProviderHandler: Saved credentials to database for user {self.user_id}")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"KiloProviderHandler: Failed to save credentials to database: {e}")
+    
     async def _ensure_authenticated(self) -> str:
-        """Ensure user is authenticated and return valid token."""
+        """Ensure user is authenticated and return valid token.
+        
+        If the token is expired, this will attempt to re-authenticate using
+        the device flow. The device code is automatically renewed when it
+        expires, allowing the flow to continue until the user completes
+        authorization or explicitly cancels.
+        """
         import logging
+        import asyncio
         logger = logging.getLogger(__name__)
         
         token = self.oauth2.get_valid_token()
@@ -120,15 +152,58 @@ class KiloProviderHandler(BaseProviderHandler):
             logger.info("KiloProviderHandler: Using API key authentication")
             return self.api_key
         
-        logger.info("KiloProviderHandler: No valid token, initiating OAuth2 flow")
-        result = await self.oauth2.authenticate_with_device_flow()
+        logger.info("KiloProviderHandler: No valid OAuth2 token, initiating device flow")
         
-        if result.get("type") == "success":
-            token = result.get("token")
-            logger.info(f"KiloProviderHandler: OAuth2 authentication successful")
-            return token
+        # Start the non-blocking device flow
+        flow_info = await self.oauth2.initiate_device_flow()
         
-        raise Exception("OAuth2 authentication failed")
+        # Poll for completion with auto-renewal of device code
+        # The device code expires in ~10 minutes, but we auto-renew it
+        # so the user has up to 1 hour to complete authorization
+        poll_interval = flow_info.get("poll_interval", 3.0)
+        max_duration_seconds = 3600  # 1 hour max
+        max_attempts = int(max_duration_seconds / poll_interval)
+        attempts = 0
+        
+        logger.info(f"KiloProviderHandler: Waiting for device authorization...")
+        logger.info(f"KiloProviderHandler: Please visit {flow_info['verification_url']} and enter code: {flow_info['code']}")
+        logger.info(f"KiloProviderHandler: Device code will auto-renew when expired")
+        
+        while attempts < max_attempts:
+            attempts += 1
+            await asyncio.sleep(poll_interval)
+            
+            result = await self.oauth2.poll_device_flow_completion()
+            status = result.get("status")
+            
+            if status == "approved":
+                token = result.get("token")
+                logger.info(f"KiloProviderHandler: OAuth2 authentication successful")
+                
+                # For database users, also save credentials to the database
+                # This ensures the next request (which creates a new handler instance)
+                # can load the credentials from the database
+                if self.user_id is not None and self.oauth2.credentials:
+                    self._save_oauth2_to_db(self.oauth2.credentials)
+                
+                return token
+            
+            elif status == "denied":
+                raise Exception(f"OAuth2 authentication denied: {result.get('error', 'Authorization denied')}")
+            
+            elif status == "error":
+                raise Exception(f"OAuth2 authentication error: {result.get('error', 'Unknown error')}")
+            
+            # status == "pending" - check if code was renewed
+            if result.get("code_renewed"):
+                new_code = result.get("new_code", "unknown")
+                logger.info(f"KiloProviderHandler: Device code renewed - new code: {new_code}")
+            
+            # Log progress every 20 attempts (~1 minute)
+            if attempts % 20 == 0:
+                logger.debug(f"KiloProviderHandler: Still waiting for authorization... ({attempts} attempts)")
+        
+        raise Exception("OAuth2 authentication timeout: User did not complete authorization within 1 hour")
     
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,

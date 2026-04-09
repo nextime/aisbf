@@ -642,6 +642,96 @@ Once configured, claude provider can be used like any other provider in AISBF:
 - Use Claude models in AISBF rotations alongside other providers
 - Automatic failover and load balancing with other providers
 
+### Qwen Provider Integration
+
+**Overview:**
+Qwen is Alibaba Cloud's large language model service that provides OAuth2-based authentication for accessing Qwen models through the DashScope OpenAI-compatible API. It's integrated as a provider type in AISBF.
+
+**What is Qwen:**
+- OAuth2 Device Authorization Grant with PKCE for secure authentication
+- OpenAI-compatible API endpoint through DashScope
+- Provides access to Qwen models (Qwen Plus, Qwen Turbo, Qwen Max, Coder Model)
+- Supports streaming, tool calling, and standard chat completions
+- Free tier available with quota limits (1,000 requests/day, 60 requests/minute)
+
+**Integration Architecture:**
+- [`QwenOAuth2`](aisbf/auth/qwen.py) class handles OAuth2 Device Authorization Grant with PKCE
+- [`QwenProviderHandler`](aisbf/providers/qwen.py) manages API requests using OpenAI SDK
+- Supports all standard AISBF features: streaming, tools, rate limiting, error tracking
+- Automatic token refresh with cross-process synchronization
+
+**Configuration:**
+
+**IMPORTANT:** Qwen providers use OAuth2 authentication instead of API keys. The `qwen_config` object contains authentication settings. Optionally, an API key can be provided to bypass OAuth2.
+
+**Qwen Provider Configuration:**
+```json
+{
+  "qwen": {
+    "id": "qwen",
+    "name": "Qwen (OAuth2)",
+    "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+    "type": "qwen",
+    "api_key_required": false,
+    "rate_limit": 0,
+    "qwen_config": {
+      "credentials_file": "~/.aisbf/qwen_credentials.json",
+      "api_key": ""
+    },
+    "models": [
+      {
+        "name": "qwen-plus",
+        "rate_limit": 0,
+        "max_request_tokens": 32000,
+        "context_size": 32000
+      }
+    ]
+  }
+}
+```
+
+**Qwen Configuration Fields (qwen_config):**
+- `credentials_file`: Path to OAuth2 credentials file (default: `~/.aisbf/qwen_credentials.json`)
+- `api_key`: Optional API key to bypass OAuth2 (leave empty to use OAuth2)
+
+**Authentication Flow:**
+1. First request triggers OAuth2 Device Authorization flow if no credentials exist
+2. User visits verification URL and enters user code
+3. Authorization code exchanged for access token with PKCE
+4. Credentials saved to file for future use
+5. Automatic token refresh when expired (30-second buffer)
+6. Cross-process token synchronization with file locking
+
+**Setup Requirements:**
+1. Qwen account (free tier available)
+2. Web browser for initial authentication
+3. Internet connection for OAuth2 flow
+
+**Available Models:**
+- `qwen-plus` - Enhanced model with 32K context
+- `qwen-turbo` - Fast model for quick responses
+- `qwen-max` - Top-tier model with advanced capabilities
+- `coder-model` - Specialized coding model (maps to qwen3.6-plus)
+
+**Usage:**
+Once configured, qwen provider can be used like any other provider in AISBF:
+- Direct provider access: `/api/qwen/chat/completions`
+- Rotation access: `/api/qwen-rotation/chat/completions`
+- Model listing: `/api/qwen/models`
+
+**Benefits:**
+- Access Qwen models through OAuth2 subscription or API key
+- No need to manage API keys manually (OAuth2 mode)
+- Automatic token refresh
+- Use Qwen models in AISBF rotations alongside other providers
+- Automatic failover and load balancing with other providers
+
+**API Key Mode (Optional):**
+If you prefer to use an API key instead of OAuth2:
+1. Obtain an API key from Alibaba Cloud DashScope
+2. Set `api_key` in `qwen_config`
+3. The provider will use the API key directly instead of OAuth2
+
 ### Modifying Configuration
 1. Edit files in `~/.aisbf/` for user-specific changes
 2. Edit files in installed location for system-wide defaults

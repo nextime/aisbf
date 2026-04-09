@@ -337,6 +337,59 @@
         "credentials_file": "~/.aisbf/codex_credentials.json",
         "issuer": "https://auth.openai.com"
       }
+    },
+    "qwen": {
+      "id": "qwen",
+      "name": "Qwen (OAuth2)",
+      "endpoint": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "type": "qwen",
+      "api_key_required": false,
+      "nsfw": false,
+      "privacy": false,
+      "rate_limit": 0,
+      "qwen_config": {
+        "_comment": "Uses OAuth2 Device Authorization Grant with PKCE (Qwen Code compatible)",
+        "credentials_file": "~/.aisbf/qwen_credentials.json",
+        "api_key": ""
+      },
+      "models": [
+        {
+          "name": "qwen-plus",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 32000,
+          "context_size": 32000,
+          "capabilities": ["t2t", "function_calling"]
+        },
+        {
+          "name": "qwen-turbo",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 8000,
+          "context_size": 8000,
+          "capabilities": ["t2t", "function_calling"]
+        },
+        {
+          "name": "qwen-max",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 8000,
+          "context_size": 8000,
+          "capabilities": ["t2t", "function_calling"]
+        },
+        {
+          "name": "coder-model",
+          "nsfw": false,
+          "privacy": false,
+          "rate_limit": 0,
+          "max_request_tokens": 32000,
+          "context_size": 32000,
+          "capabilities": ["t2t", "function_calling"]
+        }
+      ]
     }
   }
 }

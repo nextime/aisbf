@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.9.8",
+    version="0.99.0",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -123,6 +123,7 @@ setup(
             'aisbf/providers/kilo.py',
             'aisbf/providers/ollama.py',
             'aisbf/providers/codex.py',
+            'aisbf/providers/qwen.py',
         ]),
         # aisbf.providers.kiro subpackage
         ('share/aisbf/aisbf/providers/kiro', [
@@ -141,6 +142,7 @@ setup(
             'aisbf/auth/claude.py',
             'aisbf/auth/kilo.py',
             'aisbf/auth/codex.py',
+            'aisbf/auth/qwen.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [

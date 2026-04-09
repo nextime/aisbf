@@ -24,10 +24,12 @@ Why did the programmer quit his job? Because he didn't get arrays!
 from .kiro import KiroAuthManager, AuthType
 from .claude import ClaudeAuth
 from .kilo import KiloOAuth2
+from .qwen import QwenOAuth2
 
 __all__ = [
     "KiroAuthManager",
     "AuthType",
     "ClaudeAuth",
     "KiloOAuth2",
+    "QwenOAuth2",
 ]

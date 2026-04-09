@@ -42,6 +42,7 @@ from .providers import (
     ClaudeProviderHandler,
     KiloProviderHandler,
     OllamaProviderHandler,
+    QwenProviderHandler,
     get_provider_handler,
     PROVIDER_HANDLERS
 )
@@ -49,10 +50,11 @@ from .providers.kiro import KiroProviderHandler
 from .auth.kiro import KiroAuthManager
 from .auth.claude import ClaudeAuth
 from .auth.kilo import KiloOAuth2
+from .auth.qwen import QwenOAuth2
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
-__version__ = "0.9.2"
+__version__ = "0.99.0"
 __all__ = [
     # Config
     "config",
@@ -80,12 +82,14 @@ __all__ = [
     "ClaudeProviderHandler",
     "KiloProviderHandler",
     "KiroProviderHandler",
+    "QwenProviderHandler",
     "get_provider_handler",
     "PROVIDER_HANDLERS",
     # Auth
     "KiroAuthManager",
     "ClaudeAuth",
     "KiloOAuth2",
+    "QwenOAuth2",
     # Handlers
     "RequestHandler",
     "RotationHandler",

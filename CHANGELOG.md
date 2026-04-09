@@ -7,6 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.0] - 2026-04-09
+
+### Added
+- **Qwen Provider (OAuth2)**: Full support for Qwen (Alibaba Cloud) using OAuth2 Device Authorization Grant with PKCE
+  - New `qwen` provider type with OpenAI-compatible DashScope API endpoint
+  - OAuth2 authentication via `aisbf/auth/qwen.py` with device code flow and PKCE (S256)
+  - Provider handler in `aisbf/providers/qwen.py` using OpenAI SDK
+  - Dashboard integration with authentication UI (device code flow)
+  - Automatic token refresh with cross-process synchronization
+  - File-based locking for multi-process token management
+  - Credentials stored in `~/.aisbf/qwen_credentials.json`
+  - Optional API key mode (bypass OAuth2)
+  - Uses Qwen's OAuth2 endpoints (`https://chat.qwen.ai`)
+  - No localhost callback port needed (device code flow)
+  - Dashboard endpoints: `/dashboard/qwen/auth/start`, `/dashboard/qwen/auth/poll`, `/dashboard/qwen/auth/status`, `/dashboard/qwen/auth/logout`
+  - Available models: qwen-plus, qwen-turbo, qwen-max, coder-model
+  - Free tier: 1,000 requests/day, 60 requests/minute
+  - Comprehensive documentation in AI.PROMPT, README.md, and DOCUMENTATION.md
+
+### Changed
+- **Version Bump**: Updated version to 0.99.0 in setup.py, pyproject.toml, and aisbf/__init__.py
+
 ## [0.9.8] - 2026-04-04
 
 ### Added
