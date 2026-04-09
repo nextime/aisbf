@@ -1720,23 +1720,6 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                         if 'condense_context' not in model or model.get('condense_context') is None:
                             model['condense_context'] = 80
         
-        # Auto-detect models for providers with no models configured
-        auto_detected_count = 0
-        for provider_key, provider in providers_data.items():
-            # Check if provider has no models or empty models list
-            has_models = 'models' in provider and isinstance(provider.get('models'), list) and len(provider.get('models', [])) > 0
-            
-            if not has_models:
-                # Try to auto-detect models from API
-                detected_models = await _auto_detect_provider_models(provider_key, provider)
-                if detected_models:
-                    provider['models'] = detected_models
-                    auto_detected_count += 1
-                    logger.info(f"Auto-detected {len(detected_models)} models for provider '{provider_key}'")
-        
-        if auto_detected_count > 0:
-            logger.info(f"Auto-detected models for {auto_detected_count} provider(s)")
-        
         if is_config_admin:
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'providers.json'
@@ -1767,8 +1750,6 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             logger.info(f"Saved {len(providers_data)} provider(s) to database for user {current_user_id}")
         
         success_msg = "Configuration saved successfully! Restart server for changes to take effect."
-        if auto_detected_count > 0:
-            success_msg = f"Configuration saved successfully! Auto-detected models for {auto_detected_count} provider(s). Restart server for changes to take effect."
         
         return templates.TemplateResponse(
         request=request,
