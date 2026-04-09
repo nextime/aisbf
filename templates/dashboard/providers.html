@@ -1057,7 +1057,7 @@ async function uploadCodexFile(providerKey, file) {
     formData.append('file_type', 'credentials');
     
     try {
-        const response = await fetch(''{{ url_for(request, "/dashboard/providers/upload-auth-file") }}'', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
             method: 'POST',
             body: formData
         });
@@ -1484,7 +1484,7 @@ async function authenticateClaude(key) {
                     
                     // Try to complete authentication
                     try {
-                        const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                        const completeResponse = await fetch('{{ url_for(request, "/dashboard/claude/auth/complete") }}', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
