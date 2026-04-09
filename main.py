@@ -953,8 +953,13 @@ async def startup_event():
                         kilo_config = getattr(provider_config, 'kilo_config', None)
                         credentials_file = None
                         api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
+                        
                         if kilo_config and isinstance(kilo_config, dict):
                             credentials_file = kilo_config.get('credentials_file')
+                            # Override api_base from kilo_config if present
+                            if 'api_base' in kilo_config and kilo_config['api_base']:
+                                api_base = kilo_config['api_base']
+                        
                         oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
                         if oauth2.is_authenticated():
                             has_valid_auth = True
@@ -1216,9 +1221,21 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
     logger.error(f"Validation error details: {exc.errors()}")
     logger.error(f"=== END VALIDATION ERROR ===")
     
+    # Convert FormData to plain dict for JSON serialization
+    body_data = None
+    if hasattr(exc, 'body'):
+        if isinstance(exc.body, dict):
+            body_data = exc.body
+        elif hasattr(exc.body, '_dict'):
+            body_data = exc.body._dict
+        elif hasattr(exc.body, 'items'):
+            body_data = dict(exc.body.items())
+        else:
+            body_data = str(exc.body)
+    
     return JSONResponse(
         status_code=status.HTTP_422_UNPROCESSABLE_ENTITY,
-        content={"detail": exc.errors(), "body": exc.body}
+        content={"detail": exc.errors(), "body": body_data}
     )
 
 # CORS middleware
@@ -1912,7 +1929,7 @@ async def dashboard_rotations(request: Request):
     )
 
 @app.post("/dashboard/rotations")
-async def dashboard_rotations_save(request: Request, config_data: str = Form(...)):
+async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     """Save rotations configuration"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
@@ -1923,7 +1940,7 @@ async def dashboard_rotations_save(request: Request, config_data: str = Form(...
     is_config_admin = current_user_id is None
     
     try:
-        rotations_data = json.loads(config_data)
+        rotations_data = json.loads(config)
         
         # Apply defaults: if condense_method is set but condense_context is not, default to 80
         if 'rotations' in rotations_data:
@@ -1954,19 +1971,21 @@ async def dashboard_rotations_save(request: Request, config_data: str = Form(...
             
             logger.info(f"Saved {len(rotations)} rotation(s) to database for user {current_user_id}")
         
-        available_providers = list(config.providers.keys()) if config else []
+        # Get global config safely
+        from aisbf.config import config as global_config
+        available_providers = list(global_config.providers.keys()) if global_config else []
         
         return templates.TemplateResponse(
-        request=request,
-        name="dashboard/rotations.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "rotations_json": json.dumps(rotations_data),
-            "available_providers": json.dumps(available_providers),
-            "success": "Configuration saved successfully! Restart server for changes to take effect."
-        }
-    )
+            request=request,
+            name="dashboard/rotations.html",
+            context={
+                "request": request,
+                "session": request.session,
+                "rotations_json": json.dumps(rotations_data),
+                "available_providers": json.dumps(available_providers),
+                "success": "Configuration saved successfully! Restart server for changes to take effect."
+            }
+        )
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
@@ -2111,19 +2130,21 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             
             logger.info(f"Saved {len(autoselect_data)} autoselect(s) to database for user {current_user_id}")
         
-        available_rotations = list(config.rotations.keys()) if config else []
+        # Get global config safely
+        from aisbf.config import config as global_config
+        available_rotations = list(global_config.rotations.keys()) if global_config else []
         
         return templates.TemplateResponse(
-        request=request,
-        name="dashboard/autoselect.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "autoselect_json": json.dumps(autoselect_data),
-            "available_rotations": json.dumps(available_rotations),
-            "success": "Configuration saved successfully! Restart server for changes to take effect."
-        }
-    )
+            request=request,
+            name="dashboard/autoselect.html",
+            context={
+                "request": request,
+                "session": request.session,
+                "autoselect_json": json.dumps(autoselect_data),
+                "available_rotations": json.dumps(available_rotations),
+                "success": "Configuration saved successfully! Restart server for changes to take effect."
+            }
+        )
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
