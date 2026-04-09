@@ -104,7 +104,8 @@ class KiloOAuth2:
             try:
                 response = await client.post(
                     url,
-                    data={},
+                    content=b'',
+                    headers={'Content-Type': 'application/x-www-form-urlencoded'},
                     timeout=30.0
                 )
                 
