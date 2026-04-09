@@ -90,55 +90,82 @@ class KiloOAuth2:
     
     async def initiate_device_auth(self) -> Dict[str, Any]:
         """
-        Initiate device authorization flow.
+        Initiate device authorization flow with retry logic.
+        
+        Implements retry with exponential backoff to handle transient Vercel edge node failures.
         
         Returns:
             Dict with 'code', 'verificationUrl', and 'expiresIn'
             
         Raises:
-            Exception: If initiation fails
+            Exception: If initiation fails after all retries
         """
         url = f"{self.api_base}/api/device-auth/codes"
+        max_retries = 3
+        base_delay = 1.0
         
         async with httpx.AsyncClient() as client:
-            try:
-                headers = {
-                    'Content-Type': 'application/x-www-form-urlencoded',
-                    'Content-Length': '0',
-                    'User-Agent': 'AISBF/0.99.13 (httpx)'
-                }
-                
-                # Log the exact request details
-                logger.info(f"KiloOAuth2: Initiating device auth request")
-                logger.info(f"KiloOAuth2: URL: {url}")
-                logger.info(f"KiloOAuth2: Headers: {headers}")
-                logger.info(f"KiloOAuth2: Body: b''")
-                logger.info(f"KiloOAuth2: httpx version: {httpx.__version__}")
-                
-                response = await client.post(
-                    url,
-                    content=b'',
-                    headers=headers,
-                    timeout=30.0
-                )
-                
-                # Log the exact response details
-                logger.info(f"KiloOAuth2: Response status: {response.status_code}")
-                logger.info(f"KiloOAuth2: Response headers: {dict(response.headers)}")
-                logger.info(f"KiloOAuth2: Response body: {response.text}")
-                
-                if response.status_code == 429:
-                    raise Exception("Too many pending authorization requests. Please try again later.")
-                
-                response.raise_for_status()
-                data = response.json()
-                
-                logger.info(f"KiloOAuth2: Device auth initiated - code: {data.get('code')}")
-                return data
-                
-            except httpx.HTTPError as e:
-                logger.error(f"KiloOAuth2: Failed to initiate device auth: {e}")
-                raise Exception(f"Failed to initiate device authorization: {e}")
+            for attempt in range(max_retries):
+                try:
+                    headers = {
+                        'Content-Type': 'application/x-www-form-urlencoded',
+                        'Content-Length': '0',
+                        'User-Agent': 'AISBF/0.99.14 (httpx)'
+                    }
+                    
+                    if attempt > 0:
+                        logger.info(f"KiloOAuth2: Retry attempt {attempt + 1}/{max_retries}")
+                    
+                    # Log the exact request details
+                    logger.info(f"KiloOAuth2: Initiating device auth request")
+                    logger.info(f"KiloOAuth2: URL: {url}")
+                    logger.info(f"KiloOAuth2: Headers: {headers}")
+                    logger.info(f"KiloOAuth2: Body: b''")
+                    logger.info(f"KiloOAuth2: httpx version: {httpx.__version__}")
+                    
+                    response = await client.post(
+                        url,
+                        content=b'',
+                        headers=headers,
+                        timeout=30.0
+                    )
+                    
+                    # Log the exact response details
+                    logger.info(f"KiloOAuth2: Response status: {response.status_code}")
+                    logger.info(f"KiloOAuth2: Response headers: {dict(response.headers)}")
+                    logger.info(f"KiloOAuth2: Response body: {response.text}")
+                    
+                    # Check for Vercel edge node in response
+                    vercel_id = response.headers.get('x-vercel-id', 'unknown')
+                    logger.info(f"KiloOAuth2: Vercel edge node: {vercel_id}")
+                    
+                    if response.status_code == 429:
+                        raise Exception("Too many pending authorization requests. Please try again later.")
+                    
+                    # If we get a 500 error and have retries left, retry with exponential backoff
+                    if response.status_code == 500 and attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"KiloOAuth2: Got 500 error from Vercel edge node {vercel_id}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    logger.info(f"KiloOAuth2: Device auth initiated - code: {data.get('code')}")
+                    return data
+                    
+                except httpx.HTTPError as e:
+                    if attempt < max_retries - 1:
+                        delay = base_delay * (2 ** attempt)
+                        logger.warning(f"KiloOAuth2: Request failed: {e}, retrying in {delay}s...")
+                        await asyncio.sleep(delay)
+                        continue
+                    else:
+                        logger.error(f"KiloOAuth2: Failed to initiate device auth after {max_retries} attempts: {e}")
+                        raise Exception(f"Failed to initiate device authorization: {e}")
+            
+            raise Exception(f"Failed to initiate device authorization after {max_retries} attempts")
     
     async def poll_device_auth(self, code: str) -> Dict[str, Any]:
         """
