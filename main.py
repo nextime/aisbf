@@ -1912,7 +1912,7 @@ async def dashboard_rotations(request: Request):
     )
 
 @app.post("/dashboard/rotations")
-async def dashboard_rotations_save(request: Request, config: str = Form(...)):
+async def dashboard_rotations_save(request: Request, config_data: str = Form(...)):
     """Save rotations configuration"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
@@ -1923,7 +1923,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     is_config_admin = current_user_id is None
     
     try:
-        rotations_data = json.loads(config)
+        rotations_data = json.loads(config_data)
         
         # Apply defaults: if condense_method is set but condense_context is not, default to 80
         if 'rotations' in rotations_data:
@@ -6339,7 +6339,8 @@ async def dashboard_claude_auth_complete(request: Request):
                 try:
                     from aisbf.database import get_database
                     db = get_database()
-                    if db and current_user_id:
+                    provider_key = request.session.get('oauth2_provider')
+                    if db and current_user_id and provider_key:
                         # Read the credentials that were just saved to file
                         credentials_path = Path(credentials_file).expanduser()
                         if credentials_path.exists():
@@ -6632,7 +6633,8 @@ async def dashboard_kilo_auth_poll(request: Request):
                     try:
                         from aisbf.database import get_database
                         db = get_database()
-                        if db and current_user_id:
+                        provider_key = request.session.get('kilo_provider')
+                        if db and current_user_id and provider_key:
                             # Save to database
                             db.save_user_oauth2_credentials(
                                 user_id=current_user_id,
@@ -6944,7 +6946,8 @@ async def dashboard_codex_auth_poll(request: Request):
                 try:
                     from aisbf.database import get_database
                     db = get_database()
-                    if db and current_user_id:
+                    provider_key = request.session.get('codex_provider')
+                    if db and current_user_id and provider_key:
                         # Read the credentials that were just saved to file
                         credentials_path = Path(credentials_file).expanduser()
                         if credentials_path.exists():
