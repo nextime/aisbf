@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.5] - 2026-04-09
+
+### Fixed
+- **JavaScript Template Syntax**: Fixed malformed url_for() calls in providers.html template
+  - Corrected extra quotes in uploadCodexFile function causing syntax errors
+  - Fixed remaining hardcoded /dashboard/claude/auth/complete URL
+  - All JavaScript syntax errors resolved for proper dashboard functionality
+
+### Changed
+- **Version Bump**: Updated version to 0.99.5 in setup.py, pyproject.toml, and aisbf/__init__.py
+
 ## [0.99.4] - 2026-04-09
 
 ### Fixed
