@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.4] - 2026-04-09
+
+### Fixed
+- **OAuth2 Proxy-Awareness**: Fixed OAuth2 authentication endpoints not respecting reverse proxy subpaths
+  - Updated all OAuth2 JavaScript fetch calls to use `{{ url_for(request, "...") }}` instead of hardcoded `/dashboard/` paths
+  - Fixed Claude, Kilo, Codex, and Qwen OAuth2 authentication flows for reverse proxy deployments
+  - Fixed file upload endpoints, rate limits data endpoint, user management endpoints, and autoselect save endpoint
+  - OAuth2 authentication buttons now work correctly behind nginx reverse proxy with `/aisbf/` location
+
+### Changed
+- **Version Bump**: Updated version to 0.99.4 in setup.py, pyproject.toml, and aisbf/__init__.py
+
 ## [0.99.3] - 2026-04-09
 
 ### Fixed

@@ -83,7 +83,7 @@ async function loadRateLimits() {
     content.innerHTML = '<p>Loading rate limit data...</p>';
     
     try {
-        const response = await fetch('/dashboard/rate-limits/data');
+        const response = await fetch('{{ url_for(request, "/dashboard/rate-limits/data") }}');
         const data = await response.json();
         
         if (Object.keys(data).length === 0) {
@@ -181,7 +181,7 @@ async function clearAllRateLimiters() {
     
     // First get the list of providers
     try {
-        const response = await fetch('/dashboard/rate-limits/data');
+        const response = await fetch({{ url_for(request, "/dashboard/rate-limits/data") }});
         const data = await response.json();
         
         for (const providerId of Object.keys(data)) {

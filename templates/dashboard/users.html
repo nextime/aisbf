@@ -150,7 +150,7 @@ function editUser(userId, username, role, isActive) {
     document.getElementById('edit-username').value = username;
     document.getElementById('edit-role').value = role;
     document.getElementById('edit-is-active').checked = isActive;
-    document.getElementById('edit-form').action = '/dashboard/users/' + userId + '/edit';
+    document.getElementById('edit-form').action = '{{ url_for(request, "/dashboard/users/") }}' + userId + '/edit';
     document.getElementById('edit-modal').style.display = 'block';
 }
 
@@ -161,7 +161,7 @@ function closeEditModal() {
 function toggleUserStatus(userId, currentStatus) {
     const action = currentStatus ? 'disable' : 'enable';
     if (confirm('Are you sure you want to ' + action + ' this user?')) {
-        fetch('/dashboard/users/' + userId + '/toggle', {
+        fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/toggle', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })
@@ -181,7 +181,7 @@ function toggleUserStatus(userId, currentStatus) {
 
 function deleteUser(userId, username) {
     if (confirm('Are you sure you want to delete user "' + username + '"? This action cannot be undone.')) {
-        fetch('/dashboard/users/' + userId + '/delete', {
+        fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })

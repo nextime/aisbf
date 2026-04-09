@@ -231,7 +231,7 @@ async function authenticateClaudeUser(providerId) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/claude/auth/start', {
+        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/start") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -268,7 +268,7 @@ async function checkClaudeAuthUser(providerId) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
     
     try {
-        const response = await fetch('/dashboard/claude/auth/status', {
+        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/status") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',

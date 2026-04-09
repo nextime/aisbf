@@ -1057,7 +1057,7 @@ async function uploadCodexFile(providerKey, file) {
     formData.append('file_type', 'credentials');
     
     try {
-        const response = await fetch('/dashboard/providers/upload-auth-file', {
+        const response = await fetch(''{{ url_for(request, "/dashboard/providers/upload-auth-file") }}'', {
             method: 'POST',
             body: formData
         });
@@ -1083,7 +1083,7 @@ async function authenticateKilo(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/kilo/auth/start', {
+        const response = await fetch('{{ url_for(request, "/dashboard/kilo/auth/start") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1136,7 +1136,7 @@ async function authenticateKilo(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('/dashboard/kilo/auth/poll', {
+                const pollResponse = await fetch('{{ url_for(request, "/dashboard/kilo/auth/poll") }}', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1194,7 +1194,7 @@ async function checkKiloAuth(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
     
     try {
-        const response = await fetch('/dashboard/kilo/auth/status', {
+        const response = await fetch('{{ url_for(request, "/dashboard/kilo/auth/status") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1236,7 +1236,7 @@ async function uploadKiloFile(providerKey, file) {
     formData.append('file_type', 'credentials');
     
     try {
-        const response = await fetch('/dashboard/providers/upload-auth-file', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
             method: 'POST',
             body: formData
         });
@@ -1330,7 +1330,7 @@ async function authenticateClaude(key) {
     
     try {
         // Get OAuth2 URL from server
-        const response = await fetch('/dashboard/claude/auth/start', {
+        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/start") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1408,7 +1408,7 @@ async function authenticateClaude(key) {
             // For localhost flow, check callback status endpoint
             if (!needsExtension) {
                 try {
-                    const statusResponse = await fetch('/dashboard/claude/auth/callback-status');
+                    const statusResponse = await fetch('{{ url_for(request, "/dashboard/claude/auth/callback-status") }}');
                     const statusData = await statusResponse.json();
                     
                     if (statusData.received) {
@@ -1437,7 +1437,7 @@ async function authenticateClaude(key) {
                         try {
                             statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication (this may take a moment if rate limited)...</p>';
                             
-                            const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                            const completeResponse = await fetch('{{ url_for(request, "/dashboard/claude/auth/complete") }}', {
                                 method: 'POST',
                                 headers: {
                                     'Content-Type': 'application/json',
@@ -1675,7 +1675,7 @@ async function checkClaudeAuth(key) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
     
     try {
-        const response = await fetch('/dashboard/claude/auth/status', {
+        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/status") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1793,7 +1793,7 @@ async function uploadKiroFile(providerKey, fileType, file) {
     formData.append('file_type', fileType);
     
     try {
-        const response = await fetch('/dashboard/providers/upload-auth-file', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
             method: 'POST',
             body: formData
         });
@@ -1828,7 +1828,7 @@ async function uploadClaudeFile(providerKey, file) {
     formData.append('file_type', 'credentials');
     
     try {
-        const response = await fetch('/dashboard/providers/upload-auth-file', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
             method: 'POST',
             body: formData
         });
@@ -1857,7 +1857,7 @@ async function getModelsFromProvider(providerKey) {
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Fetching models from provider API...</p>';
     
     try {
-        const response = await fetch('/dashboard/providers/get-models', {
+        const response = await fetch('{{ url_for(request, "/dashboard/providers/get-models") }}', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
