@@ -102,16 +102,30 @@ class KiloOAuth2:
         
         async with httpx.AsyncClient() as client:
             try:
+                headers = {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                    'Content-Length': '0',
+                    'User-Agent': 'AISBF/0.99.13 (httpx)'
+                }
+                
+                # Log the exact request details
+                logger.info(f"KiloOAuth2: Initiating device auth request")
+                logger.info(f"KiloOAuth2: URL: {url}")
+                logger.info(f"KiloOAuth2: Headers: {headers}")
+                logger.info(f"KiloOAuth2: Body: b''")
+                logger.info(f"KiloOAuth2: httpx version: {httpx.__version__}")
+                
                 response = await client.post(
                     url,
                     content=b'',
-                    headers={
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Content-Length': '0',
-                        'User-Agent': 'AISBF/0.99.12 (httpx)'
-                    },
+                    headers=headers,
                     timeout=30.0
                 )
+                
+                # Log the exact response details
+                logger.info(f"KiloOAuth2: Response status: {response.status_code}")
+                logger.info(f"KiloOAuth2: Response headers: {dict(response.headers)}")
+                logger.info(f"KiloOAuth2: Response body: {response.text}")
                 
                 if response.status_code == 429:
                     raise Exception("Too many pending authorization requests. Please try again later.")
