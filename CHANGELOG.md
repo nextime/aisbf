@@ -7,6 +7,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.3] - 2026-04-09
+
+### Fixed
+- **Template Download Links**: Fixed malformed Jinja2 template syntax in user_providers.html causing download link issues
+  - Corrected URL generation for authentication file download links
+  - Fixed extension download link in providers.html template
+  - All template syntax errors resolved for proper dashboard rendering
+
+### Changed
+- **Version Bump**: Updated version to 0.99.3 in setup.py, pyproject.toml, and aisbf/__init__.py
+
 ## [0.99.2] - 2026-04-09
 
 ### Fixed

@@ -335,10 +335,10 @@ async function loadAuthFiles(providerId) {
     try {
         const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/files`);
         const data = await response.json();
-        
+
         const container = document.getElementById(`auth-files-${providerId}`);
         if (!container) return;
-        
+
         if (data.files && data.files.length > 0) {
             container.innerHTML = data.files.map(file => `
                 <div class="auth-file-item" style="background: #0f3460; padding: 8px; margin: 5px 0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
@@ -347,7 +347,7 @@ async function loadAuthFiles(providerId) {
                         <span style="color: #a0a0a0; font-size: 0.9em;"> (${formatFileSize(file.file_size)})</span>
                     </span>
                     <span>
-                        <a href="{{ url_for(request, "/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
+                        <a href="/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
                         <button class="btn btn-danger btn-sm" onclick="deleteAuthFile('${providerId}', '${file.file_type}')">Delete</button>
                     </span>
                 </div>

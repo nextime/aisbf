@@ -41,8 +41,8 @@ python -m build
 ```
 
 This creates:
-- `dist/aisbf-0.99.2.tar.gz` - Source distribution
-- `dist/aisbf-0.99.2-py3-none-any.whl` - Wheel distribution
+- `dist/aisbf-0.99.3.tar.gz` - Source distribution
+- `dist/aisbf-0.99.3-py3-none-any.whl` - Wheel distribution
 
 ## Testing the Package
 
@@ -50,7 +50,7 @@ This creates:
 
 ```bash
 # Install from the built wheel
-pip install dist/aisbf-0.99.2-py3-none-any.whl
+pip install dist/aisbf-0.99.3-py3-none-any.whl
 
 # Test the installation
 aisbf status

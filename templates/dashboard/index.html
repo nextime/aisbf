@@ -62,12 +62,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <h3 style="margin-top: 30px; margin-bottom: 15px;">Quick Actions</h3>
 <div style="display: flex; gap: 10px; flex-wrap: wrap;">
-    <a href="{{ url_for(request, "/dashboard/providers" class="btn">Manage Providers</a>
-    <a href="{{ url_for(request, "/dashboard/rotations" class="btn">Manage Rotations</a>
-    <a href="{{ url_for(request, "/dashboard/autoselect" class="btn">Manage Autoselect</a>
-    <a href="{{ url_for(request, "/dashboard/prompts" class="btn">Manage Prompts</a>
-    <a href="{{ url_for(request, "/dashboard/rate-limits" class="btn">Rate Limits</a>
-    <a href="{{ url_for(request, "/dashboard/response-cache/stats" class="btn">Response Cache</a>
-    <a href="{{ url_for(request, "/dashboard/settings" class="btn btn-secondary">Server Settings</a>
+    <a href="{{ url_for(request, '/dashboard/providers') }}" class="btn">Manage Providers</a>
+    <a href="{{ url_for(request, '/dashboard/rotations') }}" class="btn">Manage Rotations</a>
+    <a href="{{ url_for(request, '/dashboard/autoselect') }}" class="btn">Manage Autoselect</a>
+    <a href="{{ url_for(request, '/dashboard/prompts') }}" class="btn">Manage Prompts</a>
+    <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn">Rate Limits</a>
+    <a href="{{ url_for(request, '/dashboard/response-cache/stats') }}" class="btn">Response Cache</a>
+    <a href="{{ url_for(request, '/dashboard/settings') }}" class="btn btn-secondary">Server Settings</a>
 </div>
 {% endblock %}
