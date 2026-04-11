@@ -104,56 +104,101 @@ class QwenProviderHandler(BaseProviderHandler):
         return QwenOAuth2(credentials_file=credentials_file)
     
     def _get_sdk_client(self):
-        """Get or create an OpenAI SDK client configured with OAuth2 auth token."""
+        """Get or create an OpenAI SDK client configured with authentication (OAuth2 or API key)."""
         import logging
         logger = logging.getLogger(__name__)
-        
-        access_token = self.auth.get_valid_token()
-        
-        if not access_token:
-            logger.error("QwenProviderHandler: No OAuth2 access token available")
-            raise Exception("No OAuth2 access token. Please re-authenticate")
-        
-        # Get resource URL (API endpoint)
-        base_url = self.auth.get_resource_url()
-        
+
+        # Check if API key is configured (vs OAuth2)
+        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        api_key = None
+        if qwen_config and isinstance(qwen_config, dict):
+            api_key = qwen_config.get('api_key')
+
+        if api_key:
+            # Use API key authentication
+            logger.info("QwenProviderHandler: Using API key authentication")
+            auth_key = api_key
+            # Use region-based endpoint for API key authentication
+            base_url = self._get_region_endpoint(qwen_config)
+        else:
+            # Use OAuth2 authentication
+            access_token = self.auth.get_valid_token()
+
+            if not access_token:
+                logger.error("QwenProviderHandler: No OAuth2 access token available")
+                raise Exception("No OAuth2 access token. Please re-authenticate")
+
+            logger.info("QwenProviderHandler: Using OAuth2 authentication")
+            auth_key = access_token
+            # Use provider configured endpoint for OAuth2 (fixed endpoints)
+            base_url = self.provider_config.endpoint
+
         # Normalize endpoint
         if not base_url.startswith("http"):
             base_url = f"https://{base_url}"
-        if not base_url.endswith("/v1"):
-            base_url = f"{base_url}/v1"
-        
+        # DashScope endpoint already includes /v1 so do not append again
+
         self._sdk_client = AsyncOpenAI(
-            api_key=access_token,
+            api_key=auth_key,
             base_url=base_url,
             max_retries=3,
             timeout=httpx.Timeout(300.0, connect=30.0),
         )
-        
-        logger.info(f"QwenProviderHandler: Created SDK client with OAuth2 auth token (endpoint: {base_url})")
+
+        logger.info(f"QwenProviderHandler: Created SDK client (endpoint: {base_url})")
         return self._sdk_client
+
+    def _get_region_endpoint(self, qwen_config: Dict) -> str:
+        """Get the appropriate endpoint URL based on the configured region."""
+        region = qwen_config.get('region', 'china-beijing')  # Default to China (Beijing)
+
+        region_endpoints = {
+            'singapore': 'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
+            'us-virginia': 'https://dashscope-us.aliyuncs.com/compatible-mode/v1',
+            'china-beijing': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+            'china-hongkong': 'https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1',
+            'germany-frankfurt': f"https://{qwen_config.get('workspace_id', 'Default Workspace')}.eu-central-1.maas.aliyuncs.com/compatible-mode/v1"
+        }
+
+        endpoint = region_endpoints.get(region, region_endpoints['china-beijing'])
+        return endpoint
     
     def _get_auth_headers(self) -> Dict[str, str]:
-        """Get HTTP headers with OAuth2 Bearer token and DashScope-specific headers."""
+        """Get HTTP headers with authentication (OAuth2 or API key) and DashScope-specific headers."""
         import logging
         logger = logging.getLogger(__name__)
-        
-        access_token = self.auth.get_valid_token()
-        
-        if not access_token:
-            logger.error("QwenProviderHandler: No OAuth2 access token available")
-            raise Exception("No OAuth2 access token. Please re-authenticate")
-        
+
+        # Check if API key is configured (vs OAuth2)
+        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        api_key = None
+        if qwen_config and isinstance(qwen_config, dict):
+            api_key = qwen_config.get('api_key')
+
+        if api_key:
+            # Use API key authentication
+            auth_value = f"Bearer {api_key}"
+            auth_type = "api-key"
+        else:
+            # Use OAuth2 authentication
+            access_token = self.auth.get_valid_token()
+
+            if not access_token:
+                logger.error("QwenProviderHandler: No OAuth2 access token available")
+                raise Exception("No OAuth2 access token. Please re-authenticate")
+
+            auth_value = f"Bearer {access_token}"
+            auth_type = "qwen-oauth"
+
         headers = {
-            "Authorization": f"Bearer {access_token}",
+            "Authorization": auth_value,
             "Content-Type": "application/json",
             "User-Agent": "QwenCode/1.0.0 (linux; x86_64)",
             "X-DashScope-CacheControl": "enable",
             "X-DashScope-UserAgent": "QwenCode/1.0.0 (linux; x86_64)",
-            "X-DashScope-AuthType": "qwen-oauth",
+            "X-DashScope-AuthType": auth_type,
         }
-        
-        logger.debug("QwenProviderHandler: Created auth headers with OAuth2 token")
+
+        logger.debug(f"QwenProviderHandler: Created auth headers with {auth_type} authentication")
         return headers
     
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
@@ -385,29 +430,64 @@ class QwenProviderHandler(BaseProviderHandler):
         """Return list of available Qwen models."""
         import logging
         logger = logging.getLogger(__name__)
-        
+
         logger.info("QwenProviderHandler: Fetching available models")
-        
+
         await self.apply_rate_limit()
-        
+
+        # Check if API token is configured (vs OAuth2)
+        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        using_api_key = qwen_config and isinstance(qwen_config, dict) and qwen_config.get('api_key')
+
+        if not using_api_key:
+            # OAuth2 authentication: return fixed model list
+            logger.info("QwenProviderHandler: Using OAuth2 authentication, returning fixed model list")
+            return [
+                Model(
+                    id="coder-model",
+                    name="Coder Model",
+                    provider_id=self.provider_id,
+                    context_size=1000000,
+                    context_length=1000000,
+                )
+            ]
+
+        # API token authentication: fetch from models endpoint
+        logger.info("QwenProviderHandler: Using API token authentication, fetching from models endpoint")
+
+        # Check if models are already defined in provider configuration
+        if self.provider_config.models and len(self.provider_config.models) > 0:
+            # Models are defined in configuration, use those instead of fetching
+            logger.info("QwenProviderHandler: Models defined in configuration, using configured models")
+            models = []
+            for model_config in self.provider_config.models:
+                models.append(Model(
+                    id=model_config.get('name', ''),
+                    name=model_config.get('name', ''),
+                    provider_id=self.provider_id,
+                    context_size=model_config.get('context_size', 32000),
+                    context_length=model_config.get('context_size', 32000),
+                ))
+            return models
+
         try:
-            # Get SDK client with current OAuth token
+            # Get SDK client with API key authentication
             client = self._get_sdk_client()
-            
+
             # List models using OpenAI SDK
             models_response = await client.models.list()
-            
+
             models = []
             for model_data in models_response.data:
                 model_id = model_data.id
-                
+
                 # Extract context size if available
                 context_size = None
                 if hasattr(model_data, 'context_window'):
                     context_size = model_data.context_window
                 elif hasattr(model_data, 'max_model_len'):
                     context_size = model_data.max_model_len
-                
+
                 models.append(Model(
                     id=model_id,
                     name=model_id,
@@ -415,9 +495,9 @@ class QwenProviderHandler(BaseProviderHandler):
                     context_size=context_size,
                     context_length=context_size,
                 ))
-                
+
                 logger.debug(f"QwenProviderHandler: Found model: {model_id}")
-            
+
             if not models:
                 # Fallback to static model list
                 logger.warning("QwenProviderHandler: No models returned from API, using static list")
@@ -427,13 +507,13 @@ class QwenProviderHandler(BaseProviderHandler):
                     Model(id="qwen-max", name="Qwen Max", provider_id=self.provider_id, context_size=8000),
                     Model(id="coder-model", name="Qwen Coder", provider_id=self.provider_id, context_size=32000),
                 ]
-            
+
             logger.info(f"QwenProviderHandler: Returning {len(models)} models")
             return models
-            
+
         except Exception as e:
             logger.error(f"QwenProviderHandler: Failed to fetch models: {e}", exc_info=True)
-            
+
             # Return static fallback list
             logger.info("QwenProviderHandler: Using static fallback model list")
             return [

@@ -68,7 +68,14 @@ class OllamaProviderHandler(BaseProviderHandler):
             try:
                 health_response = await self.client.get("/api/tags", timeout=10.0)
                 logger.info(f"Ollama health check passed: {health_response.status_code}")
-                logger.info(f"Available models: {health_response.json().get('models', [])}")
+                models = health_response.json().get('models', [])
+                if AISBF_DEBUG:
+                    response_str = str(models)
+                    if len(response_str) > 1024:
+                        response_str = response_str[:1024] + f" ... [TRUNCATED, total length: {len(response_str)} chars]"
+                    logger.info(f"Available models: {response_str}")
+                else:
+                    logger.info(f"Available models: {len(models)} models")
             except Exception as e:
                 logger.error(f"Ollama health check failed: {str(e)}")
                 logger.error(f"Cannot connect to Ollama at {self.client.base_url}")

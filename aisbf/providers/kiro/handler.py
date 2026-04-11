@@ -502,7 +502,10 @@ class KiroProviderHandler(BaseProviderHandler):
                         logging.info(f"KiroProviderHandler: ✓ Nexlab API call successful!")
 
                         if AISBF_DEBUG:
-                            logging.info(f"KiroProviderHandler: Nexlab response: {nexlab_data}")
+                            response_str = str(nexlab_data)
+                            if len(response_str) > 1024:
+                                response_str = response_str[:1024] + f" ... [TRUNCATED, total length: {len(response_str)} chars]"
+                            logging.info(f"KiroProviderHandler: Nexlab response: {response_str}")
 
                         models_list = nexlab_data if isinstance(nexlab_data, list) else nexlab_data.get('data', nexlab_data.get('models', []))
 
@@ -671,7 +674,10 @@ class KiroProviderHandler(BaseProviderHandler):
                     response_data = response.json()
 
                     if AISBF_DEBUG:
-                        logging.info(f"KiroProviderHandler: Response data: {json.dumps(response_data, indent=2)}")
+                        response_str = json.dumps(response_data, indent=2)
+                        if len(response_str) > 1024:
+                            response_str = response_str[:1024] + f"\n... [TRUNCATED, total length: {len(response_str)} chars]"
+                        logging.info(f"KiroProviderHandler: Response data: {response_str}")
 
                     models_list = response_data.get('models', [])
 

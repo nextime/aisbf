@@ -49,6 +49,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="kiro">Kiro (Amazon Q Developer)</option>
             <option value="claude">Claude (OAuth2)</option>
             <option value="kilocode">Kilocode (OAuth2)</option>
+            <option value="qwen">Qwen (OAuth2)</option>
             <option value="codex">Codex (OpenAI OAuth2)</option>
         </select>
         <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
@@ -128,6 +129,7 @@ function renderProviderDetails(key) {
     const isKiroProvider = provider.type === 'kiro';
     const isClaudeProvider = provider.type === 'claude';
     const isKiloProvider = provider.type === 'kilocode';
+    const isQwenProvider = provider.type === 'qwen';
     const isCodexProvider = provider.type === 'codex';
     
     // Initialize kiro_config if this is a kiro provider and doesn't have it
@@ -158,6 +160,16 @@ function renderProviderDetails(key) {
         };
     }
     
+    // Initialize qwen_config if this is a qwen provider and doesn't have it
+    if (isQwenProvider && !provider.qwen_config) {
+        provider.qwen_config = {
+            credentials_file: '~/.aisbf/qwen_credentials.json',
+            api_key: '',
+            region: 'china-beijing',
+            workspace_id: 'Default Workspace'
+        };
+    }
+    
     // Initialize codex_config if this is a codex provider and doesn't have it
     if (isCodexProvider && !provider.codex_config) {
         provider.codex_config = {
@@ -169,6 +181,7 @@ function renderProviderDetails(key) {
     const kiroConfig = provider.kiro_config || {};
     const claudeConfig = provider.claude_config || {};
     const kiloConfig = provider.kilo_config || {};
+    const qwenConfig = provider.qwen_config || {};
     const codexConfig = provider.codex_config || {};
     
     // Build authentication fields based on provider type
@@ -333,6 +346,82 @@ function renderProviderDetails(key) {
                 <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
         `;
+    } else if (isQwenProvider) {
+        // Qwen authentication fields - supports both API key and OAuth2
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Qwen Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
+                </small>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key</h5>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" value="${qwenConfig.api_key || ''}" onchange="updateQwenConfig('${key}', 'api_key', this.value)" placeholder="Enter your Qwen API key">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                </div>
+
+                <div id="qwen-region-config-${key}" style="display: ${qwenConfig.api_key ? 'block' : 'none'}; margin-top: 15px;">
+                    <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Region Configuration (API Key Mode)</h5>
+                    <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                        Select your preferred region for API key authentication. Different regions have different endpoints.
+                    </small>
+
+                    <div class="form-group">
+                        <label>Region</label>
+                        <select onchange="updateQwenConfig('${key}', 'region', this.value)">
+                            <option value="china-beijing" ${qwenConfig.region === 'china-beijing' || !qwenConfig.region ? 'selected' : ''}>China (Beijing) - dashscope.aliyuncs.com</option>
+                            <option value="singapore" ${qwenConfig.region === 'singapore' ? 'selected' : ''}>Singapore - dashscope-intl.aliyuncs.com</option>
+                            <option value="us-virginia" ${qwenConfig.region === 'us-virginia' ? 'selected' : ''}>US (Virginia) - dashscope-us.aliyuncs.com</option>
+                            <option value="china-hongkong" ${qwenConfig.region === 'china-hongkong' ? 'selected' : ''}>China (Hong Kong) - cn-hongkong.dashscope.aliyuncs.com</option>
+                            <option value="germany-frankfurt" ${qwenConfig.region === 'germany-frankfurt' ? 'selected' : ''}>Germany (Frankfurt) - Requires Workspace ID</option>
+                        </select>
+                        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the region for your Qwen API endpoint</small>
+                    </div>
+
+                    <div id="qwen-workspace-config-${key}" style="display: ${qwenConfig.region === 'germany-frankfurt' ? 'block' : 'none'};">
+                        <div class="form-group">
+                            <label>Workspace ID</label>
+                            <input type="text" value="${qwenConfig.workspace_id || 'Default Workspace'}" onchange="updateQwenConfig('${key}', 'workspace_id', this.value)" placeholder="Default Workspace">
+                            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Workspace ID for Germany region (default: "Default Workspace")</small>
+                        </div>
+                    </div>
+                </div>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication</h5>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    If no API key is provided, OAuth2 will be used automatically.
+                </small>
+
+                <div class="form-group">
+                    <label>Credentials File Path</label>
+                    <input type="text" value="${qwenConfig.credentials_file || '~/.aisbf/qwen_credentials.json'}" onchange="updateQwenConfig('${key}', 'credentials_file', this.value)" placeholder="~/.aisbf/qwen_credentials.json">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                </div>
+
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateQwen('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Qwen OAuth2
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkQwenAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+
+                <div id="qwen-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload OAuth2 Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="qwen-creds-file-${key}" accept=".json" onchange="uploadQwenFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Qwen OAuth2 credentials JSON file</small>
+                </div>
+                <div id="qwen-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
     } else if (isCodexProvider) {
         // Codex OAuth2 authentication fields
         authFieldsHtml = `
@@ -412,10 +501,12 @@ function renderProviderDetails(key) {
         
         <div class="form-group">
             <label>Endpoint</label>
-            <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${provider.type === 'kilocode' ? 'readonly style="background: #0f2840; cursor: not-allowed;"' : ''} required>
+            <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${(provider.type === 'kilocode' || provider.type === 'qwen' || provider.type === 'claude' || provider.type === 'codex') ? 'readonly style="background: #0f2840; cursor: not-allowed;"' : ''} required>
             ${isKiroProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
-            ${provider.type === 'kilocode' ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Kilocode provider</small>' : ''}
-            ${isCodexProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://api.openai.com/v1 (OpenAI-compatible)</small>' : ''}
+            ${provider.type === 'kilocode' ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Kilocode OAuth2 provider</small>' : ''}
+            ${isQwenProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Qwen OAuth2 provider (https://dashscope.aliyuncs.com/compatible-mode/v1)</small>' : ''}
+            ${isClaudeProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Claude OAuth2 provider (https://api.anthropic.com/v1)</small>' : ''}
+            ${isCodexProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Codex OAuth2 provider (https://api.openai.com/v1)</small>' : ''}
         </div>
         
         <div class="form-group">
@@ -428,6 +519,7 @@ function renderProviderDetails(key) {
                 <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
                 <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
                 <option value="kilocode" ${provider.type === 'kilocode' ? 'selected' : ''}>Kilocode (OAuth2)</option>
+                <option value="qwen" ${provider.type === 'qwen' ? 'selected' : ''}>Qwen (OAuth2)</option>
                 <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
             </select>
         </div>
@@ -654,6 +746,7 @@ function updateNewProviderDefaults() {
         'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com',
         'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1',
         'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
+        'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
     };
     
@@ -690,7 +783,7 @@ function confirmAddProvider() {
         name: key,
         endpoint: '',
         type: providerType,
-        api_key_required: providerType !== 'kiro' && providerType !== 'ollama' && providerType !== 'claude' && providerType !== 'kilocode' && providerType !== 'codex',
+        api_key_required: providerType !== 'kiro' && providerType !== 'ollama' && providerType !== 'claude' && providerType !== 'kilocode' && providerType !== 'qwen' && providerType !== 'codex',
         rate_limit: 0,
         default_rate_limit: 0,
         models: []
@@ -721,6 +814,15 @@ function confirmAddProvider() {
         newProvider.kilo_config = {
             credentials_file: '~/.kilo_credentials.json',
             api_base: 'https://api.kilo.ai/api/gateway'
+        };
+    } else if (providerType === 'qwen') {
+        newProvider.endpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+        newProvider.name = key + ' (Qwen OAuth2)';
+        newProvider.qwen_config = {
+            credentials_file: '~/.aisbf/qwen_credentials.json',
+            api_key: '',
+            region: 'china-beijing',
+            workspace_id: 'Default Workspace'
         };
     } else if (providerType === 'codex') {
         newProvider.endpoint = 'https://api.openai.com/v1';
@@ -863,12 +965,28 @@ function updateProviderType(key, newType) {
         if (!providersData[key].endpoint || providersData[key].endpoint === '') {
             providersData[key].endpoint = 'https://api.openai.com/v1';
         }
-    } else if (newType !== 'kiro' && newType !== 'claude' && newType !== 'kilocode' && newType !== 'codex' && (oldType === 'kiro' || oldType === 'claude' || oldType === 'kilocode' || oldType === 'codex')) {
-        // Transitioning FROM kiro/claude/kilocode/codex: remove special configs, set api_key_required to true
+    } else if (newType === 'qwen' && oldType !== 'qwen') {
+        // Transitioning TO qwen: initialize qwen_config, set api_key_required to false
+        providersData[key].api_key_required = false;
+        providersData[key].qwen_config = {
+            credentials_file: '~/.aisbf/qwen_credentials.json',
+            api_key: ''
+        };
+        delete providersData[key].kiro_config;
+        delete providersData[key].claude_config;
+        delete providersData[key].kilo_config;
+        delete providersData[key].codex_config;
+        // Set default endpoint for qwen
+        if (!providersData[key].endpoint || providersData[key].endpoint === '') {
+            providersData[key].endpoint = 'https://dashscope.aliyuncs.com/compatible-mode/v1';
+        }
+    } else if (newType !== 'kiro' && newType !== 'claude' && newType !== 'kilocode' && newType !== 'qwen' && newType !== 'codex' && (oldType === 'kiro' || oldType === 'claude' || oldType === 'kilocode' || oldType === 'qwen' || oldType === 'codex')) {
+        // Transitioning FROM kiro/claude/kilocode/qwen/codex: remove special configs, set api_key_required to true
         providersData[key].api_key_required = true;
         delete providersData[key].kiro_config;
         delete providersData[key].claude_config;
         delete providersData[key].kilo_config;
+        delete providersData[key].qwen_config;
         delete providersData[key].codex_config;
     }
     
@@ -897,11 +1015,234 @@ function updateKiloConfig(key, field, value) {
     providersData[key].kilo_config[field] = value;
 }
 
+function updateQwenConfig(key, field, value) {
+    if (!providersData[key].qwen_config) {
+        providersData[key].qwen_config = {};
+    }
+    providersData[key].qwen_config[field] = value;
+
+    // Handle dynamic UI updates for region/workspace configuration
+    if (field === 'api_key') {
+        const regionConfigEl = document.getElementById(`qwen-region-config-${key}`);
+        if (regionConfigEl) {
+            regionConfigEl.style.display = value ? 'block' : 'none';
+        }
+    } else if (field === 'region') {
+        const workspaceConfigEl = document.getElementById(`qwen-workspace-config-${key}`);
+        if (workspaceConfigEl) {
+            workspaceConfigEl.style.display = value === 'germany-frankfurt' ? 'block' : 'none';
+        }
+    }
+}
+
 function updateCodexConfig(key, field, value) {
     if (!providersData[key].codex_config) {
         providersData[key].codex_config = {};
     }
     providersData[key].codex_config[field] = value;
+}
+
+async function authenticateQwen(key) {
+    const statusEl = document.getElementById(`qwen-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/qwen/auth/start") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].qwen_config?.credentials_file || '~/.aisbf/qwen_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Qwen Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'qwen-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('{{ url_for(request, "/dashboard/qwen/auth/poll") }}', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'approved') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Qwen authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Qwen auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function checkQwenAuth(key) {
+    const statusEl = document.getElementById(`qwen-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking Qwen authentication status...</p>';
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/qwen/auth/status") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].qwen_config?.credentials_file || '~/.aisbf/qwen_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.authenticated) {
+            statusEl.style.background = '#0f4020';
+            statusEl.style.border = '1px solid #4eff9e';
+            const expiresIn = data.expires_in ? ` (expires in ${Math.floor(data.expires_in / (24 * 60 * 60))} days)` : '';
+            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Qwen authenticated${expiresIn}</p>`;
+        } else {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Not authenticated. Click "Authenticate with Qwen" to log in.</p>';
+        }
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function uploadFileChunked(providerKey, fileType, file, statusElement, updateCallback) {
+    if (!file) return;
+    
+    const CHUNK_SIZE = 256 * 1024; // 256KB chunks - works with every proxy
+    const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+    let uploadedChunks = 0;
+    
+    statusElement.innerHTML = `<p style="margin: 0; color: #4a9eff;">🔄 Uploading 0% (0/${totalChunks} chunks)...</p>`;
+    
+    for (let i = 0; i < totalChunks; i++) {
+        const start = i * CHUNK_SIZE;
+        const end = Math.min(start + CHUNK_SIZE, file.size);
+        const chunk = file.slice(start, end);
+        
+        const formData = new FormData();
+        formData.append('file', chunk);
+        formData.append('provider_key', providerKey);
+        formData.append('file_type', fileType);
+        formData.append('file_name', file.name);
+        formData.append('chunk_number', i + 1);
+        formData.append('total_chunks', totalChunks);
+        formData.append('total_size', file.size);
+        
+        try {
+            const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file/chunk") }}', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const data = await response.json();
+            
+            if (!data.success) {
+                statusElement.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
+                return;
+            }
+            
+            uploadedChunks++;
+            const percent = Math.round((uploadedChunks / totalChunks) * 100);
+            statusElement.innerHTML = `<p style="margin: 0; color: #4a9eff;">🔄 Uploading ${percent}% (${uploadedChunks}/${totalChunks} chunks)...</p>`;
+            
+            if (data.complete) {
+                statusElement.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
+                if (updateCallback) {
+                    updateCallback(data.file_path);
+                }
+            }
+            
+        } catch (error) {
+            statusElement.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+            return;
+        }
+    }
+}
+
+async function uploadQwenFile(providerKey, file) {
+    if (!file) return;
+    const statusEl = document.getElementById(`qwen-upload-status-${providerKey}`);
+    
+    await uploadFileChunked(providerKey, 'credentials', file, statusEl, (filePath) => {
+        updateQwenConfig(providerKey, 'credentials_file', filePath);
+    });
 }
 
 async function authenticateCodex(key) {
@@ -976,6 +1317,17 @@ async function authenticateCodex(key) {
                     statusEl.style.background = '#0f4020';
                     statusEl.style.border = '1px solid #4eff9e';
                     statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Codex authentication successful! Credentials saved.</p>';
+                    // Update endpoint field to ChatGPT backend for OAuth2 mode
+                    const endpointInput = document.querySelector(`input[onchange*="updateProvider('${key}', 'endpoint', this.value)"]`);
+                    if (endpointInput && pollData.new_endpoint) {
+                        // Update both the UI input field AND the underlying providersData object
+                        endpointInput.value = pollData.new_endpoint;
+                        providersData[key].endpoint = pollData.new_endpoint;
+                        // Remove readonly attribute if present
+                        endpointInput.removeAttribute('readonly');
+                        endpointInput.style.background = '#1a1a2e';
+                        endpointInput.style.cursor = 'text';
+                    }
                 } else if (pollData.status === 'denied') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
@@ -1047,32 +1399,11 @@ async function checkCodexAuth(key) {
 
 async function uploadCodexFile(providerKey, file) {
     if (!file) return;
-    
     const statusEl = document.getElementById(`codex-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('provider_key', providerKey);
-    formData.append('file_type', 'credentials');
-    
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
-            updateCodexConfig(providerKey, 'credentials_file', data.file_path);
-        } else {
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
-        }
-    } catch (error) {
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials', file, statusEl, (filePath) => {
+        updateCodexConfig(providerKey, 'credentials_file', filePath);
+    });
 }
 
 async function authenticateKilo(key) {
@@ -1226,33 +1557,11 @@ async function checkKiloAuth(key) {
 
 async function uploadKiloFile(providerKey, file) {
     if (!file) return;
-    
     const statusEl = document.getElementById(`kilo-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('provider_key', providerKey);
-    formData.append('file_type', 'credentials');
-    
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
-            // Update the config with the new file path
-            updateKiloConfig(providerKey, 'credentials_file', data.file_path);
-        } else {
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
-        }
-    } catch (error) {
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials', file, statusEl, (filePath) => {
+        updateKiloConfig(providerKey, 'credentials_file', filePath);
+    });
 }
 
 // Extension detection and configuration
@@ -1307,14 +1616,14 @@ async function checkExtensionInstalled() {
 
 async function configureExtension() {
     try {
-        const serverUrl = window.location.origin;
-        
+        const serverUrl = window.location.href.replace(/\/dashboard.*$/, '');
+
         // Send configuration to extension using postMessage
         window.postMessage({
             type: 'aisbf-extension-configure',
             serverUrl: serverUrl
         }, '*');
-        
+
         console.log('Extension configuration sent');
     } catch (error) {
         console.error('Error configuring extension:', error);
@@ -1783,68 +2092,24 @@ async function saveProviders() {
 
 async function uploadKiroFile(providerKey, fileType, file) {
     if (!file) return;
-    
     const statusEl = document.getElementById(`kiro-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('provider_key', providerKey);
-    formData.append('file_type', fileType);
-    
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
-            // Update the config with the new file path
-            if (fileType === 'creds_file') {
-                updateKiroConfig(providerKey, 'creds_file', data.file_path);
-            } else if (fileType === 'sqlite_db') {
-                updateKiroConfig(providerKey, 'sqlite_db', data.file_path);
-            }
-        } else {
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
+    await uploadFileChunked(providerKey, fileType, file, statusEl, (filePath) => {
+        if (fileType === 'creds_file') {
+            updateKiroConfig(providerKey, 'creds_file', filePath);
+        } else if (fileType === 'sqlite_db') {
+            updateKiroConfig(providerKey, 'sqlite_db', filePath);
         }
-    } catch (error) {
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
-    }
+    });
 }
 
 async function uploadClaudeFile(providerKey, file) {
     if (!file) return;
-    
     const statusEl = document.getElementById(`claude-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Uploading file...</p>';
     
-    const formData = new FormData();
-    formData.append('file', file);
-    formData.append('provider_key', providerKey);
-    formData.append('file_type', 'credentials');
-    
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/providers/upload-auth-file") }}', {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (data.success) {
-            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ File uploaded successfully! Path: ${data.file_path}</p>`;
-            // Update the config with the new file path
-            updateClaudeConfig(providerKey, 'credentials_file', data.file_path);
-        } else {
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Upload failed: ${data.error}</p>`;
-        }
-    } catch (error) {
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials', file, statusEl, (filePath) => {
+        updateClaudeConfig(providerKey, 'credentials_file', filePath);
+    });
 }
 
 async function getModelsFromProvider(providerKey) {

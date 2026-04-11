@@ -108,9 +108,8 @@ class KiloOAuth2:
             for attempt in range(max_retries):
                 try:
                     headers = {
-                        'Content-Type': 'application/x-www-form-urlencoded',
-                        'Content-Length': '0',
-                        'User-Agent': 'AISBF/0.99.14 (httpx)'
+                        'Content-Type': 'application/json',
+                        'User-Agent': 'Kilocode/1.0 (Firefox/130.0)'
                     }
                     
                     if attempt > 0:

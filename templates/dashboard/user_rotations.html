@@ -21,6 +21,7 @@
             <!-- Rotations will be loaded here -->
         </div>
         <button class="btn btn-primary" onclick="showAddRotationModal()">Add New Rotation</button>
+        <button class="btn btn-success" onclick="applyChanges()" style="margin-left: 10px;">✓ Apply Changes</button>
     </div>
 </div>
 
@@ -180,6 +181,48 @@ document.getElementById('rotation-form').addEventListener('submit', function(e) 
         alert('Error: ' + error.message);
     });
 });
+
+async function applyChanges() {
+    const button = event.target;
+    const originalText = button.innerHTML;
+    
+    try {
+        button.innerHTML = '🔄 Reloading...';
+        button.disabled = true;
+        
+        const response = await fetch('{{ url_for(request, "/dashboard/user/reload-config") }}', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        if (response.ok) {
+            button.innerHTML = '✓ Applied Successfully!';
+            button.style.background = '#10b981';
+            
+            setTimeout(() => {
+                button.innerHTML = originalText;
+                button.style.background = '';
+                button.disabled = false;
+            }, 2000);
+        } else {
+            const data = await response.json();
+            throw new Error(data.error || 'Failed to apply changes');
+        }
+    } catch (error) {
+        button.innerHTML = '✗ Error';
+        button.style.background = '#ef4444';
+        
+        setTimeout(() => {
+            button.innerHTML = originalText;
+            button.style.background = '';
+            button.disabled = false;
+        }, 2000);
+        
+        alert('Error applying changes: ' + error.message);
+    }
+}
 
 renderRotations();
 </script>

@@ -98,11 +98,29 @@ class RequestHandler:
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
+        self.reload_user_config()
+
+    def reload_user_config(self):
+        """Reload user configuration from database"""
+        import logging
+        logger = logging.getLogger(__name__)
         from .database import get_database
         db = get_database()
-        self.user_providers = db.get_user_providers(self.user_id)
-        self.user_rotations = db.get_user_rotations(self.user_id)
-        self.user_autoselects = db.get_user_autoselects(self.user_id)
+        
+        # Convert list to dictionary with id as key
+        providers = db.get_user_providers(self.user_id)
+        self.user_providers = {p['provider_id']: p['config'] for p in providers}
+        
+        rotations = db.get_user_rotations(self.user_id)
+        self.user_rotations = {r['rotation_id']: r['config'] for r in rotations}
+        
+        autoselects = db.get_user_autoselects(self.user_id)
+        self.user_autoselects = {a['autoselect_id']: a['config'] for a in autoselects}
+        
+        logger.info(f"Reloaded user configuration for user_id={self.user_id}")
+        logger.info(f"  Loaded {len(self.user_providers)} user providers")
+        logger.info(f"  Loaded {len(self.user_rotations)} user rotations")
+        logger.info(f"  Loaded {len(self.user_autoselects)} user autoselects")
 
     def _should_cache_response(self, provider_config=None, model_config=None, rotation_config=None, autoselect_config=None):
         """
@@ -1117,12 +1135,137 @@ class RequestHandler:
         else:
             api_key = None
 
+        # First check if we already have models for same provider type + same endpoint from same user
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check all other providers with same type, same endpoint and same user
+        same_providers = []
+        if self.user_id:
+            # Check user providers
+            for pid, pconfig in self.user_providers.items():
+                if pid != provider_id and pconfig.type == provider_config.type and pconfig.endpoint == provider_config.endpoint:
+                    same_providers.append(pid)
+        else:
+            # Check global providers
+            for pid, pconfig in self.config.providers.items():
+                if pid != provider_id and pconfig.type == provider_config.type and pconfig.endpoint == provider_config.endpoint:
+                    same_providers.append(pid)
+        
+        # If there are matching providers, check if they have cached models
+        for same_pid in same_providers:
+            # Check if this provider already has models loaded
+            try:
+                same_handler = get_provider_handler(same_pid, user_id=self.user_id)
+                if hasattr(same_handler, '_cached_models') and same_handler._cached_models and len(same_handler._cached_models) > 0:
+                    logger.info(f"Reusing models from existing provider {same_pid} for {provider_id} (same type and endpoint)")
+                    # Copy models and apply correct provider_id
+                    models = []
+                    for model in same_handler._cached_models:
+                        # Create new model instance with correct provider_id
+                        model_copy = model.copy()
+                        model_copy.provider_id = provider_id
+                        models.append(model_copy)
+                    
+                    # Also cache on this handler
+                    handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
+                    handler._cached_models = models
+                    
+                    # Skip rate limit and direct model fetch
+                    model_filter = getattr(provider_config, 'model_filter', None)
+                    if model_filter and (not provider_config.models or len(provider_config.models) == 0):
+                        logger.info(f"Applying model filter '{model_filter}' to provider {provider_id}")
+                        original_count = len(models)
+                        models = [m for m in models if model_filter.lower() in m.id.lower()]
+                        logger.info(f"Model filter applied: {original_count} -> {len(models)} models")
+                    
+                    # Enhance model information with context window and capabilities
+                    enhanced_models = []
+                    current_time = int(time_module.time())
+                    for model in models:
+                        model_dict = model.dict()
+                        model_name = model_dict.get('id', '')
+                        
+                        # Add OpenAI-compatible required fields
+                        model_dict['object'] = 'model'
+                        model_dict['created'] = current_time
+                        model_dict['owned_by'] = provider_config.name
+                        
+                        # Try to find model config in provider config
+                        model_config = None
+                        if provider_config.models:
+                            for m in provider_config.models:
+                                if m.name == model_name:
+                                    model_config = m
+                                    break
+                        
+                        # Add context window information - use dynamically fetched value unless manually configured
+                        # Priority: manually configured > dynamically fetched > inferred
+                        if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
+                            # Manually configured - use this value
+                            model_dict['context_window'] = model_config.context_size
+                        elif model_dict.get('context_size'):
+                            # Dynamically fetched from provider - use this value
+                            model_dict['context_window'] = model_dict['context_size']
+                        else:
+                            # Fall back to inference
+                            model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
+                        
+                        # Add context_length for compatibility - same priority order as context_window
+                        if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
+                            model_dict['context_length'] = model_config.context_size
+                        elif model_dict.get('context_size'):
+                            model_dict['context_length'] = model_dict['context_size']
+                        elif model_dict.get('context_length'):
+                            model_dict['context_length'] = model_dict['context_length']
+                        
+                        # Add pricing if available (from dynamic fetch)
+                        if model_dict.get('pricing'):
+                            model_dict['pricing'] = model_dict['pricing']
+                        
+                        # Add description if available (from dynamic fetch)
+                        if model_dict.get('description'):
+                            model_dict['description'] = model_dict['description']
+                        
+                        # Add top_provider info if available (from dynamic fetch)
+                        if model_dict.get('top_provider'):
+                            model_dict['top_provider'] = model_dict['top_provider']
+                        
+                        # Add supported_parameters if available (from dynamic fetch)
+                        if model_dict.get('supported_parameters'):
+                            model_dict['supported_parameters'] = model_dict['supported_parameters']
+                        
+                        # Add capabilities information
+                        if model_config and hasattr(model_config, 'capabilities'):
+                            model_dict['capabilities'] = model_config.capabilities
+                        elif 'capabilities' not in model_dict:
+                            # Auto-detect capabilities based on model name and provider type
+                            model_dict['capabilities'] = self._detect_capabilities(model_name, provider_config.type)
+                        
+                        enhanced_models.append(model_dict)
+                    
+                    return enhanced_models
+            except Exception as e:
+                logger.debug(f"Failed to reuse models from {same_pid}: {e}")
+                continue
+        
+        # No existing models found, proceed normally
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         try:
             # Apply rate limiting
             await handler.apply_rate_limit()
 
             models = await handler.get_models()
+            
+            # Check if this is an auth status response (dictionary instead of Model list)
+            # Some providers (Kilo, Qwen, Claude) return auth status instead of models when not authenticated
+            if isinstance(models, dict) and 'status' in models:
+                logger.info(f"Provider {provider_id} returned auth status instead of models: {models.get('status')}")
+                # Return empty models list but include auth status in response headers
+                models = []
+            
+            # Cache the models on the handler
+            handler._cached_models = models
             
             # Apply model filter if configured and no models are manually specified
             model_filter = getattr(provider_config, 'model_filter', None)
@@ -1622,6 +1765,21 @@ class RotationHandler:
         self.user_providers = db.get_user_providers(self.user_id)
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
+
+    def reload_user_configs(self):
+        """Reload user-specific configurations from database"""
+        if self.user_id:
+            self._load_user_configs()
+
+    def reload_user_configs(self):
+        """Reload user-specific configurations from database"""
+        if self.user_id:
+            self._load_user_configs()
+
+    def reload_user_configs(self):
+        """Reload user-specific configurations from database"""
+        if self.user_id:
+            self._load_user_configs()
 
     def _get_provider_type(self, provider_id: str) -> str:
         """Get the provider type from configuration"""

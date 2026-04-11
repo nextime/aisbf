@@ -79,7 +79,7 @@ def _generate_client_id():
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Official Claude Code client ID
 AUTH_URL = "https://claude.com/cai/oauth/authorize"  # Authorization endpoint (note: /cai path is required)
 TOKEN_URL = "https://api.anthropic.com/v1/oauth/token"  # Token exchange endpoint
-REDIRECT_URI = "http://localhost:54545/callback"  # OAuth2 callback URI
+DEFAULT_REDIRECT_URI = "http://localhost:54545/callback"  # Default local OAuth2 callback URI
 CLI_USER_AGENT = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
 
 logger = logging.getLogger(__name__)
@@ -97,10 +97,10 @@ class ClaudeAuth:
     CLIENT_ID = CLIENT_ID
     AUTH_URL = AUTH_URL
     TOKEN_URL = TOKEN_URL
-    REDIRECT_URI = REDIRECT_URI
+    REDIRECT_URI = DEFAULT_REDIRECT_URI
     CLI_USER_AGENT = CLI_USER_AGENT
     
-    def __init__(self, credentials_file: Optional[str] = None):
+    def __init__(self, credentials_file: Optional[str] = None, redirect_uri: Optional[str] = None):
         """
         Initialize Claude authentication.
         
@@ -112,6 +112,9 @@ class ClaudeAuth:
         else:
             # Store credentials in ~/.aisbf/ directory (AISBF config directory)
             self.credentials_file = Path.home() / ".aisbf" / "claude_credentials.json"
+        
+        # Allow overriding redirect URI for reverse proxy deployments
+        self.redirect_uri = redirect_uri if redirect_uri is not None else DEFAULT_REDIRECT_URI
         
         self.tokens = self._load_credentials()
         self._oauth_state = None  # Store state for OAuth flow
@@ -386,7 +389,7 @@ class ClaudeAuth:
                 "code": "true",
                 "client_id": CLIENT_ID,
                 "response_type": "code",
-                "redirect_uri": REDIRECT_URI,
+                "redirect_uri": self.redirect_uri,
                 "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
                 "code_challenge": challenge,
                 "code_challenge_method": "S256",
@@ -450,7 +453,7 @@ class ClaudeAuth:
                         "state": state,
                         "grant_type": "authorization_code",
                         "client_id": CLIENT_ID,
-                        "redirect_uri": REDIRECT_URI,
+                        "redirect_uri": self.redirect_uri,
                         "code_verifier": verifier
                     }
                     
@@ -495,7 +498,7 @@ class ClaudeAuth:
             "code": "true",
             "client_id": CLIENT_ID,
             "response_type": "code",
-            "redirect_uri": REDIRECT_URI,
+            "redirect_uri": self.redirect_uri,
             "scope": "org:create_api_key user:profile user:inference user:sessions:claude_code user:mcp_servers user:file_upload",
             "code_challenge": challenge,
             "code_challenge_method": "S256",
@@ -585,7 +588,7 @@ class ClaudeAuth:
                     "state": state,
                     "grant_type": "authorization_code",
                     "client_id": CLIENT_ID,
-                    "redirect_uri": REDIRECT_URI,
+                    "redirect_uri": self.redirect_uri,
                     "code_verifier": verifier
                 }
                 

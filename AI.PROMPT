@@ -693,6 +693,8 @@ Qwen is Alibaba Cloud's large language model service that provides OAuth2-based 
 **Qwen Configuration Fields (qwen_config):**
 - `credentials_file`: Path to OAuth2 credentials file (default: `~/.aisbf/qwen_credentials.json`)
 - `api_key`: Optional API key to bypass OAuth2 (leave empty to use OAuth2)
+- `region`: Region for API key authentication (china-beijing, singapore, us-virginia, china-hongkong, germany-frankfurt)
+- `workspace_id`: Workspace ID for Germany region (default: "Default Workspace")
 
 **Authentication Flow:**
 1. First request triggers OAuth2 Device Authorization flow if no credentials exist
@@ -708,10 +710,16 @@ Qwen is Alibaba Cloud's large language model service that provides OAuth2-based 
 3. Internet connection for OAuth2 flow
 
 **Available Models:**
+
+*OAuth2 Authentication (Fixed Model List):*
+- `coder-model` - Specialized coding model with 1M context (fixed for OAuth2 auth)
+
+*API Key Authentication (Dynamic Model List):*
 - `qwen-plus` - Enhanced model with 32K context
 - `qwen-turbo` - Fast model for quick responses
 - `qwen-max` - Top-tier model with advanced capabilities
 - `coder-model` - Specialized coding model (maps to qwen3.6-plus)
+- Additional models fetched from DashScope API endpoint
 
 **Usage:**
 Once configured, qwen provider can be used like any other provider in AISBF:
@@ -726,11 +734,28 @@ Once configured, qwen provider can be used like any other provider in AISBF:
 - Use Qwen models in AISBF rotations alongside other providers
 - Automatic failover and load balancing with other providers
 
+**Authentication Behavior:**
+
+**OAuth2 Mode (Default - No API Key):**
+- Uses OAuth2 Device Authorization Grant with PKCE
+- Model list is fixed to only `coder-model` with 1M context tokens
+- Endpoint: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Requires browser-based authentication flow
+- Automatic token refresh
+
 **API Key Mode (Optional):**
-If you prefer to use an API key instead of OAuth2:
-1. Obtain an API key from Alibaba Cloud DashScope
-2. Set `api_key` in `qwen_config`
-3. The provider will use the API key directly instead of OAuth2
+- Set `api_key` in `qwen_config` to use API key authentication
+- Model list is fetched dynamically from DashScope `/models` endpoint
+- If models are defined in provider configuration, uses those instead
+- No OAuth2 authentication flow required
+- Obtain API key from Alibaba Cloud DashScope console
+
+**Region-Based Endpoints (API Key Mode):**
+- `china-beijing`: `https://dashscope.aliyuncs.com/compatible-mode/v1` (default)
+- `singapore`: `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`
+- `us-virginia`: `https://dashscope-us.aliyuncs.com/compatible-mode/v1`
+- `china-hongkong`: `https://cn-hongkong.dashscope.aliyuncs.com/compatible-mode/v1`
+- `germany-frankfurt`: `https://{workspace_id}.eu-central-1.maas.aliyuncs.com/compatible-mode/v1`
 
 ### Modifying Configuration
 1. Edit files in `~/.aisbf/` for user-specific changes
@@ -828,7 +853,20 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 
 ### Recent Updates
 
-**2026-04-03 - Version 0.9.6 - Fixed aisbf.json Installation Path**
+**2026-04-11 - Qwen Provider Authentication-Based Model Handling & Region Support**
+- Modified QwenProviderHandler.get_models() to handle OAuth2 vs API key authentication differently
+- OAuth2 authentication: Returns fixed model list with only "coder-model" (1M context)
+- API key authentication: Fetches full model list from DashScope /models endpoint (if no models configured)
+- Added region-based endpoint support for API key authentication:
+  - Singapore: dashscope-intl.aliyuncs.com
+  - US (Virginia): dashscope-us.aliyuncs.com
+  - China (Beijing): dashscope.aliyuncs.com
+  - China (Hong Kong): cn-hongkong.dashscope.aliyuncs.com
+  - Germany (Frankfurt): {workspace_id}.eu-central-1.maas.aliyuncs.com
+- Added region and workspace_id configuration fields to qwen_config
+- Updated dashboard templates to show region selector and workspace ID field
+- Updated _get_sdk_client() and _get_auth_headers() to support both OAuth2 and API key authentication
+- Updated AI.PROMPT documentation to reflect authentication-specific model behavior and region configuration
 - Fixed aisbf.json not being copied to ~/.aisbf/ directory on first run
 - Updated _ensure_config_directory() in aisbf/config.py to include aisbf.json in the list of files to copy
 - Previously only providers.json, rotations.json, and autoselect.json were copied

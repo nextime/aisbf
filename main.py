@@ -464,7 +464,10 @@ def url_for(request: Request, path: str) -> str:
 
 # Note: config will be imported after parsing CLI args if --config is provided
 # For now, we'll delay the import and initialization
-app = FastAPI(title="AI Proxy Server")
+app = FastAPI(
+    title="AI Proxy Server",
+    max_request_size=100 * 1024 * 1024  # 100MB max request size
+)
 
 # Add proxy headers middleware (must be added before other middleware)
 app.add_middleware(ProxyHeadersMiddleware)
@@ -483,10 +486,40 @@ def setup_template_globals():
 # Call setup after templates are initialized
 setup_template_globals()
 
-# Add session middleware at module level with a temporary secret key
+# Add session middleware at module level with a persistent secret key
 # This is needed for uvicorn import (when main() doesn't run)
-_default_session_secret = secrets.token_urlsafe(32)
-app.add_middleware(SessionMiddleware, secret_key=_default_session_secret)
+# Use a persistent secret key so sessions survive server restarts
+def _get_or_create_session_secret():
+    """Get or create a persistent session secret key"""
+    secret_file = Path.home() / '.aisbf' / 'session_secret.key'
+    
+    if secret_file.exists():
+        try:
+            with open(secret_file, 'r') as f:
+                return f.read().strip()
+        except Exception as e:
+            logger.warning(f"Failed to read session secret, generating new one: {e}")
+    
+    # Generate new secret
+    secret = secrets.token_urlsafe(32)
+    
+    # Save it for future use
+    try:
+        secret_file.parent.mkdir(parents=True, exist_ok=True)
+        with open(secret_file, 'w') as f:
+            f.write(secret)
+        # Set restrictive permissions
+        import os
+        os.chmod(secret_file, 0o600)
+    except Exception as e:
+        logger.warning(f"Failed to save session secret: {e}")
+    
+    return secret
+
+_session_secret = _get_or_create_session_secret()
+# Configure session middleware: 30 days max age (cookie expiration)
+# Note: Session data is stored in signed cookies, so it persists across restarts
+app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
 
 # These will be initialized in startup event or main() after config is loaded
 request_handler = None
@@ -592,12 +625,15 @@ def initialize_app(custom_config_dir=None):
     _initialized = True
     logger.info("App initialization complete")
 
-async def fetch_provider_models(provider_id: str) -> list:
+async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None) -> list:
     """Fetch models from provider API and cache them"""
     global _model_cache, _model_cache_timestamps
     
     try:
-        logger.debug(f"Fetching models from provider: {provider_id}")
+        logger.debug(f"Fetching models from provider: {provider_id} (user_id: {user_id})")
+        # Create request handler with correct user context
+        request_handler = RequestHandler(user_id=user_id)
+        
         # Create a dummy request object for the handler
         from starlette.requests import Request
         from starlette.datastructures import Headers
@@ -611,12 +647,13 @@ async def fetch_provider_models(provider_id: str) -> list:
         }
         dummy_request = Request(scope)
         
-        # Fetch models from provider API (use global handler for model fetching)
+        # Fetch models from provider API (use user context if available)
         models = await request_handler.handle_model_list(dummy_request, provider_id)
-        
-        # Cache the results
-        _model_cache[provider_id] = models
-        _model_cache_timestamps[provider_id] = time.time()
+
+        # Cache the results - separate cache for users vs global
+        cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+        _model_cache[cache_key] = models
+        _model_cache_timestamps[cache_key] = time.time()
         
         logger.info(f"Cached {len(models)} models from provider: {provider_id}")
         return models
@@ -745,7 +782,7 @@ def validate_kiro_credentials(provider_id: str, provider_config) -> bool:
     logger.debug(f"Provider {provider_id}: No valid credential source configured")
     return False
 
-async def get_provider_models(provider_id: str, provider_config) -> list:
+async def get_provider_models(provider_id: str, provider_config, user_id: Optional[int] = None) -> list:
     """Get models for a provider from local config or cache"""
     global _model_cache, _model_cache_timestamps
     
@@ -759,10 +796,53 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
             logger.debug(f"Skipping provider {provider_id}: API key required but not configured")
             return []
     
+    # Validate provider authentication status
+    provider_type = getattr(provider_config, 'type', '')
+    
     # Validate kiro/kiro-cli credentials
-    if not validate_kiro_credentials(provider_id, provider_config):
-        logger.debug(f"Skipping provider {provider_id}: Kiro credentials not available or invalid")
-        return []
+    if provider_type in ('kiro', 'kiro-cli'):
+        if not validate_kiro_credentials(provider_id, provider_config):
+            logger.debug(f"Skipping provider {provider_id}: Kiro credentials not available or invalid")
+            return []
+    
+    # Validate Codex OAuth2 credentials
+    if provider_type == 'codex':
+        try:
+            from aisbf.auth.codex import CodexOAuth2
+            codex_config = getattr(provider_config, 'codex_config', {})
+            credentials_file = codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json')
+            auth = CodexOAuth2(credentials_file=credentials_file)
+            if not auth.is_authenticated():
+                logger.debug(f"Skipping provider {provider_id}: Codex OAuth2 not authenticated")
+                return []
+        except Exception as e:
+            logger.debug(f"Codex auth check failed for {provider_id}: {e}")
+    
+    # Validate Qwen OAuth2 credentials
+    if provider_type == 'qwen':
+        try:
+            from aisbf.auth.qwen import QwenOAuth2
+            qwen_config = getattr(provider_config, 'qwen_config', {})
+            credentials_file = qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json')
+            auth = QwenOAuth2(credentials_file=credentials_file)
+            if not auth.is_authenticated():
+                logger.debug(f"Skipping provider {provider_id}: Qwen OAuth2 not authenticated")
+                return []
+        except Exception as e:
+            logger.debug(f"Qwen auth check failed for {provider_id}: {e}")
+    
+    # Validate Claude OAuth2 credentials
+    if provider_type == 'claude':
+        try:
+            from aisbf.auth.claude import ClaudeAuth
+            claude_config = getattr(provider_config, 'claude_config', {})
+            credentials_file = claude_config.get('credentials_file', '~/.claude_credentials.json')
+            auth = ClaudeAuth(credentials_file=credentials_file)
+            if not auth.is_authenticated():
+                logger.debug(f"Skipping provider {provider_id}: Claude OAuth2 not authenticated")
+                return []
+        except Exception as e:
+            logger.debug(f"Claude auth check failed for {provider_id}: {e}")
     
     current_time = int(time.time())
     
@@ -792,7 +872,8 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
         return models
     
     # Check if we have cached models
-    if provider_id in _model_cache:
+    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+    if cache_key in _model_cache:
         cache_age = time.time() - _model_cache_timestamps.get(provider_id, 0)
         if cache_age < _cache_refresh_interval:
             # Cache is still fresh, use it
@@ -819,7 +900,7 @@ async def get_provider_models(provider_id: str, provider_config) -> list:
     # No local config and no cache, try to fetch from API (only if API key is valid or not required)
     if not api_key_required or (api_key and not api_key.startswith('YOUR_')):
         try:
-            fetched_models = await fetch_provider_models(provider_id)
+            fetched_models = await fetch_provider_models(provider_id, user_id=user_id)
             if fetched_models:
                 # Add provider prefix to model IDs and ensure all required fields
                 models = []
@@ -1398,7 +1479,7 @@ async def dashboard_login_page(request: Request):
         raise
 
 @app.post("/dashboard/login")
-async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...)):
+async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...), remember_me: bool = Form(False)):
     """Handle dashboard login"""
     from aisbf.database import get_database
     
@@ -1415,6 +1496,13 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['username'] = username
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
+        request.session['remember_me'] = remember_me
+        if remember_me:
+            # Set session to expire in 30 days for remember me
+            request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
+        else:
+            # For non-remember-me sessions, set expiry to 2 weeks (default session length)
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
     
     # Fallback to config admin
@@ -1427,6 +1515,13 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['username'] = username
         request.session['role'] = 'admin'
         request.session['user_id'] = None  # Config admin has no user_id
+        request.session['remember_me'] = remember_me
+        if remember_me:
+            # Set session to expire in 30 days for remember me
+            request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
+        else:
+            # For non-remember-me sessions, set expiry to 2 weeks (default session length)
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
     
     return templates.TemplateResponse(
@@ -1445,6 +1540,22 @@ def require_dashboard_auth(request: Request):
     """Check if user is logged in to dashboard"""
     if not request.session.get('logged_in'):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    # Check if session has expired
+    expires_at = request.session.get('expires_at')
+    if expires_at and int(time.time()) > expires_at:
+        # Session expired
+        request.session.clear()
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    # Extend session expiry for remember me users on each request (sliding expiration)
+    if request.session.get('remember_me'):
+        # Refresh expiry to 30 days from now for remember me
+        request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
+    elif expires_at:
+        # For non-remember-me sessions, refresh to 2 weeks from now (sliding expiration)
+        request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+    
     return None
 
 def require_admin(request: Request):
@@ -1837,7 +1948,21 @@ async def dashboard_providers_get_models(request: Request):
         handler = get_provider_handler(provider_key, api_key)
         
         # Fetch models from provider
-        models = await handler.get_models()
+        models_result = await handler.get_models()
+        
+        # Handle pending authorization status
+        if isinstance(models_result, dict) and models_result.get("status") == "pending_authorization":
+            return JSONResponse({
+                "success": False,
+                "authorization_required": True,
+                "authorization_url": models_result.get("verification_url"),
+                "device_code": models_result.get("code"),
+                "expires_in": models_result.get("expires_in"),
+                "poll_interval": models_result.get("poll_interval"),
+                "message": f"Please visit {models_result.get('verification_url')} and enter code: {models_result.get('code')}"
+            }, status_code=401)
+        
+        models = models_result
         
         # Convert Model objects to dicts with all available fields
         models_data = []
@@ -2630,26 +2755,43 @@ async def dashboard_users_delete(request: Request, user_id: int):
 
 @app.post("/dashboard/restart")
 async def dashboard_restart(request: Request):
-    """Restart the server"""
+    """Reload configuration from disk"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
-    import signal
-    
-    logger.info("Server restart requested from dashboard")
-    
-    # Schedule restart after response is sent
-    def restart_server():
-        import time
-        time.sleep(1)  # Give time for response to be sent
-        logger.info("Restarting server...")
-        os.execv(sys.executable, [sys.executable] + _original_argv)
-    
-    import threading
-    threading.Thread(target=restart_server, daemon=True).start()
-    
-    return JSONResponse({"message": "Server is restarting..."})
+
+    logger.info("Configuration reload requested from dashboard")
+
+    try:
+        # Reload configuration
+        from aisbf.config import config
+        config.reload()
+
+        # Re-initialize database if config changed
+        db_config = config.aisbf.database if config.aisbf and config.aisbf.database else None
+        if db_config:
+            from aisbf.database import initialize_database
+            initialize_database(db_config)
+
+        # Re-initialize cache if config changed
+        cache_config = config.aisbf.cache if config.aisbf and config.aisbf.cache else None
+        if cache_config:
+            from aisbf.cache import initialize_cache
+            initialize_cache(cache_config)
+
+        # Re-initialize response cache if config changed
+        response_cache_config = config.aisbf.response_cache if config.aisbf and config.aisbf.response_cache else None
+        if response_cache_config:
+            from aisbf.cache import initialize_response_cache
+            initialize_response_cache(response_cache_config.model_dump() if hasattr(response_cache_config, 'model_dump') else response_cache_config)
+
+        logger.info("Configuration reloaded successfully")
+
+        return JSONResponse({"message": "Configuration reloaded successfully. All changes have been applied."})
+
+    except Exception as e:
+        logger.error(f"Error reloading configuration: {e}")
+        return JSONResponse({"error": f"Failed to reload configuration: {str(e)}"}, status_code=500)
 
 # User-specific configuration management routes
 @app.get("/dashboard/user/providers", response_class=HTMLResponse)
@@ -2767,7 +2909,7 @@ async def dashboard_user_provider_upload(
 
     try:
         # Validate file type
-        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials']
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
         if file_type not in allowed_types:
             return JSONResponse(
                 status_code=400,
@@ -2928,7 +3070,7 @@ async def dashboard_provider_upload(
 
     try:
         # Validate file type
-        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials']
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
         if file_type not in allowed_types:
             return JSONResponse(
                 status_code=400,
@@ -2955,6 +3097,7 @@ async def dashboard_provider_upload(
             logger.info(f"Config admin uploaded auth file: {file_path}")
 
             return JSONResponse({
+                "success": True,
                 "message": "File uploaded successfully",
                 "file_path": str(file_path),
                 "stored_filename": stored_filename
@@ -2992,6 +3135,7 @@ async def dashboard_provider_upload(
             logger.info(f"User {current_user_id} uploaded auth file: {file_path}")
 
             return JSONResponse({
+                "success": True,
                 "message": "File uploaded successfully",
                 "file_id": file_id,
                 "file_path": str(file_path),
@@ -2999,7 +3143,211 @@ async def dashboard_provider_upload(
             })
     except Exception as e:
         logger.error(f"Error uploading file: {e}")
-        return JSONResponse(status_code=500, content={"error": str(e)})
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/dashboard/providers/upload-auth-file")
+async def dashboard_provider_upload_form(
+    request: Request,
+    provider_key: str = Form(...),
+    file_type: str = Form(...),
+    file: UploadFile = File(...)
+):
+    """Upload authentication file for a provider (form variant used by frontend)."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    # Check if current user is config admin (from aisbf.json)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        # Validate file type
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
+        if file_type not in allowed_types:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": f"Invalid file type. Allowed: {', '.join(allowed_types)}"}
+            )
+
+        # Read file content
+        content = await file.read()
+
+        if is_config_admin:
+            # Config admin: save to files
+            auth_files_dir = get_admin_auth_files_dir()
+            
+            # Generate unique filename
+            import uuid
+            file_ext = Path(file.filename).suffix if file.filename else '.json'
+            stored_filename = f"{provider_key}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+            file_path = auth_files_dir / stored_filename
+
+            # Save file
+            with open(file_path, 'wb') as f:
+                f.write(content)
+
+            logger.info(f"Config admin uploaded auth file: {file_path}")
+
+            return JSONResponse({
+                "success": True,
+                "message": "File uploaded successfully",
+                "file_path": str(file_path),
+                "stored_filename": stored_filename
+            })
+        else:
+            # Database user: save to database
+            from aisbf.database import get_database
+            db = get_database()
+
+            # Get user auth files directory
+            auth_files_dir = get_user_auth_files_dir(current_user_id)
+            
+            # Generate unique filename
+            import uuid
+            file_ext = Path(file.filename).suffix if file.filename else '.json'
+            stored_filename = f"{provider_key}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+            file_path = auth_files_dir / stored_filename
+
+            # Save file
+            with open(file_path, 'wb') as f:
+                f.write(content)
+
+            # Save metadata to database
+            file_id = db.save_user_auth_file(
+                user_id=current_user_id,
+                provider_id=provider_key,
+                file_type=file_type,
+                original_filename=file.filename or stored_filename,
+                stored_filename=stored_filename,
+                file_path=str(file_path),
+                file_size=len(content),
+                mime_type=file.content_type
+            )
+
+            logger.info(f"User {current_user_id} uploaded auth file: {file_path}")
+
+            return JSONResponse({
+                "success": True,
+                "message": "File uploaded successfully",
+                "file_id": file_id,
+                "file_path": str(file_path),
+                "stored_filename": stored_filename
+            })
+    except Exception as e:
+        logger.error(f"Error uploading file: {e}")
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
+
+
+@app.post("/dashboard/providers/upload-auth-file/chunk")
+async def dashboard_provider_upload_chunk(
+    request: Request,
+    provider_key: str = Form(...),
+    file_type: str = Form(...),
+    file_name: str = Form(...),
+    chunk_number: int = Form(...),
+    total_chunks: int = Form(...),
+    total_size: int = Form(...),
+    file: UploadFile = File(...)
+):
+    """Chunked file upload endpoint - handles very large files behind proxies."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        # Validate file type
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
+        if file_type not in allowed_types:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": f"Invalid file type. Allowed: {', '.join(allowed_types)}"}
+            )
+
+        import uuid
+        import hashlib
+
+        # Generate unique upload ID
+        upload_id = hashlib.sha256(f"{current_user_id}:{provider_key}:{file_name}:{total_size}".encode()).hexdigest()[:16]
+        file_ext = Path(file_name).suffix if file_name else '.bin'
+
+        # Create temporary upload directory
+        temp_dir = Path('/tmp/aisbf_uploads')
+        temp_dir.mkdir(parents=True, exist_ok=True)
+
+        # Save chunk
+        chunk_path = temp_dir / f"{upload_id}.part{chunk_number}"
+        content = await file.read()
+        with open(chunk_path, 'wb') as f:
+            f.write(content)
+
+        # Check if all chunks are received
+        received_chunks = list(temp_dir.glob(f"{upload_id}.part*"))
+        if len(received_chunks) == total_chunks:
+            # Assemble final file
+            import uuid
+            stored_filename = f"{provider_key}_{file_type}_{uuid.uuid4().hex[:8]}{file_ext}"
+
+            if is_config_admin:
+                auth_files_dir = get_admin_auth_files_dir()
+            else:
+                auth_files_dir = get_user_auth_files_dir(current_user_id)
+
+            file_path = auth_files_dir / stored_filename
+
+            # Combine chunks
+            with open(file_path, 'wb') as outfile:
+                for i in range(1, total_chunks + 1):
+                    chunk_path = temp_dir / f"{upload_id}.part{i}"
+                    with open(chunk_path, 'rb') as infile:
+                        outfile.write(infile.read())
+                    chunk_path.unlink()
+
+            # Save metadata to database if not admin
+            if not is_config_admin:
+                from aisbf.database import get_database
+                db = get_database()
+                db.save_user_auth_file(
+                    user_id=current_user_id,
+                    provider_id=provider_key,
+                    file_type=file_type,
+                    original_filename=file_name,
+                    stored_filename=stored_filename,
+                    file_path=str(file_path),
+                    file_size=total_size,
+                    mime_type=file.content_type
+                )
+
+            logger.info(f"Upload complete: {file_path} ({total_size} bytes, {total_chunks} chunks)")
+
+            return JSONResponse({
+                "success": True,
+                "complete": True,
+                "message": "File uploaded successfully",
+                "file_path": str(file_path),
+                "stored_filename": stored_filename
+            })
+
+        return JSONResponse({
+            "success": True,
+            "complete": False,
+            "received_chunks": len(received_chunks),
+            "total_chunks": total_chunks
+        })
+
+    except Exception as e:
+        logger.error(f"Chunk upload error: {e}")
+        # Cleanup failed upload
+        try:
+            for chunk_path in temp_dir.glob(f"{upload_id}.part*"):
+                chunk_path.unlink()
+        except:
+            pass
+        return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
 
 @app.get("/dashboard/providers/{provider_name}/files")
@@ -3259,6 +3607,48 @@ async def dashboard_user_autoselects_delete(request: Request, autoselect_name: s
         return JSONResponse({"message": "Autoselect deleted successfully"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+@app.post("/dashboard/user/reload-config")
+async def dashboard_user_reload_config(request: Request):
+    """Reload user configuration from database"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    try:
+        global _user_handlers_cache
+        
+        # Clear all cached handler instances for this user
+        cache_keys_to_remove = [
+            key for key in _user_handlers_cache.keys()
+            if key.endswith(f"_{user_id}")
+        ]
+        
+        for key in cache_keys_to_remove:
+            del _user_handlers_cache[key]
+        
+        logger.info(f"Cleared {len(cache_keys_to_remove)} cached handler(s) for user {user_id}")
+        
+        # Force create new handler instances to verify reload works
+        get_user_handler('request', user_id)
+        get_user_handler('rotation', user_id)
+        get_user_handler('autoselect', user_id)
+        
+        logger.info(f"User {user_id} configuration reloaded successfully from database")
+        
+        return JSONResponse({
+            "message": "Configuration reloaded successfully. All changes have been applied immediately.",
+            "handlers_cleared": len(cache_keys_to_remove)
+        })
+
+    except Exception as e:
+        logger.error(f"Error reloading user configuration: {e}")
+        return JSONResponse({"error": f"Failed to reload configuration: {str(e)}"}, status_code=500)
 
 # User API token management routes
 @app.get("/dashboard/user/tokens", response_class=HTMLResponse)
@@ -3772,13 +4162,29 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
 async def list_all_models(request: Request):
     """List all available models from all providers (public endpoint)"""
     logger.info("=== LIST ALL MODELS REQUEST ===")
-    
+
     all_models = []
-    
+
+    # Check authentication for user-specific models
+    user_id = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        # Try to authenticate user
+        try:
+            from aisbf.database import get_database
+            db = get_database()
+            token = auth_header.split(" ")[1]
+            user = db.get_user_by_token(token)
+            if user:
+                user_id = user.get("id")
+                logger.info(f"Authenticated user {user_id} for models request")
+        except Exception as e:
+            logger.debug(f"Auth check failed for models request: {e}")
+
     # PATH 1: Add provider models (from local config or cached API results)
     for provider_id, provider_config in config.providers.items():
         try:
-            provider_models = await get_provider_models(provider_id, provider_config)
+            provider_models = await get_provider_models(provider_id, provider_config, user_id=user_id)
             all_models.extend(provider_models)
         except Exception as e:
             logger.warning(f"Error listing models for provider {provider_id}: {e}")
@@ -3825,11 +4231,27 @@ async def v1_list_all_models(request: Request):
     logger.info("=== V1 LIST ALL MODELS REQUEST ===")
     
     all_models = []
+
+    # Check authentication for user-specific models
+    user_id = None
+    auth_header = request.headers.get("Authorization")
+    if auth_header and auth_header.startswith("Bearer "):
+        # Try to authenticate user
+        try:
+            from aisbf.database import get_database
+            db = get_database()
+            token = auth_header.split(" ")[1]
+            user = db.get_user_by_token(token)
+            if user:
+                user_id = user.get("id")
+                logger.info(f"Authenticated user {user_id} for models request")
+        except Exception as e:
+            logger.debug(f"Auth check failed for models request: {e}")
     
     # PATH 1: Add provider models (from local config or cached API results)
     for provider_id, provider_config in config.providers.items():
         try:
-            provider_models = await get_provider_models(provider_id, provider_config)
+            provider_models = await get_provider_models(provider_id, provider_config, user_id=user_id)
             all_models.extend(provider_models)
         except Exception as e:
             logger.warning(f"Error listing models for provider {provider_id}: {e}")
@@ -3869,6 +4291,24 @@ async def v1_list_all_models(request: Request):
     
     logger.info(f"Returning {len(all_models)} total models")
     return {"object": "list", "data": all_models}
+
+
+@app.get("/v1/models")
+async def v1_list_all_models_alias(request: Request):
+    """Alias for /api/v1/models for client compatibility"""
+    return await v1_list_all_models(request)
+
+
+@app.get("/v1/chat/models")
+async def v1_chat_models_alias(request: Request):
+    """Alias for /api/v1/models for OpenAI client compatibility"""
+    return await v1_list_all_models(request)
+
+
+@app.get("/models")
+async def models_root_alias(request: Request):
+    """Alias for /api/v1/models for client compatibility"""
+    return await v1_list_all_models(request)
 
 @app.post("/api/v1/audio/transcriptions")
 async def v1_audio_transcriptions(request: Request):
@@ -4406,6 +4846,7 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 @app.get("/api/{provider_id}/models")
 async def list_models(request: Request, provider_id: str):
     logger.debug(f"Received list_models request for provider: {provider_id}")
+    AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
     # Get user-specific handler based on the type
     user_id = getattr(request.state, 'user_id', None)
@@ -4416,7 +4857,16 @@ async def list_models(request: Request, provider_id: str):
         handler = get_user_handler('autoselect', user_id)
         try:
             result = await handler.handle_autoselect_model_list(provider_id)
-            logger.debug(f"Autoselect models result: {result}")
+            if AISBF_DEBUG:
+                result_str = str(result)
+                if len(result_str) > 1024:
+                    result_str = result_str[:1024] + " ... [TRUNCATED, total length: " + str(len(result_str)) + " chars]"
+                logger.debug(f"Autoselect models result: {result_str}")
+            else:
+                model_count = len(result)
+                first_models = [m.get('id', m.get('name')) for m in result[:3]]
+                preview = f"[{' | '.join(first_models)}" + (f" ... and {model_count - 3} more]" if model_count > 3 else ']')
+                logger.debug(f"Autoselect models result: {model_count} models {preview}")
             return result
         except Exception as e:
             logger.error(f"Error handling autoselect model list: {str(e)}", exc_info=True)
@@ -4443,7 +4893,16 @@ async def list_models(request: Request, provider_id: str):
     try:
         logger.debug("Handling model list request")
         result = await handler.handle_model_list(request, provider_id)
-        logger.debug(f"Models result: {result}")
+        if AISBF_DEBUG:
+            result_str = str(result)
+            if len(result_str) > 1024:
+                result_str = result_str[:1024] + " ... [TRUNCATED, total length: " + str(len(result_str)) + " chars]"
+            logger.debug(f"Models result: {result_str}")
+        else:
+            model_count = len(result)
+            first_models = [m.get('id', m.get('name')) for m in result[:3]]
+            preview = f"[{' | '.join(first_models)}" + (f" ... and {model_count - 3} more]" if model_count > 3 else ']')
+            logger.debug(f"Models result: {model_count} models {preview}")
         return result
     except Exception as e:
         logger.error(f"Error handling list_models: {str(e)}", exc_info=True)
@@ -7000,7 +7459,8 @@ async def dashboard_codex_auth_poll(request: Request):
             return JSONResponse({
                 "success": True,
                 "status": "approved",
-                "message": "Authentication completed successfully"
+                "message": "Authentication completed successfully",
+                "new_endpoint": "https://chatgpt.com/backend-api/codex"
             })
         elif result['status'] == 'pending':
             return JSONResponse({
@@ -7159,6 +7619,389 @@ async def dashboard_codex_auth_logout(request: Request):
         
     except Exception as e:
         logger.error(f"Error logging out from Codex: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+# Qwen OAuth2 authentication endpoints - Save credentials after successful poll
+def _save_qwen_credentials(credentials_file: str, token_response: dict) -> None:
+    """Save Qwen OAuth2 credentials to file"""
+    from pathlib import Path
+    import time
+    
+    try:
+        # OAuth2 standard: expires_in is always in seconds
+        # Convert to milliseconds for storage
+        expires_in = token_response.get("expires_in", 7200)
+        expires_in_ms = expires_in * 1000  # Convert seconds to milliseconds
+        
+        # Minimum expiry: 1 hour (3600 seconds = 3,600,000 ms)
+        if expires_in_ms < 3600000:
+            expires_in_ms = 3600000  # Default to 1 hour minimum
+        
+        credentials = {
+            "access_token": token_response["access_token"],
+            "refresh_token": token_response.get("refresh_token"),
+            "token_type": token_response.get("token_type", "Bearer"),
+            "resource_url": token_response.get("resource_url"),
+            "expiry_date": int(time.time() * 1000) + expires_in_ms,
+            "last_refresh": datetime.utcnow().isoformat() + "Z",
+        }
+        
+        # Ensure directory exists
+        cred_path = Path(credentials_file).expanduser()
+        cred_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Write credentials atomically (temp file + rename)
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode='w', dir=cred_path.parent, delete=False) as f:
+            json.dump(credentials, f, indent=2)
+            temp_path = f.name
+        
+        # Atomic rename
+        import os
+        os.rename(temp_path, cred_path)
+        
+        # Set file permissions to 0o600
+        os.chmod(cred_path, 0o600)
+        
+        logger.info(f"QwenOAuth2: Saved credentials to {credentials_file}")
+    except Exception as e:
+        logger.error(f"QwenOAuth2: Failed to save credentials: {e}")
+        raise
+
+
+@app.post("/dashboard/qwen/auth/start")
+async def dashboard_qwen_auth_start(request: Request):
+    """Start Qwen OAuth2 Device Authorization Grant flow"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/qwen_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import QwenOAuth2
+        from aisbf.auth.qwen import QwenOAuth2
+        
+        # Create auth instance
+        auth = QwenOAuth2(credentials_file=credentials_file)
+        
+        logger.info(f"QwenOAuth2: Requesting device code for provider: {provider_key}")
+        
+        # Request device code
+        device_info = await auth.request_device_code()
+        
+        if not device_info:
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "error": "Failed to initiate device authorization"}
+            )
+        
+        logger.info(f"QwenOAuth2: Device code obtained: {device_info.get('user_code')}")
+        
+        # Store in session for polling
+        request.session['qwen_device_code'] = device_info['device_code']
+        request.session['qwen_code_verifier'] = device_info['code_verifier']
+        request.session['qwen_provider'] = provider_key
+        request.session['qwen_credentials_file'] = credentials_file
+        request.session['qwen_expires_at'] = time.time() + device_info['expires_in']
+        
+        return JSONResponse({
+            "success": True,
+            "user_code": device_info['user_code'],
+            "verification_uri": device_info['verification_uri_complete'],
+            "expires_in": device_info['expires_in'],
+            "interval": device_info['interval'],
+            "message": f"Please visit {device_info['verification_uri_complete']} and enter code: {device_info['user_code']}"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error starting Qwen auth: {e}", exc_info=True)
+        return JSONResponse(
+            status_code=500,
+            content={"success": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/qwen/auth/poll")
+async def dashboard_qwen_auth_poll(request: Request):
+    """Poll Qwen OAuth2 device authorization status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Get device code from session
+        device_code = request.session.get('qwen_device_code')
+        code_verifier = request.session.get('qwen_code_verifier')
+        credentials_file = request.session.get('qwen_credentials_file', '~/.aisbf/qwen_credentials.json')
+        expires_at = request.session.get('qwen_expires_at', 0)
+        
+        if not device_code:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "status": "error", "error": "No device authorization in progress"}
+            )
+        
+        # Check if expired
+        if time.time() > expires_at:
+            request.session.pop('qwen_device_code', None)
+            request.session.pop('qwen_code_verifier', None)
+            request.session.pop('qwen_provider', None)
+            request.session.pop('qwen_credentials_file', None)
+            request.session.pop('qwen_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        
+        # Import QwenOAuth2
+        from aisbf.auth.qwen import QwenOAuth2
+        
+        # Create auth instance
+        auth = QwenOAuth2(credentials_file=credentials_file)
+        
+        # Poll for token - returns token dict if approved, None if still pending
+        result = await auth.poll_device_token(device_code, code_verifier)
+        
+        if result and result.get("access_token"):
+            # Authentication successful - save the tokens
+            # Only the ONE config admin (user_id=None from aisbf.json) saves to file
+            # All other users (including database admins) save to database
+            current_user_id = request.session.get('user_id')
+            is_config_admin = current_user_id is None
+            
+            # First save to file (for config admin), then copy to DB if needed
+            _save_qwen_credentials(credentials_file, result)
+            
+            if not is_config_admin:
+                # Non-config-admin user: also save credentials to database
+                try:
+                    from aisbf.database import get_database
+                    db = get_database()
+                    provider_key = request.session.get('qwen_provider')
+                    if db and current_user_id and provider_key:
+                        # Read the credentials that were just saved to file
+                        credentials_path = Path(credentials_file).expanduser()
+                        if credentials_path.exists():
+                            with open(credentials_path, 'r') as f:
+                                db_credentials = json.load(f)
+                            
+                            # Save to database
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_key,
+                                auth_type='qwen_oauth2',
+                                credentials=db_credentials
+                            )
+                            logger.info(f"QwenOAuth2: Saved credentials to database for user {current_user_id}")
+                            
+                            # Remove the file since we're using database storage for non-admin
+                            credentials_path.unlink(missing_ok=True)
+                except Exception as e:
+                    logger.error(f"QwenOAuth2: Failed to save credentials to database: {e}")
+            
+            # Clear session
+            request.session.pop('qwen_device_code', None)
+            request.session.pop('qwen_code_verifier', None)
+            request.session.pop('qwen_provider', None)
+            request.session.pop('qwen_credentials_file', None)
+            request.session.pop('qwen_expires_at', None)
+            
+            return JSONResponse({
+                "success": True,
+                "status": "approved",
+                "message": "Authentication completed successfully"
+            })
+        elif result is None:
+            # Still pending (None is returned when waiting for user approval)
+            return JSONResponse({
+                "success": True,
+                "status": "pending",
+                "message": "Waiting for user authorization. Please approve the device on your Qwen account."
+            })
+        else:
+            # Unexpected result (not None, but no access_token) - treat as pending
+            return JSONResponse({
+                "success": True,
+                "status": "pending",
+                "message": "Waiting for user authorization"
+            })
+        
+    except Exception as e:
+        error_msg = str(e).lower()
+        if "authorization_pending" in error_msg or "pending" in error_msg:
+            return JSONResponse({
+                "success": True,
+                "status": "pending",
+                "message": "Waiting for user authorization. Please approve the device on your Qwen account."
+            })
+        elif "slow_down" in error_msg or "429" in error_msg:
+            return JSONResponse({
+                "success": True,
+                "status": "slow_down",
+                "message": "Polling too frequently, slowing down"
+            })
+        elif "expired" in error_msg:
+            request.session.pop('qwen_device_code', None)
+            request.session.pop('qwen_code_verifier', None)
+            request.session.pop('qwen_provider', None)
+            request.session.pop('qwen_credentials_file', None)
+            request.session.pop('qwen_expires_at', None)
+            
+            return JSONResponse({
+                "success": False,
+                "status": "expired",
+                "error": "Device authorization expired"
+            })
+        else:
+            logger.error(f"Error polling Qwen auth: {e}", exc_info=True)
+            return JSONResponse(
+                status_code=500,
+                content={"success": False, "status": "error", "error": str(e)}
+            )
+
+
+@app.post("/dashboard/qwen/auth/status")
+async def dashboard_qwen_auth_status(request: Request):
+    """Check Qwen authentication status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/qwen_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"authenticated": False, "error": "Provider key is required"}
+            )
+        
+        # Import QwenOAuth2
+        from aisbf.auth.qwen import QwenOAuth2
+        
+        # Check if current user is config admin
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
+        
+        if not is_config_admin:
+            # Non-config-admin user: check database for credentials
+            try:
+                from aisbf.database import get_database
+                db = get_database()
+                if db and current_user_id:
+                    db_creds = db.get_user_oauth2_credentials(
+                        user_id=current_user_id,
+                        provider_id=provider_key,
+                        auth_type='qwen_oauth2'
+                    )
+                    if db_creds and db_creds.get('credentials'):
+                        # Check if tokens are still valid
+                        creds = db_creds['credentials']
+                        access_token = creds.get('access_token')
+                        expiry_date = creds.get('expiry_date', 0)
+                        if access_token and time.time() * 1000 < expiry_date:
+                            return JSONResponse({
+                                "authenticated": True,
+                                "expires_in": max(0, (expiry_date - int(time.time() * 1000)) / 1000)
+                        })
+            except Exception as e:
+                logger.warning(f"QwenOAuth2: Failed to check database credentials: {e}")
+        
+        # Config admin or no database credentials: check file
+        auth = QwenOAuth2(credentials_file=credentials_file)
+        
+        # Check if authenticated
+        if auth.is_authenticated():
+            # Try to get a valid token (will refresh if needed)
+            token = await auth.get_valid_token_with_refresh()
+            if token:
+                # Get token expiration info
+                expiry_date = auth.credentials.get('expiry_date', 0)
+                
+                return JSONResponse({
+                    "authenticated": True,
+                    "expires_in": max(0, (expiry_date - int(time.time() * 1000)) / 1000)
+                })
+        
+        return JSONResponse({
+            "authenticated": False
+        })
+        
+    except Exception as e:
+        logger.error(f"Error checking Qwen auth status: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"authenticated": False, "error": str(e)}
+        )
+
+
+@app.post("/dashboard/qwen/auth/logout")
+async def dashboard_qwen_auth_logout(request: Request):
+    """Logout from Qwen OAuth2 (clear stored credentials)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        provider_key = data.get('provider_key')
+        credentials_file = data.get('credentials_file', '~/.aisbf/qwen_credentials.json')
+        
+        if not provider_key:
+            return JSONResponse(
+                status_code=400,
+                content={"success": False, "error": "Provider key is required"}
+            )
+        
+        # Import QwenOAuth2
+        from aisbf.auth.qwen import QwenOAuth2
+        
+        # Clear file credentials (for config admin)
+        auth = QwenOAuth2(credentials_file=credentials_file)
+        auth.clear_credentials()
+        
+        # Also clear database credentials (for database users)
+        current_user_id = request.session.get('user_id')
+        if current_user_id:
+            try:
+                from aisbf.database import get_database
+                db = get_database()
+                if db:
+                    db.delete_user_oauth2_credentials(current_user_id, provider_key, 'qwen_oauth2')
+            except Exception as e:
+                logger.warning(f"QwenOAuth2: Failed to clear database credentials: {e}")
+        
+        # Clear session data
+        request.session.pop('qwen_device_code', None)
+        request.session.pop('qwen_code_verifier', None)
+        request.session.pop('qwen_provider', None)
+        request.session.pop('qwen_credentials_file', None)
+        request.session.pop('qwen_expires_at', None)
+        
+        return JSONResponse({
+            "success": True,
+            "message": "Logged out successfully"
+        })
+        
+    except Exception as e:
+        logger.error(f"Error logging out from Qwen: {e}")
         return JSONResponse(
             status_code=500,
             content={"success": False, "error": str(e)}

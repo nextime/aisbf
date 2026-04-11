@@ -42,6 +42,7 @@ logger = logging.getLogger(__name__)
 CLIENT_ID = "app_EMoamEEZ73f0CkXaXp7hrann"
 DEFAULT_ISSUER = "https://auth.openai.com"
 DEFAULT_PORT = 1455
+# IMPORTANT: Scopes must match the codex-cli implementation guide
 SCOPES = "openid profile email offline_access api.connectors.read api.connectors.invoke"
 
 
@@ -61,7 +62,16 @@ class CodexOAuth2:
             credentials_file: Path to credentials JSON file (default: ~/.aisbf/codex_credentials.json)
             issuer: OAuth2 issuer URL (default: https://auth.openai.com)
         """
-        self.credentials_file = credentials_file or os.path.expanduser("~/.aisbf/codex_credentials.json")
+        # Expand and resolve path immediately to absolute path
+        default_path = os.path.expanduser("~/.aisbf/codex_credentials.json")
+        if credentials_file:
+            # Expand user directory and convert to absolute path
+            expanded = os.path.expanduser(credentials_file)
+            # If still relative, make it absolute
+            self.credentials_file = os.path.abspath(expanded)
+        else:
+            self.credentials_file = default_path
+        
         self.issuer = (issuer or DEFAULT_ISSUER).rstrip("/")
         self.credentials = None
         self._load_credentials()
@@ -80,25 +90,55 @@ class CodexOAuth2:
     def _save_credentials(self, credentials: Dict[str, Any]) -> None:
         """
         Save credentials to file with secure permissions.
-        
+
         Args:
             credentials: Credentials dict to save
         """
         try:
-            # Ensure directory exists
-            os.makedirs(os.path.dirname(self.credentials_file), exist_ok=True)
+            # Path is already expanded and absolute from __init__
+            resolved_path = self.credentials_file
             
-            # Write credentials
-            with open(self.credentials_file, 'w') as f:
+            logger.debug(f"CodexOAuth2: Saving credentials to resolved path: {resolved_path}")
+            
+            # Ensure parent directory exists
+            parent_dir = os.path.dirname(resolved_path)
+            if parent_dir:
+                logger.debug(f"CodexOAuth2: Creating parent directory: {parent_dir}")
+                os.makedirs(parent_dir, exist_ok=True)
+                # Secure directory permissions
+                try:
+                    os.chmod(parent_dir, 0o700)
+                    logger.debug(f"CodexOAuth2: Set directory permissions to 0o700")
+                except Exception as e:
+                    logger.debug(f"CodexOAuth2: Could not set directory permissions: {e}")
+
+            # Write credentials safely
+            logger.debug(f"CodexOAuth2: Writing credentials to file")
+            with open(resolved_path, 'w') as f:
                 json.dump(credentials, f, indent=2)
+                f.flush()
+                os.fsync(f.fileno())
             
+            logger.debug(f"CodexOAuth2: File written successfully")
+
             # Set file permissions to 0o600 (user read/write only)
-            os.chmod(self.credentials_file, 0o600)
-            
+            try:
+                os.chmod(resolved_path, 0o600)
+                logger.debug(f"CodexOAuth2: Set file permissions to 0o600")
+            except Exception as e:
+                logger.debug(f"CodexOAuth2: Could not set file permissions: {e}")
+
+            # Verify file was created
+            if os.path.exists(resolved_path):
+                file_size = os.path.getsize(resolved_path)
+                logger.info(f"CodexOAuth2: Saved credentials to {resolved_path} ({file_size} bytes)")
+            else:
+                logger.error(f"CodexOAuth2: File was not created at {resolved_path}")
+                raise IOError(f"Failed to create credentials file at {resolved_path}")
+
             self.credentials = credentials
-            logger.info(f"CodexOAuth2: Saved credentials to {self.credentials_file}")
         except Exception as e:
-            logger.error(f"CodexOAuth2: Failed to save credentials: {e}")
+            logger.error(f"CodexOAuth2: Failed to save credentials to {self.credentials_file}: {e}", exc_info=True)
             raise
     
     @staticmethod

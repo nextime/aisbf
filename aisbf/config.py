@@ -68,8 +68,12 @@ class ProviderConfig(BaseModel):
     rate_limit: float = 0.0
     api_key: Optional[str] = None  # Optional API key in provider config
     models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
-    kiro_config: Optional[Dict] = None  # Optional Kiro-specific configuration (credentials, region, etc.)
-    claude_config: Optional[Dict] = None  # Optional Claude-specific configuration (credentials file path)
+    auth_config: Optional[Dict] = None  # Unified provider authentication configuration (for all provider types)
+    kiro_config: Optional[Dict] = None  # Optional Kiro-specific configuration (credentials, region, etc.) - DEPRECATED
+    kilo_config: Optional[Dict] = None  # Optional Kilo-specific configuration (credentials file path) - DEPRECATED
+    claude_config: Optional[Dict] = None  # Optional Claude-specific configuration (credentials file path) - DEPRECATED
+    codex_config: Optional[Dict] = None  # Optional Codex-specific configuration - DEPRECATED
+    qwen_config: Optional[Dict] = None  # Optional Qwen-specific configuration - DEPRECATED
     # Default settings for models in this provider
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
@@ -256,6 +260,31 @@ class Config:
         self._load_autoselect()  # Load autoselect after aisbf config so cache is available
         self._initialize_error_tracking()
         self._log_configuration_summary()
+
+    def reload(self):
+        """Reload all configuration files from disk"""
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info("=== Config.reload() START ===")
+
+        # Clear existing config
+        self.providers.clear()
+        self.rotations.clear()
+        self.autoselect.clear()
+        self.error_tracking.clear()
+        self._loaded_files.clear()
+
+        # Re-load everything
+        self._load_providers()
+        self._load_rotations()
+        self._load_condensation()
+        self._load_tor()
+        self._load_aisbf_config()
+        self._load_autoselect()
+        self._initialize_error_tracking()
+        self._log_configuration_summary()
+
+        logger.info("=== Config.reload() END ===")
 
     def _get_config_source_dir(self):
         """Get the directory containing default config files"""

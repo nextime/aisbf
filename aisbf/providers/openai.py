@@ -174,7 +174,14 @@ class OpenAIProviderHandler(BaseProviderHandler):
             await self.apply_rate_limit()
 
             models = self.client.models.list()
-            logging.info(f"OpenAIProviderHandler: Models received: {models}")
+            if AISBF_DEBUG:
+                response_str = str(models)
+                if len(response_str) > 1024:
+                    response_str = response_str[:1024] + f" ... [TRUNCATED, total length: {len(response_str)} chars]"
+                logging.info(f"OpenAIProviderHandler: Models received: {response_str}")
+            else:
+                model_count = len(models.data) if hasattr(models, 'data') else len(models) if isinstance(models, (list, dict)) else 'N/A'
+                logging.info(f"OpenAIProviderHandler: Models received: {model_count} models")
 
             result = []
             for model in models:

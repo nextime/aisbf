@@ -27,7 +27,9 @@ import hashlib
 import json
 import logging
 import os
+import platform
 import secrets
+import sys
 import time
 import uuid
 from datetime import datetime
@@ -37,6 +39,20 @@ from typing import Optional, Dict, Any
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Qwen CLI-style headers
+def _get_qwen_headers() -> Dict[str, str]:
+    """Get headers that mimic the Qwen CLI."""
+    # Detect platform for user-agent
+    system = platform.system()  # 'Linux', 'Darwin', 'Windows'
+    machine = platform.machine()  # 'x86_64', 'aarch64', etc.
+    user_agent = f"QwenCode/1.0.0 ({system.lower()}; {machine})"
+    
+    return {
+        "User-Agent": user_agent,
+        "Accept": "application/json",
+        "x-request-id": str(uuid.uuid4()),
+    }
 
 # Qwen OAuth2 Constants (from qwen-oauth2-analysis.md)
 QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
@@ -69,7 +85,7 @@ class QwenOAuth2:
         Args:
             credentials_file: Path to credentials JSON file (default: ~/.aisbf/qwen_credentials.json)
         """
-        self.credentials_file = credentials_file or os.path.expanduser("~/.aisbf/qwen_credentials.json")
+        self.credentials_file = os.path.expanduser(credentials_file) if credentials_file else os.path.expanduser("~/.aisbf/qwen_credentials.json")
         self.lock_file = os.path.expanduser("~/.aisbf/qwen_credentials.lock")
         self.credentials = None
         self._file_mod_time = 0
@@ -227,17 +243,21 @@ class QwenOAuth2:
             "code_challenge_method": "S256",
         }
         
-        async with httpx.AsyncClient() as client:
+        # Build headers mimicking Qwen CLI
+        headers = _get_qwen_headers()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["X-DashScope-CacheControl"] = "enable"
+        
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.post(
                 QWEN_OAUTH_DEVICE_CODE_ENDPOINT,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json",
-                    "x-request-id": str(uuid.uuid4()),
-                },
+                headers=headers,
                 data=body_data,
                 timeout=30.0
             )
+            
+            logger.debug(f"QwenOAuth2: Device code request response status: {response.status_code}")
+            logger.debug(f"QwenOAuth2: Device code request response headers: {dict(response.headers)}")
             
             if response.status_code != 200:
                 error_body = response.text
@@ -245,7 +265,21 @@ class QwenOAuth2:
                     f"Device authorization failed: {response.status_code} {response.reason_phrase}. Response: {error_body}"
                 )
             
-            result = response.json()
+            # Try to parse JSON, handle empty or non-JSON responses
+            response_text = response.text
+            logger.debug(f"QwenOAuth2: Device code request response body: {response_text[:500] if response_text else 'empty'}")
+            
+            if not response_text or not response_text.strip():
+                raise Exception(
+                    f"Device authorization failed: Empty response from server. Status: {response.status_code}"
+                )
+            
+            try:
+                result = response.json()
+            except json.JSONDecodeError as e:
+                raise Exception(
+                    f"Device authorization failed: Invalid JSON response. Status: {response.status_code}, Response: {response_text[:500]}"
+                )
             
             if "device_code" not in result:
                 error = result.get("error", "Unknown error")
@@ -288,16 +322,37 @@ class QwenOAuth2:
             "code_verifier": code_verifier,
         }
         
-        async with httpx.AsyncClient() as client:
+        # Build headers mimicking Qwen CLI
+        headers = _get_qwen_headers()
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
+        headers["X-DashScope-CacheControl"] = "enable"
+        
+        async with httpx.AsyncClient(follow_redirects=True) as client:
             response = await client.post(
                 QWEN_OAUTH_TOKEN_ENDPOINT,
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json",
-                },
+                headers=headers,
                 data=body_data,
                 timeout=30.0
             )
+            
+            # Check Content-Type to determine response type
+            content_type = response.headers.get("content-type", "")
+            
+            # If not JSON, it's likely a pending/authorization page
+            if "application/json" not in content_type:
+                response_text = response.text.lower()
+                # Check if this is an authorization pending page
+                if ("pending" in response_text or 
+                    "authorize" in response_text or
+                    "waiting" in response_text or
+                    response.status_code == 200):
+                    # Still pending - user hasn't approved yet
+                    logger.debug("QwenOAuth2: Authorization still pending (HTML response)")
+                    return None
+                # Otherwise it's an error
+                raise Exception(
+                    f"Device token poll failed: HTTP {response.status_code}, Content-Type: {content_type}"
+                )
             
             if response.status_code == 200:
                 result = response.json()
@@ -355,12 +410,20 @@ class QwenOAuth2:
                 
                 if token_data:
                     # Success - save credentials
+                    # OAuth2: expires_in is in seconds
+                    expires_in = token_data.get("expires_in", 7200)
+                    expires_in_ms = expires_in * 1000  # Convert seconds to milliseconds
+                    
+                    # Minimum 1 hour
+                    if expires_in_ms < 3600000:
+                        expires_in_ms = 3600000
+                    
                     credentials = {
                         "access_token": token_data["access_token"],
                         "refresh_token": token_data.get("refresh_token"),
                         "token_type": token_data.get("token_type", "Bearer"),
                         "resource_url": token_data.get("resource_url"),
-                        "expiry_date": int(time.time() * 1000) + token_data.get("expires_in", 7200) * 1000,
+                        "expiry_date": int(time.time() * 1000) + expires_in_ms,
                         "last_refresh": datetime.utcnow().isoformat() + "Z",
                     }
                     
@@ -415,13 +478,15 @@ class QwenOAuth2:
                 "client_id": QWEN_OAUTH_CLIENT_ID,
             }
             
+            # Build headers mimicking Qwen CLI
+            headers = _get_qwen_headers()
+            headers["Content-Type"] = "application/x-www-form-urlencoded"
+            headers["X-DashScope-CacheControl"] = "enable"
+            
             async with httpx.AsyncClient() as client:
                 response = await client.post(
                     QWEN_OAUTH_TOKEN_ENDPOINT,
-                    headers={
-                        "Content-Type": "application/x-www-form-urlencoded",
-                        "Accept": "application/json",
-                    },
+                    headers=headers,
                     data=body_data,
                     timeout=30.0
                 )
@@ -435,7 +500,8 @@ class QwenOAuth2:
                         "token_type": result.get("token_type", "Bearer"),
                         "refresh_token": result.get("refresh_token", self.credentials["refresh_token"]),
                         "resource_url": result.get("resource_url", self.credentials.get("resource_url")),
-                        "expiry_date": int(time.time() * 1000) + result.get("expires_in", 7200) * 1000,
+                        # OAuth2: expires_in is in seconds, convert to ms with minimum 1 hour
+                        "expiry_date": int(time.time() * 1000) + max(3600000, result.get("expires_in", 7200) * 1000),
                         "last_refresh": datetime.utcnow().isoformat() + "Z",
                     }
                     

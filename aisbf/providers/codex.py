@@ -4,7 +4,7 @@ Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
 AISBF - AI Service Broker Framework || AI Should Be Free
 
 Codex provider handler.
-Uses the same protocol as OpenAI but with OAuth2 authentication.
+Supports both API key mode (OpenAI API) and OAuth2 mode (ChatGPT Responses API).
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
@@ -21,11 +21,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 Why did the programmer quit his job? Because he didn't get arrays!
 """
+import json
 import logging
 import time
-from typing import Dict, List, Optional, Union
+import uuid
+from typing import Dict, List, Optional, Union, AsyncIterator
 
 from openai import OpenAI
+import httpx
 
 from ..models import Model
 from ..config import config
@@ -33,13 +36,23 @@ from ..utils import count_messages_tokens
 from .base import BaseProviderHandler, AISBF_DEBUG
 from ..auth.codex import CodexOAuth2
 
+logger = logging.getLogger(__name__)
+
 
 class CodexProviderHandler(BaseProviderHandler):
     """
-    Codex provider handler.
+    Codex provider handler with dual-mode support.
     
-    Uses the same OpenAI-compatible protocol but authenticates via OAuth2
-    using the Codex OAuth2 flow (device code or browser-based PKCE).
+    **API Key Mode** (api_key provided):
+    - Uses standard OpenAI API: https://api.openai.com/v1
+    - Uses Chat Completions endpoint: /v1/chat/completions
+    - Standard OpenAI protocol with Bearer token
+    
+    **OAuth2 Mode** (no api_key, OAuth2 credentials):
+    - Uses ChatGPT backend API: https://chatgpt.com/backend-api/codex
+    - Uses Responses API endpoint: /v1/responses
+    - ChatGPT-specific protocol with SSE streaming
+    - Includes ChatGPT-Account-ID header
     
     For admin users (user_id=None), credentials are loaded from file.
     For non-admin users, credentials are loaded from the database.
@@ -51,7 +64,6 @@ class CodexProviderHandler(BaseProviderHandler):
         
         # Get provider config
         provider_config = config.providers.get(provider_id)
-        endpoint = provider_config.endpoint if provider_config else "https://api.openai.com/v1"
         
         # Initialize OAuth2 client
         codex_config = getattr(provider_config, 'codex_config', {}) if provider_config else {}
@@ -69,19 +81,35 @@ class CodexProviderHandler(BaseProviderHandler):
                 issuer=issuer,
             )
         
-        # Resolve API key: use provided key, or get from OAuth2, or use stored API key
-        resolved_api_key = api_key
-        if not resolved_api_key:
-            # Try to get OAuth2 access token
-            resolved_api_key = self.oauth2.get_valid_token()
+        # Determine mode: API key mode or OAuth2 mode
+        self._use_api_key_mode = bool(api_key or (provider_config and provider_config.api_key))
+        self._account_id = None  # Will be extracted from ID token in OAuth2 mode
         
-        if not resolved_api_key:
-            # Fall back to provider config API key
-            if provider_config and provider_config.api_key:
-                resolved_api_key = provider_config.api_key
+        # Set base URL from config (default endpoint)
+        # This will be overridden for OAuth2 mode when credentials are validated
+        self.base_url = provider_config.endpoint if provider_config else "https://api.openai.com/v1"
         
-        self.client = OpenAI(base_url=endpoint, api_key=resolved_api_key or "dummy")
-        self._oauth2_enabled = not api_key and provider_config and not provider_config.api_key_required
+        # API Key Mode: Initialize OpenAI client with configured endpoint
+        if self._use_api_key_mode:
+            resolved_api_key = api_key or (provider_config.api_key if provider_config else None)
+            self.client = OpenAI(
+                base_url=self.base_url,
+                api_key=resolved_api_key or "dummy",
+                default_headers={
+                    "User-Agent": "codex-cli/1.0.0",
+                }
+            )
+            logger.info(f"CodexProviderHandler: Initialized in API Key mode with endpoint: {self.base_url}")
+        else:
+            # OAuth2 Mode: Check if OAuth2 is authenticated
+            # If authenticated, use ChatGPT backend; otherwise use configured endpoint
+            if self.oauth2.is_authenticated():
+                self.base_url = "https://chatgpt.com/backend-api/codex"
+                logger.info(f"CodexProviderHandler: Initialized in OAuth2 mode with ChatGPT backend: {self.base_url}")
+            else:
+                # Not yet authenticated, keep configured endpoint
+                logger.info(f"CodexProviderHandler: Initialized in OAuth2 mode (not authenticated yet) with endpoint: {self.base_url}")
+            self.client = None  # Not used in OAuth2 mode
     
     def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, issuer: str) -> CodexOAuth2:
         """
@@ -127,9 +155,386 @@ class CodexProviderHandler(BaseProviderHandler):
         # Try OAuth2 token
         token = await self.oauth2.get_valid_token_with_refresh()
         if token:
+            # Extract account ID from credentials if available
+            if self.oauth2.credentials and self.oauth2.credentials.get('tokens'):
+                self._account_id = self.oauth2.credentials['tokens'].get('account_id')
+            
+            # Switch to ChatGPT backend if OAuth2 is now authenticated
+            if not self._use_api_key_mode and self.base_url != "https://chatgpt.com/backend-api/codex":
+                self.base_url = "https://chatgpt.com/backend-api/codex"
+                logger.info(f"CodexProviderHandler: Switched to ChatGPT backend after OAuth2 authentication: {self.base_url}")
+                
+                # Update the configuration with the new endpoint
+                await self._update_provider_endpoint(self.base_url)
+            
             return token
         
         raise Exception("Codex authentication required. Please authenticate via dashboard or provide API key.")
+    
+    async def _update_provider_endpoint(self, new_endpoint: str) -> None:
+        """Update the provider endpoint in configuration."""
+        try:
+            provider_config = config.providers.get(self.provider_id)
+            if provider_config:
+                # Update the endpoint in the config object
+                provider_config.endpoint = new_endpoint
+                
+                # Save to configuration file or database
+                if self.user_id is not None:
+                    # User-specific provider: update in database
+                    from ..database import get_database
+                    db = get_database()
+                    if db:
+                        # Update user provider endpoint in database
+                        db.update_user_provider_endpoint(
+                            user_id=self.user_id,
+                            provider_id=self.provider_id,
+                            endpoint=new_endpoint
+                        )
+                        logger.info(f"CodexProviderHandler: Updated endpoint in database for user {self.user_id}: {new_endpoint}")
+                else:
+                    # Global provider: update in config file
+                    config.save_providers()
+                    logger.info(f"CodexProviderHandler: Updated endpoint in config file: {new_endpoint}")
+        except Exception as e:
+            logger.warning(f"CodexProviderHandler: Failed to update endpoint in configuration: {e}")
+    
+    # =========================================================================
+    # API Key Mode Methods (Standard OpenAI API)
+    # =========================================================================
+    
+    async def _handle_request_api_key_mode(
+        self,
+        model: str,
+        messages: List[Dict],
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = 1.0,
+        stream: Optional[bool] = False,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[Union[str, Dict]] = None,
+    ) -> Union[Dict, object]:
+        """Handle request using standard OpenAI Chat Completions API."""
+        # Build request parameters
+        request_params = {
+            "model": model,
+            "messages": [],
+            "temperature": temperature,
+            "stream": stream
+        }
+        
+        # Only add max_tokens if it's not None
+        if max_tokens is not None:
+            request_params["max_tokens"] = max_tokens
+        
+        # Build messages with all fields
+        for msg in messages:
+            message = {"role": msg["role"]}
+            
+            if msg["role"] == "tool":
+                if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                    message["tool_call_id"] = msg["tool_call_id"]
+                else:
+                    logger.warning(f"Skipping tool message without tool_call_id: {msg}")
+                    continue
+            
+            if "content" in msg and msg["content"] is not None:
+                message["content"] = msg["content"]
+            if "tool_calls" in msg and msg["tool_calls"] is not None:
+                message["tool_calls"] = msg["tool_calls"]
+            if "name" in msg and msg["name"] is not None:
+                message["name"] = msg["name"]
+            request_params["messages"].append(message)
+        
+        if tools is not None:
+            request_params["tools"] = tools
+        if tool_choice is not None:
+            request_params["tool_choice"] = tool_choice
+
+        response = self.client.chat.completions.create(**request_params)
+        return response
+    
+    # =========================================================================
+    # OAuth2 Mode Methods (ChatGPT Responses API)
+    # =========================================================================
+    
+    def _convert_messages_to_responses_format(self, messages: List[Dict]) -> List[Dict]:
+        """
+        Convert OpenAI Chat Completions messages to Responses API format.
+        
+        OpenAI format: {"role": "user", "content": "text"}
+        Responses format: {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "text"}]}
+        """
+        result = []
+        
+        for msg in messages:
+            role = msg.get("role", "user")
+            content = msg.get("content", "")
+            
+            # Handle tool messages
+            if role == "tool":
+                result.append({
+                    "type": "function_call_output",
+                    "call_id": msg.get("tool_call_id", ""),
+                    "output": content
+                })
+                continue
+            
+            # Handle assistant messages with tool calls
+            if role == "assistant" and "tool_calls" in msg:
+                # Add the assistant message first
+                if content:
+                    result.append({
+                        "type": "message",
+                        "role": "assistant",
+                        "content": [{"type": "output_text", "text": content}]
+                    })
+                
+                # Add function calls
+                for tool_call in msg.get("tool_calls", []):
+                    result.append({
+                        "type": "function_call",
+                        "call_id": tool_call.get("id", ""),
+                        "name": tool_call.get("function", {}).get("name", ""),
+                        "arguments": tool_call.get("function", {}).get("arguments", "{}")
+                    })
+                continue
+            
+            # Handle regular messages
+            content_items = []
+            if isinstance(content, str):
+                content_type = "input_text" if role in ["user", "system", "developer"] else "output_text"
+                content_items.append({"type": content_type, "text": content})
+            elif isinstance(content, list):
+                # Handle multimodal content
+                for item in content:
+                    if isinstance(item, dict):
+                        if item.get("type") == "text":
+                            content_type = "input_text" if role in ["user", "system", "developer"] else "output_text"
+                            content_items.append({"type": content_type, "text": item.get("text", "")})
+                        elif item.get("type") == "image_url":
+                            content_items.append({
+                                "type": "input_image",
+                                "image_url": item.get("image_url", {}).get("url", "")
+                            })
+            
+            if content_items:
+                result.append({
+                    "type": "message",
+                    "role": role,
+                    "content": content_items
+                })
+        
+        return result
+    
+    def _build_responses_request(
+        self,
+        model: str,
+        messages: List[Dict],
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = 1.0,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[Union[str, Dict]] = None,
+    ) -> Dict:
+        """Build a Responses API request payload."""
+        # Convert messages to Responses format
+        input_items = self._convert_messages_to_responses_format(messages)
+        
+        # Build base request
+        request = {
+            "model": model,
+            "instructions": "You are Codex, a helpful AI assistant for coding tasks.",
+            "input": input_items,
+            "stream": True,
+            "store": False,
+        }
+        
+        # Add optional parameters
+        if max_tokens is not None:
+            request["max_tokens"] = max_tokens
+        
+        if temperature is not None:
+            request["temperature"] = temperature
+        
+        if tools:
+            # Convert OpenAI tool format to Responses API format
+            request["tools"] = tools
+        
+        if tool_choice:
+            request["tool_choice"] = tool_choice if isinstance(tool_choice, str) else "auto"
+        
+        return request
+    
+    def _build_headers(self, api_key: str, conversation_id: Optional[str] = None) -> Dict[str, str]:
+        """Build request headers for Responses API."""
+        headers = {
+            "Authorization": f"Bearer {api_key}",
+            "Content-Type": "application/json",
+            "Accept": "text/event-stream",
+            "User-Agent": "codex-cli/1.0.0",
+            "originator": "codex_cli_rs",
+        }
+        
+        # Add ChatGPT-Account-ID if available (OAuth2 mode)
+        if self._account_id:
+            headers["ChatGPT-Account-ID"] = self._account_id
+        
+        # Add conversation tracking headers
+        if conversation_id:
+            headers["x-client-request-id"] = conversation_id
+            headers["session_id"] = conversation_id
+        
+        return headers
+    
+    async def _parse_sse_stream(self, response: httpx.Response) -> AsyncIterator[Dict]:
+        """Parse Server-Sent Events stream from Responses API."""
+        buffer = ""
+        event_type = None
+        
+        async for line in response.aiter_lines():
+            if not line:
+                # Empty line marks end of event
+                if buffer and event_type:
+                    try:
+                        data = json.loads(buffer)
+                        yield {"event": event_type, "data": data}
+                    except json.JSONDecodeError as e:
+                        logger.warning(f"Failed to parse SSE data: {e}")
+                    buffer = ""
+                    event_type = None
+                continue
+            
+            if line.startswith("event:"):
+                event_type = line[6:].strip()
+            elif line.startswith("data:"):
+                data_line = line[5:].strip()
+                if buffer:
+                    buffer += "\n" + data_line
+                else:
+                    buffer = data_line
+    
+    def _convert_sse_to_openai_format(self, events: List[Dict], model: str) -> Dict:
+        """Convert Responses API SSE events to OpenAI Chat Completions format."""
+        # Accumulate response
+        response_id = None
+        content = ""
+        tool_calls = []
+        finish_reason = None
+        usage = {}
+        
+        for event in events:
+            event_type = event.get("event")
+            data = event.get("data", {})
+            
+            if event_type == "response.created":
+                response_id = data.get("response_id")
+            
+            elif event_type == "response.content_part.delta":
+                delta = data.get("delta", {})
+                if "text" in delta:
+                    content += delta["text"]
+            
+            elif event_type == "response.output_item.done":
+                item = data.get("item", {})
+                if item.get("type") == "function_call":
+                    tool_calls.append({
+                        "id": item.get("call_id"),
+                        "type": "function",
+                        "function": {
+                            "name": item.get("name"),
+                            "arguments": item.get("arguments", "{}")
+                        }
+                    })
+            
+            elif event_type == "response.done":
+                finish_reason = data.get("status", "stop")
+                usage = data.get("usage", {})
+        
+        # Build OpenAI-compatible response
+        message = {
+            "role": "assistant",
+            "content": content if content else None,
+        }
+        
+        if tool_calls:
+            message["tool_calls"] = tool_calls
+        
+        return {
+            "id": response_id or f"chatcmpl-{uuid.uuid4().hex[:8]}",
+            "object": "chat.completion",
+            "created": int(time.time()),
+            "model": model,
+            "choices": [{
+                "index": 0,
+                "message": message,
+                "finish_reason": finish_reason or "stop"
+            }],
+            "usage": {
+                "prompt_tokens": usage.get("input_tokens", 0),
+                "completion_tokens": usage.get("output_tokens", 0),
+                "total_tokens": usage.get("total_tokens", 0)
+            }
+        }
+    
+    async def _handle_request_oauth2_mode(
+        self,
+        model: str,
+        messages: List[Dict],
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = 1.0,
+        stream: Optional[bool] = False,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[Union[str, Dict]] = None,
+    ) -> Union[Dict, object]:
+        """Handle request using ChatGPT Responses API."""
+        # Get valid API key (with OAuth2 refresh if needed)
+        api_key = await self._get_valid_api_key()
+        
+        # Build Responses API request
+        request_payload = self._build_responses_request(
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+            tool_choice=tool_choice
+        )
+        
+        # Generate conversation ID for tracking
+        conversation_id = str(uuid.uuid4())
+        
+        # Build headers
+        headers = self._build_headers(api_key, conversation_id)
+        
+        # Make request to Responses API
+        url = f"{self.base_url}/v1/responses"
+        
+        logger.info(f"CodexProviderHandler: Sending request to {url}")
+        
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            response = await client.post(
+                url,
+                headers=headers,
+                json=request_payload,
+            )
+            
+            response.raise_for_status()
+            
+            # Parse SSE stream
+            events = []
+            async for event in self._parse_sse_stream(response):
+                events.append(event)
+                
+                # For streaming, we would yield events here
+                # For now, accumulate all events
+            
+            # Convert to OpenAI format
+            openai_response = self._convert_sse_to_openai_format(events, model)
+            
+            return openai_response
+    
+    # =========================================================================
+    # Main Request Handler (Routes to appropriate mode)
+    # =========================================================================
     
     async def handle_request(
         self,
@@ -145,8 +550,7 @@ class CodexProviderHandler(BaseProviderHandler):
             raise Exception("Provider rate limited")
 
         try:
-            logger = logging.getLogger(__name__)
-            logger.info(f"CodexProviderHandler: Handling request for model {model}")
+            logger.info(f"CodexProviderHandler: Handling request for model {model} (mode: {'API Key' if self._use_api_key_mode else 'OAuth2'})")
             if AISBF_DEBUG:
                 logger.info(f"CodexProviderHandler: Messages: {messages}")
             else:
@@ -154,159 +558,139 @@ class CodexProviderHandler(BaseProviderHandler):
 
             # Apply rate limiting
             await self.apply_rate_limit()
-
-            # Get valid API key (with OAuth2 refresh if needed)
-            api_key = await self._get_valid_api_key()
             
-            # Re-initialize client with fresh token if OAuth2 is enabled
-            if self._oauth2_enabled:
-                provider_config = config.providers.get(self.provider_id)
-                endpoint = provider_config.endpoint if provider_config else "https://api.openai.com/v1"
-                self.client = OpenAI(base_url=endpoint, api_key=api_key)
-
-            # Check if native caching is enabled for this provider
-            provider_config = config.providers.get(self.provider_id)
-            enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
-            min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1024)
-            prompt_cache_key = getattr(provider_config, 'prompt_cache_key', None)
-
-            # Build request parameters
-            request_params = {
-                "model": model,
-                "messages": [],
-                "temperature": temperature,
-                "stream": stream
-            }
-            
-            # Only add max_tokens if it's not None
-            if max_tokens is not None:
-                request_params["max_tokens"] = max_tokens
-            
-            # Add prompt_cache_key if provided
-            if enable_native_caching and prompt_cache_key:
-                request_params["prompt_cache_key"] = prompt_cache_key
-            
-            # Build messages with all fields
-            if enable_native_caching:
-                cumulative_tokens = 0
-                for i, msg in enumerate(messages):
-                    message_tokens = count_messages_tokens([msg], model)
-                    cumulative_tokens += message_tokens
-
-                    message = {"role": msg["role"]}
-                    
-                    if msg["role"] == "tool":
-                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
-                            message["tool_call_id"] = msg["tool_call_id"]
-                        else:
-                            logger.warning(f"Skipping tool message without tool_call_id: {msg}")
-                            continue
-                    
-                    if "content" in msg and msg["content"] is not None:
-                        message["content"] = msg["content"]
-                    if "tool_calls" in msg and msg["tool_calls"] is not None:
-                        message["tool_calls"] = msg["tool_calls"]
-                    if "name" in msg and msg["name"] is not None:
-                        message["name"] = msg["name"]
-                    
-                    if (msg["role"] == "system" or
-                        (i < len(messages) - 2 and cumulative_tokens >= min_cacheable_tokens)):
-                        message["cache_control"] = {"type": "ephemeral"}
-                    
-                    request_params["messages"].append(message)
+            # Route to appropriate handler based on mode
+            if self._use_api_key_mode:
+                response = await self._handle_request_api_key_mode(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=stream,
+                    tools=tools,
+                    tool_choice=tool_choice
+                )
             else:
-                for msg in messages:
-                    message = {"role": msg["role"]}
-                    
-                    if msg["role"] == "tool":
-                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
-                            message["tool_call_id"] = msg["tool_call_id"]
-                        else:
-                            logger.warning(f"Skipping tool message without tool_call_id: {msg}")
-                            continue
-                    
-                    if "content" in msg and msg["content"] is not None:
-                        message["content"] = msg["content"]
-                    if "tool_calls" in msg and msg["tool_calls"] is not None:
-                        message["tool_calls"] = msg["tool_calls"]
-                    if "name" in msg and msg["name"] is not None:
-                        message["name"] = msg["name"]
-                    request_params["messages"].append(message)
+                response = await self._handle_request_oauth2_mode(
+                    model=model,
+                    messages=messages,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                    stream=stream,
+                    tools=tools,
+                    tool_choice=tool_choice
+                )
             
-            if tools is not None:
-                request_params["tools"] = tools
-            if tool_choice is not None:
-                request_params["tool_choice"] = tool_choice
-
-            response = self.client.chat.completions.create(**request_params)
             logger.info(f"CodexProviderHandler: Response received")
             self.record_success()
             
             if AISBF_DEBUG:
                 logger.info(f"=== RAW CODEX RESPONSE ===")
-                logger.info(f"Raw response type: {type(response)}")
                 logger.info(f"Raw response: {response}")
                 logger.info(f"=== END RAW CODEX RESPONSE ===")
             
             return response
+                
         except Exception as e:
-            logger = logging.getLogger(__name__)
             logger.error(f"CodexProviderHandler: Error: {str(e)}", exc_info=True)
             self.record_failure()
             raise e
 
     async def get_models(self) -> List[Model]:
         try:
-            logger = logging.getLogger(__name__)
             logger.info("CodexProviderHandler: Getting models list")
 
             # Apply rate limiting
             await self.apply_rate_limit()
-
-            # Get valid API key for models list
-            api_key = await self._get_valid_api_key()
-            provider_config = config.providers.get(self.provider_id)
-            endpoint = provider_config.endpoint if provider_config else "https://api.openai.com/v1"
             
-            # Create temporary client with fresh token
-            temp_client = OpenAI(base_url=endpoint, api_key=api_key)
+            # Route to appropriate endpoint based on mode
+            if self._use_api_key_mode:
+                # API Key Mode: Use standard OpenAI models endpoint
+                models_url = f"{self.base_url}/models"
+                headers = {
+                    "Authorization": f"Bearer {self.client.api_key}",
+                    "Content-Type": "application/json",
+                    "User-Agent": "codex-cli/1.0.0",
+                }
+            else:
+                # OAuth2 Mode: Use ChatGPT backend models endpoint
+                # https://chatgpt.com/backend-api/codex/models
+                api_key = await self._get_valid_api_key()
+                models_url = "https://chatgpt.com/backend-api/codex/models"
+                headers = self._build_headers(api_key)
+                headers["Accept"] = "application/json"  # Not SSE for models
             
-            models = temp_client.models.list()
-            logger.info(f"CodexProviderHandler: Models received")
-
+            logger.info(f"CodexProviderHandler: Using models endpoint: {models_url}")
+            
+            async with httpx.AsyncClient() as client:
+                params = {"client_version": "1.0.0"} if not self._use_api_key_mode else {}
+                response = await client.get(
+                    models_url,
+                    headers=headers,
+                    params=params,
+                    timeout=30.0
+                )
+                
+                logger.info(f"CodexProviderHandler: Response status: {response.status_code}")
+                
+                if response.status_code == 403:
+                    logger.error(f"CodexProviderHandler: 403 Unauthorized - Full response: {response.text}")
+                
+                response.raise_for_status()
+                models_data = response.json()
+            
+            logger.info(f"CodexProviderHandler: Models data received")
+            
+            # Parse response based on mode
             result = []
-            for model in models:
-                context_size = None
-                if hasattr(model, 'context_window') and model.context_window:
-                    context_size = model.context_window
-                elif hasattr(model, 'context_length') and model.context_length:
-                    context_size = model.context_length
-                elif hasattr(model, 'max_context_length') and model.max_context_length:
-                    context_size = model.max_context_length
-                
-                pricing = None
-                if hasattr(model, 'pricing') and model.pricing:
-                    pricing = model.pricing
-                elif hasattr(model, 'top_provider') and model.top_provider:
-                    top_provider = model.top_provider
-                    if hasattr(top_provider, 'dict'):
-                        top_provider = top_provider.dict()
-                    if isinstance(top_provider, dict):
-                        tp_pricing = top_provider.get('pricing')
-                        if tp_pricing:
-                            pricing = tp_pricing
-                
-                result.append(Model(
-                    id=model.id,
-                    name=model.id,
-                    provider_id=self.provider_id,
-                    context_size=context_size,
-                    context_length=context_size,
-                    pricing=pricing
-                ))
+            if self._use_api_key_mode:
+                # Standard OpenAI format: {"data": [{"id": "...", ...}], "object": "list"}
+                if isinstance(models_data, dict) and 'data' in models_data:
+                    for model_info in models_data['data']:
+                        model_id = model_info.get('id')
+                        if model_id:
+                            result.append(Model(
+                                id=model_id,
+                                name=model_info.get('name', model_id),
+                                provider_id=self.provider_id,
+                                context_size=model_info.get('context_window') or model_info.get('context_length'),
+                                context_length=model_info.get('context_length') or model_info.get('context_window'),
+                                pricing=model_info.get('pricing')
+                            ))
+            else:
+                # Codex format: {"models": [{"slug": "...", "display_name": "...", ...}]}
+                if isinstance(models_data, dict) and 'models' in models_data:
+                    for model_info in models_data['models']:
+                        model_id = model_info.get('slug') or model_info.get('id')
+                        if model_id:
+                            result.append(Model(
+                                id=model_id,
+                                name=model_info.get('display_name', model_id),
+                                provider_id=self.provider_id,
+                                context_size=model_info.get('context_window'),
+                                context_length=model_info.get('context_window'),
+                                pricing=None
+                            ))
             
+            logger.info(f"CodexProviderHandler: Parsed {len(result)} models")
             return result
+            
         except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"CodexProviderHandler: Error getting models: {str(e)}", exc_info=True)
-            raise e
+            error_msg = str(e)
+            
+            logger.error(f"CodexProviderHandler: Full error type: {type(e).__name__}")
+            logger.error(f"CodexProviderHandler: Full error message: {error_msg}")
+            
+            # Return default known Codex models as fallback
+            logger.warning(f"CodexProviderHandler: Returning default Codex models")
+            
+            default_models = [
+                Model(id="gpt-4o", name="GPT-4o", provider_id=self.provider_id, context_size=128000, context_length=128000),
+                Model(id="gpt-4o-mini", name="GPT-4o Mini", provider_id=self.provider_id, context_size=128000, context_length=128000),
+                Model(id="gpt-4-turbo", name="GPT-4 Turbo", provider_id=self.provider_id, context_size=128000, context_length=128000),
+                Model(id="gpt-4", name="GPT-4", provider_id=self.provider_id, context_size=8192, context_length=8192),
+                Model(id="o1-preview", name="O1 Preview", provider_id=self.provider_id, context_size=128000, context_length=128000),
+            ]
+            
+            logger.info(f"CodexProviderHandler: Returned {len(default_models)} default models as fallback")
+            return default_models
