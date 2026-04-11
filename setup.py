@@ -144,6 +144,8 @@ setup(
             'aisbf/auth/kilo.py',
             'aisbf/auth/codex.py',
             'aisbf/auth/qwen.py',
+            'aisbf/auth/google.py',
+            'aisbf/auth/github.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
@@ -168,6 +170,8 @@ setup(
             'templates/dashboard/rate_limits.html',
             'templates/dashboard/users.html',
             'templates/dashboard/signup.html',
+            'templates/dashboard/profile.html',
+            'templates/dashboard/change_password.html',
         ]),
         # Install static files (extension and favicon)
         ('share/aisbf/static', [

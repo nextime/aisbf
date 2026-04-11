@@ -480,6 +480,13 @@ def setup_template_globals():
     """Setup Jinja2 template globals for proxy-aware URLs"""
     templates.env.globals['url_for'] = url_for
     templates.env.globals['get_base_url'] = get_base_url
+    # Add md5 filter for Gravatar email hashing (handles None/empty values gracefully)
+    def md5_filter(s):
+        if not s:
+            # Fallback to empty string hash for users without email
+            return hashlib.md5(b'').hexdigest().lower()
+        return hashlib.md5(s.encode('utf-8')).hexdigest().lower()
+    templates.env.filters['md5'] = md5_filter
     # Clear the template cache to avoid stale cache issues
     templates.env.cache.clear()
 
@@ -1476,7 +1483,7 @@ async def dashboard_login_page(request: Request):
 
         # Get and render template
         template = env.get_template("dashboard/login.html")
-        html_content = template.render(request=request, signup_enabled=signup_enabled)
+        html_content = template.render(request=request, signup_enabled=signup_enabled, config=config.aisbf if config and config.aisbf else {})
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -1544,7 +1551,7 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
     return templates.TemplateResponse(
         request=request,
         name="dashboard/login.html",
-        context={"request": request, "error": "Invalid credentials", "signup_enabled": signup_enabled}
+        context={"request": request, "error": "Invalid credentials", "signup_enabled": signup_enabled, "config": config.aisbf if config and config.aisbf else {}}
     )
 
 
@@ -1572,7 +1579,7 @@ async def dashboard_signup_page(request: Request):
 
         # Get and render template
         template = env.get_template("dashboard/signup.html")
-        html_content = template.render(request=request)
+        html_content = template.render(request=request, config=config.aisbf if config and config.aisbf else {})
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -1734,6 +1741,448 @@ async def dashboard_logout(request: Request):
     """Handle dashboard logout"""
     request.session.clear()
     return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+
+@app.get("/dashboard/profile", response_class=HTMLResponse)
+async def dashboard_profile(request: Request):
+    """User profile edit page"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    # User dashboard - load usage stats same as main dashboard user route
+    from aisbf.database import get_database
+    db = get_database()
+    user_id = request.session.get('user_id')
+    
+    # Get user statistics
+    usage_stats = {
+        'total_tokens': 0,
+        'requests_today': 0
+    }
+    
+    if user_id:
+        # Get token usage for this user
+        token_usage = db.get_user_token_usage(user_id)
+        usage_stats['total_tokens'] = sum(row['token_count'] for row in token_usage)
+        
+        # Count requests today
+        from datetime import datetime, timedelta
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        usage_stats['requests_today'] = len([
+            row for row in token_usage
+            if datetime.fromisoformat(row['timestamp']) >= today
+        ])
+        
+        # Get user config counts
+        providers_count = len(db.get_user_providers(user_id))
+        rotations_count = len(db.get_user_rotations(user_id))
+        autoselects_count = len(db.get_user_autoselects(user_id))
+        
+        # Get recent activity (last 10)
+        recent_activity = token_usage[-10:] if token_usage else []
+    else:
+        providers_count = 0
+        rotations_count = 0
+        autoselects_count = 0
+        recent_activity = []
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/profile.html",
+        context={
+            "session": request.session,
+            "success": request.query_params.get('success'),
+            "error": request.query_params.get('error')
+        }
+    )
+
+
+@app.post("/dashboard/profile")
+async def dashboard_profile_save(request: Request, username: str = Form(...), email: str = Form(...)):
+    """Save user profile changes"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    from aisbf.database import get_database
+    user_id = request.session.get('user_id')
+    db = get_database()
+    
+    try:
+        db.update_user_profile(user_id, username, email)
+        # Update session with new username
+        request.session['username'] = username
+        request.session['email'] = email
+        
+        return RedirectResponse(url=url_for(request, "/dashboard/profile?success=Profile updated successfully"), status_code=303)
+    except Exception as e:
+        return RedirectResponse(url=url_for(request, f"/dashboard/profile?error=Failed to update profile: {str(e)}"), status_code=303)
+
+
+@app.get("/dashboard/change-password", response_class=HTMLResponse)
+async def dashboard_change_password(request: Request):
+    """Change user password page"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    # User dashboard - load usage stats same as main dashboard user route
+    from aisbf.database import get_database
+    db = get_database()
+    user_id = request.session.get('user_id')
+    
+    # Get user statistics
+    usage_stats = {
+        'total_tokens': 0,
+        'requests_today': 0
+    }
+    
+    if user_id:
+        # Get token usage for this user
+        token_usage = db.get_user_token_usage(user_id)
+        usage_stats['total_tokens'] = sum(row['token_count'] for row in token_usage)
+        
+        # Count requests today
+        from datetime import datetime, timedelta
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        usage_stats['requests_today'] = len([
+            row for row in token_usage
+            if datetime.fromisoformat(row['timestamp']) >= today
+        ])
+        
+        # Get user config counts
+        providers_count = len(db.get_user_providers(user_id))
+        rotations_count = len(db.get_user_rotations(user_id))
+        autoselects_count = len(db.get_user_autoselects(user_id))
+        
+        # Get recent activity (last 10)
+        recent_activity = token_usage[-10:] if token_usage else []
+    else:
+        providers_count = 0
+        rotations_count = 0
+        autoselects_count = 0
+        recent_activity = []
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/change_password.html",
+        context={
+            "session": request.session,
+            "success": request.query_params.get('success'),
+            "error": request.query_params.get('error')
+        }
+    )
+
+
+@app.post("/dashboard/change-password")
+async def dashboard_change_password_save(request: Request, current_password: str = Form(...), new_password: str = Form(...), confirm_password: str = Form(...)):
+    """Save password change"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    from aisbf.database import get_database
+    user_id = request.session.get('user_id')
+    db = get_database()
+    
+    if new_password != confirm_password:
+        return RedirectResponse(url=url_for(request, "/dashboard/change-password?error=New passwords do not match"), status_code=303)
+    
+    if len(new_password) < 6:
+        return RedirectResponse(url=url_for(request, "/dashboard/change-password?error=New password must be at least 6 characters"), status_code=303)
+    
+    try:
+        # Verify current password
+        if not db.verify_user_password(user_id, current_password):
+            return RedirectResponse(url=url_for(request, "/dashboard/change-password?error=Current password is incorrect"), status_code=303)
+        
+        # Update password
+        db.update_user_password(user_id, new_password)
+        
+        return RedirectResponse(url=url_for(request, "/dashboard/change-password?success=Password changed successfully"), status_code=303)
+    except Exception as e:
+        return RedirectResponse(url=url_for(request, f"/dashboard/change-password?error=Failed to change password: {str(e)}"), status_code=303)
+    return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+
+# ==============================================
+# OAuth2 Authentication Endpoints (Google + GitHub)
+# ==============================================
+
+# OAuth2 handler instances are stored in session during auth flow
+_oauth2_instances = {}
+
+@app.get("/auth/oauth2/google")
+async def oauth2_google_initiate(request: Request):
+    """Initiate Google OAuth2 authentication flow"""
+    if not (config and config.aisbf and config.aisbf.oauth2 and 
+            config.aisbf.oauth2.google and config.aisbf.oauth2.google.enabled):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    try:
+        from aisbf.auth.google import GoogleOAuth2
+        
+        client_id = config.aisbf.oauth2.google.client_id
+        client_secret = config.aisbf.oauth2.google.client_secret
+        
+        # Build proper redirect URI respecting proxy headers
+        base_url = get_base_url(request)
+        redirect_uri = f"{base_url}/auth/oauth2/google/callback"
+        
+        oauth = GoogleOAuth2(client_id, client_secret, redirect_uri)
+        auth_url = oauth.get_authorization_url(config.aisbf.oauth2.google.scopes)
+        
+        # Store oauth instance and state in session for callback
+        request.session['oauth2_google'] = {
+            'state': oauth._state,
+            'code_verifier': oauth._code_verifier
+        }
+        
+        return RedirectResponse(url=auth_url, status_code=303)
+    except Exception as e:
+        logger.error(f"Google OAuth2 initiation failed: {e}")
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={
+                "request": request, 
+                "error": "Google authentication service is temporarily unavailable"
+            }
+        )
+
+
+@app.get("/auth/oauth2/google/callback")
+async def oauth2_google_callback(request: Request, code: str = Query(...), state: str = Query(...)):
+    """Handle Google OAuth2 callback"""
+    if not (config and config.aisbf and config.aisbf.oauth2 and 
+            config.aisbf.oauth2.google and config.aisbf.oauth2.google.enabled):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    try:
+        from aisbf.auth.google import GoogleOAuth2
+        from aisbf.database import get_database
+        
+        client_id = config.aisbf.oauth2.google.client_id
+        client_secret = config.aisbf.oauth2.google.client_secret
+        base_url = get_base_url(request)
+        redirect_uri = f"{base_url}/auth/oauth2/google/callback"
+        
+        # Verify state matches
+        session_state = request.session.get('oauth2_google', {}).get('state')
+        if state != session_state:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Invalid authentication state"}
+            )
+        
+        # Restore oauth instance
+        oauth = GoogleOAuth2(client_id, client_secret, redirect_uri)
+        oauth._state = session_state
+        oauth._code_verifier = request.session.get('oauth2_google', {}).get('code_verifier')
+        
+        # Exchange code for tokens
+        tokens = await oauth.exchange_code_for_tokens(code, state)
+        if not tokens:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Failed to authenticate with Google"}
+            )
+        
+        # Get user profile
+        user_info = await oauth.get_user_info(tokens.get('access_token'))
+        if not user_info or not user_info.get('email'):
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Could not retrieve your profile from Google"}
+            )
+        
+        email = user_info.get('email')
+        email_verified = user_info.get('email_verified', False)
+        
+        db = get_database()
+        
+        # Lookup existing user
+        existing_user = db.get_user_by_email(email)
+        
+        if existing_user:
+            # Existing user - login directly
+            request.session['logged_in'] = True
+            request.session['username'] = existing_user['username']
+            request.session['role'] = existing_user['role']
+            request.session['user_id'] = existing_user['id']
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+        else:
+            # New user - create account automatically (no password required)
+            if not email_verified:
+                return templates.TemplateResponse(
+                    request=request,
+                    name="dashboard/login.html",
+                    context={"request": request, "error": "Google email must be verified to create an account"}
+                )
+            
+            # Generate secure random password for OAuth users (never used for login)
+            random_password = secrets.token_urlsafe(32)
+            password_hash = hashlib.sha256(random_password.encode()).hexdigest()
+            
+            # Create user with verified email (no verification required)
+            user_id = db.create_user(email, password_hash, None)
+            db.verify_email(email)  # Mark email as verified automatically
+            
+            # Login the new user
+            request.session['logged_in'] = True
+            request.session['username'] = email
+            request.session['role'] = 'user'
+            request.session['user_id'] = user_id
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+        
+        # Cleanup session data
+        request.session.pop('oauth2_google', None)
+        
+        # Redirect to dashboard
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+        
+    except Exception as e:
+        logger.error(f"Google OAuth2 callback failed: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={"request": request, "error": "Authentication failed. Please try again."}
+        )
+
+
+@app.get("/auth/oauth2/github")
+async def oauth2_github_initiate(request: Request):
+    """Initiate GitHub OAuth2 authentication flow"""
+    if not (config and config.aisbf and config.aisbf.oauth2 and 
+            config.aisbf.oauth2.github and config.aisbf.oauth2.github.enabled):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    try:
+        from aisbf.auth.github import GitHubOAuth2
+        
+        client_id = config.aisbf.oauth2.github.client_id
+        client_secret = config.aisbf.oauth2.github.client_secret
+        
+        # Build proper redirect URI respecting proxy headers
+        base_url = get_base_url(request)
+        redirect_uri = f"{base_url}/auth/oauth2/github/callback"
+        
+        oauth = GitHubOAuth2(client_id, client_secret, redirect_uri)
+        auth_url = oauth.get_authorization_url(config.aisbf.oauth2.github.scopes)
+        
+        # Store state in session for callback
+        request.session['oauth2_github'] = {
+            'state': oauth._state
+        }
+        
+        return RedirectResponse(url=auth_url, status_code=303)
+    except Exception as e:
+        logger.error(f"GitHub OAuth2 initiation failed: {e}")
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={
+                "request": request, 
+                "error": "GitHub authentication service is temporarily unavailable"
+            }
+        )
+
+
+@app.get("/auth/oauth2/github/callback")
+async def oauth2_github_callback(request: Request, code: str = Query(...), state: str = Query(...)):
+    """Handle GitHub OAuth2 callback"""
+    if not (config and config.aisbf and config.aisbf.oauth2 and 
+            config.aisbf.oauth2.github and config.aisbf.oauth2.github.enabled):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    try:
+        from aisbf.auth.github import GitHubOAuth2
+        from aisbf.database import get_database
+        
+        client_id = config.aisbf.oauth2.github.client_id
+        client_secret = config.aisbf.oauth2.github.client_secret
+        base_url = get_base_url(request)
+        redirect_uri = f"{base_url}/auth/oauth2/github/callback"
+        
+        # Verify state matches
+        session_state = request.session.get('oauth2_github', {}).get('state')
+        if state != session_state:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Invalid authentication state"}
+            )
+        
+        # Restore oauth instance
+        oauth = GitHubOAuth2(client_id, client_secret, redirect_uri)
+        oauth._state = session_state
+        
+        # Exchange code for tokens
+        tokens = await oauth.exchange_code_for_tokens(code, state)
+        if not tokens:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Failed to authenticate with GitHub"}
+            )
+        
+        # Get user profile
+        user_info = await oauth.get_user_info(tokens.get('access_token'))
+        if not user_info or not user_info.get('email'):
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Could not retrieve your profile from GitHub. Please ensure your email is public."}
+            )
+        
+        email = user_info.get('email')
+        
+        db = get_database()
+        
+        # Lookup existing user
+        existing_user = db.get_user_by_email(email)
+        
+        if existing_user:
+            # Existing user - login directly
+            request.session['logged_in'] = True
+            request.session['username'] = existing_user['username']
+            request.session['role'] = existing_user['role']
+            request.session['user_id'] = existing_user['id']
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+        else:
+            # New user - create account automatically (no password required)
+            # Generate secure random password for OAuth users (never used for login)
+            random_password = secrets.token_urlsafe(32)
+            password_hash = hashlib.sha256(random_password.encode()).hexdigest()
+            
+            # Create user with verified email (GitHub emails are always verified)
+            user_id = db.create_user(email, password_hash, None)
+            db.verify_email(email)  # Mark email as verified automatically
+            
+            # Login the new user
+            request.session['logged_in'] = True
+            request.session['username'] = email
+            request.session['role'] = 'user'
+            request.session['user_id'] = user_id
+            request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+        
+        # Cleanup session data
+        request.session.pop('oauth2_github', None)
+        
+        # Redirect to dashboard
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+        
+    except Exception as e:
+        logger.error(f"GitHub OAuth2 callback failed: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={"request": request, "error": "Authentication failed. Please try again."}
+        )
 
 def require_dashboard_auth(request: Request):
     """Check if user is logged in to dashboard"""
@@ -2735,50 +3184,56 @@ async def dashboard_settings(request: Request):
     }
     )
 
- @app.post("/dashboard/settings")
- async def dashboard_settings_save(
-     request: Request,
-     host: str = Form(...),
-     port: int = Form(...),
-     protocol: str = Form(...),
-     auth_enabled: bool = Form(False),
-     auth_tokens: str = Form(""),
-     dashboard_username: str = Form(...),
-     dashboard_password: str = Form(""),
-     condensation_model_id: str = Form(...),
-     autoselect_model_id: str = Form(...),
-     database_type: str = Form("sqlite"),
-     sqlite_path: str = Form("~/.aisbf/aisbf.db"),
-     mysql_host: str = Form("localhost"),
-     mysql_port: int = Form(3306),
-     mysql_user: str = Form("aisbf"),
-     mysql_password: str = Form(""),
-     mysql_database: str = Form("aisbf"),
-     cache_type: str = Form("file"),
-     redis_host: str = Form("localhost"),
-     redis_port: int = Form(6379),
-     redis_db: int = Form(0),
-     redis_password: str = Form(""),
-     redis_key_prefix: str = Form("aisbf:"),
-     mcp_enabled: bool = Form(False),
-     autoselect_tokens: str = Form(""),
-     fullconfig_tokens: str = Form(""),
-     tor_enabled: bool = Form(False),
-     tor_control_port: int = Form(9051),
-     tor_control_host: str = Form("127.0.0.1"),
-     tor_control_password: str = Form(""),
-     tor_hidden_service_dir: str = Form(""),
-     tor_hidden_service_port: int = Form(80),
-     tor_socks_port: int = Form(9050),
-     tor_socks_host: str = Form("127.0.0.1"),
-     signup_enabled: bool = Form(False),
-     smtp_server: str = Form(""),
-     smtp_port: int = Form(587),
-     smtp_username: str = Form(""),
-     smtp_password: str = Form(""),
-     smtp_use_tls: bool = Form(True),
-     smtp_from_address: str = Form("")
- ):
+@app.post("/dashboard/settings")
+async def dashboard_settings_save(
+   request: Request,
+   host: str = Form(...),
+   port: int = Form(...),
+   protocol: str = Form(...),
+   auth_enabled: bool = Form(False),
+   auth_tokens: str = Form(""),
+   dashboard_username: str = Form(...),
+   dashboard_password: str = Form(""),
+   condensation_model_id: str = Form(...),
+   autoselect_model_id: str = Form(...),
+   database_type: str = Form("sqlite"),
+   sqlite_path: str = Form("~/.aisbf/aisbf.db"),
+   mysql_host: str = Form("localhost"),
+   mysql_port: int = Form(3306),
+   mysql_user: str = Form("aisbf"),
+   mysql_password: str = Form(""),
+   mysql_database: str = Form("aisbf"),
+   cache_type: str = Form("file"),
+   redis_host: str = Form("localhost"),
+   redis_port: int = Form(6379),
+   redis_db: int = Form(0),
+   redis_password: str = Form(""),
+   redis_key_prefix: str = Form("aisbf:"),
+   mcp_enabled: bool = Form(False),
+   autoselect_tokens: str = Form(""),
+   fullconfig_tokens: str = Form(""),
+   tor_enabled: bool = Form(False),
+   tor_control_port: int = Form(9051),
+   tor_control_host: str = Form("127.0.0.1"),
+   tor_control_password: str = Form(""),
+   tor_hidden_service_dir: str = Form(""),
+   tor_hidden_service_port: int = Form(80),
+   tor_socks_port: int = Form(9050),
+   tor_socks_host: str = Form("127.0.0.1"),
+   signup_enabled: bool = Form(False),
+   smtp_server: str = Form(""),
+   smtp_port: int = Form(587),
+   smtp_username: str = Form(""),
+   smtp_password: str = Form(""),
+   smtp_use_tls: bool = Form(True),
+   smtp_from_address: str = Form(""),
+   oauth2_google_enabled: bool = Form(False),
+   oauth2_google_client_id: str = Form(""),
+   oauth2_google_client_secret: str = Form(""),
+   oauth2_github_enabled: bool = Form(False),
+   oauth2_github_client_id: str = Form(""),
+   oauth2_github_client_secret: str = Form("")
+):
     """Save server settings"""
     auth_check = require_admin(request)
     if auth_check:
@@ -2853,17 +3308,6 @@ async def dashboard_settings(request: Request):
     with open(config_path, 'w') as f:
         json.dump(aisbf_config, f, indent=2)
     
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard/settings.html",
-        context={
-        "request": request,
-        "session": request.session,
-        "config": aisbf_config,
-        "success": "Settings saved successfully! Restart server for changes to take effect."
-    }
-    )
-
     return templates.TemplateResponse(
         request=request,
         name="dashboard/settings.html",

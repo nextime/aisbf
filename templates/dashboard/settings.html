@@ -448,6 +448,46 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">How long verification links remain valid (1-168 hours)</small>
     </div>
     
+    <h3 style="margin: 30px 0 20px;">OAuth2 Authentication</h3>
+
+    <h4 style="margin: 25px 0 15px;">Google OAuth2</h4>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="oauth2_google_enabled" {% if config.oauth2 and config.oauth2.google and config.oauth2.google.enabled %}checked{% endif %}>
+            Enable Google OAuth2 Authentication
+        </label>
+    </div>
+    
+    <div class="form-group">
+        <label for="oauth2_google_client_id">Google Client ID</label>
+        <input type="text" id="oauth2_google_client_id" name="oauth2_google_client_id" value="{{ config.oauth2.google.client_id if config.oauth2 and config.oauth2.google else '' }}" placeholder="Client ID from Google Cloud Console">
+    </div>
+    
+    <div class="form-group">
+        <label for="oauth2_google_client_secret">Google Client Secret</label>
+        <input type="password" id="oauth2_google_client_secret" name="oauth2_google_client_secret" value="{{ config.oauth2.google.client_secret if config.oauth2 and config.oauth2.google else '' }}" placeholder="Client Secret from Google Cloud Console">
+    </div>
+
+    <h4 style="margin: 25px 0 15px;">GitHub OAuth2</h4>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="oauth2_github_enabled" {% if config.oauth2 and config.oauth2.github and config.oauth2.github.enabled %}checked{% endif %}>
+            Enable GitHub OAuth2 Authentication
+        </label>
+    </div>
+    
+    <div class="form-group">
+        <label for="oauth2_github_client_id">GitHub Client ID</label>
+        <input type="text" id="oauth2_github_client_id" name="oauth2_github_client_id" value="{{ config.oauth2.github.client_id if config.oauth2 and config.oauth2.github else '' }}" placeholder="Client ID from GitHub Developer Settings">
+    </div>
+    
+    <div class="form-group">
+        <label for="oauth2_github_client_secret">GitHub Client Secret</label>
+        <input type="password" id="oauth2_github_client_secret" name="oauth2_github_client_secret" value="{{ config.oauth2.github.client_secret if config.oauth2 and config.oauth2.github else '' }}" placeholder="Client Secret from GitHub Developer Settings">
+    </div>
+
     <h3 style="margin: 30px 0 20px;">SMTP Email Configuration</h3>
     
     <div class="form-group">

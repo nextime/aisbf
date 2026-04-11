@@ -1,0 +1,86 @@
+{% extends "base.html" %}
+
+{% block title %}Edit Profile - AISBF{% endblock %}
+
+{% block content %}
+<div class="container">
+    <h1>Edit Profile</h1>
+    <p>Update your account information</p>
+
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% endif %}
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    <div class="card">
+        <h2>Account Information</h2>
+        
+        <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}">
+            <div class="form-group">
+                <label for="username">Username</label>
+                <input type="text" id="username" name="username" value="{{ session.username }}" required>
+            </div>
+
+            <div class="form-group">
+                <label for="email">Email Address</label>
+                <input type="email" id="email" name="email" value="{{ session.email }}" required>
+            </div>
+
+            <div class="form-group">
+                <label>Profile Picture</label>
+                <div style="display: flex; align-items: center; gap: 1rem;">
+                    <img src="https://www.gravatar.com/avatar/{{ session.email|md5 }}?s=96&d=identicon" alt="Current avatar" style="border-radius: 8px;">
+                    <p style="color: #a0a0a0;">Profile pictures are managed via <a href="https://gravatar.com" target="_blank">Gravatar</a> using your email address</p>
+                </div>
+            </div>
+
+            <div style="margin-top: 1.5rem;">
+                <button type="submit" class="btn btn-primary">Save Changes</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<style>
+.card {
+    background: #16213e;
+    padding: 2rem;
+    border-radius: 8px;
+    margin-top: 1.5rem;
+}
+
+.card h2 {
+    margin-bottom: 1.5rem;
+    color: #e0e0e0;
+}
+
+.form-group {
+    margin-bottom: 1.25rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.form-group input {
+    width: 100%;
+    padding: 0.75rem;
+    border: 1px solid #0f3460;
+    border-radius: 4px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+    font-size: 1rem;
+}
+
+.form-group input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+</style>
+{% endblock %}

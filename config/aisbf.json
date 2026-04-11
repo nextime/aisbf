@@ -131,5 +131,20 @@
     "use_ssl": false,
     "from_email": "noreply@example.com",
     "from_name": "AISBF"
+  },
+
+  "oauth2": {
+    "google": {
+      "enabled": false,
+      "client_id": "",
+      "client_secret": "",
+      "scopes": ["openid", "email", "profile"]
+    },
+    "github": {
+      "enabled": false,
+      "client_id": "",
+      "client_secret": "",
+      "scopes": ["user:email", "read:user"]
+    }
   }
 }

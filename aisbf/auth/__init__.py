@@ -25,6 +25,8 @@ from .kiro import KiroAuthManager, AuthType
 from .claude import ClaudeAuth
 from .kilo import KiloOAuth2
 from .qwen import QwenOAuth2
+from .google import GoogleOAuth2
+from .github import GitHubOAuth2
 
 __all__ = [
     "KiroAuthManager",
@@ -32,4 +34,6 @@ __all__ = [
     "ClaudeAuth",
     "KiloOAuth2",
     "QwenOAuth2",
+    "GoogleOAuth2",
+    "GitHubOAuth2",
 ]

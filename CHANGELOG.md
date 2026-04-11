@@ -7,6 +7,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+- ✅ **OAuth2 Authentication Support**
+  - Google OAuth2 authentication and signup
+  - GitHub OAuth2 authentication and signup
+  - Admin configurable OAuth2 providers in dashboard settings
+  - Dynamic OAuth2 button display on login and signup pages
+  - Automatic user account creation for first time OAuth users
+  - Automatic email verification for OAuth authenticated users
+  - Full session integration matching existing authentication system
+  - PKCE security implemented for Google OAuth2 flow
+  - State parameter validation for CSRF protection
+  - Proxy-aware redirect URI handling
+  - Secure random password generation for OAuth users
+
 ## [0.99.20] - 2026-04-11
 
 ### Added
