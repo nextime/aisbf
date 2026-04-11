@@ -11,18 +11,6 @@
     "fallback": "general",
     "capabilities": ["t2t", "reasoning", "multimodal"],
     "available_models": [
-      {
-        "model_id": "coding",
-        "nsfw": false,
-        "privacy": false,
-        "description": "Best for programming, code generation, debugging, and technical tasks. Optimized for software development, code reviews, and algorithm design."
-      },
-      {
-        "model_id": "general",
-        "nsfw": false,
-        "privacy": false,
-        "description": "General purpose model for everyday tasks, conversations, and general knowledge queries. Good for a wide range of topics including writing, analysis, and explanations."
-      }
     ]
   }
 }
