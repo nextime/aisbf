@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aisbf"
-version = "0.99.17"
+version = "0.99.18"
 description = "AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -51,10 +51,7 @@ Documentation = "https://git.nexlab.net/nexlab/aisbf.git"
 packages = ["aisbf", "aisbf.auth", "aisbf.providers", "aisbf.providers.kiro"]
 # Note: Provider handler modules (base, google, openai, anthropic, claude, kilo, ollama, codex) are in aisbf.providers package
 py-modules = ["cli"]
+include-package-data = true
 
 [tool.setuptools.package-data]
-aisbf = ["*.json", "streaming_optimization.py"]
-
-[tool.setuptools.data-files]
-"share/aisbf/templates" = ["templates/**/*.html", "templates/**/*.css", "templates/**/*.js"]
-"share/aisbf/static" = ["static/**/*.*"]
+"*" = ["*.json", "*.md", "*.sh", "*.py", "LICENSE.txt", "requirements.txt", "main.py"]
