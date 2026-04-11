@@ -45,6 +45,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
         
         <button type="submit" class="btn" style="width: 100%;">Login</button>
+        
+        {% if signup_enabled %}
+        <div style="text-align: center; margin-top: 20px;">
+            <p>Don't have an account? <a href="{{ url_for(request, '/dashboard/signup') }}" style="color: #4CAF50;">Sign up here</a></p>
+        </div>
+        {% endif %}
     </form>
 </div>
 {% endblock %}

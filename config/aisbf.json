@@ -116,5 +116,20 @@
     "jitter_factor": 0.25,
     "history_window": 3600,
     "consecutive_successes_for_recovery": 10
+  },
+  "signup": {
+    "enabled": false,
+    "require_email_verification": true,
+    "verification_token_expiry_hours": 24
+  },
+  "smtp": {
+    "host": "localhost",
+    "port": 587,
+    "username": "",
+    "password": "",
+    "use_tls": true,
+    "use_ssl": false,
+    "from_email": "noreply@example.com",
+    "from_name": "AISBF"
   }
 }

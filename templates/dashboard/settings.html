@@ -422,11 +422,142 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
     
+    <h3 style="margin: 30px 0 20px;">User Signup</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="signup_enabled" {% if config.signup and config.signup.enabled %}checked{% endif %}>
+            Enable User Signup
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Allow users to create accounts via signup form</small>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="signup_require_verification" {% if config.signup and config.signup.require_email_verification %}checked{% endif %}>
+            Require Email Verification
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Users must verify their email before they can login</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="verification_token_expiry">Verification Token Expiry (hours)</label>
+        <input type="number" id="verification_token_expiry" name="verification_token_expiry"
+               value="{{ config.signup.verification_token_expiry_hours if config.signup else 24 }}"
+               min="1" max="168">
+        <small style="color: #666; display: block; margin-top: 5px;">How long verification links remain valid (1-168 hours)</small>
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">SMTP Email Configuration</h3>
+    
+    <div class="form-group">
+        <label for="smtp_host">SMTP Host</label>
+        <input type="text" id="smtp_host" name="smtp_host"
+               value="{{ config.smtp.host if config.smtp else 'localhost' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">SMTP server hostname (e.g., smtp.gmail.com)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="smtp_port">SMTP Port</label>
+        <input type="number" id="smtp_port" name="smtp_port"
+               value="{{ config.smtp.port if config.smtp else 587 }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">SMTP server port (587 for TLS, 465 for SSL, 25 for no encryption)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="smtp_username">SMTP Username</label>
+        <input type="text" id="smtp_username" name="smtp_username"
+               value="{{ config.smtp.username if config.smtp else '' }}">
+        <small style="color: #666; display: block; margin-top: 5px;">SMTP authentication username (leave blank if not required)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="smtp_password">SMTP Password</label>
+        <input type="password" id="smtp_password" name="smtp_password" placeholder="Leave blank to keep current">
+        <small style="color: #666; display: block; margin-top: 5px;">SMTP authentication password</small>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="smtp_use_tls" {% if not config.smtp or config.smtp.use_tls %}checked{% endif %}>
+            Use TLS
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Use STARTTLS for secure connection (recommended for port 587)</small>
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="smtp_use_ssl" {% if config.smtp and config.smtp.use_ssl %}checked{% endif %}>
+            Use SSL
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Use SSL/TLS from the start (for port 465)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="smtp_from_email">From Email Address</label>
+        <input type="email" id="smtp_from_email" name="smtp_from_email"
+               value="{{ config.smtp.from_email if config.smtp else 'noreply@example.com' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">Email address to send from</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="smtp_from_name">From Name</label>
+        <input type="text" id="smtp_from_name" name="smtp_from_name"
+               value="{{ config.smtp.from_name if config.smtp else 'AISBF' }}" required>
+        <small style="color: #666; display: block; margin-top: 5px;">Display name for sent emails</small>
+    </div>
+    
     <div style="display: flex; gap: 10px; margin-top: 30px;">
         <button type="submit" class="btn">Save Settings</button>
         <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
+        <button type="button" onclick="testSMTP()" class="btn btn-secondary" style="margin-left: auto;">Test SMTP</button>
     </div>
 </form>
+
+<script>
+async function testSMTP() {
+    const host = document.getElementById('smtp_host').value;
+    const port = document.getElementById('smtp_port').value;
+    const username = document.getElementById('smtp_username').value;
+    const fromEmail = document.getElementById('smtp_from_email').value;
+    
+    if (!host || !port || !fromEmail) {
+        alert('Please fill in SMTP host, port, and from email before testing');
+        return;
+    }
+    
+    if (!confirm('This will send a test email to the admin email address. Continue?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/test-smtp") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({
+                host: host,
+                port: parseInt(port),
+                username: username,
+                password: document.getElementById('smtp_password').value,
+                use_tls: document.querySelector('input[name="smtp_use_tls"]').checked,
+                use_ssl: document.querySelector('input[name="smtp_use_ssl"]').checked,
+                from_email: fromEmail,
+                from_name: document.getElementById('smtp_from_name').value
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('Test email sent successfully! Check your inbox.');
+        } else {
+            alert('Failed to send test email: ' + (data.error || 'Unknown error'));
+        }
+    } catch (error) {
+        alert('Error testing SMTP: ' + error.message);
+    }
+}
+</script>
 
 <script>
 function toggleSSLFields() {

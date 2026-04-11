@@ -7,6 +7,45 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.20] - 2026-04-11
+
+### Added
+- **User Signup Functionality**: Complete user registration system with email verification
+  - Admin-controlled signup enable/disable toggle via dashboard settings
+  - SMTP server configuration interface in settings page
+  - Secure password hashing with SHA256
+  - Email verification with time-limited secure tokens
+  - Signup form with email and password fields
+  - Conditional signup link on login page when enabled
+  - Email verification landing page with status messages
+  - User accounts are disabled until email is verified
+
+- **SMTP Email System**: Full SMTP email sending capabilities
+  - Supports plain, TLS, and SSL SMTP connections
+  - Configurable SMTP host, port, username, password, and sender address
+  - Proxy-aware verification link generation
+  - Verification email templates with proper formatting
+  - Connection timeout and error handling
+
+- **User Management System**:
+  - Admin user management interface at /dashboard/users
+  - Create, edit, delete, and toggle user status
+  - Role-based access control (admin / regular user)
+  - Users have isolated private configurations
+  - Each user gets their own providers, rotations, autoselects
+  - User-specific API endpoints and authentication tokens
+
+### Changed
+- **Version Bump**: Updated version to 0.99.20 in setup.py, pyproject.toml, and aisbf/__init__.py
+- **Authentication System**: Updated to support both config admin and database users
+- **Login System**: Added email verification check before allowing login
+- **Dashboard Templates**: Updated login page to show conditional signup link
+
+### Fixed
+- **Database Schema**: Added backwards compatible database migration for user tables
+- **Session Management**: Added sliding session expiration for authenticated users
+- **Proxy Awareness**: All verification links respect reverse proxy configurations
+
 ## [0.99.5] - 2026-04-09
 
 ### Fixed

@@ -1459,20 +1459,25 @@ async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
     import logging
     from jinja2 import Environment, FileSystemLoader, DictLoader
-    
+
     logger = logging.getLogger(__name__)
     try:
         # Create a completely fresh Jinja2 environment to avoid any caching issues
         env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
-        
+
         # Add the required globals
         env.globals['url_for'] = url_for
         env.globals['get_base_url'] = get_base_url
-        
+
+        # Check if signup is enabled
+        signup_enabled = False
+        if config and hasattr(config, 'aisbf') and config.aisbf:
+            signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
+
         # Get and render template
         template = env.get_template("dashboard/login.html")
-        html_content = template.render(request=request)
-        
+        html_content = template.render(request=request, signup_enabled=signup_enabled)
+
         return HTMLResponse(content=html_content)
     except Exception as e:
         logger.error(f"Error rendering login page: {e}", exc_info=True)
@@ -1482,16 +1487,23 @@ async def dashboard_login_page(request: Request):
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...), remember_me: bool = Form(False)):
     """Handle dashboard login"""
     from aisbf.database import get_database
-    
+
     # Hash the submitted password
     password_hash = hashlib.sha256(password.encode()).hexdigest()
-    
+
     # Try database authentication first
     db = get_database()
     user = db.authenticate_user(username, password_hash)
-    
+
     if user:
-        # Database user authenticated
+        # Database user authenticated - check if email is verified
+        if not user['email_verified']:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Please verify your email address before logging in"}
+            )
+
         request.session['logged_in'] = True
         request.session['username'] = username
         request.session['role'] = user['role']
@@ -1504,12 +1516,12 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
             # For non-remember-me sessions, set expiry to 2 weeks (default session length)
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
-    
+
     # Fallback to config admin
     dashboard_config = server_config.get('dashboard_config', {}) if server_config else {}
     stored_username = dashboard_config.get('username', 'admin')
     stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
-    
+
     if username == stored_username and password_hash == stored_password_hash:
         request.session['logged_in'] = True
         request.session['username'] = username
@@ -1523,12 +1535,199 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
             # For non-remember-me sessions, set expiry to 2 weeks (default session length)
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
-    
+
+    # Check if signup is enabled
+    signup_enabled = False
+    if config and hasattr(config, 'aisbf') and config.aisbf:
+        signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/login.html",
-        context={"request": request, "error": "Invalid credentials"}
+        context={"request": request, "error": "Invalid credentials", "signup_enabled": signup_enabled}
     )
+
+
+@app.get("/dashboard/signup", response_class=HTMLResponse)
+async def dashboard_signup_page(request: Request):
+    """Show dashboard signup page"""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        # Check if signup is enabled
+        signup_enabled = False
+        if config and hasattr(config, 'aisbf') and config.aisbf:
+            signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
+
+        if not signup_enabled:
+            return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+        # Create a completely fresh Jinja2 environment to avoid any caching issues
+        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+
+        # Add the required globals
+        env.globals['url_for'] = url_for
+        env.globals['get_base_url'] = get_base_url
+
+        # Get and render template
+        template = env.get_template("dashboard/signup.html")
+        html_content = template.render(request=request)
+
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error rendering signup page: {e}", exc_info=True)
+        raise
+
+
+@app.post("/dashboard/signup")
+async def dashboard_signup(
+    request: Request,
+    email: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    """Handle user signup"""
+    from aisbf.database import get_database
+    from aisbf.email_utils import hash_password, generate_verification_token, send_verification_email
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Check if signup is enabled
+    signup_enabled = False
+    if config and hasattr(config, 'aisbf') and config.aisbf:
+        signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
+
+    if not signup_enabled:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    # Validate passwords match
+    if password != confirm_password:
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "Passwords do not match"}
+        )
+
+    # Validate password strength (minimum 8 characters)
+    if len(password) < 8:
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "Password must be at least 8 characters long"}
+        )
+
+    # Validate email format
+    import re
+    if not re.match(r"[^@]+@[^@]+\.[^@]+", email):
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "Invalid email address"}
+        )
+
+    try:
+        db = get_database()
+
+        # Check if user already exists
+        existing_user = db.get_user_by_email(email)
+        if existing_user:
+            if existing_user['email_verified']:
+                return templates.TemplateResponse(
+                    request=request,
+                    name="dashboard/signup.html",
+                    context={"request": request, "error": "An account with this email already exists"}
+                )
+            else:
+                # Resend verification email for unverified user
+                verification_token = generate_verification_token()
+                db.set_verification_token(email, verification_token)
+
+                # Send verification email
+                try:
+                    base_url = get_base_url(request)
+                    verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}&email={email}"
+                    send_verification_email(email, verification_url, config.aisbf.smtp if config.aisbf.smtp else None)
+                except Exception as e:
+                    logger.error(f"Failed to send verification email: {e}")
+
+                return templates.TemplateResponse(
+                    request=request,
+                    name="dashboard/signup.html",
+                    context={"request": request, "message": "Account already exists but not verified. A new verification email has been sent."}
+                )
+
+        # Create new user
+        password_hash = hash_password(password)
+        verification_token = generate_verification_token()
+
+        user_id = db.create_user(email, password_hash, verification_token)
+
+        # Send verification email
+        try:
+            base_url = get_base_url(request)
+            verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}&email={email}"
+            send_verification_email(email, verification_url, config.aisbf.smtp if config.aisbf.smtp else None)
+
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/signup.html",
+                context={"request": request, "message": "Account created successfully! Please check your email to verify your account."}
+            )
+        except Exception as e:
+            logger.error(f"Failed to send verification email: {e}")
+            # Still create user but inform them about email issue
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/signup.html",
+                context={"request": request, "message": "Account created successfully! However, there was an issue sending the verification email. Please contact an administrator."}
+            )
+
+    except Exception as e:
+        logger.error(f"Error during signup: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "An error occurred during signup. Please try again."}
+        )
+
+
+@app.get("/dashboard/verify-email")
+async def verify_email(request: Request, token: str, email: str):
+    """Handle email verification"""
+    from aisbf.database import get_database
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        db = get_database()
+
+        # Verify the token
+        if db.verify_email_token(email, token):
+            # Token is valid, mark email as verified
+            db.verify_email(email)
+
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "message": "Email verified successfully! You can now log in."}
+            )
+        else:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={"request": request, "error": "Invalid or expired verification token"}
+            )
+
+    except Exception as e:
+        logger.error(f"Error during email verification: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={"request": request, "error": "An error occurred during email verification"}
+        )
 
 @app.get("/dashboard/logout")
 async def dashboard_logout(request: Request):
@@ -2536,43 +2735,50 @@ async def dashboard_settings(request: Request):
     }
     )
 
-@app.post("/dashboard/settings")
-async def dashboard_settings_save(
-    request: Request,
-    host: str = Form(...),
-    port: int = Form(...),
-    protocol: str = Form(...),
-    auth_enabled: bool = Form(False),
-    auth_tokens: str = Form(""),
-    dashboard_username: str = Form(...),
-    dashboard_password: str = Form(""),
-    condensation_model_id: str = Form(...),
-    autoselect_model_id: str = Form(...),
-    database_type: str = Form("sqlite"),
-    sqlite_path: str = Form("~/.aisbf/aisbf.db"),
-    mysql_host: str = Form("localhost"),
-    mysql_port: int = Form(3306),
-    mysql_user: str = Form("aisbf"),
-    mysql_password: str = Form(""),
-    mysql_database: str = Form("aisbf"),
-    cache_type: str = Form("file"),
-    redis_host: str = Form("localhost"),
-    redis_port: int = Form(6379),
-    redis_db: int = Form(0),
-    redis_password: str = Form(""),
-    redis_key_prefix: str = Form("aisbf:"),
-    mcp_enabled: bool = Form(False),
-    autoselect_tokens: str = Form(""),
-    fullconfig_tokens: str = Form(""),
-    tor_enabled: bool = Form(False),
-    tor_control_port: int = Form(9051),
-    tor_control_host: str = Form("127.0.0.1"),
-    tor_control_password: str = Form(""),
-    tor_hidden_service_dir: str = Form(""),
-    tor_hidden_service_port: int = Form(80),
-    tor_socks_port: int = Form(9050),
-    tor_socks_host: str = Form("127.0.0.1")
-):
+ @app.post("/dashboard/settings")
+ async def dashboard_settings_save(
+     request: Request,
+     host: str = Form(...),
+     port: int = Form(...),
+     protocol: str = Form(...),
+     auth_enabled: bool = Form(False),
+     auth_tokens: str = Form(""),
+     dashboard_username: str = Form(...),
+     dashboard_password: str = Form(""),
+     condensation_model_id: str = Form(...),
+     autoselect_model_id: str = Form(...),
+     database_type: str = Form("sqlite"),
+     sqlite_path: str = Form("~/.aisbf/aisbf.db"),
+     mysql_host: str = Form("localhost"),
+     mysql_port: int = Form(3306),
+     mysql_user: str = Form("aisbf"),
+     mysql_password: str = Form(""),
+     mysql_database: str = Form("aisbf"),
+     cache_type: str = Form("file"),
+     redis_host: str = Form("localhost"),
+     redis_port: int = Form(6379),
+     redis_db: int = Form(0),
+     redis_password: str = Form(""),
+     redis_key_prefix: str = Form("aisbf:"),
+     mcp_enabled: bool = Form(False),
+     autoselect_tokens: str = Form(""),
+     fullconfig_tokens: str = Form(""),
+     tor_enabled: bool = Form(False),
+     tor_control_port: int = Form(9051),
+     tor_control_host: str = Form("127.0.0.1"),
+     tor_control_password: str = Form(""),
+     tor_hidden_service_dir: str = Form(""),
+     tor_hidden_service_port: int = Form(80),
+     tor_socks_port: int = Form(9050),
+     tor_socks_host: str = Form("127.0.0.1"),
+     signup_enabled: bool = Form(False),
+     smtp_server: str = Form(""),
+     smtp_port: int = Form(587),
+     smtp_username: str = Form(""),
+     smtp_password: str = Form(""),
+     smtp_use_tls: bool = Form(True),
+     smtp_from_address: str = Form("")
+ ):
     """Save server settings"""
     auth_check = require_admin(request)
     if auth_check:

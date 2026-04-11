@@ -1,0 +1,124 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Sign Up - AISBF{% endblock %}
+
+{% block content %}
+<div style="max-width: 500px; margin: 50px auto;">
+    <h2 style="margin-bottom: 30px; text-align: center;">Create Account</h2>
+    
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+    
+    {% if success %}
+    <div class="alert alert-success">{{ success }}</div>
+    {% else %}
+    <form method="POST" action="{{ url_for(request, '/dashboard/signup') }}">
+        <div class="form-group">
+            <label for="username">Username</label>
+            <input type="text" id="username" name="username" required autofocus 
+                   pattern="[a-zA-Z0-9_-]+" 
+                   title="Username can only contain letters, numbers, underscores, and hyphens"
+                   minlength="3" maxlength="50">
+            <small style="color: #666; display: block; margin-top: 5px;">
+                3-50 characters, letters, numbers, underscores, and hyphens only
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label for="email">Email Address</label>
+            <input type="email" id="email" name="email" required>
+            <small style="color: #666; display: block; margin-top: 5px;">
+                You will receive a verification email at this address
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label for="password">Password</label>
+            <input type="password" id="password" name="password" required 
+                   minlength="8"
+                   pattern="(?=.*[a-z])(?=.*[A-Z])(?=.*\d).{8,}"
+                   title="Password must be at least 8 characters and contain at least one uppercase letter, one lowercase letter, and one number">
+            <small style="color: #666; display: block; margin-top: 5px;">
+                At least 8 characters with uppercase, lowercase, and numbers
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label for="confirm_password">Confirm Password</label>
+            <input type="password" id="confirm_password" name="confirm_password" required>
+        </div>
+        
+        <div class="form-group">
+            <label style="display: flex; align-items: center; cursor: pointer;">
+                <input type="checkbox" id="terms" name="terms" required style="width: auto; margin-right: 10px;">
+                I agree to the Terms of Service and Privacy Policy
+            </label>
+        </div>
+        
+        <button type="submit" class="btn" style="width: 100%;">Create Account</button>
+        
+        <div style="text-align: center; margin-top: 20px;">
+            <p>Already have an account? <a href="{{ url_for(request, '/dashboard/login') }}" style="color: #4CAF50;">Login here</a></p>
+        </div>
+    </form>
+    {% endif %}
+</div>
+
+<script>
+// Client-side password validation
+document.querySelector('form')?.addEventListener('submit', function(e) {
+    const password = document.getElementById('password').value;
+    const confirmPassword = document.getElementById('confirm_password').value;
+    
+    if (password !== confirmPassword) {
+        e.preventDefault();
+        alert('Passwords do not match!');
+        return false;
+    }
+    
+    // Check password strength
+    if (password.length < 8) {
+        e.preventDefault();
+        alert('Password must be at least 8 characters long!');
+        return false;
+    }
+    
+    if (!/[a-z]/.test(password)) {
+        e.preventDefault();
+        alert('Password must contain at least one lowercase letter!');
+        return false;
+    }
+    
+    if (!/[A-Z]/.test(password)) {
+        e.preventDefault();
+        alert('Password must contain at least one uppercase letter!');
+        return false;
+    }
+    
+    if (!/\d/.test(password)) {
+        e.preventDefault();
+        alert('Password must contain at least one number!');
+        return false;
+    }
+    
+    return true;
+});
+</script>
+{% endblock %}

@@ -213,6 +213,23 @@ class AdaptiveRateLimitingConfig(BaseModel):
     history_window: int = 3600  # History window in seconds (1 hour)
     consecutive_successes_for_recovery: int = 10  # Successes needed before recovery starts
 
+class SignupConfig(BaseModel):
+    """Configuration for user signup functionality"""
+    enabled: bool = False
+    require_email_verification: bool = True
+    verification_token_expiry_hours: int = 24
+    
+class SMTPConfig(BaseModel):
+    """Configuration for SMTP email sending"""
+    host: str = "localhost"
+    port: int = 587
+    username: str = ""
+    password: str = ""
+    use_tls: bool = True
+    use_ssl: bool = False
+    from_email: str = ""
+    from_name: str = "AISBF"
+
 class AISBFConfig(BaseModel):
     """Global AISBF configuration from aisbf.json"""
     classify_nsfw: bool = False
@@ -229,6 +246,8 @@ class AISBFConfig(BaseModel):
     response_cache: Optional[ResponseCacheConfig] = None
     batching: Optional[BatchingConfig] = None
     adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
+    signup: Optional[SignupConfig] = None
+    smtp: Optional[SMTPConfig] = None
 
 
 class AppConfig(BaseModel):
@@ -701,6 +720,14 @@ class Config:
             adaptive_data = data.get('adaptive_rate_limiting')
             if adaptive_data:
                 data['adaptive_rate_limiting'] = AdaptiveRateLimitingConfig(**adaptive_data)
+            # Parse signup separately if present
+            signup_data = data.get('signup')
+            if signup_data:
+                data['signup'] = SignupConfig(**signup_data)
+            # Parse smtp separately if present
+            smtp_data = data.get('smtp')
+            if smtp_data:
+                data['smtp'] = SMTPConfig(**smtp_data)
             self.aisbf = AISBFConfig(**data)
             self._loaded_files['aisbf'] = str(aisbf_path.absolute())
             logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")
@@ -710,6 +737,10 @@ class Config:
                 logger.info(f"Batching config: enabled={self.aisbf.batching.enabled}, window_ms={self.aisbf.batching.window_ms}, max_batch_size={self.aisbf.batching.max_batch_size}")
             if self.aisbf.adaptive_rate_limiting:
                 logger.info(f"Adaptive rate limiting: enabled={self.aisbf.adaptive_rate_limiting.enabled}, initial_rate_limit={self.aisbf.adaptive_rate_limiting.initial_rate_limit}")
+            if self.aisbf.signup:
+                logger.info(f"Signup config: enabled={self.aisbf.signup.enabled}, require_email_verification={self.aisbf.signup.require_email_verification}")
+            if self.aisbf.smtp:
+                logger.info(f"SMTP config: host={self.aisbf.smtp.host}, port={self.aisbf.smtp.port}, from_email={self.aisbf.smtp.from_email}")
             logger.info(f"=== Config._load_aisbf_config END ===")
 
     def _initialize_error_tracking(self):

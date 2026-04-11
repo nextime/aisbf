@@ -221,14 +221,70 @@ class DatabaseManager:
                 CREATE TABLE IF NOT EXISTS users (
                     id INTEGER PRIMARY KEY {auto_increment},
                     username VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE,
                     password_hash VARCHAR(255) NOT NULL,
                     role VARCHAR(50) DEFAULT 'user',
                     created_by VARCHAR(255),
                     created_at TIMESTAMP DEFAULT {timestamp_default},
                     last_login TIMESTAMP NULL,
-                    is_active {boolean_type} DEFAULT 1
+                    is_active {boolean_type} DEFAULT 1,
+                    email_verified {boolean_type} DEFAULT 0,
+                    verification_token VARCHAR(255),
+                    verification_token_expires TIMESTAMP NULL
                 )
             ''')
+            
+            # Migration: Add email-related columns if they don't exist
+            try:
+                if self.db_type == 'sqlite':
+                    cursor.execute("PRAGMA table_info(users)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    if 'email' not in columns:
+                        cursor.execute('ALTER TABLE users ADD COLUMN email VARCHAR(255) UNIQUE')
+                        logger.info("Migration: Added email column to users table")
+                    if 'email_verified' not in columns:
+                        cursor.execute(f'ALTER TABLE users ADD COLUMN email_verified {boolean_type} DEFAULT 0')
+                        logger.info("Migration: Added email_verified column to users table")
+                    if 'verification_token' not in columns:
+                        cursor.execute('ALTER TABLE users ADD COLUMN verification_token VARCHAR(255)')
+                        logger.info("Migration: Added verification_token column to users table")
+                    if 'verification_token_expires' not in columns:
+                        cursor.execute('ALTER TABLE users ADD COLUMN verification_token_expires TIMESTAMP NULL')
+                        logger.info("Migration: Added verification_token_expires column to users table")
+                else:  # mysql
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'email'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE users ADD COLUMN email VARCHAR(255) UNIQUE')
+                        logger.info("Migration: Added email column to users table")
+                    
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'email_verified'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute(f'ALTER TABLE users ADD COLUMN email_verified {boolean_type} DEFAULT 0')
+                        logger.info("Migration: Added email_verified column to users table")
+                    
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_token'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE users ADD COLUMN verification_token VARCHAR(255)')
+                        logger.info("Migration: Added verification_token column to users table")
+                    
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'verification_token_expires'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE users ADD COLUMN verification_token_expires TIMESTAMP NULL')
+                        logger.info("Migration: Added verification_token_expires column to users table")
+            except Exception as e:
+                logger.warning(f"Migration check for users email fields: {e}")
 
             # User-specific configuration tables for multi-user isolation
             cursor.execute(f'''
@@ -798,7 +854,8 @@ class DatabaseManager:
                 }
             return None
 
-    def create_user(self, username: str, password_hash: str, role: str = 'user', created_by: str = None) -> int:
+    def create_user(self, username: str, password_hash: str, role: str = 'user', created_by: str = None,
+                   email: str = None, email_verified: bool = False) -> int:
         """
         Create a new user.
 
@@ -807,6 +864,8 @@ class DatabaseManager:
             password_hash: SHA256 hash of the password
             role: User role ('admin' or 'user')
             created_by: Username of the creator
+            email: Email address (optional)
+            email_verified: Whether email is verified (default: False)
 
         Returns:
             User ID of the created user
@@ -815,11 +874,108 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                INSERT INTO users (username, password_hash, role, created_by)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
-            ''', (username, password_hash, role, created_by))
+                INSERT INTO users (username, email, password_hash, role, created_by, email_verified)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+            ''', (username, email, password_hash, role, created_by, 1 if email_verified else 0))
             conn.commit()
             return cursor.lastrowid
+    
+    def get_user_by_email(self, email: str) -> Optional[Dict]:
+        """
+        Get a user by email address.
+
+        Args:
+            email: Email address to look up
+
+        Returns:
+            User dict if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT id, username, email, role, is_active, email_verified
+                FROM users
+                WHERE email = {placeholder}
+            ''', (email,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'username': row[1],
+                    'email': row[2],
+                    'role': row[3],
+                    'is_active': row[4],
+                    'email_verified': row[5]
+                }
+            return None
+    
+    def set_verification_token(self, user_id: int, token: str, expires_at: datetime):
+        """
+        Set email verification token for a user.
+
+        Args:
+            user_id: User ID
+            token: Verification token
+            expires_at: Token expiration datetime
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                UPDATE users
+                SET verification_token = {placeholder}, verification_token_expires = {placeholder}
+                WHERE id = {placeholder}
+            ''', (token, expires_at.isoformat(), user_id))
+            conn.commit()
+    
+    def verify_email(self, token: str) -> Optional[Dict]:
+        """
+        Verify a user's email using the verification token.
+
+        Args:
+            token: Verification token
+
+        Returns:
+            User dict if token is valid and not expired, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            # Find user with this token that hasn't expired
+            cursor.execute(f'''
+                SELECT id, username, email, verification_token_expires
+                FROM users
+                WHERE verification_token = {placeholder} AND is_active = 1
+            ''', (token,))
+            
+            row = cursor.fetchone()
+            if not row:
+                return None
+            
+            user_id, username, email, expires_str = row
+            
+            # Check if token has expired
+            if expires_str:
+                expires_at = datetime.fromisoformat(expires_str)
+                if datetime.now() > expires_at:
+                    return None
+            
+            # Mark email as verified and clear token
+            cursor.execute(f'''
+                UPDATE users
+                SET email_verified = 1, verification_token = NULL, verification_token_expires = NULL
+                WHERE id = {placeholder}
+            ''', (user_id,))
+            conn.commit()
+            
+            return {
+                'id': user_id,
+                'username': username,
+                'email': email
+            }
 
     def get_users(self) -> List[Dict]:
         """
