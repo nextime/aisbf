@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aisbf"
-version = "0.99.16"
+version = "0.99.17"
 description = "AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -54,3 +54,7 @@ py-modules = ["cli"]
 
 [tool.setuptools.package-data]
 aisbf = ["*.json", "streaming_optimization.py"]
+
+[tool.setuptools.package-data.""]
+templates = ["**/*.html", "**/*.css", "**/*.js"]
+static = ["**/*"]
