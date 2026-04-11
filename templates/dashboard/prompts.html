@@ -49,6 +49,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     <div style="display: flex; gap: 10px; margin-top: 20px;">
         <button type="submit" class="btn">Save Prompt</button>
+        {% if not is_admin %}
+        <button type="button" class="btn btn-secondary" onclick="resetPrompt()">Reset to Default</button>
+        {% endif %}
         <a href="/dashboard" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
@@ -66,6 +69,22 @@ function switchPrompt() {
     if (prompt) {
         document.getElementById('prompt_content').value = prompt.content;
         document.getElementById('prompt_key').value = key;
+    }
+}
+
+function resetPrompt() {
+    if (!currentPromptKey) return;
+    if (confirm('Are you sure you want to reset this prompt to the default admin configuration?')) {
+        fetch('/dashboard/prompts/reset/' + currentPromptKey, {
+            method: 'POST',
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        }).then(response => {
+            if (response.ok) {
+                location.reload();
+            }
+        });
     }
 }
 

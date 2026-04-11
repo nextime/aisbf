@@ -25,35 +25,35 @@
             <h3>Your Models</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">/api/user/models</code>
+                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/models</code>
                 <p>List all models from your providers, rotations, and autoselects</p>
             </div>
             
             <h3>Your Providers</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">/api/user/providers</code>
+                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/providers</code>
                 <p>List all your configured providers</p>
             </div>
             
             <h3>Your Rotations</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">/api/user/rotations</code>
+                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/rotations</code>
                 <p>List all your configured rotations</p>
             </div>
             
             <h3>Your Autoselects</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">/api/user/autoselects</code>
+                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/autoselects</code>
                 <p>List all your configured autoselects</p>
             </div>
             
             <h3>Your Chat Completions</h3>
             <div class="endpoint">
                 <code class="method POST">POST</code>
-                <code class="url">/api/user/chat/completions</code>
+                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/chat/completions</code>
                 <p>Send chat requests using your configurations</p>
                 <p class="example">Example model formats:</p>
                 <ul>
@@ -66,12 +66,12 @@
             <h3>MCP Tools</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">/mcp/tools</code>
+                <code class="url">{{ get_base_url(request) }}/mcp/tools</code>
                 <p>List available MCP tools for your configurations</p>
             </div>
             <div class="endpoint">
                 <code class="method POST">POST</code>
-                <code class="url">/mcp/tools/call</code>
+                <code class="url">{{ get_base_url(request) }}/mcp/tools/call</code>
                 <p>Call MCP tools to manage your configurations</p>
             </div>
         </div>

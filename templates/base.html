@@ -418,8 +418,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %}>Analytics</a>
             {% if request.session.role == 'admin' %}
             <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
-            {% endif %}
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
+            {% endif %}
             <a href="{{ url_for(request, '/dashboard/docs') }}" {% if '/docs' in request.path %}class="active"{% endif %}>Docs</a>
             <a href="{{ url_for(request, '/dashboard/about') }}" {% if '/about' in request.path %}class="active"{% endif %}>About</a>
         </div>

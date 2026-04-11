@@ -2310,6 +2310,9 @@ async def dashboard_prompts(request: Request):
     if auth_check:
         return auth_check
     
+    is_admin = request.session.get('role') == 'admin'
+    user_id = request.session.get('user_id')
+    
     # Define available prompts
     prompt_files = [
         {'key': 'condensation_conversational', 'name': 'Condensation - Conversational', 'filename': 'condensation_conversational.md'},
@@ -2318,54 +2321,61 @@ async def dashboard_prompts(request: Request):
     ]
     
     prompts_data = []
+    from aisbf.database import get_database
+    db = get_database()
+    
     for prompt_file in prompt_files:
-        # Check user config first
-        config_path = Path.home() / '.aisbf' / prompt_file['filename']
+        content = None
         
-        if not config_path.exists():
-            # Try installed locations
-            installed_dirs = [
-                Path.home() / '.local' / 'share' / 'aisbf',
-                Path('/usr/share/aisbf'),
-                Path(__file__).parent,  # For source tree
-            ]
-            
-            source_path = None
-            for installed_dir in installed_dirs:
-                test_path = installed_dir / prompt_file['filename']
-                if test_path.exists():
-                    source_path = test_path
-                    break
-                # Also check config subdirectory
-                test_path = installed_dir / 'config' / prompt_file['filename']
-                if test_path.exists():
-                    source_path = test_path
-                    break
-            
-            if source_path:
-                # Copy to user config directory
-                config_path.parent.mkdir(parents=True, exist_ok=True)
-                import shutil
-                shutil.copy2(source_path, config_path)
-                logger.info(f"Copied prompt from {source_path} to {config_path}")
+        # Check if regular user has saved override
+        if user_id:
+            content = db.get_user_prompt(user_id, prompt_file['key'])
         
-        if config_path.exists():
-            with open(config_path) as f:
-                content = f.read()
-            prompts_data.append({
-                'key': prompt_file['key'],
-                'name': prompt_file['name'],
-                'filename': prompt_file['filename'],
-                'content': content
-            })
-        else:
-            # Add empty prompt if file not found
-            prompts_data.append({
-                'key': prompt_file['key'],
-                'name': prompt_file['name'],
-                'filename': prompt_file['filename'],
-                'content': f'# {prompt_file["name"]}\n\nPrompt template not found. Please add your prompt here.'
-            })
+        # If no user override or admin, load default from filesystem
+        if content is None:
+            # Check user config first
+            config_path = Path.home() / '.aisbf' / prompt_file['filename']
+            
+            if not config_path.exists():
+                # Try installed locations
+                installed_dirs = [
+                    Path.home() / '.local' / 'share' / 'aisbf',
+                    Path('/usr/share/aisbf'),
+                    Path(__file__).parent,  # For source tree
+                ]
+                
+                source_path = None
+                for installed_dir in installed_dirs:
+                    test_path = installed_dir / prompt_file['filename']
+                    if test_path.exists():
+                        source_path = test_path
+                        break
+                    # Also check config subdirectory
+                    test_path = installed_dir / 'config' / prompt_file['filename']
+                    if test_path.exists():
+                        source_path = test_path
+                        break
+                
+                if source_path:
+                    # Copy to user config directory
+                    config_path.parent.mkdir(parents=True, exist_ok=True)
+                    import shutil
+                    shutil.copy2(source_path, config_path)
+                    logger.info(f"Copied prompt from {source_path} to {config_path}")
+            
+            if config_path.exists():
+                with open(config_path) as f:
+                    content = f.read()
+            else:
+                # Add empty prompt if file not found
+                content = f'# {prompt_file["name"]}\n\nPrompt template not found. Please add your prompt here.'
+        
+        prompts_data.append({
+            'key': prompt_file['key'],
+            'name': prompt_file['name'],
+            'filename': prompt_file['filename'],
+            'content': content
+        })
     
     # Check for success parameter
     success = request.query_params.get('success')
@@ -2378,6 +2388,7 @@ async def dashboard_prompts(request: Request):
         "session": request.session,
         "prompts": prompt_files,
         "prompts_data": json.dumps(prompts_data),
+        "is_admin": is_admin,
         "success": "Prompt saved successfully!" if success else None
     }
     )
@@ -2388,6 +2399,9 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
+    
+    is_admin = request.session.get('role') == 'admin'
+    user_id = request.session.get('user_id')
     
     # Map prompt keys to filenames
     prompt_map = {
@@ -2409,14 +2423,39 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
         }
     )
     
-    filename = prompt_map[prompt_key]
-    config_path = Path.home() / '.aisbf' / filename
-    config_path.parent.mkdir(parents=True, exist_ok=True)
-    
-    with open(config_path, 'w') as f:
-        f.write(prompt_content)
+    if is_admin:
+        # Admin saves to filesystem
+        filename = prompt_map[prompt_key]
+        config_path = Path.home() / '.aisbf' / filename
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        with open(config_path, 'w') as f:
+            f.write(prompt_content)
+    else:
+        # Regular user saves to database
+        from aisbf.database import get_database
+        db = get_database()
+        db.save_user_prompt(user_id, prompt_key, prompt_content)
     
     return RedirectResponse(url=url_for(request, "/dashboard/prompts?success=1"), status_code=303)
+
+@app.post("/dashboard/prompts/reset/{prompt_key}")
+async def dashboard_prompts_reset(request: Request, prompt_key: str):
+    """Reset prompt to default for user"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+    
+    from aisbf.database import get_database
+    db = get_database()
+    db.delete_user_prompt(user_id, prompt_key)
+    
+    return JSONResponse({"success": True})
+
 
 @app.get("/dashboard/condensation", response_class=HTMLResponse)
 async def dashboard_condensation(request: Request):
@@ -2535,7 +2574,7 @@ async def dashboard_settings_save(
     tor_socks_host: str = Form("127.0.0.1")
 ):
     """Save server settings"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_admin(request)
     if auth_check:
         return auth_check
     
@@ -2756,7 +2795,7 @@ async def dashboard_users_delete(request: Request, user_id: int):
 @app.post("/dashboard/restart")
 async def dashboard_restart(request: Request):
     """Reload configuration from disk"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_admin(request)
     if auth_check:
         return auth_check
 
@@ -5694,6 +5733,213 @@ async def mcp_call_tool(request: Request):
 # These endpoints allow authenticated users to access their own configurations
 # Admin users can also access other users' configurations
 
+# New username-based endpoints
+@app.get("/api/u/{username}/models")
+async def user_list_models_by_username(request: Request, username: str):
+    """
+    List all available models for the specified user.
+    
+    This includes the user's own providers, rotations, and autoselects.
+    Admin users can access any user's configurations.
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Returns models from:
+    - User-configured providers
+    - User-configured rotations  
+    - User-configured autoselects
+    
+    Example:
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/models
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    # Get target user by username
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    # Check permissions: only admin, global token, or the user themselves can access
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    # For admin/global tokens, return both global and user configurations
+    if is_global_token or is_admin:
+        # Return global config models plus user-specific models
+        all_models = []
+        
+        # Add global provider models
+        for provider_id, provider_config in config.providers.items():
+            try:
+                provider_models = await get_provider_models(provider_id, provider_config)
+                all_models.extend(provider_models)
+            except Exception as e:
+                logger.warning(f"Error listing models for provider {provider_id}: {e}")
+        
+        # Add global rotations
+        for rotation_id, rotation_config in config.rotations.items():
+            try:
+                all_models.append({
+                    'id': f"rotation/{rotation_id}",
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': 'aisbf-rotation',
+                    'type': 'rotation',
+                    'rotation_id': rotation_id,
+                    'model_name': rotation_config.model_name,
+                    'source': 'global'
+                })
+            except Exception as e:
+                logger.warning(f"Error listing rotation {rotation_id}: {e}")
+        
+        # Add global autoselects
+        for autoselect_id, autoselect_config in config.autoselect.items():
+            try:
+                all_models.append({
+                    'id': f"autoselect/{autoselect_id}",
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': 'aisbf-autoselect',
+                    'type': 'autoselect',
+                    'autoselect_id': autoselect_id,
+                    'model_name': autoselect_config.model_name,
+                    'description': autoselect_config.description,
+                    'source': 'global'
+                })
+            except Exception as e:
+                logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
+        
+        # Add user-specific models
+        handler = get_user_handler('request', target_user_id)
+        for provider_id, provider_config in handler.user_providers.items():
+            try:
+                if hasattr(provider_config, 'models') and provider_config.models:
+                    for model in provider_config.models:
+                        model_id = f"{provider_id}/{model.name}"
+                        all_models.append({
+                            'id': model_id,
+                            'object': 'model',
+                            'created': int(time.time()),
+                            'owned_by': provider_id,
+                            'provider': provider_id,
+                            'type': 'user_provider',
+                            'model_name': model.name,
+                            'source': 'user_config'
+                        })
+            except Exception as e:
+                logger.warning(f"Error listing models for user provider {provider_id}: {e}")
+        
+        rotation_handler = get_user_handler('rotation', target_user_id)
+        for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+            try:
+                all_models.append({
+                    'id': f"user-rotation/{rotation_id}",
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': 'aisbf-user-rotation',
+                    'type': 'user_rotation',
+                    'rotation_id': rotation_id,
+                    'source': 'user_config'
+                })
+            except Exception as e:
+                logger.warning(f"Error listing user rotation {rotation_id}: {e}")
+        
+        autoselect_handler = get_user_handler('autoselect', target_user_id)
+        for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+            try:
+                all_models.append({
+                    'id': f"user-autoselect/{autoselect_id}",
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': 'aisbf-user-autoselect',
+                    'type': 'user_autoselect',
+                    'autoselect_id': autoselect_id,
+                    'source': 'user_config'
+                })
+            except Exception as e:
+                logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
+        
+        return {"object": "list", "data": all_models}
+    
+    # Regular user - only their own configurations
+    all_models = []
+    
+    # Get user-specific handler for providers
+    handler = get_user_handler('request', target_user_id)
+    
+    # Add user providers
+    for provider_id, provider_config in handler.user_providers.items():
+        try:
+            if hasattr(provider_config, 'models') and provider_config.models:
+                for model in provider_config.models:
+                    model_id = f"{provider_id}/{model.name}"
+                    all_models.append({
+                        'id': model_id,
+                        'object': 'model',
+                        'created': int(time.time()),
+                        'owned_by': provider_id,
+                        'provider': provider_id,
+                        'type': 'user_provider',
+                        'model_name': model.name,
+                        'context_size': getattr(model, 'context_size', None),
+                        'capabilities': getattr(model, 'capabilities', []),
+                        'description': getattr(model, 'description', None),
+                        'source': 'user_config'
+                    })
+        except Exception as e:
+            logger.warning(f"Error listing models for user provider {provider_id}: {e}")
+    
+    # Add user rotations
+    rotation_handler = get_user_handler('rotation', target_user_id)
+    for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+        try:
+            all_models.append({
+                'id': f"user-rotation/{rotation_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-user-rotation',
+                'type': 'user_rotation',
+                'rotation_id': rotation_id,
+                'model_name': rotation_config.get('model_name', rotation_id),
+                'capabilities': rotation_config.get('capabilities', []),
+                'source': 'user_config'
+            })
+        except Exception as e:
+            logger.warning(f"Error listing user rotation {rotation_id}: {e}")
+    
+    # Add user autoselects
+    autoselect_handler = get_user_handler('autoselect', target_user_id)
+    for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+        try:
+            all_models.append({
+                'id': f"user-autoselect/{autoselect_id}",
+                'object': 'model',
+                'created': int(time.time()),
+                'owned_by': 'aisbf-user-autoselect',
+                'type': 'user_autoselect',
+                'autoselect_id': autoselect_id,
+                'model_name': autoselect_config.get('model_name', autoselect_id),
+                'description': autoselect_config.get('description'),
+                'capabilities': autoselect_config.get('capabilities', []),
+                'source': 'user_config'
+            })
+        except Exception as e:
+            logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
+    
+    return {"object": "list", "data": all_models}
+
+
 @app.get("/api/user/models")
 async def user_list_models(request: Request):
     """
@@ -6138,6 +6384,553 @@ async def user_list_autoselects(request: Request):
             logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
     
     return {"autoselects": autoselects_info}
+
+
+# Username-based user endpoints
+@app.get("/api/u/{username}/providers")
+async def user_list_providers_by_username(request: Request, username: str):
+    """
+    List all provider configurations for the specified user.
+    
+    Admin users and global tokens can access all configurations.
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Example:
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/providers
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    if is_global_token or is_admin:
+        providers_info = {}
+        
+        for provider_id, provider_config in config.providers.items():
+            try:
+                if hasattr(provider_config, 'model_dump'):
+                    config_dict = provider_config.model_dump()
+                elif hasattr(provider_config, '__dict__'):
+                    config_dict = vars(provider_config)
+                else:
+                    config_dict = {}
+                
+                safe_config = {k: v for k, v in config_dict.items()
+                              if k not in ['api_key', 'password', 'secret', 'token']}
+                
+                providers_info[provider_id] = {
+                    'name': getattr(provider_config, 'name', provider_id),
+                    'type': getattr(provider_config, 'type', 'unknown'),
+                    'endpoint': getattr(provider_config, 'endpoint', None),
+                    'models_count': len(getattr(provider_config, 'models', [])),
+                    'config': safe_config,
+                    'source': 'global'
+                }
+            except Exception as e:
+                logger.warning(f"Error listing global provider {provider_id}: {e}")
+        
+        if not is_global_token and target_user_id:
+            handler = get_user_handler('request', target_user_id)
+            for provider_id, provider_config in handler.user_providers.items():
+                try:
+                    if hasattr(provider_config, 'model_dump'):
+                        config_dict = provider_config.model_dump()
+                    elif hasattr(provider_config, '__dict__'):
+                        config_dict = vars(provider_config)
+                    else:
+                        config_dict = {}
+                    
+                    safe_config = {k: v for k, v in config_dict.items()
+                                  if k not in ['api_key', 'password', 'secret', 'token']}
+                    
+                    providers_info[provider_id] = {
+                        'name': getattr(provider_config, 'name', provider_id),
+                        'type': getattr(provider_config, 'type', 'unknown'),
+                        'endpoint': getattr(provider_config, 'endpoint', None),
+                        'models_count': len(getattr(provider_config, 'models', [])),
+                        'config': safe_config,
+                        'source': 'user_config'
+                    }
+                except Exception as e:
+                    logger.warning(f"Error listing user provider {provider_id}: {e}")
+        
+        return {"providers": providers_info}
+    
+    if not target_user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required. Use a valid API token."}
+        )
+    
+    handler = get_user_handler('request', target_user_id)
+    
+    providers_info = {}
+    for provider_id, provider_config in handler.user_providers.items():
+        try:
+            if hasattr(provider_config, 'model_dump'):
+                config_dict = provider_config.model_dump()
+            elif hasattr(provider_config, '__dict__'):
+                config_dict = vars(provider_config)
+            else:
+                config_dict = {}
+            
+            safe_config = {k: v for k, v in config_dict.items()
+                          if k not in ['api_key', 'password', 'secret', 'token']}
+            
+            providers_info[provider_id] = {
+                'name': getattr(provider_config, 'name', provider_id),
+                'type': getattr(provider_config, 'type', 'unknown'),
+                'endpoint': getattr(provider_config, 'endpoint', None),
+                'models_count': len(getattr(provider_config, 'models', [])),
+                'config': safe_config
+            }
+        except Exception as e:
+            logger.warning(f"Error listing user provider {provider_id}: {e}")
+    
+    return {"providers": providers_info}
+
+
+@app.get("/api/u/{username}/rotations")
+async def user_list_rotations_by_username(request: Request, username: str):
+    """
+    List all rotation configurations for the specified user.
+    
+    Admin users and global tokens can access all configurations.
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Example:
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    if is_global_token or is_admin:
+        rotations_info = {}
+        
+        for rotation_id, rotation_config in config.rotations.items():
+            try:
+                rotations_info[rotation_id] = {
+                    "model_name": rotation_config.model_name,
+                    "providers": rotation_config.providers,
+                    "source": "global"
+                }
+            except Exception as e:
+                logger.warning(f"Error listing global rotation {rotation_id}: {e}")
+        
+        if not is_global_token and target_user_id:
+            handler = get_user_handler('rotation', target_user_id)
+            for rotation_id, rotation_config in handler.user_rotations.items():
+                try:
+                    rotations_info[rotation_id] = {
+                        "model_name": rotation_config.get('model_name', rotation_id),
+                        "providers": rotation_config.get('providers', []),
+                        "source": "user_config"
+                    }
+                except Exception as e:
+                    logger.warning(f"Error listing user rotation {rotation_id}: {e}")
+        
+        return {"rotations": rotations_info}
+    
+    if not target_user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required. Use a valid API token."}
+        )
+    
+    handler = get_user_handler('rotation', target_user_id)
+    
+    rotations_info = {}
+    for rotation_id, rotation_config in handler.user_rotations.items():
+        try:
+            rotations_info[rotation_id] = {
+                "model_name": rotation_config.get('model_name', rotation_id),
+                "providers": rotation_config.get('providers', [])
+            }
+        except Exception as e:
+            logger.warning(f"Error listing user rotation {rotation_id}: {e}")
+    
+    return {"rotations": rotations_info}
+
+
+@app.get("/api/u/{username}/autoselects")
+async def user_list_autoselects_by_username(request: Request, username: str):
+    """
+    List all autoselect configurations for the specified user.
+    
+    Admin users and global tokens can access all configurations.
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Example:
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/autoselects
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    if is_global_token or is_admin:
+        autoselects_info = {}
+        
+        for autoselect_id, autoselect_config in config.autoselect.items():
+            try:
+                autoselects_info[autoselect_id] = {
+                    "model_name": autoselect_config.model_name,
+                    "description": autoselect_config.description,
+                    "fallback": autoselect_config.fallback,
+                    "available_models": [
+                        {"model_id": m.model_id, "description": m.description}
+                        for m in autoselect_config.available_models
+                    ],
+                    "source": "global"
+                }
+            except Exception as e:
+                logger.warning(f"Error listing global autoselect {autoselect_id}: {e}")
+        
+        if not is_global_token and target_user_id:
+            handler = get_user_handler('autoselect', target_user_id)
+            for autoselect_id, autoselect_config in handler.user_autoselects.items():
+                try:
+                    autoselects_info[autoselect_id] = {
+                        "model_name": autoselect_config.get('model_name', autoselect_id),
+                        "description": autoselect_config.get('description', ''),
+                        "fallback": autoselect_config.get('fallback', ''),
+                        "available_models": autoselect_config.get('available_models', []),
+                        "source": "user_config"
+                    }
+                except Exception as e:
+                    logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
+        
+        return {"autoselects": autoselects_info}
+    
+    if not target_user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required. Use a valid API token."}
+        )
+    
+    handler = get_user_handler('autoselect', target_user_id)
+    
+    autoselects_info = {}
+    for autoselect_id, autoselect_config in handler.user_autoselects.items():
+        try:
+            autoselects_info[autoselect_id] = {
+                "model_name": autoselect_config.get('model_name', autoselect_id),
+                "description": autoselect_config.get('description', ''),
+                "fallback": autoselect_config.get('fallback', ''),
+                "available_models": autoselect_config.get('available_models', [])
+            }
+        except Exception as e:
+            logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
+    
+    return {"autoselects": autoselects_info}
+
+
+@app.post("/api/u/{username}/chat/completions")
+async def user_chat_completions_by_username(request: Request, username: str, body: ChatCompletionRequest):
+    """
+    Handle chat completions using the specified user's configurations.
+    
+    Admin users and global tokens can also use global configurations.
+    Users can use their own providers, rotations, and autoselects.
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Model format:
+    - 'provider/model' - global provider (admin only)
+    - 'rotation/name' - global rotation (admin only)
+    - 'autoselect/name' - global autoselect (admin only)
+    - 'user-provider/model' - user's provider
+    - 'user-rotation/name' - user's rotation
+    - 'user-autoselect/name' - user's autoselect
+    
+    Example:
+        curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+             -H "Content-Type: application/json" \
+             -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
+             http://localhost:17765/api/u/{username}/chat/completions
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    provider_id, actual_model = parse_provider_from_model(body.model)
+    
+    if not provider_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'"
+        )
+    
+    body_dict = body.model_dump()
+    
+    if provider_id == "user-autoselect":
+        handler = get_user_handler('autoselect', target_user_id)
+        if actual_model not in handler.user_autoselects:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}"
+            )
+        body_dict['model'] = actual_model
+        
+        if body.stream:
+            return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
+        else:
+            return await handler.handle_autoselect_request(actual_model, body_dict)
+    
+    if provider_id == "user-rotation":
+        handler = get_user_handler('rotation', target_user_id)
+        if actual_model not in handler.user_rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.user_rotations.keys())}"
+            )
+        body_dict['model'] = actual_model
+        return await handler.handle_rotation_request(actual_model, body_dict)
+    
+    if provider_id == "user-provider":
+        handler = get_user_handler('request', target_user_id)
+        if actual_model not in handler.user_providers:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User provider '{actual_model}' not found. Available: {list(handler.user_providers.keys())}"
+            )
+        
+        provider_config = handler.user_providers[actual_model]
+        
+        if not validate_kiro_credentials(actual_model, provider_config):
+            raise HTTPException(
+                status_code=403,
+                detail=f"Provider '{actual_model}' credentials not available."
+            )
+        
+        body_dict['model'] = actual_model
+        
+        if body.stream:
+            return await handler.handle_streaming_chat_completion(request, actual_model, body_dict)
+        else:
+            return await handler.handle_chat_completion(request, actual_model, body_dict)
+    
+    if is_global_token or is_admin:
+        if provider_id == "autoselect":
+            if actual_model not in config.autoselect:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+                )
+            handler = get_user_handler('autoselect', None)
+            body_dict['model'] = actual_model
+            
+            if body.stream:
+                return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
+            else:
+                return await handler.handle_autoselect_request(actual_model, body_dict)
+        
+        if provider_id == "rotation":
+            if actual_model not in config.rotations:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Rotation '{actual_model}' not found. Available: {list(config.rotations.keys())}"
+                )
+            handler = get_user_handler('rotation', None)
+            body_dict['model'] = actual_model
+            return await handler.handle_rotation_request(actual_model, body_dict)
+        
+        if provider_id in config.providers:
+            provider_config = config.get_provider(provider_id)
+            
+            if not validate_kiro_credentials(provider_id, provider_config):
+                raise HTTPException(
+                    status_code=403,
+                    detail=f"Provider '{provider_id}' credentials not available."
+                )
+            
+            body_dict['model'] = actual_model
+            handler = get_user_handler('request', None)
+            
+            if body.stream:
+                return await handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+            else:
+                return await handler.handle_chat_completion(request, provider_id, body_dict)
+    
+    raise HTTPException(
+        status_code=400,
+        detail="Model must be in format 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'. Global configurations are only available to admin users."
+    )
+
+
+@app.get("/api/u/{username}/{config_type}/models")
+async def user_list_config_models_by_username(request: Request, username: str, config_type: str):
+    """
+    List models for a specific user configuration type.
+    
+    Args:
+        config_type: One of 'providers', 'rotations', or 'autoselects'
+    
+    Authentication is done via Bearer token in the Authorization header.
+    
+    Example:
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations/models
+    """
+    from aisbf.database import get_database
+    db = get_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    if not target_user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required. Use a valid API token."}
+        )
+    
+    all_models = []
+    
+    if config_type == "providers":
+        handler = get_user_handler('request', target_user_id)
+        for provider_id, provider_config in handler.user_providers.items():
+            try:
+                if hasattr(provider_config, 'models') and provider_config.models:
+                    for model in provider_config.models:
+                        all_models.append({
+                            "id": f"user-provider/{provider_id}/{model.name}",
+                            "name": model.name,
+                            "object": "model",
+                            "created": int(time.time()),
+                            "owned_by": provider_id,
+                            "provider_id": provider_id,
+                            "type": "user_provider"
+                        })
+            except Exception as e:
+                logger.warning(f"Error listing models for user provider {provider_id}: {e}")
+    
+    elif config_type == "rotations":
+        handler = get_user_handler('rotation', target_user_id)
+        for rotation_id, rotation_config in handler.user_rotations.items():
+            try:
+                providers = rotation_config.get('providers', [])
+                for provider in providers:
+                    for model in provider.get('models', []):
+                        all_models.append({
+                            "id": f"user-rotation/{rotation_id}/{model.get('name', '')}",
+                            "name": rotation_id,
+                            "object": "model",
+                            "created": int(time.time()),
+                            "owned_by": provider.get('provider_id', ''),
+                            "rotation_id": rotation_id,
+                            "actual_model": model.get('name', ''),
+                            "provider_id": provider.get('provider_id', ''),
+                            "weight": model.get('weight', 1),
+                            "type": "user_rotation"
+                        })
+            except Exception as e:
+                logger.warning(f"Error listing user rotation {rotation_id}: {e}")
+    
+    elif config_type == "autoselects":
+        handler = get_user_handler('autoselect', target_user_id)
+        for autoselect_id, autoselect_config in handler.user_autoselects.items():
+            try:
+                for model_info in autoselect_config.get('available_models', []):
+                    all_models.append({
+                        "id": f"user-autoselect/{autoselect_id}/{model_info.get('model_id', '')}",
+                        "name": autoselect_id,
+                        "object": "model",
+                        "created": int(time.time()),
+                        "owned_by": "user-autoselect",
+                        "autoselect_id": autoselect_id,
+                        "description": model_info.get('description', ''),
+                        "type": "user_autoselect"
+                    })
+            except Exception as e:
+                logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
+    
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Invalid config type. Use 'providers', 'rotations', or 'autoselects'"
+        )
+    
+    return {"data": all_models}
 
 
 # User-specific API chat completion endpoints

@@ -271,6 +271,19 @@ class DatabaseManager:
             ''')
 
             cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS user_prompts (
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    user_id INTEGER NOT NULL,
+                    prompt_key VARCHAR(255) NOT NULL,
+                    content TEXT NOT NULL,
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    updated_at TIMESTAMP DEFAULT {timestamp_default},
+                    FOREIGN KEY (user_id) REFERENCES users(id),
+                    UNIQUE(user_id, prompt_key)
+                )
+            ''')
+
+            cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS user_api_tokens (
                     id INTEGER PRIMARY KEY {auto_increment},
                     user_id INTEGER NOT NULL,
@@ -756,6 +769,35 @@ class DatabaseManager:
                 }
             return None
 
+    def get_user_by_username(self, username: str) -> Optional[Dict]:
+        """
+        Get a user by username.
+
+        Args:
+            username: Username to look up
+
+        Returns:
+            User dict if found, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT id, username, role, is_active
+                FROM users
+                WHERE username = {placeholder} AND is_active = 1
+            ''', (username,))
+
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'id': row[0],
+                    'username': row[1],
+                    'role': row[2],
+                    'is_active': row[3]
+                }
+            return None
+
     def create_user(self, username: str, password_hash: str, role: str = 'user', created_by: str = None) -> int:
         """
         Create a new user.
@@ -1177,6 +1219,103 @@ class DatabaseManager:
                 DELETE FROM user_autoselects
                 WHERE user_id = {placeholder} AND autoselect_id = {placeholder}
             ''', (user_id, autoselect_name))
+            conn.commit()
+
+    # User-specific prompt methods
+    def save_user_prompt(self, user_id: int, prompt_key: str, content: str):
+        """
+        Save user-specific prompt override.
+
+        Args:
+            user_id: User ID
+            prompt_key: Prompt identifier
+            content: Prompt content
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_prompts (user_id, prompt_key, content, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', (user_id, prompt_key, content))
+            else:  # mysql
+                cursor.execute(f'''
+                    INSERT INTO user_prompts (user_id, prompt_key, content, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE content=VALUES(content), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, prompt_key, content))
+            conn.commit()
+
+    def get_user_prompt(self, user_id: int, prompt_key: str) -> Optional[str]:
+        """
+        Get user-specific prompt override.
+
+        Args:
+            user_id: User ID
+            prompt_key: Prompt identifier
+
+        Returns:
+            Prompt content if exists, None otherwise
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT content
+                FROM user_prompts
+                WHERE user_id = {placeholder} AND prompt_key = {placeholder}
+            ''', (user_id, prompt_key))
+
+            row = cursor.fetchone()
+            return row[0] if row else None
+
+    def get_user_prompts(self, user_id: int) -> List[Dict]:
+        """
+        Get all user-specific prompt overrides for a user.
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            List of prompt dictionaries
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT prompt_key, content, created_at, updated_at
+                FROM user_prompts
+                WHERE user_id = {placeholder}
+                ORDER BY prompt_key
+            ''', (user_id,))
+
+            prompts = []
+            for row in cursor.fetchall():
+                prompts.append({
+                    'prompt_key': row[0],
+                    'content': row[1],
+                    'created_at': row[2],
+                    'updated_at': row[3]
+                })
+            return prompts
+
+    def delete_user_prompt(self, user_id: int, prompt_key: str):
+        """
+        Delete user-specific prompt override.
+
+        Args:
+            user_id: User ID
+            prompt_key: Prompt identifier
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                DELETE FROM user_prompts
+                WHERE user_id = {placeholder} AND prompt_key = {placeholder}
+            ''', (user_id, prompt_key))
             conn.commit()
 
     # User API token methods

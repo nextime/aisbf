@@ -1029,14 +1029,26 @@ Authorization: Bearer YOUR_API_TOKEN
 
 #### User API Endpoints
 
+Authenticated users can access their configurations using their username in the endpoint path. Each user has their own dedicated API endpoints:
+
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/user/models` | List available models from user's own configurations |
-| `GET /api/user/providers` | List user's provider configurations |
-| `GET /api/user/rotations` | List user's rotation configurations |
-| `GET /api/user/autoselects` | List user's autoselect configurations |
-| `POST /api/user/chat/completions` | Chat completions using user's own models |
-| `GET /api/user/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
+| `GET /api/u/{username}/models` | List available models from user's own configurations |
+| `GET /api/u/{username}/providers` | List user's provider configurations |
+| `GET /api/u/{username}/rotations` | List user's rotation configurations |
+| `GET /api/u/{username}/autoselects` | List user's autoselect configurations |
+| `POST /api/u/{username}/chat/completions` | Chat completions using user's own models |
+| `GET /api/u/{username}/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
+
+Legacy `/api/user/...` endpoints remain fully supported for backward compatibility:
+| Legacy Endpoint | Description |
+|-----------------|-------------|
+| `GET /api/user/models` | Legacy endpoint for authenticated user |
+| `GET /api/user/providers` | Legacy endpoint for authenticated user |
+| `GET /api/user/rotations` | Legacy endpoint for authenticated user |
+| `GET /api/user/autoselects` | Legacy endpoint for authenticated user |
+| `POST /api/user/chat/completions` | Legacy chat completions endpoint |
+| `GET /api/user/{config_type}/models` | Legacy model listing endpoint |
 
 #### Access Control
 
@@ -1058,21 +1070,33 @@ Users can create and manage API tokens through the dashboard:
 #### Example: Using User API with cURL
 
 ```bash
-# List user models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+# List models for username 'johnsmith'
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/johnsmith/models
 
-# Chat using user's own models
+# Chat using johnsmith's models
 curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model": "your-rotation/model", "messages": [{"role": "user", "content": "Hello"}]}' \
-  http://localhost:17765/api/user/chat/completions
+  http://localhost:17765/api/u/johnsmith/chat/completions
 
 # List user's providers
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/johnsmith/providers
 
 # List user's rotations
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/johnsmith/rotations
 ```
+
+#### User Dashboard
+
+When logged into the user dashboard, each user will see their own personal endpoint URLs displayed with their username automatically inserted. Users can copy their endpoint URLs directly from the dashboard homepage.
+
+#### Access Permissions
+
+- **Users** may only access their own personal endpoints
+- **Administrators** may access any user's endpoints
+- **Global API Tokens** may access any user's endpoints
+
+All requests are properly authenticated and authorized using the standard Bearer token authentication system.
 
 #### MCP Integration
 
