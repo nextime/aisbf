@@ -400,7 +400,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% if request.session.logged_in %}
             <div class="header-actions">
                 <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary">License</a>
+                {% if request.session.role == 'admin' %}
                 <button onclick="restartServer()" class="btn btn-warning">Restart Server</button>
+                {% endif %}
                 <a href="{{ url_for(request, '/dashboard/logout') }}" class="btn btn-secondary">Logout</a>
             </div>
             {% endif %}
