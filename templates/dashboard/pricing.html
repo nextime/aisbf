@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+
+{% block title %}Pricing Plans{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Pricing Plans</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<div style="text-align: center; margin-bottom: 40px;">
+    <h3 style="margin-bottom: 15px; color: #e0e0e0;">Choose Your Plan</h3>
+    <p style="color: #a0a0a0; font-size: 16px; max-width: 600px; margin: 0 auto;">Select the perfect tier for your AI service needs. All plans include access to all providers, rotations, and autoselection features.</p>
+</div>
+
+<!-- Paid Tiers -->
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 20px; margin-bottom: 40px;">
+    {% for tier in tiers %}
+    {% if tier.is_active and not tier.is_default %}
+    <div class="pricing-card {% if tier.is_recommended %}recommended{% endif %}">
+        {% if tier.is_recommended %}
+        <div style="background: #4a9eff; color: white; padding: 8px 15px; border-radius: 20px; text-align: center; margin-bottom: 20px; font-weight: bold; text-transform: uppercase; font-size: 12px;">
+            Recommended
+        </div>
+        {% endif %}
+
+        <div style="text-align: center; margin-bottom: 25px;">
+            <h3 style="margin: 0 0 15px 0; color: #e0e0e0;">{{ tier.name }}</h3>
+            <div style="font-size: 32px; font-weight: bold; color: #4ade80; margin-bottom: 5px;">
+                {{ currency_symbol }}{{ "%.2f"|format(tier.price_monthly) }}
+            </div>
+            <div style="color: #a0a0a0;">per month</div>
+            {% if tier.price_yearly > 0 %}
+            <div style="color: #4ade80; font-size: 12px; margin-top: 5px;">
+                Save {{ ((1 - tier.price_yearly / (tier.price_monthly * 12)) * 100)|round|int }}% with annual billing
+            </div>
+            {% endif %}
+        </div>
+
+        <ul style="list-style: none; padding: 0; margin: 0 0 25px 0;">
+            <li style="margin-bottom: 10px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
+                {% if tier.max_requests_day == -1 %}
+                Unlimited requests per day
+                {% elif tier.max_requests_day == 0 %}
+                No requests permitted
+                {% else %}
+                {{ tier.max_requests_day }} requests per day
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 10px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
+                {% if tier.max_requests_month == -1 %}
+                Unlimited requests per month
+                {% elif tier.max_requests_month == 0 %}
+                No requests permitted
+                {% else %}
+                {{ tier.max_requests_month }} requests per month
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 10px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
+                {% if tier.max_providers == -1 %}
+                Unlimited providers
+                {% elif tier.max_providers == 0 %}
+                No providers permitted
+                {% else %}
+                Up to {{ tier.max_providers }} providers
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 10px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
+                {% if tier.max_rotations == -1 %}
+                Unlimited rotations
+                {% elif tier.max_rotations == 0 %}
+                No rotations permitted
+                {% else %}
+                Up to {{ tier.max_rotations }} rotations
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 10px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
+                {% if tier.max_autoselections == -1 %}
+                Unlimited autoselections
+                {% elif tier.max_autoselections == 0 %}
+                No autoselections permitted
+                {% else %}
+                Up to {{ tier.max_autoselections }} autoselections
+                {% endif %}
+            </li>
+        </ul>
+
+        <div style="text-align: center;">
+            {% if current_tier and current_tier.id == tier.id %}
+            <button class="btn btn-secondary" disabled style="width: 100%; padding: 12px;">
+                <i class="fas fa-check me-2"></i>Current Plan
+            </button>
+            {% else %}
+            <button class="btn upgrade-btn" onclick="subscribeToTier({{ tier.id }})" style="width: 100%; padding: 12px;">
+                <i class="fas fa-arrow-up me-2"></i>Upgrade Now
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% endfor %}
+</div>
+
+<!-- Free Tier -->
+<div style="max-width: 500px; margin: 0 auto;">
+    <div style="background: #16213e; border: 2px solid #0f3460; border-radius: 8px; padding: 30px; text-align: center;">
+        <h3 style="margin: 0 0 15px 0; color: #e0e0e0;">Free Tier</h3>
+        <div style="font-size: 36px; font-weight: bold; color: #4ade80; margin-bottom: 10px;">Free Forever</div>
+        <p style="color: #a0a0a0; margin-bottom: 20px;">Perfect for testing and personal use</p>
+
+        <ul style="list-style: none; padding: 0; margin: 0 0 25px 0; text-align: left; max-width: 300px; margin-left: auto; margin-right: auto;">
+            {% set free_tier = tiers|selectattr('is_default', 'equalto', True)|first %}
+            {% if free_tier %}
+            <li style="margin-bottom: 8px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
+                {% if free_tier.max_requests_day == -1 %}
+                Unlimited requests per day
+                {% else %}
+                {{ free_tier.max_requests_day }} requests per day
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 8px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
+                {% if free_tier.max_requests_month == -1 %}
+                Unlimited requests per month
+                {% else %}
+                {{ free_tier.max_requests_month }} requests per month
+                {% endif %}
+            </li>
+            <li style="margin-bottom: 8px; color: #e0e0e0;">
+                <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
+                {% if free_tier.max_providers == -1 %}
+                Unlimited providers
+                {% else %}
+                Up to {{ free_tier.max_providers }} providers
+                {% endif %}
+            </li>
+            {% endif %}
+        </ul>
+
+        {% if not current_tier or current_tier.is_default %}
+        <button class="btn btn-secondary" disabled style="width: 100%; padding: 12px;">
+            <i class="fas fa-check me-2"></i>You are on the Free Plan
+        </button>
+        {% else %}
+        <button class="btn btn-secondary" onclick="downgradeToFree()" style="width: 100%; padding: 12px; background: #dc3545;">
+            <i class="fas fa-arrow-down me-2"></i>Downgrade to Free
+        </button>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Payment Methods -->
+{% if enabled_gateways|length > 0 %}
+<div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 25px; margin-top: 40px; text-align: center;">
+    <h4 style="margin: 0 0 20px 0; color: #17a2b8;">Secure Payment Methods</h4>
+    <div style="display: flex; justify-content: center; align-items: center; gap: 30px; flex-wrap: wrap;">
+        {% for gateway in enabled_gateways %}
+        <div style="text-align: center;">
+            {% if gateway == 'paypal' %}
+            <i class="fab fa-paypal fa-3x" style="color: #4a9eff; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">PayPal</div>
+            {% elif gateway == 'stripe' %}
+            <i class="fab fa-stripe fa-3x" style="color: #4ade80; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">Stripe</div>
+            {% elif gateway == 'bitcoin' %}
+            <i class="fab fa-bitcoin fa-3x" style="color: #f39c12; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">Bitcoin</div>
+            {% elif gateway == 'ethereum' %}
+            <i class="fab fa-ethereum fa-3x" style="color: #6f42c1; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">Ethereum</div>
+            {% elif gateway == 'usdt' %}
+            <i class="fas fa-dollar-sign fa-3x" style="color: #17a2b8; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">USDT</div>
+            {% elif gateway == 'usdc' %}
+            <i class="fas fa-coins fa-3x" style="color: #4a9eff; margin-bottom: 8px;"></i>
+            <div style="color: #a0a0a0; font-size: 14px;">USDC</div>
+            {% endif %}
+        </div>
+        {% endfor %}
+    </div>
+    <p style="color: #a0a0a0; font-size: 14px; margin-top: 15px;">All transactions are secure and encrypted</p>
+</div>
+{% endif %}
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.pricing-card {
+    background: #16213e;
+    border: 2px solid #0f3460;
+    border-radius: 8px;
+    padding: 25px;
+}
+
+.pricing-card.recommended {
+    border-color: #4a9eff;
+    box-shadow: 0 0 20px rgba(74, 158, 255, 0.3);
+}
+
+.upgrade-btn {
+    background: #4a9eff;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
+<script>
+function subscribeToTier(tierId) {
+    if (confirm('Are you sure you want to upgrade to this tier?')) {
+        fetch(url_for(`/api/subscribe/${tierId}`), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(result => {
+            if (result.payment_url) {
+                window.location.href = result.payment_url;
+            } else if (result.success) {
+                showToast('Subscription updated successfully', 'success');
+                setTimeout(() => window.location.reload(), 1500);
+            } else {
+                showToast(result.error || 'Error processing subscription', 'danger');
+            }
+        })
+        .catch(error => {
+            showToast('Error processing subscription', 'danger');
+        });
+    }
+}
+
+function downgradeToFree() {
+    if (confirm('Are you sure you want to downgrade to the free tier? Your current subscription will remain active until the end of the billing period.')) {
+        fetch(url_for('/api/subscribe/free'), {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        })
+        .then(response => response.json())
+        .then(result => {
+            showToast('Your account will be downgraded at the end of the billing period', 'success');
+            setTimeout(() => window.location.reload(), 1500);
+        })
+        .catch(error => {
+            showToast('Error processing downgrade', 'danger');
+        });
+    }
+}
+
+function showToast(message, type) {
+    const toastContainer = document.createElement('div');
+    toastContainer.className = `position-fixed bottom-0 end-0 p-3`;
+    toastContainer.innerHTML = `
+        <div class="toast show" role="alert">
+            <div class="toast-header bg-${type} text-white">
+                <strong class="me-auto">Notification</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body">
+                ${message}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(toastContainer);
+    
+    setTimeout(() => toastContainer.remove(), 3000);
+}
+</script>
+{% endblock %}

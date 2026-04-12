@@ -35,15 +35,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <form method="POST" action="{{ url_for(request, '/dashboard/users/add') }}" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
         <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
             <label for="username">Username</label>
-            <input type="text" id="username" name="username" required style="width: 100%;">
+            <input type="text" id="username" name="username" required style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
+        </div>
+        <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
+            <label for="email">Email</label>
+            <input type="email" id="email" name="email" style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
         </div>
         <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
             <label for="password">Password</label>
-            <input type="password" id="password" name="password" required style="width: 100%;">
+            <input type="password" id="password" name="password" required style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
         </div>
         <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
             <label for="role">Role</label>
-            <select id="role" name="role" style="width: 100%;">
+            <select id="role" name="role" style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
             </select>
@@ -59,6 +63,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <tr>
             <th>ID</th>
             <th>Username</th>
+            <th>Email</th>
             <th>Role</th>
             <th>Created By</th>
             <th>Created At</th>
@@ -73,6 +78,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <tr>
                 <td>{{ user.id }}</td>
                 <td>{{ user.username }}</td>
+                <td>{{ user.email or '-' }}</td>
                 <td>
                     {% if user.role == 'admin' %}
                     <span style="color: #e94560; font-weight: bold;">Admin</span>
@@ -92,7 +98,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 </td>
                 <td>
                     <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                        <button onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.role }}', {{ user.is_active|lower }})" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin: 0;">Edit</button>
+                        <button onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.email }}', '{{ user.role }}', {{ user.is_active|lower }})" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin: 0;">Edit</button>
                         <button onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})" class="btn btn-warning" style="padding: 5px 10px; font-size: 12px; margin: 0;">
                             {% if user.is_active %}Disable{% else %}Enable{% endif %}
                         </button>
@@ -117,11 +123,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <input type="hidden" id="edit-user-id" name="user_id">
             <div class="form-group">
                 <label for="edit-username">Username</label>
-                <input type="text" id="edit-username" name="username" required>
+                <input type="text" id="edit-username" name="username" required style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
+            </div>
+            <div class="form-group">
+                <label for="edit-email">Email</label>
+                <input type="email" id="edit-email" name="email" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
             </div>
             <div class="form-group">
                 <label for="edit-password">New Password (leave blank to keep current)</label>
-                <input type="password" id="edit-password" name="password" placeholder="Enter new password">
+                <input type="password" id="edit-password" name="password" placeholder="Enter new password" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
             </div>
             <div class="form-group">
                 <label for="edit-role">Role</label>
@@ -145,9 +155,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
-function editUser(userId, username, role, isActive) {
+function editUser(userId, username, email, role, isActive) {
     document.getElementById('edit-user-id').value = userId;
     document.getElementById('edit-username').value = username;
+    document.getElementById('edit-email').value = email;
     document.getElementById('edit-role').value = role;
     document.getElementById('edit-is-active').checked = isActive;
     document.getElementById('edit-form').action = '{{ url_for(request, "/dashboard/users/") }}' + userId + '/edit';
@@ -221,6 +232,14 @@ th, td {
 th {
     background: #0f3460;
     font-weight: 600;
+}
+/* Prevent browser autofill from overriding dark theme */
+input:-webkit-autofill,
+input:-webkit-autofill:hover,
+input:-webkit-autofill:focus,
+input:-webkit-autofill:active {
+    -webkit-box-shadow: 0 0 0 30px #1a1a2e inset !important;
+    -webkit-text-fill-color: #e0e0e0 !important;
 }
 </style>
 {% endblock %}

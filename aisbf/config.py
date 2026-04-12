@@ -219,6 +219,24 @@ class SignupConfig(BaseModel):
     require_email_verification: bool = True
     verification_token_expiry_hours: int = 24
     
+class PaymentGatewayConfig(BaseModel):
+    """Configuration for payment gateways"""
+    enabled: bool = False
+    public_key: Optional[str] = None
+    secret_key: Optional[str] = None
+    webhook_secret: Optional[str] = None
+    api_url: Optional[str] = None
+    wallet_address: Optional[str] = None
+    minimum_amount: Optional[float] = None
+    additional_config: Optional[Dict] = None
+
+class CurrencyConfig(BaseModel):
+    """Global currency configuration"""
+    code: str = "USD"
+    symbol: str = "$"
+    decimal_places: int = 2
+    position: str = "left"
+
 class SMTPConfig(BaseModel):
     """Configuration for SMTP email sending"""
     host: str = "localhost"
@@ -248,6 +266,8 @@ class AISBFConfig(BaseModel):
     adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
     signup: Optional[SignupConfig] = None
     smtp: Optional[SMTPConfig] = None
+    currency: Optional[CurrencyConfig] = None
+    payment_gateways: Optional[Dict[str, PaymentGatewayConfig]] = None
 
 
 class AppConfig(BaseModel):
@@ -728,6 +748,14 @@ class Config:
             smtp_data = data.get('smtp')
             if smtp_data:
                 data['smtp'] = SMTPConfig(**smtp_data)
+            # Parse currency separately if present
+            currency_data = data.get('currency')
+            if currency_data:
+                data['currency'] = CurrencyConfig(**currency_data)
+            # Parse payment gateways separately if present
+            payment_gateways_data = data.get('payment_gateways')
+            if payment_gateways_data:
+                data['payment_gateways'] = {k: PaymentGatewayConfig(**v) for k, v in payment_gateways_data.items()}
             self.aisbf = AISBFConfig(**data)
             self._loaded_files['aisbf'] = str(aisbf_path.absolute())
             logger.info(f"Loaded AISBF config: classify_nsfw={self.aisbf.classify_nsfw}, classify_privacy={self.aisbf.classify_privacy}")

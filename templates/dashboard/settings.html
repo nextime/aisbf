@@ -287,6 +287,100 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
 
+    <h3 style="margin: 30px 0 20px;">Response Cache Configuration</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="response_cache_enabled" {% if config.response_cache and config.response_cache.enabled %}checked{% endif %}>
+            Enable Response Cache
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Cache API responses to improve performance and reduce costs</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="response_cache_backend">Response Cache Backend</label>
+        <select id="response_cache_backend" name="response_cache_backend" onchange="toggleResponseCacheFields()">
+            <option value="memory" {% if config.response_cache and config.response_cache.backend == 'memory' %}selected{% endif %}>Memory</option>
+            <option value="sqlite" {% if config.response_cache and config.response_cache.backend == 'sqlite' %}selected{% endif %}>SQLite</option>
+            <option value="redis" {% if config.response_cache and config.response_cache.backend == 'redis' %}selected{% endif %}>Redis</option>
+            <option value="mysql" {% if config.response_cache and config.response_cache.backend == 'mysql' %}selected{% endif %}>MySQL</option>
+        </select>
+        <small style="color: #666; display: block; margin-top: 5px;">Choose the backend for response caching</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="response_cache_ttl">Cache TTL (seconds)</label>
+        <input type="number" id="response_cache_ttl" name="response_cache_ttl" value="{{ config.response_cache.ttl if config.response_cache else 600 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Time to live for cached responses (default: 600 seconds)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="response_cache_max_memory">Max Memory Cache Size</label>
+        <input type="number" id="response_cache_max_memory" name="response_cache_max_memory" value="{{ config.response_cache.max_memory_cache if config.response_cache else 1000 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Maximum number of items in memory cache (default: 1000)</small>
+    </div>
+    
+    <div id="response-cache-redis-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'redis' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="response_cache_redis_host">Redis Host</label>
+            <input type="text" id="response_cache_redis_host" name="response_cache_redis_host" value="{{ config.response_cache.redis_host if config.response_cache else 'localhost' }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_redis_port">Redis Port</label>
+            <input type="number" id="response_cache_redis_port" name="response_cache_redis_port" value="{{ config.response_cache.redis_port if config.response_cache else 6379 }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_redis_db">Redis Database</label>
+            <input type="number" id="response_cache_redis_db" name="response_cache_redis_db" value="{{ config.response_cache.redis_db if config.response_cache else 0 }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_redis_password">Redis Password</label>
+            <input type="password" id="response_cache_redis_password" name="response_cache_redis_password" placeholder="Leave blank if no password">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_redis_key_prefix">Redis Key Prefix</label>
+            <input type="text" id="response_cache_redis_key_prefix" name="response_cache_redis_key_prefix" value="{{ config.response_cache.redis_key_prefix if config.response_cache else 'aisbf:response:' }}">
+        </div>
+    </div>
+    
+    <div id="response-cache-sqlite-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'sqlite' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="response_cache_sqlite_path">SQLite Path</label>
+            <input type="text" id="response_cache_sqlite_path" name="response_cache_sqlite_path" value="{{ config.response_cache.sqlite_path if config.response_cache else '~/.aisbf/response_cache.db' }}">
+        </div>
+    </div>
+    
+    <div id="response-cache-mysql-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'mysql' %}block{% else %}none{% endif %};">
+        <div class="form-group">
+            <label for="response_cache_mysql_host">MySQL Host</label>
+            <input type="text" id="response_cache_mysql_host" name="response_cache_mysql_host" value="{{ config.response_cache.mysql_host if config.response_cache else 'localhost' }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_mysql_port">MySQL Port</label>
+            <input type="number" id="response_cache_mysql_port" name="response_cache_mysql_port" value="{{ config.response_cache.mysql_port if config.response_cache else 3306 }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_mysql_user">MySQL Username</label>
+            <input type="text" id="response_cache_mysql_user" name="response_cache_mysql_user" value="{{ config.response_cache.mysql_user if config.response_cache else 'aisbf' }}">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_mysql_password">MySQL Password</label>
+            <input type="password" id="response_cache_mysql_password" name="response_cache_mysql_password" placeholder="Leave blank to keep current">
+        </div>
+        
+        <div class="form-group">
+            <label for="response_cache_mysql_database">MySQL Database</label>
+            <input type="text" id="response_cache_mysql_database" name="response_cache_mysql_database" value="{{ config.response_cache.mysql_database if config.response_cache else 'aisbf_response_cache' }}">
+        </div>
+    </div>
+
     <h3 style="margin: 30px 0 20px;">Response Cache Statistics</h3>
     
     <div id="cache-stats" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
@@ -547,6 +641,138 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">Display name for sent emails</small>
     </div>
     
+    <h3 style="margin: 30px 0 20px;">Request Batching</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="batching_enabled" {% if config.batching and config.batching.enabled %}checked{% endif %}>
+            Enable Request Batching
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Batch multiple requests together for improved efficiency</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="batching_window_ms">Batching Window (milliseconds)</label>
+        <input type="number" id="batching_window_ms" name="batching_window_ms" value="{{ config.batching.window_ms if config.batching else 100 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Time window to collect requests for batching (default: 100ms)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="batching_max_batch_size">Max Batch Size</label>
+        <input type="number" id="batching_max_batch_size" name="batching_max_batch_size" value="{{ config.batching.max_batch_size if config.batching else 8 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Maximum number of requests per batch (default: 8)</small>
+    </div>
+    
+    <h4 style="margin: 20px 0 15px;">Provider-Specific Batching Settings</h4>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="batching_openai_enabled" {% if config.batching and config.batching.provider_settings and config.batching.provider_settings.openai and config.batching.provider_settings.openai.enabled %}checked{% endif %}>
+            Enable OpenAI Batching
+        </label>
+    </div>
+    
+    <div class="form-group">
+        <label for="batching_openai_max_batch_size">OpenAI Max Batch Size</label>
+        <input type="number" id="batching_openai_max_batch_size" name="batching_openai_max_batch_size" value="{{ config.batching.provider_settings.openai.max_batch_size if config.batching and config.batching.provider_settings and config.batching.provider_settings.openai else 10 }}" min="1">
+    </div>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="batching_anthropic_enabled" {% if config.batching and config.batching.provider_settings and config.batching.provider_settings.anthropic and config.batching.provider_settings.anthropic.enabled %}checked{% endif %}>
+            Enable Anthropic Batching
+        </label>
+    </div>
+    
+    <div class="form-group">
+        <label for="batching_anthropic_max_batch_size">Anthropic Max Batch Size</label>
+        <input type="number" id="batching_anthropic_max_batch_size" name="batching_anthropic_max_batch_size" value="{{ config.batching.provider_settings.anthropic.max_batch_size if config.batching and config.batching.provider_settings and config.batching.provider_settings.anthropic else 5 }}" min="1">
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Adaptive Rate Limiting</h3>
+    
+    <div class="form-group">
+        <label>
+            <input type="checkbox" name="adaptive_rate_limiting_enabled" {% if config.adaptive_rate_limiting and config.adaptive_rate_limiting.enabled %}checked{% endif %}>
+            Enable Adaptive Rate Limiting
+        </label>
+        <small style="color: #666; display: block; margin-top: 5px;">Automatically adjust rate limits based on provider responses</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_initial_rate_limit">Initial Rate Limit (requests/second)</label>
+        <input type="number" id="adaptive_initial_rate_limit" name="adaptive_initial_rate_limit" value="{{ config.adaptive_rate_limiting.initial_rate_limit if config.adaptive_rate_limiting else 0 }}" min="0" step="0.1">
+        <small style="color: #666; display: block; margin-top: 5px;">Starting rate limit (0 = unlimited)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_learning_rate">Learning Rate</label>
+        <input type="number" id="adaptive_learning_rate" name="adaptive_learning_rate" value="{{ config.adaptive_rate_limiting.learning_rate if config.adaptive_rate_limiting else 0.1 }}" min="0" max="1" step="0.01">
+        <small style="color: #666; display: block; margin-top: 5px;">How quickly to adapt to rate limit changes (0-1, default: 0.1)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_headroom_percent">Headroom Percent</label>
+        <input type="number" id="adaptive_headroom_percent" name="adaptive_headroom_percent" value="{{ config.adaptive_rate_limiting.headroom_percent if config.adaptive_rate_limiting else 10 }}" min="0" max="100">
+        <small style="color: #666; display: block; margin-top: 5px;">Safety margin below detected limit (default: 10%)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_recovery_rate">Recovery Rate</label>
+        <input type="number" id="adaptive_recovery_rate" name="adaptive_recovery_rate" value="{{ config.adaptive_rate_limiting.recovery_rate if config.adaptive_rate_limiting else 0.05 }}" min="0" max="1" step="0.01">
+        <small style="color: #666; display: block; margin-top: 5px;">Rate at which limits recover after errors (default: 0.05)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_max_rate_limit">Max Rate Limit (requests/second)</label>
+        <input type="number" id="adaptive_max_rate_limit" name="adaptive_max_rate_limit" value="{{ config.adaptive_rate_limiting.max_rate_limit if config.adaptive_rate_limiting else 60 }}" min="0" step="0.1">
+        <small style="color: #666; display: block; margin-top: 5px;">Maximum allowed rate limit (default: 60)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_min_rate_limit">Min Rate Limit (requests/second)</label>
+        <input type="number" id="adaptive_min_rate_limit" name="adaptive_min_rate_limit" value="{{ config.adaptive_rate_limiting.min_rate_limit if config.adaptive_rate_limiting else 0.1 }}" min="0" step="0.1">
+        <small style="color: #666; display: block; margin-top: 5px;">Minimum allowed rate limit (default: 0.1)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_backoff_base">Backoff Base</label>
+        <input type="number" id="adaptive_backoff_base" name="adaptive_backoff_base" value="{{ config.adaptive_rate_limiting.backoff_base if config.adaptive_rate_limiting else 2 }}" min="1" step="0.1">
+        <small style="color: #666; display: block; margin-top: 5px;">Exponential backoff multiplier (default: 2)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_jitter_factor">Jitter Factor</label>
+        <input type="number" id="adaptive_jitter_factor" name="adaptive_jitter_factor" value="{{ config.adaptive_rate_limiting.jitter_factor if config.adaptive_rate_limiting else 0.25 }}" min="0" max="1" step="0.01">
+        <small style="color: #666; display: block; margin-top: 5px;">Random jitter to prevent thundering herd (0-1, default: 0.25)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_history_window">History Window (seconds)</label>
+        <input type="number" id="adaptive_history_window" name="adaptive_history_window" value="{{ config.adaptive_rate_limiting.history_window if config.adaptive_rate_limiting else 3600 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Time window for tracking rate limit history (default: 3600)</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="adaptive_consecutive_successes">Consecutive Successes for Recovery</label>
+        <input type="number" id="adaptive_consecutive_successes" name="adaptive_consecutive_successes" value="{{ config.adaptive_rate_limiting.consecutive_successes_for_recovery if config.adaptive_rate_limiting else 10 }}" min="1">
+        <small style="color: #666; display: block; margin-top: 5px;">Number of successful requests before increasing rate limit (default: 10)</small>
+    </div>
+    
+    <h3 style="margin: 30px 0 20px;">Admin Password</h3>
+    
+    <div class="form-group">
+        <label for="new_admin_password">New Admin Password</label>
+        <input type="password" id="new_admin_password" name="new_admin_password" placeholder="Leave blank to keep current password">
+        <small style="color: #666; display: block; margin-top: 5px;">Enter a new password to change the admin dashboard password</small>
+    </div>
+    
+    <div class="form-group">
+        <label for="confirm_admin_password">Confirm New Admin Password</label>
+        <input type="password" id="confirm_admin_password" name="confirm_admin_password" placeholder="Confirm new password">
+        <small style="color: #666; display: block; margin-top: 5px;">Re-enter the new password to confirm</small>
+    </div>
+    
     <div style="display: flex; gap: 10px; margin-top: 30px;">
         <button type="submit" class="btn">Save Settings</button>
         <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
@@ -654,6 +880,27 @@ function toggleCacheFields() {
         sqliteFields.style.display = 'block';
     } else if (cacheType === 'mysql') {
         mysqlCacheFields.style.display = 'block';
+    }
+}
+
+function toggleResponseCacheFields() {
+    const backend = document.getElementById('response_cache_backend').value;
+    const redisFields = document.getElementById('response-cache-redis-fields');
+    const sqliteFields = document.getElementById('response-cache-sqlite-fields');
+    const mysqlFields = document.getElementById('response-cache-mysql-fields');
+    
+    // Hide all fields first
+    redisFields.style.display = 'none';
+    sqliteFields.style.display = 'none';
+    mysqlFields.style.display = 'none';
+    
+    // Show only the relevant fields
+    if (backend === 'redis') {
+        redisFields.style.display = 'block';
+    } else if (backend === 'sqlite') {
+        sqliteFields.style.display = 'block';
+    } else if (backend === 'mysql') {
+        mysqlFields.style.display = 'block';
     }
 }
 

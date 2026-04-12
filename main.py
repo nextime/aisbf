@@ -1265,6 +1265,190 @@ async def auth_middleware(request: Request, call_next):
     response = await call_next(request)
     return response
 
+
+# Account Tier Limit Enforcement Middleware
+@app.middleware("http")
+async def tier_limit_middleware(request: Request, call_next):
+    """Validate user account tier limits before processing API requests"""
+    
+    # Skip tier checks for non-API paths
+    if (request.url.path == "/" or
+        request.url.path.startswith("/dashboard") or
+        request.url.path == "/favicon.ico" or
+        request.url.path.startswith("/.well-known/") or
+        request.url.path.startswith("/mcp") or
+        request.url.path.startswith("/auth/")):
+        return await call_next(request)
+    
+    # Skip tier checks for GET models endpoints
+    if request.method == "GET" and (request.url.path.endswith("/models") or request.url.path.endswith("/models/")):
+        return await call_next(request)
+    
+    # Only apply tier limits for authenticated users
+    user_id = getattr(request.state, 'user_id', None)
+    if not user_id:
+        return await call_next(request)
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    # Get user tier and current usage
+    tier = db.get_user_tier(user_id)
+    if not tier:
+        # Default free tier - allow all requests
+        return await call_next(request)
+    
+    # Check if subscription is active and not expired
+    subscription = db.get_user_subscription(user_id)
+    if subscription:
+        from datetime import datetime
+        if subscription['expires_at'] and datetime.fromisoformat(subscription['expires_at']) < datetime.now():
+            return JSONResponse(
+                status_code=402,
+                content={
+                    "error": "Subscription expired",
+                    "message": "Your subscription has expired. Please renew to continue using the service.",
+                    "code": "subscription_expired"
+                }
+            )
+    
+    # Get current usage statistics
+    usage = db.get_user_usage(user_id)
+    
+    # Validate all tier limits with standard semantics:
+    # -1 = unlimited, 0 = blocked, >0 = actual limit
+    
+    # 1. Max requests per day
+    if tier['max_requests_per_day'] == 0:
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "Requests not permitted",
+                "message": "Your account tier does not allow API requests. Please upgrade your plan.",
+                "code": "requests_blocked"
+            }
+        )
+    elif tier['max_requests_per_day'] > 0 and usage['requests_today'] >= tier['max_requests_per_day']:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Daily request limit exceeded",
+                "message": f"You have reached your daily request limit of {tier['max_requests_per_day']} requests. Upgrade your plan for higher limits.",
+                "limit": tier['max_requests_per_day'],
+                "current": usage['requests_today'],
+                "code": "daily_limit_exceeded"
+            }
+        )
+    
+    # 2. Max requests per month
+    if tier['max_requests_per_month'] == 0:
+        return JSONResponse(
+            status_code=402,
+            content={
+                "error": "Requests not permitted",
+                "message": "Your account tier does not allow API requests. Please upgrade your plan.",
+                "code": "requests_blocked"
+            }
+        )
+    elif tier['max_requests_per_month'] > 0 and usage['requests_month'] >= tier['max_requests_per_month']:
+        return JSONResponse(
+            status_code=429,
+            content={
+                "error": "Monthly request limit exceeded",
+                "message": f"You have reached your monthly request limit of {tier['max_requests_per_month']} requests. Upgrade your plan for higher limits.",
+                "limit": tier['max_requests_per_month'],
+                "current": usage['requests_month'],
+                "code": "monthly_limit_exceeded"
+            }
+        )
+    
+    # 3. Max providers check (only when creating providers)
+    if request.url.path.endswith("/dashboard/user/providers") and request.method == "POST":
+        if tier['max_providers'] == 0:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Provider creation not permitted",
+                    "message": "Your account tier does not allow configuring providers. Please upgrade your plan.",
+                    "code": "providers_blocked"
+                }
+            )
+        elif tier['max_providers'] > 0 and usage['providers_count'] >= tier['max_providers']:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Maximum providers limit reached",
+                    "message": f"You have reached your limit of {tier['max_providers']} providers. Upgrade your plan for higher limits.",
+                    "limit": tier['max_providers'],
+                    "current": usage['providers_count'],
+                    "code": "providers_limit_exceeded"
+                }
+            )
+    
+    # 4. Max rotations check (only when creating rotations)
+    if request.url.path.endswith("/dashboard/user/rotations") and request.method == "POST":
+        if tier['max_rotations'] == 0:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Rotation creation not permitted",
+                    "message": "Your account tier does not allow configuring rotations. Please upgrade your plan.",
+                    "code": "rotations_blocked"
+                }
+            )
+        elif tier['max_rotations'] > 0 and usage['rotations_count'] >= tier['max_rotations']:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Maximum rotations limit reached",
+                    "message": f"You have reached your limit of {tier['max_rotations']} rotations. Upgrade your plan for higher limits.",
+                    "limit": tier['max_rotations'],
+                    "current": usage['rotations_count'],
+                    "code": "rotations_limit_exceeded"
+                }
+            )
+    
+    # 5. Max autoselections check (only when creating autoselects)
+    if request.url.path.endswith("/dashboard/user/autoselects") and request.method == "POST":
+        if tier['max_autoselections'] == 0:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Autoselection creation not permitted",
+                    "message": "Your account tier does not allow configuring autoselections. Please upgrade your plan.",
+                    "code": "autoselections_blocked"
+                }
+            )
+        elif tier['max_autoselections'] > 0 and usage['autoselects_count'] >= tier['max_autoselections']:
+            return JSONResponse(
+                status_code=403,
+                content={
+                    "error": "Maximum autoselections limit reached",
+                    "message": f"You have reached your limit of {tier['max_autoselections']} autoselections. Upgrade your plan for higher limits.",
+                    "limit": tier['max_autoselections'],
+                    "current": usage['autoselects_count'],
+                    "code": "autoselections_limit_exceeded"
+                }
+            )
+    
+    # All limits passed, process request
+    response = await call_next(request)
+    
+    # Record request usage after successful processing
+    if request.method == "POST" and (
+        request.url.path.endswith("/chat/completions") or
+        request.url.path.endswith("/completions") or
+        request.url.path.endswith("/embeddings") or
+        request.url.path.endswith("/audio/transcriptions") or
+        request.url.path.endswith("/audio/speech") or
+        request.url.path.endswith("/images/generations")
+    ):
+        # Increment request counters asynchronously
+        import asyncio
+        asyncio.create_task(db.increment_user_request_count(user_id))
+    
+    return response
+
 async def record_token_usage_async(user_id: int, token_id: int):
     """Asynchronously record token usage"""
     try:
@@ -4466,6 +4650,419 @@ async def dashboard_response_cache_stats(request: Request):
             'backend': 'unknown',
             'error': str(e)
         })
+
+@app.get("/dashboard/admin/tiers")
+async def dashboard_admin_tiers(request: Request):
+    """Admin account tiers management page"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    tiers = db.get_all_tiers()
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/admin_tiers.html",
+        context={
+        "request": request,
+        "session": request.session,
+        "tiers": tiers
+    }
+    )
+
+# API endpoints for tiers CRUD operations
+@app.get("/api/admin/tiers")
+async def api_list_tiers(request: Request):
+    """List all tiers - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    tiers = db.get_all_tiers()
+    return JSONResponse(tiers)
+
+@app.get("/api/admin/tiers/{tier_id}")
+async def api_get_tier(request: Request, tier_id: int):
+    """Get a specific tier by ID - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    tier = db.get_tier_by_id(tier_id)
+    if not tier:
+        return JSONResponse({"error": "Tier not found"}, status_code=404)
+    
+    return JSONResponse(tier)
+
+@app.post("/api/admin/tiers")
+async def api_create_tier(request: Request):
+    """Create a new tier - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        body = await request.json()
+        
+        tier_id = db.create_tier(
+            name=body.get('name'),
+            description=body.get('description', ''),
+            price_monthly=body.get('price_monthly', 0.0),
+            price_yearly=body.get('price_yearly', 0.0),
+            max_requests_per_day=body.get('max_requests_per_day', -1),
+            max_requests_per_month=body.get('max_requests_per_month', -1),
+            max_providers=body.get('max_providers', -1),
+            max_rotations=body.get('max_rotations', -1),
+            max_autoselections=body.get('max_autoselections', -1),
+            max_rotation_models=body.get('max_rotation_models', -1),
+            max_autoselection_models=body.get('max_autoselection_models', -1),
+            is_active=body.get('is_active', True)
+        )
+        
+        return JSONResponse({"success": True, "tier_id": tier_id})
+    except Exception as e:
+        logger.error(f"Error creating tier: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.put("/api/admin/tiers/{tier_id}")
+async def api_update_tier(request: Request, tier_id: int):
+    """Update an existing tier - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        body = await request.json()
+        
+        # Build update kwargs
+        update_kwargs = {}
+        if 'name' in body:
+            update_kwargs['name'] = body['name']
+        if 'description' in body:
+            update_kwargs['description'] = body['description']
+        if 'price_monthly' in body:
+            update_kwargs['price_monthly'] = body['price_monthly']
+        if 'price_yearly' in body:
+            update_kwargs['price_yearly'] = body['price_yearly']
+        if 'max_requests_per_day' in body:
+            update_kwargs['max_requests_per_day'] = body['max_requests_per_day']
+        if 'max_requests_per_month' in body:
+            update_kwargs['max_requests_per_month'] = body['max_requests_per_month']
+        if 'max_providers' in body:
+            update_kwargs['max_providers'] = body['max_providers']
+        if 'max_rotations' in body:
+            update_kwargs['max_rotations'] = body['max_rotations']
+        if 'max_autoselections' in body:
+            update_kwargs['max_autoselections'] = body['max_autoselections']
+        if 'max_rotation_models' in body:
+            update_kwargs['max_rotation_models'] = body['max_rotation_models']
+        if 'max_autoselection_models' in body:
+            update_kwargs['max_autoselection_models'] = body['max_autoselection_models']
+        if 'is_active' in body:
+            update_kwargs['is_active'] = body['is_active']
+        
+        success = db.update_tier(tier_id, **update_kwargs)
+        
+        if not success:
+            return JSONResponse({"error": "Tier not found or no changes"}, status_code=404)
+        
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Error updating tier: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.delete("/api/admin/tiers/{tier_id}")
+async def api_delete_tier(request: Request, tier_id: int):
+    """Delete a tier - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        success = db.delete_tier(tier_id)
+        
+        if not success:
+            return JSONResponse({"error": "Cannot delete default tier or tier not found"}, status_code=400)
+        
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"Error deleting tier: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# Tier form pages
+@app.get("/dashboard/admin/tiers/create")
+async def dashboard_admin_tier_create(request: Request):
+    """Create tier page"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/admin_tier_form.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "tier": None
+        }
+    )
+
+@app.get("/dashboard/admin/tiers/edit/{tier_id}")
+async def dashboard_admin_tier_edit(request: Request, tier_id: int):
+    """Edit tier page"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    tier = db.get_tier_by_id(tier_id)
+    if not tier:
+        return RedirectResponse(url=url_for(request, "/dashboard/admin/tiers"), status_code=303)
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/admin_tier_form.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "tier": tier
+        }
+    )
+
+@app.post("/dashboard/admin/tiers/save")
+async def dashboard_admin_tier_save(request: Request):
+    """Save tier (create or update)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    try:
+        form = await request.form()
+        tier_id = form.get('tier_id')
+        
+        tier_data = {
+            'name': form.get('name'),
+            'description': form.get('description', ''),
+            'price_monthly': float(form.get('price_monthly', 0)),
+            'price_yearly': float(form.get('price_yearly', 0)),
+            'max_requests_per_day': int(form.get('max_requests_per_day', -1)),
+            'max_requests_per_month': int(form.get('max_requests_per_month', -1)),
+            'max_providers': int(form.get('max_providers', -1)),
+            'max_rotations': int(form.get('max_rotations', -1)),
+            'max_autoselections': int(form.get('max_autoselections', -1)),
+            'max_rotation_models': int(form.get('max_rotation_models', -1)),
+            'max_autoselection_models': int(form.get('max_autoselection_models', -1)),
+            'is_active': form.get('is_active') == '1'
+        }
+        
+        if tier_id:
+            # Update existing tier
+            db.update_tier(int(tier_id), **tier_data)
+        else:
+            # Create new tier
+            db.create_tier(**tier_data)
+        
+        return RedirectResponse(url=url_for(request, "/dashboard/admin/tiers"), status_code=303)
+    except Exception as e:
+        logger.error(f"Error saving tier: {e}")
+        return RedirectResponse(url=url_for(request, "/dashboard/admin/tiers"), status_code=303)
+
+# Currency settings endpoints
+@app.get("/api/admin/settings/currency")
+async def api_get_currency_settings(request: Request):
+    """Get currency settings - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    # Return default currency settings
+    # These could be stored in database or config file in the future
+    return JSONResponse({
+        "currency_code": "USD",
+        "currency_symbol": "$",
+        "currency_decimals": 2
+    })
+
+@app.post("/api/admin/settings/currency")
+async def api_save_currency_settings(request: Request):
+    """Save currency settings - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        # In the future, save to database or config file
+        # For now, just return success
+        return JSONResponse({"success": True, "message": "Currency settings saved"})
+    except Exception as e:
+        logger.error(f"Error saving currency settings: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+# Payment gateway settings endpoints
+@app.get("/api/admin/settings/payment-gateways")
+async def api_get_payment_gateways(request: Request):
+    """Get payment gateway settings - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    # Return default/empty payment gateway settings
+    # These could be stored in database or config file in the future
+    return JSONResponse({
+        "paypal": {"enabled": False, "client_id": "", "client_secret": "", "webhook_secret": "", "sandbox": True},
+        "stripe": {"enabled": False, "publishable_key": "", "secret_key": "", "webhook_secret": "", "sandbox": True},
+        "bitcoin": {"enabled": False, "address": "", "confirmations": 3, "expiration_minutes": 120},
+        "ethereum": {"enabled": False, "address": "", "confirmations": 12, "chain_id": 1},
+        "usdt": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3},
+        "usdc": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3}
+    })
+
+@app.post("/api/admin/settings/payment-gateways")
+async def api_save_payment_gateways(request: Request):
+    """Save payment gateway settings - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        # In the future, save to database or config file
+        # For now, just return success
+        return JSONResponse({"success": True, "message": "Payment gateway settings saved"})
+    except Exception as e:
+        logger.error(f"Error saving payment gateway settings: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+
+
+@app.get("/dashboard/pricing")
+async def dashboard_pricing(request: Request):
+    """Pricing plans page for users"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    
+    tiers = db.get_all_tiers()
+    current_tier = db.get_user_tier(request.session.get('user_id'))
+    
+    # Get enabled payment gateways
+    enabled_gateways = []
+    from aisbf.config import config
+    if config.aisbf and hasattr(config.aisbf, 'payment_gateways') and config.aisbf.payment_gateways:
+        for gateway, settings in config.aisbf.payment_gateways.items():
+            if settings.get('enabled', False):
+                enabled_gateways.append(gateway)
+    
+    # Get currency settings
+    currency_symbol = "$"
+    if config.aisbf and config.aisbf.currency:
+        currency_symbol = config.aisbf.currency.get('symbol', "$")
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/pricing.html",
+        context={
+        "request": request,
+        "session": request.session,
+        "tiers": tiers,
+        "current_tier": current_tier,
+        "enabled_gateways": enabled_gateways,
+        "currency_symbol": currency_symbol
+    }
+    )
+
+@app.get("/dashboard/subscription")
+async def dashboard_subscription(request: Request):
+    """User subscription status and payment methods management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    user_id = request.session.get('user_id')
+    
+    # Get user subscription info
+    subscription = db.get_user_subscription(user_id)
+    current_tier = db.get_user_tier(user_id)
+    payment_methods = db.get_user_payment_methods(user_id)
+    
+    # Get enabled payment gateways
+    enabled_gateways = []
+    from aisbf.config import config
+    if config.aisbf and hasattr(config.aisbf, 'payment_gateways') and config.aisbf.payment_gateways:
+        for gateway, settings in config.aisbf.payment_gateways.items():
+            if settings.get('enabled', False):
+                enabled_gateways.append(gateway)
+    
+    # Get currency settings
+    currency_symbol = "$"
+    if config.aisbf and config.aisbf.currency:
+        currency_symbol = config.aisbf.currency.get('symbol', "$")
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/subscription.html",
+        context={
+        "request": request,
+        "session": request.session,
+        "subscription": subscription,
+        "current_tier": current_tier,
+        "payment_methods": payment_methods,
+        "enabled_gateways": enabled_gateways,
+        "currency_symbol": currency_symbol
+    }
+    )
+
+@app.get("/dashboard/billing")
+async def dashboard_billing(request: Request):
+    """User payment transaction history page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = get_database()
+    user_id = request.session.get('user_id')
+    
+    transactions = db.get_user_payment_transactions(user_id)
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/billing.html",
+        context={
+        "request": request,
+        "session": request.session,
+        "transactions": transactions
+    }
+    )
 
 @app.get("/dashboard/rate-limits")
 async def dashboard_rate_limits(request: Request):

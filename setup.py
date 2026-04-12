@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.99.20",
+    version="0.99.21",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -172,6 +172,11 @@ setup(
             'templates/dashboard/signup.html',
             'templates/dashboard/profile.html',
             'templates/dashboard/change_password.html',
+            'templates/dashboard/admin_tiers.html',
+            'templates/dashboard/admin_tier_form.html',
+            'templates/dashboard/pricing.html',
+            'templates/dashboard/subscription.html',
+            'templates/dashboard/billing.html',
         ]),
         # Install static files (extension and favicon)
         ('share/aisbf/static', [

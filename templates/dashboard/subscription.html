@@ -1,0 +1,285 @@
+{% extends "base.html" %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Subscription Management</h2>
+
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
+
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
+
+<!-- Current Plan Status -->
+<div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
+        <i class="fas fa-star me-2"></i>Current Plan
+    </h3>
+
+    {% if current_tier %}
+    <div style="display: flex; align-items: center; margin-bottom: 20px;">
+        <div style="flex: 1;">
+            <div style="display: flex; align-items: center; margin-bottom: 10px;">
+                <h3 style="margin: 0 15px 0 0;">{{ current_tier.name }}</h3>
+                {% if current_tier.is_default %}
+                <span style="background: #28a745; color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px;">Free Tier</span>
+                {% endif %}
+            </div>
+            <p style="color: #a0a0a0; margin: 0;">{{ current_tier.description if current_tier.description else 'No description available' }}</p>
+        </div>
+        <div style="text-align: right;">
+            {% if not current_tier.is_default %}
+            <div style="margin-bottom: 10px;">
+                <span style="font-size: 24px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ current_tier.price_monthly }}</span>
+                <span style="color: #a0a0a0; font-size: 14px;">/month</span>
+                <br>
+                <small style="color: #a0a0a0;">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</small>
+            </div>
+            {% endif %}
+            <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn">
+                <i class="fas fa-arrow-up me-2"></i>Change Plan
+            </a>
+        </div>
+    </div>
+
+    <!-- Plan Limits -->
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #4a9eff; margin-bottom: 5px;">
+                {% if current_tier.max_requests_day == -1 %}
+                ∞
+                {% else %}
+                {{ current_tier.max_requests_day }}
+                {% endif %}
+            </div>
+            <div style="color: #a0a0a0; font-size: 12px;">Requests per day</div>
+        </div>
+        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #4ade80; margin-bottom: 5px;">
+                {% if current_tier.max_requests_month == -1 %}
+                ∞
+                {% else %}
+                {{ current_tier.max_requests_month }}
+                {% endif %}
+            </div>
+            <div style="color: #a0a0a0; font-size: 12px;">Requests per month</div>
+        </div>
+        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #f39c12; margin-bottom: 5px;">
+                {% if current_tier.max_providers == -1 %}
+                ∞
+                {% else %}
+                {{ current_tier.max_providers }}
+                {% endif %}
+            </div>
+            <div style="color: #a0a0a0; font-size: 12px;">Providers</div>
+        </div>
+        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: #17a2b8; margin-bottom: 5px;">
+                {% if current_tier.max_rotations == -1 %}
+                ∞
+                {% else %}
+                {{ current_tier.max_rotations }}
+                {% endif %}
+            </div>
+            <div style="color: #a0a0a0; font-size: 12px;">Rotations</div>
+        </div>
+    </div>
+
+    {% if subscription %}
+    <hr style="border-color: #0f3460; margin: 20px 0;">
+    <div style="display: flex; align-items: center;">
+        <div style="flex: 1;">
+            <h4 style="margin: 0 0 10px 0; color: #8ec8ff;">Subscription Status</h4>
+            <div style="display: flex; align-items: center; gap: 15px;">
+                <span class="subscription-status-{{ subscription.status }}">
+                    {{ subscription.status|title }}
+                </span>
+                {% if subscription.expires_at %}
+                <div style="color: #a0a0a0;">
+                    <i class="fas fa-calendar-alt me-1"></i>
+                    <strong>Renews:</strong> {{ subscription.expires_at }}
+                </div>
+                {% endif %}
+            </div>
+        </div>
+        <div style="text-align: right;">
+            {% if subscription.status == 'active' %}
+            <button class="btn btn-secondary" style="background: #dc3545;">
+                <i class="fas fa-times-circle me-2"></i>Cancel Subscription
+            </button>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+    {% endif %}
+</div>
+
+<!-- Quick Actions -->
+<div style="background: #16213e; border: 2px solid #8ec8ff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: #8ec8ff;">
+        <i class="fas fa-bolt me-2"></i>Quick Actions
+    </h3>
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+        <a href="{{ url_for(request, '/dashboard/billing') }}" style="text-decoration: none; color: inherit;">
+            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#4a9eff'; this.style.boxShadow='0 2px 8px rgba(74,158,255,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+                <div style="text-align: center;">
+                    <i class="fas fa-history fa-3x mb-3" style="color: #4a9eff;"></i>
+                    <h4 style="margin: 0 0 10px 0;">Billing & Payments</h4>
+                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Manage payment methods and view history</p>
+                </div>
+            </div>
+        </a>
+
+        <a href="{{ url_for(request, '/dashboard/pricing') }}" style="text-decoration: none; color: inherit;">
+            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#f39c12'; this.style.boxShadow='0 2px 8px rgba(243,156,18,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+                <div style="text-align: center;">
+                    <i class="fas fa-star fa-3x mb-3" style="color: #f39c12;"></i>
+                    <h4 style="margin: 0 0 10px 0;">Upgrade Plan</h4>
+                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">View all available plans</p>
+                </div>
+            </div>
+        </a>
+
+        <a href="{{ url_for(request, '/dashboard/profile') }}" style="text-decoration: none; color: inherit;">
+            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#17a2b8'; this.style.boxShadow='0 2px 8px rgba(23,162,184,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+                <div style="text-align: center;">
+                    <i class="fas fa-user fa-3x mb-3" style="color: #17a2b8;"></i>
+                    <h4 style="margin: 0 0 10px 0;">Edit Profile</h4>
+                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Update account settings</p>
+                </div>
+            </div>
+        </a>
+
+        <a href="{{ url_for(request, '/dashboard/change-password') }}" style="text-decoration: none; color: inherit;">
+            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#6c757d'; this.style.boxShadow='0 2px 8px rgba(108,117,125,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+                <div style="text-align: center;">
+                    <i class="fas fa-lock fa-3x mb-3" style="color: #6c757d;"></i>
+                    <h4 style="margin: 0 0 10px 0;">Change Password</h4>
+                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Update security settings</p>
+                </div>
+            </div>
+        </a>
+    </div>
+</div>
+
+<!-- Add Payment Method Modal -->
+<div class="modal fade" id="addPaymentMethodModal" tabindex="-1">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h5 class="modal-title">Add Payment Method</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+            </div>
+            <div class="modal-body">
+                <ul class="nav nav-pills mb-3 justify-content-center" id="paymentTabs">
+                    {% if 'stripe' in enabled_gateways %}
+                    <li class="nav-item">
+                        <button class="nav-link active" data-bs-toggle="pill" data-bs-target="#stripeTab">
+                            <i class="fab fa-cc-stripe me-2"></i>Credit Card
+                        </button>
+                    </li>
+                    {% endif %}
+                    {% if 'paypal' in enabled_gateways %}
+                    <li class="nav-item">
+                        <button class="nav-link {% if 'stripe' not in enabled_gateways %}active{% endif %}" data-bs-toggle="pill" data-bs-target="#paypalTab">
+                            <i class="fab fa-paypal me-2"></i>PayPal
+                        </button>
+                    </li>
+                    {% endif %}
+                    {% if 'bitcoin' in enabled_gateways or 'eth' in enabled_gateways or 'usdt' in enabled_gateways or 'usdc' in enabled_gateways %}
+                    <li class="nav-item">
+                        <button class="nav-link" data-bs-toggle="pill" data-bs-target="#cryptoTab">
+                            <i class="fab fa-bitcoin me-2"></i>Crypto
+                        </button>
+                    </li>
+                    {% endif %}
+                </ul>
+
+                <div class="tab-content">
+                    <div class="tab-pane fade show active" id="stripeTab">
+                        <div class="text-center py-4">
+                            <i class="fab fa-cc-stripe fa-3x mb-3 text-primary"></i>
+                            <p>Secure credit card payment via Stripe</p>
+                            <button class="btn btn-primary">Connect with Stripe</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="paypalTab">
+                        <div class="text-center py-4">
+                            <i class="fab fa-paypal fa-3x mb-3 text-primary"></i>
+                            <p>Pay with your PayPal account</p>
+                            <button class="btn btn-primary">Connect with PayPal</button>
+                        </div>
+                    </div>
+
+                    <div class="tab-pane fade" id="cryptoTab">
+                        <div class="text-center py-3">
+                            <div class="d-flex justify-content-center gap-3 mb-3">
+                                {% if 'bitcoin' in enabled_gateways %}
+                                <button class="btn btn-outline-warning">
+                                    <i class="fab fa-bitcoin me-2"></i>Bitcoin
+                                </button>
+                                {% endif %}
+                                {% if 'eth' in enabled_gateways %}
+                                <button class="btn btn-outline-purple">
+                                    <i class="fab fa-ethereum me-2"></i>Ethereum
+                                </button>
+                                {% endif %}
+                                {% if 'usdt' in enabled_gateways %}
+                                <button class="btn btn-outline-success">
+                                    <i class="fas fa-coins me-2"></i>USDT
+                                </button>
+                                {% endif %}
+                                {% if 'usdc' in enabled_gateways %}
+                                <button class="btn btn-outline-info">
+                                    <i class="fas fa-coins me-2"></i>USDC
+                                </button>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.subscription-status-active {
+    background: #28a745;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.subscription-status-canceled {
+    background: #ffc107;
+    color: black;
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.subscription-status-expired,
+.subscription-status-suspended {
+    background: #dc3545;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.text-purple {
+    color: #6f42c1;
+}
+</style>
+{% endblock %}

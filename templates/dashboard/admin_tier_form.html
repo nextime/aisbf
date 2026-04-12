@@ -1,0 +1,104 @@
+{% extends "base.html" %}
+
+{% block title %}{{ 'Edit' if tier else 'Create' }} Tier{% endblock %}
+
+{% block content %}
+<div style="max-width: 800px; margin: 0 auto;">
+    <h2 style="margin-bottom: 30px;">
+        <i class="fas fa-layer-group" style="color: #4a9eff;"></i> 
+        {{ 'Edit Tier' if tier else 'Create New Tier' }}
+    </h2>
+
+    <form method="POST" action="{{ url_for(request, '/dashboard/admin/tiers/save') }}">
+        <input type="hidden" name="tier_id" value="{{ tier.id if tier else '' }}">
+
+        <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0; font-size: 16px;">Tier Name</label>
+                <input type="text" name="name" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-size: 16px;" required placeholder="e.g. Professional Tier" value="{{ tier.name if tier else '' }}">
+            </div>
+
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0; font-size: 16px;">Description</label>
+                <textarea name="description" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-size: 16px; min-height: 80px;" placeholder="Tier description">{{ tier.description if tier else '' }}</textarea>
+            </div>
+
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #4a9eff; font-size: 14px;">
+                        <i class="fas fa-calendar-day me-2"></i> Monthly Price
+                    </label>
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #0f3460; color: #e0e0e0; padding: 12px; border-radius: 5px 0 0 5px; border: 1px solid #0f3460;">$</span>
+                        <input type="number" name="price_monthly" style="flex: 1; padding: 12px; border: 1px solid #0f3460; border-left: none; border-radius: 0 5px 5px 0; background: #16213e; color: #e0e0e0; font-size: 16px;" step="0.01" min="0" value="{{ tier.price_monthly if tier else '0.00' }}">
+                    </div>
+                </div>
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #4ade80; font-size: 14px;">
+                        <i class="fas fa-calendar-alt me-2"></i> Yearly Price
+                    </label>
+                    <div style="display: flex; align-items: center;">
+                        <span style="background: #0f3460; color: #e0e0e0; padding: 12px; border-radius: 5px 0 0 5px; border: 1px solid #0f3460;">$</span>
+                        <input type="number" name="price_yearly" style="flex: 1; padding: 12px; border: 1px solid #0f3460; border-left: none; border-radius: 0 5px 5px 0; background: #16213e; color: #e0e0e0; font-size: 16px;" step="0.01" min="0" value="{{ tier.price_yearly if tier else '0.00' }}">
+                    </div>
+                </div>
+            </div>
+
+            <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; margin-bottom: 20px; overflow: hidden;">
+                <div style="padding: 15px; border-bottom: 1px solid #0f3460;">
+                    <h6 style="margin: 0; color: #e0e0e0; font-weight: 500;"><i class="fas fa-sliders-h me-2"></i> Usage Limits</h6>
+                    <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 12px;">Use <code style="background: #0f3460; padding: 2px 4px; border-radius: 3px;">-1</code> for unlimited, <code style="background: #0f3460; padding: 2px 4px; border-radius: 3px;">0</code> to disable, or any positive number for the limit</p>
+                </div>
+                <div style="padding: 15px;">
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Requests per Day</label>
+                            <input type="number" name="max_requests_per_day" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_requests_per_day if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Requests per Month</label>
+                            <input type="number" name="max_requests_per_month" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_requests_per_month if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Providers</label>
+                            <input type="number" name="max_providers" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_providers if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Rotations</label>
+                            <input type="number" name="max_rotations" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_rotations if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Autoselections</label>
+                            <input type="number" name="max_autoselections" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_autoselections if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Models per Rotation</label>
+                            <input type="number" name="max_rotation_models" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_rotation_models if tier else '-1' }}">
+                        </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 12px;">Max Models per Autoselection</label>
+                            <input type="number" name="max_autoselection_models" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" min="-1" value="{{ tier.max_autoselection_models if tier else '-1' }}">
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="cursor: pointer; font-weight: 500; color: #e0e0e0;">
+                    <input type="checkbox" name="is_active" value="1" {{ 'checked' if not tier or tier.is_active else '' }} style="margin-right: 10px;">
+                    Tier is active and available for users
+                </label>
+            </div>
+        </div>
+
+        <div style="display: flex; gap: 10px;">
+            <button type="submit" class="btn" style="background: #4a9eff; color: white;">
+                <i class="fas fa-save me-2"></i>Save Tier
+            </button>
+            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" class="btn" style="background: #6c757d; color: white;">
+                <i class="fas fa-times me-2"></i>Cancel
+            </a>
+        </div>
+    </form>
+</div>
+{% endblock %}

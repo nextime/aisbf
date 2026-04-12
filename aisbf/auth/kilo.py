@@ -48,7 +48,7 @@ class KiloOAuth2:
             credentials_file: Path to credentials JSON file (default: ~/.kilo_credentials.json)
             api_base: Base URL for Kilo API (default: https://api.kilo.ai)
         """
-        self.credentials_file = credentials_file or os.path.expanduser("~/.kilo_credentials.json")
+        self.credentials_file = os.path.expanduser(credentials_file) if credentials_file else os.path.expanduser("~/.kilo_credentials.json")
         self.api_base = api_base or os.environ.get("KILO_API_URL", "https://api.kilo.ai")
         self.credentials = None
         self._load_credentials()
@@ -73,7 +73,9 @@ class KiloOAuth2:
         """
         try:
             # Ensure directory exists
-            os.makedirs(os.path.dirname(self.credentials_file), exist_ok=True)
+            cred_dir = os.path.dirname(self.credentials_file)
+            if cred_dir:  # Only create if there's a directory component
+                os.makedirs(cred_dir, exist_ok=True)
             
             # Write credentials
             with open(self.credentials_file, 'w') as f:

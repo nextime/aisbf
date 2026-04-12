@@ -146,5 +146,49 @@
       "client_secret": "",
       "scopes": ["user:email", "read:user"]
     }
+  },
+  
+  "billing": {
+    "currency": "USD",
+    "currency_symbol": "$",
+    "currency_decimals": 2,
+    "payment_methods": {
+      "paypal": {
+        "enabled": false,
+        "client_id": "",
+        "client_secret": "",
+        "mode": "sandbox"
+      },
+      "stripe": {
+        "enabled": false,
+        "publishable_key": "",
+        "secret_key": "",
+        "webhook_secret": "",
+        "mode": "test"
+      },
+      "bitcoin": {
+        "enabled": false,
+        "wallet_address": "",
+        "confirmations_required": 3
+      },
+      "eth": {
+        "enabled": false,
+        "wallet_address": "",
+        "chain_id": 1,
+        "confirmations_required": 12
+      },
+      "usdt": {
+        "enabled": false,
+        "wallet_address": "",
+        "chain": "ethereum",
+        "confirmations_required": 12
+      },
+      "usdc": {
+        "enabled": false,
+        "wallet_address": "",
+        "chain": "ethereum",
+        "confirmations_required": 12
+      }
+    }
   }
 }

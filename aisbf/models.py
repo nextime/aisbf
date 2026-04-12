@@ -88,3 +88,68 @@ class ErrorTracking(BaseModel):
     failures: int
     last_failure: Optional[int]
     disabled_until: Optional[int]
+
+
+class AccountTier(BaseModel):
+    id: Optional[int] = None
+    name: str
+    description: Optional[str] = None
+    price_monthly: float = 0.0
+    price_yearly: float = 0.0
+    is_default: bool = False
+    is_active: bool = True
+    
+    # Limits
+    max_requests_per_day: int = -1
+    max_requests_per_month: int = -1
+    max_providers: int = -1
+    max_rotations: int = -1
+    max_autoselections: int = -1
+    max_rotation_models: int = -1
+    max_autoselection_models: int = -1
+    
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class UserSubscription(BaseModel):
+    id: Optional[int] = None
+    user_id: int
+    tier_id: int
+    status: str = "active"  # active, canceled, expired, suspended
+    start_date: int
+    end_date: Optional[int] = None
+    next_billing_date: Optional[int] = None
+    trial_end_date: Optional[int] = None
+    payment_method_id: Optional[int] = None
+    auto_renew: bool = True
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class PaymentMethod(BaseModel):
+    id: Optional[int] = None
+    user_id: int
+    type: str  # paypal, stripe, bitcoin, eth, usdt, usdc
+    identifier: str
+    is_default: bool = False
+    is_active: bool = True
+    metadata: Optional[Dict] = None
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class PaymentTransaction(BaseModel):
+    id: Optional[int] = None
+    user_id: int
+    tier_id: Optional[int] = None
+    subscription_id: Optional[int] = None
+    payment_method_id: Optional[int] = None
+    amount: float
+    currency: str = "USD"
+    status: str  # pending, completed, failed, refunded
+    transaction_type: str  # subscription, one_time, renewal
+    external_transaction_id: Optional[str] = None
+    metadata: Optional[Dict] = None
+    created_at: Optional[int] = None
+    completed_at: Optional[int] = None

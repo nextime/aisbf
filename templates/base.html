@@ -63,6 +63,47 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .nav .account-dropdown a:first-child { border-radius: 8px 8px 0 0; }
         .nav .account-dropdown a:last-child { border-radius: 0 0 8px 8px; }
         .nav .account-dropdown a:hover { background: #0f3460; color: #e0e0e0; }
+        
+        /* Rainbow Upgrade Button */
+        .upgrade-button {
+            font-weight: 700 !important;
+            padding: 8px 16px !important;
+            border-radius: 6px !important;
+            background: linear-gradient(120deg, #ff0080, #ff8c00, #40e0d0, #9370db, #ff0080) !important;
+            background-size: 400% 400% !important;
+            animation: rainbow-gradient 3s ease infinite !important;
+            color: white !important;
+            text-shadow: 0 1px 2px rgba(0,0,0,0.3) !important;
+            box-shadow: 0 0 12px rgba(255, 0, 128, 0.5) !important;
+            margin-left: 4px !important;
+            transition: transform 0.2s ease, box-shadow 0.2s ease !important;
+        }
+        
+        .upgrade-button:hover {
+            transform: scale(1.05) !important;
+            box-shadow: 0 0 20px rgba(255, 0, 128, 0.7) !important;
+        }
+        
+        @keyframes rainbow-gradient {
+            0% { background-position: 0% 50%; }
+            50% { background-position: 100% 50%; }
+            100% { background-position: 0% 50%; }
+        }
+        
+        .rainbow-text {
+            background: linear-gradient(90deg, #ff0000, #ff7f00, #ffff00, #00ff00, #0000ff, #4b0082, #9400d3);
+            background-size: 400% 400%;
+            animation: rainbow-text 2s linear infinite;
+            -webkit-background-clip: text;
+            background-clip: text;
+            color: transparent !important;
+            font-weight: 800 !important;
+        }
+        
+        @keyframes rainbow-text {
+            0% { background-position: 0% center; }
+            100% { background-position: 400% center; }
+        }
     </style>
     <script>
         /*
@@ -90,7 +131,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         document.addEventListener('click', function(event) {
             const accountMenu = document.querySelector('.account-menu');
             const dropdown = document.getElementById('account-dropdown');
-            if (!accountMenu.contains(event.target)) {
+            if (accountMenu && dropdown && !accountMenu.contains(event.target)) {
                 dropdown.classList.remove('active');
             }
         });
@@ -423,6 +464,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <h1>AISBF Dashboard</h1>
             {% if request.session.logged_in %}
             <div class="header-actions">
+                <a href="{{ url_for(request, '/dashboard/docs') }}" class="btn btn-secondary">Docs</a>
+                <a href="{{ url_for(request, '/dashboard/about') }}" class="btn btn-secondary">About</a>
                 <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary">License</a>
                 {% if request.session.role == 'admin' %}
                 <button onclick="restartServer()" class="btn btn-warning">Restart Server</button>
@@ -433,6 +476,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
     
+    {% if request.session.logged_in and show_upgrade_banner %}
+    <div class="upgrade-banner">
+        <div class="container">
+            <div class="d-flex align-items-center justify-content-between py-2">
+                <div>
+                    <i class="fas fa-rocket me-2"></i>
+                    <span>Want higher limits? <strong>Upgrade your plan</strong> for more requests and features!</span>
+                </div>
+                <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn btn-sm btn-light">
+                    View Pricing Plans <i class="fas fa-arrow-right ms-1"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+
     {% if request.session.logged_in %}
     <div class="container">
         <div class="nav">
@@ -445,9 +504,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% if request.session.role == 'admin' %}
             <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
+            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" {% if '/admin/tiers' in request.path %}class="active"{% endif %}>Tiers</a>
             {% endif %}
-            <a href="{{ url_for(request, '/dashboard/docs') }}" {% if '/docs' in request.path %}class="active"{% endif %}>Docs</a>
-            <a href="{{ url_for(request, '/dashboard/about') }}" {% if '/about' in request.path %}class="active"{% endif %}>About</a>
+            {% if show_upgrade_button %}
+            <a href="{{ url_for(request, '/dashboard/pricing') }}" class="upgrade-button rainbow-text">✨ Upgrade! ✨</a>
+            {% endif %}
             {% if request.session.user_id %}
             <div class="account-menu">
                 <div class="account-trigger" onclick="toggleAccountMenu()">
@@ -457,8 +518,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 <div class="account-dropdown" id="account-dropdown">
                     {% if request.session.user_id %}
                     {% if request.session.user_id %}
-                    <a href="{{ url_for(request, '/dashboard/profile') }}">Edit Profile</a>
-                    <a href="{{ url_for(request, '/dashboard/change-password') }}">Change Password</a>
+                     <a href="{{ url_for(request, '/dashboard/profile') }}">Edit Profile</a>
+                     <a href="{{ url_for(request, '/dashboard/subscription') }}">Subscription</a>
+                     <a href="{{ url_for(request, '/dashboard/billing') }}">Billing</a>
+                     <a href="{{ url_for(request, '/dashboard/change-password') }}">Change Password</a>
                     {% endif %}
                     {% endif %}
                 </div>
@@ -473,5 +536,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% block content %}{% endblock %}
         </div>
     </div>
+    
+    {% block extra_js %}{% endblock %}
 </body>
 </html>
