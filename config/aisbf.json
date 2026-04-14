@@ -123,6 +123,7 @@
     "verification_token_expiry_hours": 24
   },
   "smtp": {
+    "enabled": false,
     "host": "localhost",
     "port": 587,
     "username": "",

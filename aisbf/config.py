@@ -239,6 +239,7 @@ class CurrencyConfig(BaseModel):
 
 class SMTPConfig(BaseModel):
     """Configuration for SMTP email sending"""
+    enabled: bool = False
     host: str = "localhost"
     port: int = 587
     username: str = ""

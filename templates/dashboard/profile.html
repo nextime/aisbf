@@ -26,7 +26,16 @@
 
             <div class="form-group">
                 <label for="email">Email Address</label>
-                <input type="email" id="email" name="email" value="{{ session.email }}" required>
+                <input type="email" id="email" name="email" value="{{ session.email or '' }}" readonly style="background: #0f1419; cursor: not-allowed;">
+                {% if not session.email %}
+                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
+                    No email address set. <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: #667eea;">Add Email</a> (requires verification)
+                </small>
+                {% else %}
+                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
+                    <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: #667eea;">Change Email</a> (requires verification)
+                </small>
+                {% endif %}
             </div>
 
             <div class="form-group">
@@ -41,6 +50,12 @@
                 <button type="submit" class="btn btn-primary">Save Changes</button>
             </div>
         </form>
+    </div>
+
+    <div class="card" style="margin-top: 2rem; border: 1px solid #d32f2f;">
+        <h2 style="color: #f44336;">Danger Zone</h2>
+        <p style="color: #a0a0a0; margin-bottom: 1rem;">Permanently delete your account and all associated data.</p>
+        <a href="{{ url_for(request, '/dashboard/delete-account') }}" class="btn" style="background: #d32f2f; color: white;">Delete Account</a>
     </div>
 </div>
 

@@ -32,12 +32,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <form method="POST" action="{{ url_for(request, '/dashboard/signup') }}">
         <div class="form-group">
             <label for="username">Username</label>
-            <input type="text" id="username" name="username" required autofocus 
-                   pattern="[a-zA-Z0-9_-]+" 
-                   title="Username can only contain letters, numbers, underscores, and hyphens"
+            <input type="text" id="username" name="username" required autofocus
+                   pattern="[a-zA-Z0-9_.-]+"
+                   title="Username can only contain letters, numbers, underscores, hyphens, and dots"
                    minlength="3" maxlength="50">
             <small style="color: #666; display: block; margin-top: 5px;">
-                3-50 characters, letters, numbers, underscores, and hyphens only
+                3-50 characters, letters, numbers, underscores, hyphens, and dots only
             </small>
         </div>
         

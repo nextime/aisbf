@@ -28,10 +28,11 @@ from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Red
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.templating import Jinja2Templates
+from jinja2 import Environment, FileSystemLoader
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
 from aisbf.mcp import mcp_server, MCPAuthLevel, load_mcp_config
-from aisbf.database import initialize_database
+from aisbf.database import DatabaseRegistry
 from aisbf.cache import initialize_cache
 from aisbf.tor import setup_tor_hidden_service, TorHiddenService
 from starlette.middleware.sessions import SessionMiddleware
@@ -379,6 +380,10 @@ class ProxyHeadersMiddleware(BaseHTTPMiddleware):
         forwarded_prefix = request.headers.get("X-Forwarded-Prefix") or request.headers.get("X-Script-Name")
         forwarded_for = request.headers.get("X-Forwarded-For")
         
+        # Debug logging for proxy headers
+        if forwarded_proto or forwarded_host or forwarded_prefix:
+            logger.debug(f"Proxy headers detected - Proto: {forwarded_proto}, Host: {forwarded_host}, Prefix: {forwarded_prefix}, Path: {request.url.path}")
+        
         # Update request scope with proxy information
         if forwarded_proto:
             request.scope["scheme"] = forwarded_proto
@@ -454,9 +459,17 @@ def url_for(request: Request, path: str) -> str:
     if not path.startswith("/"):
         path = "/" + path
 
-    if root_path:
+    # Check if we're behind a proxy by looking for proxy headers
+    # If X-Forwarded-Host is present, we're behind a proxy
+    is_behind_proxy = "x-forwarded-host" in request.headers or "x-forwarded-proto" in request.headers
+    
+    if is_behind_proxy:
         # Behind proxy: return relative URL that browser resolves correctly
-        return root_path + path
+        # If root_path is "/" (no prefix), just return the path
+        if root_path and root_path != "/":
+            return root_path + path
+        else:
+            return path
     else:
         # Not behind proxy: return full URL
         base_url = get_base_url(request)
@@ -469,8 +482,8 @@ app = FastAPI(
     max_request_size=100 * 1024 * 1024  # 100MB max request size
 )
 
-# Add proxy headers middleware (must be added before other middleware)
-app.add_middleware(ProxyHeadersMiddleware)
+# Note: ProxyHeadersMiddleware will be added LAST (after all other middleware)
+# so it executes FIRST and processes proxy headers before other middleware
 
 # Initialize Jinja2 templates with custom globals for proxy-aware URLs
 templates = Jinja2Templates(directory="templates")
@@ -493,7 +506,7 @@ def setup_template_globals():
 # Call setup after templates are initialized
 setup_template_globals()
 
-# Add session middleware at module level with a persistent secret key
+# Session secret key generation function
 # This is needed for uvicorn import (when main() doesn't run)
 # Use a persistent secret key so sessions survive server restarts
 def _get_or_create_session_secret():
@@ -524,9 +537,8 @@ def _get_or_create_session_secret():
     return secret
 
 _session_secret = _get_or_create_session_secret()
-# Configure session middleware: 30 days max age (cookie expiration)
-# Note: Session data is stored in signed cookies, so it persists across restarts
-app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
+# Note: SessionMiddleware will be added AFTER the @app.middleware decorators
+# to ensure proper middleware execution order
 
 # These will be initialized in startup event or main() after config is loaded
 request_handler = None
@@ -944,7 +956,7 @@ async def startup_event():
         # Initialize database
         try:
             db_config = config.aisbf.database if config.aisbf and config.aisbf.database else None
-            initialize_database(db_config)
+            DatabaseRegistry.get_config_database(db_config)
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             # Continue startup even if database fails
@@ -1059,7 +1071,7 @@ async def startup_event():
                 if not has_valid_auth:
                     try:
                         from aisbf.database import get_database
-                        db = get_database()
+                        db = DatabaseRegistry.get_config_database()
                         if db:
                             # Check for uploaded credentials files for this provider
                             auth_files = db.get_user_auth_files(0, provider_id)  # 0 for admin/global
@@ -1236,7 +1248,7 @@ async def auth_middleware(request: Request, call_next):
         else:
             # Check user API tokens
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             user_auth = db.authenticate_user_token(token)
 
             if user_auth:
@@ -1261,6 +1273,68 @@ async def auth_middleware(request: Request, call_next):
         request.state.user_id = None
         request.state.token_id = None
         request.state.is_global_token = False
+
+    # Check for unverified email for logged in dashboard users
+    # Only enforce email verification if:
+    # 1. User is logged in to dashboard
+    # 2. User is not an admin (admins bypass email verification)
+    # 3. User's email is not verified
+    # 4. Email verification is enabled in config
+    
+    # Debug: Log session state for all dashboard requests
+    if request.url.path.startswith("/dashboard"):
+        logger.debug(f"Dashboard request to {request.url.path} - Session: logged_in={request.session.get('logged_in')}, email_verified={request.session.get('email_verified')}, role={request.session.get('role')}")
+    
+    if (request.url.path.startswith("/dashboard") and
+        request.session.get('logged_in') and
+        request.session.get('role') != 'admin'):
+
+        # Check if email verification is enabled in config
+        require_verification = False
+        if config and hasattr(config, 'aisbf') and hasattr(config.aisbf, 'signup'):
+            require_verification = getattr(config.aisbf.signup, 'require_email_verification', False)
+
+        logger.debug(f"Email verification check - require_verification={require_verification}, email_verified={request.session.get('email_verified')}")
+
+        # Check if user's email verification status has changed since login
+        # This handles the case where email was verified in another browser/session
+        user_id = request.session.get('user_id')
+        if user_id and require_verification:
+            try:
+                from aisbf.database import get_database
+                db = DatabaseRegistry.get_config_database()
+                current_user = db.get_user_by_id(user_id)
+                if current_user and current_user.get('email_verified') != request.session.get('email_verified'):
+                    # Email verification status changed, log user out
+                    logger.info(f"Email verification status changed for user {user_id}, logging out session")
+                    request.session.clear()
+                    return RedirectResponse(url=url_for(request, "/dashboard/login") + "?error=Your email verification status has changed. Please log in again.", status_code=303)
+            except Exception as e:
+                logger.error(f"Error checking email verification status for user {user_id}: {e}")
+
+        # Only check email_verified if verification is required
+        if require_verification and not request.session.get('email_verified'):
+            # Allow only specific routes for unverified users
+            # These are the ONLY pages an unverified user can access
+            allowed_routes = [
+                "/dashboard/verify",
+                "/dashboard/resend-verification",
+                "/dashboard/logout",
+                "/dashboard/verify-email"
+            ]
+            
+            # Check if current path matches any allowed route exactly or starts with it
+            is_allowed = False
+            for route in allowed_routes:
+                if request.url.path == route or request.url.path == route + "/":
+                    is_allowed = True
+                    break
+            
+            if not is_allowed:
+                # Block access and redirect to verify page
+                redirect_url = url_for(request, "/dashboard/verify")
+                logger.info(f"BLOCKING unverified user access to {request.url.path}, redirecting to: {redirect_url}")
+                return RedirectResponse(url=redirect_url, status_code=303)
 
     response = await call_next(request)
     return response
@@ -1290,7 +1364,7 @@ async def tier_limit_middleware(request: Request, call_next):
         return await call_next(request)
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     # Get user tier and current usage
     tier = db.get_user_tier(user_id)
@@ -1453,7 +1527,7 @@ async def record_token_usage_async(user_id: int, token_id: int):
     """Asynchronously record token usage"""
     try:
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         # Record with dummy values for now - will be updated when we know the actual usage
         db.record_user_token_usage(user_id, token_id, '', '', 0)
     except Exception as e:
@@ -1519,6 +1593,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Add session middleware AFTER the @app.middleware decorators
+# This ensures SessionMiddleware runs before auth_middleware and tier_limit_middleware
+# Middleware execution order: last added = first executed
+app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
+
+# Add proxy headers middleware LAST so it executes FIRST
+# This ensures proxy headers are processed before any other middleware (including auth_middleware)
+app.add_middleware(ProxyHeadersMiddleware)
+
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
 async def dashboard_analytics(
@@ -1541,7 +1624,7 @@ async def dashboard_analytics(
     from aisbf.database import get_database
     
     # Get analytics and database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     analytics = get_analytics(db)
     
     # Parse date range
@@ -1564,8 +1647,16 @@ async def dashboard_analytics(
     if from_datetime and to_datetime:
         time_range = 'custom'
     
-    # Get all users for filter dropdown
-    all_users = db.get_users() if db else []
+    # Check user role and apply user restriction
+    is_admin = request.session.get('role') == 'admin'
+    current_user_id = request.session.get('user_id')
+    
+    # For non-admin users, force user filter to current user
+    if not is_admin and current_user_id is not None:
+        user_filter = current_user_id
+    
+    # Get all users for filter dropdown (only for admins)
+    all_users = db.get_users() if db and is_admin else []
     
     # Get available providers, models, rotations, and autoselects for filter dropdowns
     available_providers = list(config.providers.keys()) if config else []
@@ -1582,9 +1673,9 @@ async def dashboard_analytics(
     
     # Get provider statistics (with optional filter)
     if provider_filter:
-        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime)]
+        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime, user_filter=user_filter)]
     else:
-        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime)
+        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime, user_filter=user_filter)
     
     # Get token usage over time (with optional filters)
     token_over_time = analytics.get_token_usage_over_time(
@@ -1605,17 +1696,17 @@ async def dashboard_analytics(
     )
     
     # Get cost overview
-    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime)
+    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter)
     
     # Get optimization recommendations
-    recommendations = analytics.get_optimization_recommendations()
+    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter)
     
     # Get date range usage summary
     date_range_usage = None
     if from_datetime or to_datetime:
         start = from_datetime or (datetime.now() - timedelta(days=1))
         end = to_datetime or datetime.now()
-        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end)
+        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter)
     
     return templates.TemplateResponse(
         request=request,
@@ -1623,6 +1714,7 @@ async def dashboard_analytics(
         context={
         "request": request,
         "session": request.session,
+        "is_admin": is_admin,
         "provider_stats": provider_stats,
         "token_over_time": json.dumps(token_over_time),
         "model_performance": model_performance,
@@ -1665,9 +1757,23 @@ async def dashboard_login_page(request: Request):
         if config and hasattr(config, 'aisbf') and config.aisbf:
             signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
 
-        # Get and render template
-        template = env.get_template("dashboard/login.html")
-        html_content = template.render(request=request, signup_enabled=signup_enabled, config=config.aisbf if config and config.aisbf else {})
+        # Check if SMTP is enabled
+        smtp_enabled = False
+        if config and hasattr(config, 'aisbf') and config.aisbf and hasattr(config.aisbf, 'smtp') and config.aisbf.smtp:
+            smtp_enabled = getattr(config.aisbf.smtp, 'enabled', False)
+
+        # Check for signup success notification
+        show_verify_email = request.query_params.get('signup') == 'success' and smtp_enabled
+
+        # Check for error message in query params
+        error_message = request.query_params.get('error')
+
+        # Check for success message in query params
+        success_message = request.query_params.get('success')
+
+        # Get and render template using templates Jinja2Templates instance
+        template = templates.get_template("dashboard/login.html")
+        html_content = template.render(request=request, signup_enabled=signup_enabled, smtp_enabled=smtp_enabled, show_verify_email=show_verify_email, error=error_message, success=success_message, config=config.aisbf if config and config.aisbf else {})
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -1683,29 +1789,54 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
     password_hash = hashlib.sha256(password.encode()).hexdigest()
 
     # Try database authentication first
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     user = db.authenticate_user(username, password_hash)
 
     if user:
-        # Database user authenticated - check if email is verified
-        if not user['email_verified']:
-            return templates.TemplateResponse(
-                request=request,
-                name="dashboard/login.html",
-                context={"request": request, "error": "Please verify your email address before logging in"}
-            )
-
+        # Database user authenticated
+        logger.info(f"User authenticated: username={username}, email={user.get('email')}, user_id={user['id']}")
         request.session['logged_in'] = True
         request.session['username'] = username
+        request.session['email'] = user.get('email') or ''  # Ensure we get the email from user dict
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
         request.session['remember_me'] = remember_me
+        request.session['email_verified'] = user['email_verified']
         if remember_me:
             # Set session to expire in 30 days for remember me
             request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
         else:
             # For non-remember-me sessions, set expiry to 2 weeks (default session length)
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+        # Check if email is verified
+        if not user['email_verified']:
+            # Check if account is expired (24 hours old and unverified)
+            from datetime import datetime, timedelta
+            if user['created_at']:
+                if isinstance(user['created_at'], str):
+                    created_at = datetime.fromisoformat(user['created_at'])
+                else:
+                    # Already a datetime object
+                    created_at = user['created_at']
+            else:
+                created_at = datetime.now()
+            if datetime.now() - created_at > timedelta(hours=24):
+                # Delete expired unverified account
+                db.delete_user(user['id'])
+                return templates.TemplateResponse(
+                    request=request,
+                    name="dashboard/login.html",
+                    context={
+                        "request": request,
+                        "error": "Your account verification has expired. Please sign up again.",
+                        "config": config.aisbf if config and config.aisbf else {}
+                    }
+                )
+            else:
+                # Redirect to verification page
+                return RedirectResponse(url=url_for(request, "/dashboard/verify"), status_code=303)
+
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
 
     # Fallback to config admin
@@ -1727,16 +1858,8 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
 
-    # Check if signup is enabled
-    signup_enabled = False
-    if config and hasattr(config, 'aisbf') and config.aisbf:
-        signup_enabled = getattr(config.aisbf.signup, 'enabled', False) if config.aisbf.signup else False
-
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard/login.html",
-        context={"request": request, "error": "Invalid credentials", "signup_enabled": signup_enabled, "config": config.aisbf if config and config.aisbf else {}}
-    )
+    # If we reach here, authentication failed
+    return RedirectResponse(url=url_for(request, "/dashboard/login") + "?error=Invalid username or password", status_code=303)
 
 
 @app.get("/dashboard/signup", response_class=HTMLResponse)
@@ -1774,6 +1897,7 @@ async def dashboard_signup_page(request: Request):
 @app.post("/dashboard/signup")
 async def dashboard_signup(
     request: Request,
+    username: str = Form(...),
     email: str = Form(...),
     password: str = Form(...),
     confirm_password: str = Form(...)
@@ -1793,12 +1917,29 @@ async def dashboard_signup(
     if not signup_enabled:
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
+    # Validate username format
+    import re
+    if not re.match(r"^[a-zA-Z0-9_.-]+$", username):
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "Username can only contain letters, numbers, underscores, hyphens, and dots", "config": config.aisbf if config and config.aisbf else {}}
+        )
+
+    # Validate username length
+    if len(username) < 3 or len(username) > 50:
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "Username must be between 3 and 50 characters", "config": config.aisbf if config and config.aisbf else {}}
+        )
+
     # Validate passwords match
     if password != confirm_password:
         return templates.TemplateResponse(
             request=request,
             name="dashboard/signup.html",
-            context={"request": request, "error": "Passwords do not match"}
+            context={"request": request, "error": "Passwords do not match", "config": config.aisbf if config and config.aisbf else {}}
         )
 
     # Validate password strength (minimum 8 characters)
@@ -1806,7 +1947,7 @@ async def dashboard_signup(
         return templates.TemplateResponse(
             request=request,
             name="dashboard/signup.html",
-            context={"request": request, "error": "Password must be at least 8 characters long"}
+            context={"request": request, "error": "Password must be at least 8 characters long", "config": config.aisbf if config and config.aisbf else {}}
         )
 
     # Validate email format
@@ -1815,11 +1956,29 @@ async def dashboard_signup(
         return templates.TemplateResponse(
             request=request,
             name="dashboard/signup.html",
-            context={"request": request, "error": "Invalid email address"}
+            context={"request": request, "error": "Invalid email address", "config": config.aisbf if config and config.aisbf else {}}
+        )
+
+    # Check if username is already taken
+    try:
+        db = DatabaseRegistry.get_config_database()
+        existing_user_by_username = db.get_user_by_username(username)
+        if existing_user_by_username:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/signup.html",
+                context={"request": request, "error": "This username is already taken. Please choose a different one.", "config": config.aisbf if config and config.aisbf else {}}
+            )
+    except Exception as e:
+        logger.error(f"Error checking username uniqueness: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/signup.html",
+            context={"request": request, "error": "An error occurred during signup. Please try again.", "config": config.aisbf if config and config.aisbf else {}}
         )
 
     try:
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
 
         # Check if user already exists
         existing_user = db.get_user_by_email(email)
@@ -1828,51 +1987,56 @@ async def dashboard_signup(
                 return templates.TemplateResponse(
                     request=request,
                     name="dashboard/signup.html",
-                    context={"request": request, "error": "An account with this email already exists"}
+                    context={"request": request, "error": "An account with this email already exists", "config": config.aisbf if config and config.aisbf else {}}
                 )
             else:
                 # Resend verification email for unverified user
                 verification_token = generate_verification_token()
-                db.set_verification_token(email, verification_token)
+                expires_at = datetime.now() + timedelta(hours=24)
+                db.set_verification_token(existing_user['id'], verification_token, expires_at)
+                db.update_last_verification_email_sent(existing_user['id'], datetime.now())
 
                 # Send verification email
                 try:
                     base_url = get_base_url(request)
                     verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}&email={email}"
-                    send_verification_email(email, verification_url, config.aisbf.smtp if config.aisbf.smtp else None)
+                    send_verification_email(email, email, verification_token, base_url, config.aisbf.smtp if config.aisbf.smtp else None)
+
+                    return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
                 except Exception as e:
                     logger.error(f"Failed to send verification email: {e}")
+                    return templates.TemplateResponse(
+                        request=request,
+                        name="dashboard/signup.html",
+                        context={"request": request, "message": "Account already exists but not verified. A new verification email has been sent.", "config": config.aisbf if config and config.aisbf else {}}
+                    )
 
-                return templates.TemplateResponse(
-                    request=request,
-                    name="dashboard/signup.html",
-                    context={"request": request, "message": "Account already exists but not verified. A new verification email has been sent."}
-                )
-
-        # Create new user
+        # Hash password
         password_hash = hash_password(password)
         verification_token = generate_verification_token()
 
-        user_id = db.create_user(email, password_hash, verification_token)
+        # Create user
+        user_id = db.create_user(username=username, password_hash=password_hash, role='user', email=email, email_verified=False)
+
+        # Set verification token
+        expires_at = datetime.now() + timedelta(hours=24)
+        db.set_verification_token(user_id, verification_token, expires_at)
+        db.update_last_verification_email_sent(user_id, datetime.now())
 
         # Send verification email
         try:
             base_url = get_base_url(request)
             verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}&email={email}"
-            send_verification_email(email, verification_url, config.aisbf.smtp if config.aisbf.smtp else None)
+            send_verification_email(email, email, verification_token, base_url, config.aisbf.smtp if config.aisbf.smtp else None)
 
-            return templates.TemplateResponse(
-                request=request,
-                name="dashboard/signup.html",
-                context={"request": request, "message": "Account created successfully! Please check your email to verify your account."}
-            )
+            return RedirectResponse(url=url_for(request, "/dashboard/login") + "?signup=success", status_code=303)
         except Exception as e:
             logger.error(f"Failed to send verification email: {e}")
             # Still create user but inform them about email issue
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/signup.html",
-                context={"request": request, "message": "Account created successfully! However, there was an issue sending the verification email. Please contact an administrator."}
+                context={"request": request, "message": "Account created successfully! However, there was an issue sending the verification email. Please contact an administrator.", "config": config.aisbf if config and config.aisbf else {}}
             )
 
     except Exception as e:
@@ -1880,8 +2044,122 @@ async def dashboard_signup(
         return templates.TemplateResponse(
             request=request,
             name="dashboard/signup.html",
-            context={"request": request, "error": "An error occurred during signup. Please try again."}
+            context={"request": request, "error": "An error occurred during signup. Please try again.", "config": config.aisbf if config and config.aisbf else {}}
         )
+
+@app.get("/dashboard/verify")
+async def verify_email_page(request: Request):
+    """Show email verification page"""
+    from aisbf.database import get_database
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Check if user is logged in
+    if not request.session.get('logged_in'):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    db = DatabaseRegistry.get_config_database()
+    user = db.get_user_by_id(user_id)
+    if not user or user['email_verified']:
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+
+    # Check if can resend (last sent > 10 min ago)
+    can_resend = True
+    if user.get('last_verification_email_sent'):
+        from datetime import datetime, timedelta
+        if isinstance(user['last_verification_email_sent'], str):
+            last_sent = datetime.fromisoformat(user['last_verification_email_sent'])
+        else:
+            # Already a datetime object
+            last_sent = user['last_verification_email_sent']
+        if datetime.now() - last_sent < timedelta(minutes=10):
+            can_resend = False
+
+    # Render verify page
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/verify.html",
+        context={
+            "request": request,
+            "user": user,
+            "can_resend": can_resend,
+            "config": config.aisbf if config and config.aisbf else {}
+        }
+    )
+
+@app.post("/dashboard/resend-verification")
+async def resend_verification(request: Request):
+    """Resend verification email"""
+    from aisbf.database import get_database
+    from aisbf.email_utils import send_verification_email, generate_verification_token
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    # Check if user is logged in
+    if not request.session.get('logged_in'):
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    db = DatabaseRegistry.get_config_database()
+    user = db.get_user_by_id(user_id)
+    if not user or user['email_verified']:
+        return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
+
+    # Check if can resend
+    if user.get('last_verification_email_sent'):
+        from datetime import datetime, timedelta
+        if isinstance(user['last_verification_email_sent'], str):
+            last_sent = datetime.fromisoformat(user['last_verification_email_sent'])
+        else:
+            # Already a datetime object
+            last_sent = user['last_verification_email_sent']
+        if datetime.now() - last_sent < timedelta(minutes=10):
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/verify.html",
+                context={
+                    "request": request,
+                    "user": user,
+                    "can_resend": False,
+                    "error": "Please wait 10 minutes before requesting another verification email.",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
+            )
+
+    # Generate new token and send
+    verification_token = generate_verification_token()
+    expires_at = datetime.now() + timedelta(hours=24)
+    db.set_verification_token(user_id, verification_token, expires_at)
+    db.update_last_verification_email_sent(user_id, datetime.now())
+
+    try:
+        base_url = get_base_url(request)
+        send_verification_email(user['email'], user['username'], verification_token, base_url, config.aisbf.smtp if config.aisbf.smtp else None)
+        message = "Verification email sent successfully!"
+    except Exception as e:
+        logger.error(f"Failed to send verification email: {e}")
+        message = "Failed to send verification email. Please try again later."
+
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/verify.html",
+        context={
+            "request": request,
+            "user": user,
+            "can_resend": False,  # Just sent, can't resend immediately
+            "message": message,
+            "config": config.aisbf if config and config.aisbf else {}
+        }
+    )
 
 
 @app.get("/dashboard/verify-email")
@@ -1893,23 +2171,28 @@ async def verify_email(request: Request, token: str, email: str):
     logger = logging.getLogger(__name__)
 
     try:
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
 
         # Verify the token
         if db.verify_email_token(email, token):
             # Token is valid, mark email as verified
             db.verify_email(email)
 
-            return templates.TemplateResponse(
-                request=request,
-                name="dashboard/login.html",
-                context={"request": request, "message": "Email verified successfully! You can now log in."}
-            )
+            # If user is already logged in, update their session
+            if request.session.get('logged_in'):
+                request.session['email_verified'] = True
+
+            # Redirect to login page with success message
+            return RedirectResponse(url=url_for(request, "/dashboard/login") + "?success=Email verified successfully! You can now log in.", status_code=303)
         else:
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/login.html",
-                context={"request": request, "error": "Invalid or expired verification token"}
+                context={
+                    "request": request,
+                    "error": "Invalid or expired verification token",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
             )
 
     except Exception as e:
@@ -1917,7 +2200,248 @@ async def verify_email(request: Request, token: str, email: str):
         return templates.TemplateResponse(
             request=request,
             name="dashboard/login.html",
-            context={"request": request, "error": "An error occurred during email verification"}
+            context={
+                "request": request,
+                "error": "An error occurred during email verification",
+                "config": config.aisbf if config and config.aisbf else {}
+            }
+        )
+
+
+@app.get("/dashboard/forgot-password", response_class=HTMLResponse)
+async def dashboard_forgot_password_page(request: Request):
+    """Show forgot password page"""
+    import logging
+
+    logger = logging.getLogger(__name__)
+    try:
+        # Check if SMTP is configured
+        smtp_enabled = False
+        if config and hasattr(config, 'aisbf') and config.aisbf and hasattr(config.aisbf, 'smtp'):
+            smtp_enabled = getattr(config.aisbf.smtp, 'enabled', False)
+
+        if not smtp_enabled:
+            return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+        # Create a completely fresh Jinja2 environment to avoid any caching issues
+        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+
+        # Add the required globals
+        env.globals['url_for'] = url_for
+        env.globals['get_base_url'] = get_base_url
+
+        # Get and render template
+        template = env.get_template("dashboard/forgot_password.html")
+        html_content = template.render(request=request, config=config.aisbf if config and config.aisbf else {})
+
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error rendering forgot password page: {e}", exc_info=True)
+        raise
+
+
+@app.post("/dashboard/forgot-password")
+async def dashboard_forgot_password(request: Request, email: str = Form(...)):
+    """Handle forgot password request"""
+    from aisbf.database import get_database
+    from aisbf.email_utils import generate_password_reset_token, send_password_reset_email
+    import logging
+    from datetime import datetime, timedelta
+
+    logger = logging.getLogger(__name__)
+
+    # Check if SMTP is configured
+    smtp_enabled = False
+    if config and hasattr(config, 'aisbf') and config.aisbf and hasattr(config.aisbf, 'smtp'):
+        smtp_enabled = getattr(config.aisbf.smtp, 'enabled', False)
+
+    if not smtp_enabled:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    try:
+        db = DatabaseRegistry.get_config_database()
+
+        # Check if user exists
+        user = db.get_user_by_email(email)
+        if user and user['email_verified']:
+            # Generate password reset token (1 hour expiry)
+            reset_token = generate_password_reset_token()
+            expires_at = datetime.now() + timedelta(hours=1)
+
+            # Store token in database
+            db.set_password_reset_token(user['id'], reset_token, expires_at)
+
+            # Send reset email
+            try:
+                base_url = get_base_url(request)
+                success = send_password_reset_email(
+                    to_email=email,
+                    username=user.get('username', email),
+                    reset_token=reset_token,
+                    base_url=base_url,
+                    smtp_config=config.aisbf.smtp
+                )
+                if success:
+                    logger.info(f"Password reset email sent to {email}")
+                else:
+                    logger.error(f"Failed to send password reset email to {email}")
+            except Exception as e:
+                logger.error(f"Failed to send password reset email: {e}")
+
+        # Always return the same message regardless of whether user exists (security best practice)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/forgot_password.html",
+            context={
+                "request": request,
+                "success": True,
+                "message": "If an account exists with that email address, we have sent a password reset link.",
+                "message_type": "success"
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing forgot password request: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/forgot_password.html",
+            context={
+                "request": request,
+                "error": "An error occurred processing your request. Please try again later.",
+                "config": config.aisbf if config and config.aisbf else {}
+            }
+        )
+
+
+@app.get("/dashboard/reset-password", response_class=HTMLResponse)
+async def dashboard_reset_password_page(request: Request, token: str = Query(...), email: str = Query(...)):
+    """Show password reset page"""
+    import logging
+
+    logger = logging.getLogger(__name())
+    try:
+        db = DatabaseRegistry.get_config_database()
+
+        # Validate token
+        token_valid = db.validate_password_reset_token(email, token)
+        if not token_valid:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={
+                    "request": request,
+                    "error": "Invalid or expired password reset token. Please request a new one.",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
+            )
+
+        # Create a completely fresh Jinja2 environment to avoid any caching issues
+        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+
+        # Add the required globals
+        env.globals['url_for'] = url_for
+        env.globals['get_base_url'] = get_base_url
+
+        # Get and render template
+        template = env.get_template("dashboard/reset_password.html")
+        html_content = template.render(request=request, email=email, token=token, config=config.aisbf if config and config.aisbf else {})
+
+        return HTMLResponse(content=html_content)
+    except Exception as e:
+        logger.error(f"Error rendering reset password page: {e}", exc_info=True)
+        raise
+
+
+@app.post("/dashboard/reset-password")
+async def dashboard_reset_password(
+    request: Request,
+    email: str = Form(...),
+    token: str = Form(...),
+    password: str = Form(...),
+    confirm_password: str = Form(...)
+):
+    """Handle password reset confirmation"""
+    from aisbf.database import get_database
+    from aisbf.email_utils import hash_password
+    import logging
+
+    logger = logging.getLogger(__name__)
+
+    try:
+        db = DatabaseRegistry.get_config_database()
+
+        # Validate token
+        token_valid = db.validate_password_reset_token(email, token)
+        if not token_valid:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/login.html",
+                context={
+                    "request": request,
+                    "error": "Invalid or expired password reset token. Please request a new one.",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
+            )
+
+        # Validate passwords match
+        if password != confirm_password:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/reset_password.html",
+                context={
+                    "request": request,
+                    "email": email,
+                    "token": token,
+                    "error": "Passwords do not match",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
+            )
+
+        # Validate password strength (minimum 8 characters)
+        if len(password) < 8:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/reset_password.html",
+                context={
+                    "request": request,
+                    "email": email,
+                    "token": token,
+                    "error": "Password must be at least 8 characters long",
+                    "config": config.aisbf if config and config.aisbf else {}
+                }
+            )
+
+        # Hash new password
+        password_hash = hash_password(password)
+
+        # Update user password and invalidate token
+        db.update_user_password(email, password_hash)
+        db.invalidate_password_reset_token(email, token)
+
+        logger.info(f"Password successfully reset for user {email}")
+
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/login.html",
+            context={
+                "request": request,
+                "message": "Password has been reset successfully. You can now login with your new password.",
+                "config": config.aisbf if config and config.aisbf else {}
+            }
+        )
+
+    except Exception as e:
+        logger.error(f"Error processing password reset: {e}", exc_info=True)
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/reset_password.html",
+            context={
+                "request": request,
+                "email": email,
+                "token": token,
+                "error": "An error occurred resetting your password. Please try again later.",
+                "config": config.aisbf if config and config.aisbf else {}
+            }
         )
 
 @app.get("/dashboard/logout")
@@ -1936,7 +2460,7 @@ async def dashboard_profile(request: Request):
     
     # User dashboard - load usage stats same as main dashboard user route
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
     # Get user statistics
@@ -1983,21 +2507,20 @@ async def dashboard_profile(request: Request):
 
 
 @app.post("/dashboard/profile")
-async def dashboard_profile_save(request: Request, username: str = Form(...), email: str = Form(...)):
-    """Save user profile changes"""
+async def dashboard_profile_save(request: Request, username: str = Form(...)):
+    """Save user profile changes (username only)"""
     auth_check = require_dashboard_auth(request)
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
     from aisbf.database import get_database
     user_id = request.session.get('user_id')
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
-        db.update_user_profile(user_id, username, email)
+        db.update_user_profile(user_id, username, None)
         # Update session with new username
         request.session['username'] = username
-        request.session['email'] = email
         
         return RedirectResponse(url=url_for(request, "/dashboard/profile?success=Profile updated successfully"), status_code=303)
     except Exception as e:
@@ -2013,7 +2536,7 @@ async def dashboard_change_password(request: Request):
     
     # User dashboard - load usage stats same as main dashboard user route
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
     # Get user statistics
@@ -2068,7 +2591,7 @@ async def dashboard_change_password_save(request: Request, current_password: str
     
     from aisbf.database import get_database
     user_id = request.session.get('user_id')
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     if new_password != confirm_password:
         return RedirectResponse(url=url_for(request, "/dashboard/change-password?error=New passwords do not match"), status_code=303)
@@ -2088,6 +2611,203 @@ async def dashboard_change_password_save(request: Request, current_password: str
     except Exception as e:
         return RedirectResponse(url=url_for(request, f"/dashboard/change-password?error=Failed to change password: {str(e)}"), status_code=303)
     return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+
+@app.get("/dashboard/change-email", response_class=HTMLResponse)
+async def dashboard_change_email(request: Request):
+    """Change email page"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/change_email.html",
+        context={
+            "session": request.session,
+            "success": request.query_params.get('success'),
+            "error": request.query_params.get('error')
+        }
+    )
+
+
+@app.post("/dashboard/change-email")
+async def dashboard_change_email_save(request: Request, new_email: str = Form(...), password: str = Form(...)):
+    """Process email change request"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    from aisbf.database import get_database
+    from aisbf.email_utils import send_email_verification, hash_password
+    import secrets
+    
+    user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+    
+    try:
+        # Verify current password
+        if not db.verify_user_password(user_id, password):
+            return RedirectResponse(url=url_for(request, "/dashboard/change-email?error=Incorrect password"), status_code=303)
+        
+        # Check if new email is already in use
+        existing_user = db.get_user_by_email(new_email)
+        if existing_user and existing_user['id'] != user_id:
+            return RedirectResponse(url=url_for(request, "/dashboard/change-email?error=Email address already in use"), status_code=303)
+        
+        # Generate verification token
+        token = secrets.token_urlsafe(32)
+        expires_at = datetime.now() + timedelta(hours=24)
+        
+        # Store pending email change in session (we'll update after verification)
+        request.session['pending_email_change'] = {
+            'new_email': new_email,
+            'token': token,
+            'expires_at': expires_at.isoformat()
+        }
+        
+        # Send verification email to new address
+        base_url = get_base_url(request)
+        verification_url = f"{base_url}/dashboard/verify-email-change?token={token}&email={new_email}"
+        
+        if config and config.aisbf and config.aisbf.smtp and config.aisbf.smtp.enabled:
+            send_email_verification(
+                new_email,
+                verification_url,
+                config.aisbf.smtp
+            )
+            return RedirectResponse(
+                url=url_for(request, "/dashboard/change-email?success=Verification email sent to new address. Please check your inbox."),
+                status_code=303
+            )
+        else:
+            return RedirectResponse(
+                url=url_for(request, "/dashboard/change-email?error=Email service not configured. Please contact administrator."),
+                status_code=303
+            )
+    except Exception as e:
+        logger.error(f"Email change error: {e}")
+        return RedirectResponse(url=url_for(request, f"/dashboard/change-email?error=Failed to process email change: {str(e)}"), status_code=303)
+
+
+@app.get("/dashboard/verify-email-change")
+async def verify_email_change(request: Request, token: str = Query(...), email: str = Query(...)):
+    """Verify new email address"""
+    from aisbf.database import get_database
+    
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+    
+    try:
+        # Check pending email change in session
+        pending = request.session.get('pending_email_change', {})
+        
+        if not pending or pending.get('token') != token or pending.get('new_email') != email:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/change_email.html",
+                context={
+                    "session": request.session,
+                    "error": "Invalid or expired verification link"
+                }
+            )
+        
+        # Check expiration
+        expires_at = datetime.fromisoformat(pending['expires_at'])
+        if datetime.now() > expires_at:
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/change_email.html",
+                context={
+                    "session": request.session,
+                    "error": "Verification link has expired"
+                }
+            )
+        
+        # Update email
+        db.update_user_email(user_id, email)
+        request.session['email'] = email
+        
+        # Clear pending change
+        request.session.pop('pending_email_change', None)
+        
+        return RedirectResponse(
+            url=url_for(request, "/dashboard/profile?success=Email address updated successfully"),
+            status_code=303
+        )
+    except Exception as e:
+        logger.error(f"Email verification error: {e}")
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/change_email.html",
+            context={
+                "session": request.session,
+                "error": f"Failed to verify email: {str(e)}"
+            }
+        )
+
+
+@app.get("/dashboard/delete-account", response_class=HTMLResponse)
+async def dashboard_delete_account(request: Request):
+    """Delete account confirmation page"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    from aisbf.database import get_database
+    user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+    
+    # Check for active subscription
+    subscription = db.get_user_subscription(user_id)
+    has_subscription = subscription is not None and subscription.get('status') == 'active'
+    subscription_tier = subscription.get('tier_name', '') if subscription else ''
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/delete_account.html",
+        context={
+            "session": request.session,
+            "error": request.query_params.get('error'),
+            "has_subscription": has_subscription,
+            "subscription_tier": subscription_tier
+        }
+    )
+
+
+@app.post("/dashboard/delete-account")
+async def dashboard_delete_account_confirm(request: Request, password: str = Form(...), confirmation: str = Form(...)):
+    """Process account deletion"""
+    auth_check = require_dashboard_auth(request)
+    if isinstance(auth_check, RedirectResponse):
+        return auth_check
+    
+    from aisbf.database import get_database
+    user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+    
+    try:
+        # Verify confirmation text
+        if confirmation != "DELETE":
+            return RedirectResponse(url=url_for(request, "/dashboard/delete-account?error=Please type DELETE to confirm"), status_code=303)
+        
+        # Verify password
+        if not db.verify_user_password(user_id, password):
+            return RedirectResponse(url=url_for(request, "/dashboard/delete-account?error=Incorrect password"), status_code=303)
+        
+        # Delete user (this will cascade delete all related data)
+        db.delete_user(user_id)
+        
+        # Clear session
+        request.session.clear()
+        
+        return RedirectResponse(url=url_for(request, "/dashboard/login?message=Account deleted successfully"), status_code=303)
+    except Exception as e:
+        logger.error(f"Account deletion error: {e}")
+        return RedirectResponse(url=url_for(request, f"/dashboard/delete-account?error=Failed to delete account: {str(e)}"), status_code=303)
 
 
 # ==============================================
@@ -2187,7 +2907,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
         email = user_info.get('email')
         email_verified = user_info.get('email_verified', False)
         
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         
         # Lookup existing user
         existing_user = db.get_user_by_email(email)
@@ -2196,6 +2916,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             # Existing user - login directly
             request.session['logged_in'] = True
             request.session['username'] = existing_user['username']
+            request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
@@ -2219,6 +2940,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             # Login the new user
             request.session['logged_in'] = True
             request.session['username'] = email
+            request.session['email'] = email
             request.session['role'] = 'user'
             request.session['user_id'] = user_id
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
@@ -2230,11 +2952,11 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
         
     except Exception as e:
-        logger.error(f"Google OAuth2 callback failed: {e}", exc_info=True)
+        logger.error(f"Error during email verification: {e}", exc_info=True)
         return templates.TemplateResponse(
             request=request,
             name="dashboard/login.html",
-            context={"request": request, "error": "Authentication failed. Please try again."}
+            context={"request": request, "error": "An error occurred during email verification", "config": config.aisbf if config and config.aisbf else {}}
         )
 
 
@@ -2325,7 +3047,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
         
         email = user_info.get('email')
         
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         
         # Lookup existing user
         existing_user = db.get_user_by_email(email)
@@ -2334,6 +3056,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             # Existing user - login directly
             request.session['logged_in'] = True
             request.session['username'] = existing_user['username']
+            request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
@@ -2343,13 +3066,14 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             random_password = secrets.token_urlsafe(32)
             password_hash = hashlib.sha256(random_password.encode()).hexdigest()
             
-            # Create user with verified email (GitHub emails are always verified)
+            # Create user with verified email (no verification required)
             user_id = db.create_user(email, password_hash, None)
             db.verify_email(email)  # Mark email as verified automatically
             
             # Login the new user
             request.session['logged_in'] = True
             request.session['username'] = email
+            request.session['email'] = email
             request.session['role'] = 'user'
             request.session['user_id'] = user_id
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
@@ -2426,7 +3150,7 @@ async def dashboard_index(request: Request):
     else:
         # User dashboard - show user stats
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         user_id = request.session.get('user_id')
         
         # Get user statistics
@@ -2504,7 +3228,7 @@ async def dashboard_providers(request: Request):
     else:
         # Database user: load from database
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         
         # Convert to the format expected by the frontend
@@ -2701,7 +3425,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         else:
             # Database user: save to database
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             
             # Save each provider to database
             for provider_key, provider_config in providers_data.items():
@@ -2859,7 +3583,7 @@ async def dashboard_rotations(request: Request):
     else:
         # Database user: load from database
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         user_rotations = db.get_user_rotations(current_user_id)
         
         # Convert to the format expected by the frontend
@@ -2919,7 +3643,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         else:
             # Database user: save to database
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             
             # Save each rotation to database
             rotations = rotations_data.get('rotations', {})
@@ -2956,7 +3680,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                 rotations_data = json.load(f)
         else:
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             user_rotations = db.get_user_rotations(current_user_id)
             rotations_data = {"rotations": {}, "notifyerrors": False}
             for rotation in user_rotations:
@@ -2998,7 +3722,7 @@ async def dashboard_autoselect(request: Request):
     else:
         # Database user: load from database
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
         
         # Convert to the format expected by the frontend
@@ -3079,7 +3803,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         else:
             # Database user: save to database
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             
             # Save each autoselect to database
             for autoselect_key, autoselect_config in autoselect_data.items():
@@ -3115,7 +3839,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                 autoselect_data = json.load(f)
         else:
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             user_autoselects = db.get_user_autoselects(current_user_id)
             autoselect_data = {}
             for autoselect in user_autoselects:
@@ -3154,7 +3878,7 @@ async def dashboard_prompts(request: Request):
     
     prompts_data = []
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     for prompt_file in prompt_files:
         content = None
@@ -3266,7 +3990,7 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
     else:
         # Regular user saves to database
         from aisbf.database import get_database
-        db = get_database()
+        db = DatabaseRegistry.get_config_database()
         db.save_user_prompt(user_id, prompt_key, prompt_content)
     
     return RedirectResponse(url=url_for(request, "/dashboard/prompts?success=1"), status_code=303)
@@ -3283,7 +4007,7 @@ async def dashboard_prompts_reset(request: Request, prompt_key: str):
         return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     db.delete_user_prompt(user_id, prompt_key)
     
     return JSONResponse({"success": True})
@@ -3393,6 +4117,21 @@ async def dashboard_settings_save(
    redis_db: int = Form(0),
    redis_password: str = Form(""),
    redis_key_prefix: str = Form("aisbf:"),
+   response_cache_enabled: bool = Form(False),
+   response_cache_backend: str = Form("memory"),
+   response_cache_ttl: int = Form(600),
+   response_cache_max_memory: int = Form(1000),
+   response_cache_redis_host: str = Form("localhost"),
+   response_cache_redis_port: int = Form(6379),
+   response_cache_redis_db: int = Form(0),
+   response_cache_redis_password: str = Form(""),
+   response_cache_redis_key_prefix: str = Form("aisbf:response:"),
+   response_cache_sqlite_path: str = Form("~/.aisbf/response_cache.db"),
+   response_cache_mysql_host: str = Form("localhost"),
+   response_cache_mysql_port: int = Form(3306),
+   response_cache_mysql_user: str = Form("aisbf"),
+   response_cache_mysql_password: str = Form(""),
+   response_cache_mysql_database: str = Form("aisbf_response_cache"),
    mcp_enabled: bool = Form(False),
    autoselect_tokens: str = Form(""),
    fullconfig_tokens: str = Form(""),
@@ -3405,18 +4144,23 @@ async def dashboard_settings_save(
    tor_socks_port: int = Form(9050),
    tor_socks_host: str = Form("127.0.0.1"),
    signup_enabled: bool = Form(False),
-   smtp_server: str = Form(""),
+   signup_require_verification: bool = Form(False),
+   verification_token_expiry: int = Form(24),
+   smtp_host: str = Form(""),
    smtp_port: int = Form(587),
    smtp_username: str = Form(""),
    smtp_password: str = Form(""),
    smtp_use_tls: bool = Form(True),
-   smtp_from_address: str = Form(""),
+   smtp_use_ssl: bool = Form(False),
+   smtp_from_email: str = Form(""),
+   smtp_from_name: str = Form(""),
    oauth2_google_enabled: bool = Form(False),
    oauth2_google_client_id: str = Form(""),
    oauth2_google_client_secret: str = Form(""),
    oauth2_github_enabled: bool = Form(False),
    oauth2_github_client_id: str = Form(""),
-   oauth2_github_client_secret: str = Form("")
+   oauth2_github_client_secret: str = Form(""),
+   smtp_enabled: bool = Form(False)
 ):
     """Save server settings"""
     auth_check = require_admin(request)
@@ -3467,6 +4211,33 @@ async def dashboard_settings_save(
         aisbf_config['cache']['redis_password'] = redis_password
     aisbf_config['cache']['redis_key_prefix'] = redis_key_prefix
 
+    # Update response cache config
+    if 'response_cache' not in aisbf_config:
+        aisbf_config['response_cache'] = {}
+    aisbf_config['response_cache']['enabled'] = response_cache_enabled
+    aisbf_config['response_cache']['backend'] = response_cache_backend
+    aisbf_config['response_cache']['ttl'] = response_cache_ttl
+    aisbf_config['response_cache']['max_memory_cache'] = response_cache_max_memory
+    
+    # Response cache Redis settings
+    aisbf_config['response_cache']['redis_host'] = response_cache_redis_host
+    aisbf_config['response_cache']['redis_port'] = response_cache_redis_port
+    aisbf_config['response_cache']['redis_db'] = response_cache_redis_db
+    if response_cache_redis_password:  # Only update if provided
+        aisbf_config['response_cache']['redis_password'] = response_cache_redis_password
+    aisbf_config['response_cache']['redis_key_prefix'] = response_cache_redis_key_prefix
+    
+    # Response cache SQLite settings
+    aisbf_config['response_cache']['sqlite_path'] = response_cache_sqlite_path
+    
+    # Response cache MySQL settings
+    aisbf_config['response_cache']['mysql_host'] = response_cache_mysql_host
+    aisbf_config['response_cache']['mysql_port'] = response_cache_mysql_port
+    aisbf_config['response_cache']['mysql_user'] = response_cache_mysql_user
+    if response_cache_mysql_password:  # Only update if provided
+        aisbf_config['response_cache']['mysql_password'] = response_cache_mysql_password
+    aisbf_config['response_cache']['mysql_database'] = response_cache_mysql_database
+
     # Update MCP config
     if 'mcp' not in aisbf_config:
         aisbf_config['mcp'] = {}
@@ -3486,6 +4257,62 @@ async def dashboard_settings_save(
     aisbf_config['tor']['socks_port'] = tor_socks_port
     aisbf_config['tor']['socks_host'] = tor_socks_host
     
+    # Update Signup config
+    if 'signup' not in aisbf_config:
+        aisbf_config['signup'] = {}
+    aisbf_config['signup']['enabled'] = signup_enabled
+    aisbf_config['signup']['require_email_verification'] = signup_require_verification
+    aisbf_config['signup']['verification_token_expiry_hours'] = verification_token_expiry
+    
+    # Update SMTP config
+    if 'smtp' not in aisbf_config:
+        aisbf_config['smtp'] = {}
+    aisbf_config['smtp']['enabled'] = smtp_enabled
+    aisbf_config['smtp']['host'] = smtp_host
+    aisbf_config['smtp']['port'] = smtp_port
+    aisbf_config['smtp']['username'] = smtp_username
+    # Preserve existing password if submitted field is empty
+    if smtp_password:
+        aisbf_config['smtp']['password'] = smtp_password
+    elif 'password' not in aisbf_config['smtp']:
+        # Initialize as empty if not exists
+        aisbf_config['smtp']['password'] = ""
+    aisbf_config['smtp']['use_tls'] = smtp_use_tls
+    aisbf_config['smtp']['use_ssl'] = smtp_use_ssl
+    aisbf_config['smtp']['from_email'] = smtp_from_email
+    aisbf_config['smtp']['from_name'] = smtp_from_name
+    
+    # Update OAuth2 config
+    if 'oauth2' not in aisbf_config:
+        aisbf_config['oauth2'] = {}
+    
+    # Google OAuth2
+    if 'google' not in aisbf_config['oauth2']:
+        aisbf_config['oauth2']['google'] = {}
+    aisbf_config['oauth2']['google']['enabled'] = oauth2_google_enabled
+    aisbf_config['oauth2']['google']['client_id'] = oauth2_google_client_id
+    # Preserve existing client_secret if submitted field is empty
+    if oauth2_google_client_secret:
+        aisbf_config['oauth2']['google']['client_secret'] = oauth2_google_client_secret
+    elif 'client_secret' not in aisbf_config['oauth2']['google']:
+        aisbf_config['oauth2']['google']['client_secret'] = ""
+    aisbf_config['oauth2']['google']['scopes'] = [
+        "openid",
+        "https://www.googleapis.com/auth/userinfo.email",
+        "https://www.googleapis.com/auth/userinfo.profile"
+    ]
+    
+    # GitHub OAuth2
+    if 'github' not in aisbf_config['oauth2']:
+        aisbf_config['oauth2']['github'] = {}
+    aisbf_config['oauth2']['github']['enabled'] = oauth2_github_enabled
+    aisbf_config['oauth2']['github']['client_id'] = oauth2_github_client_id
+    # Preserve existing client_secret if submitted field is empty
+    if oauth2_github_client_secret:
+        aisbf_config['oauth2']['github']['client_secret'] = oauth2_github_client_secret
+    elif 'client_secret' not in aisbf_config['oauth2']['github']:
+        aisbf_config['oauth2']['github']['client_secret'] = ""
+    
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -3503,6 +4330,42 @@ async def dashboard_settings_save(
     }
     )
 
+@app.post("/dashboard/test-smtp")
+async def dashboard_test_smtp(request: Request):
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        from aisbf.email_utils import send_test_email
+        
+        # Send test email to specified recipient
+        test_recipient = body.get('test_recipient')
+        
+        if not test_recipient:
+            return JSONResponse({"success": False, "error": "Test recipient email is required"})
+        
+        # Load the actual saved SMTP config from aisbf.json
+        config_path = Path.home() / '.aisbf' / 'aisbf.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+        
+        with open(config_path) as f:
+            aisbf_config = json.load(f)
+        
+        smtp_config = aisbf_config.get('smtp', {})
+        
+        result = send_test_email(test_recipient, smtp_config)
+        
+        if result:
+            return JSONResponse({"success": True})
+        else:
+            return JSONResponse({"success": False, "error": "Failed to send test email"})
+    except Exception as e:
+        logger.error(f"Error testing SMTP: {e}")
+        return JSONResponse({"success": False, "error": str(e)})
+
 # Admin user management routes
 @app.get("/dashboard/users", response_class=HTMLResponse)
 async def dashboard_users(request: Request):
@@ -3512,7 +4375,7 @@ async def dashboard_users(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     # Get all users
     users = db.get_users()
@@ -3535,7 +4398,7 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     # Hash the password
     password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -3566,7 +4429,7 @@ async def dashboard_users_edit(request: Request, user_id: int, username: str = F
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         # Update user (only if password is provided)
@@ -3597,7 +4460,7 @@ async def dashboard_users_toggle(request: Request, user_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         users = db.get_users()
@@ -3618,7 +4481,7 @@ async def dashboard_users_delete(request: Request, user_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         db.delete_user(user_id)
@@ -3643,8 +4506,8 @@ async def dashboard_restart(request: Request):
         # Re-initialize database if config changed
         db_config = config.aisbf.database if config.aisbf and config.aisbf.database else None
         if db_config:
-            from aisbf.database import initialize_database
-            initialize_database(db_config)
+            from aisbf.database import DatabaseRegistry
+            DatabaseRegistry.get_config_database(db_config)
 
         # Re-initialize cache if config changed
         cache_config = config.aisbf.cache if config.aisbf and config.aisbf.cache else None
@@ -3679,7 +4542,7 @@ async def dashboard_user_providers(request: Request):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     # Get user-specific providers
     user_providers = db.get_user_providers(user_id)
@@ -3707,7 +4570,7 @@ async def dashboard_user_providers_save(request: Request, provider_name: str = F
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         # Validate JSON
@@ -3744,7 +4607,7 @@ async def dashboard_user_providers_delete(request: Request, provider_name: str):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         db.delete_user_provider(user_id, provider_name)
@@ -3778,7 +4641,7 @@ async def dashboard_user_provider_upload(
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         # Validate file type
@@ -3838,7 +4701,7 @@ async def dashboard_user_provider_files(request: Request, provider_name: str):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         files = db.get_user_auth_files(user_id, provider_name)
@@ -3864,7 +4727,7 @@ async def dashboard_user_provider_file_download(
 
     from aisbf.database import get_database
     from fastapi.responses import FileResponse
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         file_info = db.get_user_auth_file(user_id, provider_name, file_type)
@@ -3900,7 +4763,7 @@ async def dashboard_user_provider_file_delete(
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         file_info = db.get_user_auth_file(user_id, provider_name, file_type)
@@ -3978,7 +4841,7 @@ async def dashboard_provider_upload(
         else:
             # Database user: save to database
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
 
             # Get user auth files directory
             auth_files_dir = get_user_auth_files_dir(current_user_id)
@@ -4072,7 +4935,7 @@ async def dashboard_provider_upload_form(
         else:
             # Database user: save to database
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
 
             # Get user auth files directory
             auth_files_dir = get_user_auth_files_dir(current_user_id)
@@ -4183,7 +5046,7 @@ async def dashboard_provider_upload_chunk(
             # Save metadata to database if not admin
             if not is_config_admin:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 db.save_user_auth_file(
                     user_id=current_user_id,
                     provider_id=provider_key,
@@ -4322,7 +5185,7 @@ async def dashboard_user_rotations(request: Request):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     # Get user-specific rotations
     user_rotations = db.get_user_rotations(user_id)
@@ -4350,7 +5213,7 @@ async def dashboard_user_rotations_save(request: Request, rotation_name: str = F
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         # Validate JSON
@@ -4387,7 +5250,7 @@ async def dashboard_user_rotations_delete(request: Request, rotation_name: str):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         db.delete_user_rotation(user_id, rotation_name)
@@ -4408,7 +5271,7 @@ async def dashboard_user_autoselects(request: Request):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     # Get user-specific autoselects
     user_autoselects = db.get_user_autoselects(user_id)
@@ -4436,7 +5299,7 @@ async def dashboard_user_autoselects_save(request: Request, autoselect_name: str
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         # Validate JSON
@@ -4473,7 +5336,7 @@ async def dashboard_user_autoselects_delete(request: Request, autoselect_name: s
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         db.delete_user_autoselect(user_id, autoselect_name)
@@ -4536,7 +5399,7 @@ async def dashboard_user_tokens(request: Request):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     # Get user API tokens
     user_tokens = db.get_user_api_tokens(user_id)
@@ -4566,7 +5429,7 @@ async def dashboard_user_tokens_create(request: Request, description: str = Form
     from aisbf.database import get_database
     import secrets
 
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     # Generate a secure token
     token = secrets.token_urlsafe(32)
@@ -4593,7 +5456,7 @@ async def dashboard_user_tokens_delete(request: Request, token_id: int):
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
 
     try:
         db.delete_user_api_token(user_id, token_id)
@@ -4659,7 +5522,7 @@ async def dashboard_admin_tiers(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_all_tiers()
     
@@ -4682,7 +5545,7 @@ async def api_list_tiers(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_all_tiers()
     return JSONResponse(tiers)
@@ -4695,7 +5558,7 @@ async def api_get_tier(request: Request, tier_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     tier = db.get_tier_by_id(tier_id)
     if not tier:
@@ -4711,7 +5574,7 @@ async def api_create_tier(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         body = await request.json()
@@ -4744,7 +5607,7 @@ async def api_update_tier(request: Request, tier_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         body = await request.json()
@@ -4794,7 +5657,7 @@ async def api_delete_tier(request: Request, tier_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         success = db.delete_tier(tier_id)
@@ -4833,7 +5696,7 @@ async def dashboard_admin_tier_edit(request: Request, tier_id: int):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     tier = db.get_tier_by_id(tier_id)
     if not tier:
@@ -4857,7 +5720,7 @@ async def dashboard_admin_tier_save(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     try:
         form = await request.form()
@@ -4967,7 +5830,7 @@ async def dashboard_pricing(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_all_tiers()
     current_tier = db.get_user_tier(request.session.get('user_id'))
@@ -5006,7 +5869,7 @@ async def dashboard_subscription(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
     # Get user subscription info
@@ -5049,7 +5912,7 @@ async def dashboard_billing(request: Request):
         return auth_check
     
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
     transactions = db.get_user_payment_transactions(user_id)
@@ -5458,7 +6321,7 @@ async def list_all_models(request: Request):
         # Try to authenticate user
         try:
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             token = auth_header.split(" ")[1]
             user = db.get_user_by_token(token)
             if user:
@@ -5525,7 +6388,7 @@ async def v1_list_all_models(request: Request):
         # Try to authenticate user
         try:
             from aisbf.database import get_database
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             token = auth_header.split(" ")[1]
             user = db.get_user_by_token(token)
             if user:
@@ -6999,7 +7862,7 @@ async def user_list_models_by_username(request: Request, username: str):
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/models
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     # Get target user by username
     target_user = db.get_user_by_username(username)
@@ -7646,7 +8509,7 @@ async def user_list_providers_by_username(request: Request, username: str):
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/providers
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
     if not target_user:
@@ -7765,7 +8628,7 @@ async def user_list_rotations_by_username(request: Request, username: str):
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
     if not target_user:
@@ -7845,7 +8708,7 @@ async def user_list_autoselects_by_username(request: Request, username: str):
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/autoselects
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
     if not target_user:
@@ -7946,7 +8809,7 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
              http://localhost:17765/api/u/{username}/chat/completions
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
     if not target_user:
@@ -8085,7 +8948,7 @@ async def user_list_config_models_by_username(request: Request, username: str, c
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations/models
     """
     from aisbf.database import get_database
-    db = get_database()
+    db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
     if not target_user:
@@ -8858,7 +9721,7 @@ async def dashboard_claude_auth_complete(request: Request):
                 # Non-config-admin user: save credentials to database
                 try:
                     from aisbf.database import get_database
-                    db = get_database()
+                    db = DatabaseRegistry.get_config_database()
                     provider_key = request.session.get('oauth2_provider')
                     if db and current_user_id and provider_key:
                         # Read the credentials that were just saved to file
@@ -8974,7 +9837,7 @@ async def dashboard_claude_auth_status(request: Request):
             # Non-config-admin user: check database for credentials
             try:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
                         user_id=current_user_id,
@@ -9152,7 +10015,7 @@ async def dashboard_kilo_auth_poll(request: Request):
                     # Non-config-admin user: save credentials to database
                     try:
                         from aisbf.database import get_database
-                        db = get_database()
+                        db = DatabaseRegistry.get_config_database()
                         provider_key = request.session.get('kilo_provider')
                         if db and current_user_id and provider_key:
                             # Save to database
@@ -9261,7 +10124,7 @@ async def dashboard_kilo_auth_status(request: Request):
             # Non-config-admin user: check database for credentials
             try:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
                         user_id=current_user_id,
@@ -9465,7 +10328,7 @@ async def dashboard_codex_auth_poll(request: Request):
                 # Non-admin user: save credentials to database instead of file
                 try:
                     from aisbf.database import get_database
-                    db = get_database()
+                    db = DatabaseRegistry.get_config_database()
                     provider_key = request.session.get('codex_provider')
                     if db and current_user_id and provider_key:
                         # Read the credentials that were just saved to file
@@ -9578,7 +10441,7 @@ async def dashboard_codex_auth_status(request: Request):
             # Non-config-admin user: check database for credentials
             try:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
                         user_id=current_user_id,
@@ -9831,7 +10694,7 @@ async def dashboard_qwen_auth_poll(request: Request):
                 # Non-config-admin user: also save credentials to database
                 try:
                     from aisbf.database import get_database
-                    db = get_database()
+                    db = DatabaseRegistry.get_config_database()
                     provider_key = request.session.get('qwen_provider')
                     if db and current_user_id and provider_key:
                         # Read the credentials that were just saved to file
@@ -9944,7 +10807,7 @@ async def dashboard_qwen_auth_status(request: Request):
             # Non-config-admin user: check database for credentials
             try:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
                         user_id=current_user_id,
@@ -10022,7 +10885,7 @@ async def dashboard_qwen_auth_logout(request: Request):
         if current_user_id:
             try:
                 from aisbf.database import get_database
-                db = get_database()
+                db = DatabaseRegistry.get_config_database()
                 if db:
                     db.delete_user_oauth2_credentials(current_user_id, provider_key, 'qwen_oauth2')
             except Exception as e:

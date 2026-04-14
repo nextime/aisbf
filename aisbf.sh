@@ -162,6 +162,8 @@ ensure_venv() {
         if [ -f "$SHARE_DIR/requirements.txt" ]; then
             echo "Installing requirements from $SHARE_DIR/requirements.txt"
             "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
+            "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
         fi
         
         # Save version for future upgrade detection
@@ -173,6 +175,8 @@ ensure_venv() {
             # Only update requirements, aisbf is accessed from system site-packages
             if [ -f "$SHARE_DIR/requirements.txt" ]; then
                 "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+                # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
+                "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             fi
             python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
             echo "Virtual environment updated successfully"
@@ -191,9 +195,13 @@ update_venv() {
         if [ $ALREADY_SATISFIED -ne 0 ]; then
             echo "Installing new requirements (this will take a while!) ... "
             "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
+            "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             echo "[OK]"
         else
             echo "Virtual env already up to date"
+            # Still force reinstall uvicorn to ensure it's in venv
+            "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
         fi
     fi
 }

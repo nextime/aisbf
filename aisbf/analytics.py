@@ -124,7 +124,8 @@ class Analytics:
         self,
         provider_id: str,
         from_datetime: Optional[datetime] = None,
-        to_datetime: Optional[datetime] = None
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Get statistics for a specific provider.
@@ -177,7 +178,8 @@ class Analytics:
         self,
         provider_id: str,
         from_datetime: datetime,
-        to_datetime: datetime
+        to_datetime: datetime,
+        user_filter: Optional[int] = None
     ) -> Dict[str, Any]:
         """Get provider stats from database for a specific date range."""
         # This is a placeholder - in a real implementation, you'd query the database
@@ -194,7 +196,8 @@ class Analytics:
         self,
         provider_id: Optional[str] = None,
         from_datetime: Optional[datetime] = None,
-        to_datetime: Optional[datetime] = None
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Get token usage for a specific date range.
@@ -254,7 +257,8 @@ class Analytics:
     def get_all_providers_stats(
         self,
         from_datetime: Optional[datetime] = None,
-        to_datetime: Optional[datetime] = None
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None
     ) -> List[Dict[str, Any]]:
         """
         Get statistics for all providers.
@@ -360,17 +364,19 @@ class Analytics:
             cursor = conn.cursor()
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             
-            # Determine date format based on database type
+            # Determine date format and time bucket expression based on database type
             if self.db.db_type == 'sqlite':
                 date_format = "%Y-%m-%d %H:%M"
+                time_bucket_expr = f"strftime('{date_format}', timestamp)"
             else:
                 date_format = "%Y-%m-%d %H:%i"
+                time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
             
             if provider_id:
                 if user_filter:
                     cursor.execute(f'''
                         SELECT 
-                            strftime('{date_format}', timestamp) as time_bucket,
+                            {time_bucket_expr} as time_bucket,
                             SUM(tokens_used) as tokens
                         FROM token_usage
                         WHERE provider_id = {placeholder} AND user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
@@ -380,7 +386,7 @@ class Analytics:
                 else:
                     cursor.execute(f'''
                         SELECT 
-                            strftime('{date_format}', timestamp) as time_bucket,
+                            {time_bucket_expr} as time_bucket,
                             SUM(tokens_used) as tokens
                         FROM token_usage
                         WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
@@ -391,7 +397,7 @@ class Analytics:
                 if user_filter:
                     cursor.execute(f'''
                         SELECT 
-                            strftime('{date_format}', timestamp) as time_bucket,
+                            {time_bucket_expr} as time_bucket,
                             SUM(tokens_used) as tokens,
                             provider_id
                         FROM token_usage
@@ -402,7 +408,7 @@ class Analytics:
                 else:
                     cursor.execute(f'''
                         SELECT 
-                            strftime('{date_format}', timestamp) as time_bucket,
+                            {time_bucket_expr} as time_bucket,
                             SUM(tokens_used) as tokens,
                             provider_id
                         FROM token_usage
@@ -610,7 +616,8 @@ class Analytics:
     def get_cost_overview(
         self,
         from_datetime: Optional[datetime] = None,
-        to_datetime: Optional[datetime] = None
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None
     ) -> Dict[str, Any]:
         """
         Get cost overview for all providers.
@@ -665,7 +672,7 @@ class Analytics:
             }
         }
     
-    def get_optimization_recommendations(self) -> List[Dict[str, Any]]:
+    def get_optimization_recommendations(self, user_filter: Optional[int] = None) -> List[Dict[str, Any]]:
         """
         Generate optimization recommendations based on analytics.
         
@@ -919,12 +926,14 @@ class Analytics:
             
             if self.db.db_type == 'sqlite':
                 date_format = "%Y-%m-%d %H:%M"
+                time_bucket_expr = f"strftime('{date_format}', timestamp)"
             else:
                 date_format = "%Y-%m-%d %H:%i"
+                time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
             
             cursor.execute(f'''
                 SELECT 
-                    strftime('{date_format}', timestamp) as time_bucket,
+                    {time_bucket_expr} as time_bucket,
                     SUM(tokens_used) as tokens,
                     provider_id
                 FROM token_usage

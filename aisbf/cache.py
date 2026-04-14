@@ -36,11 +36,11 @@ except ImportError:
     redis = None
 
 try:
-    import mysql.connector
+    import mysql.connector as _mysql_connector
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
-    mysql = None
+    _mysql_connector = None
 
 try:
     import numpy as np
@@ -357,7 +357,7 @@ class MySQLCache(CacheBackend):
         """Initialize the MySQL database and create tables"""
         try:
             # Try to connect to the database
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
 
             # Create cache table
@@ -379,12 +379,12 @@ class MySQLCache(CacheBackend):
             conn.commit()
             cursor.close()
             conn.close()
-        except mysql.connector.Error as e:
+        except _mysql_connector.Error as e:
             if e.errno == 1049:  # Unknown database
                 # Try to create the database
                 temp_config = self.mysql_config.copy()
                 del temp_config['database']
-                conn = mysql.connector.connect(**temp_config)
+                conn = _mysql_connector.connect(**temp_config)
                 cursor = conn.cursor()
                 cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.mysql_config['database']}`")
                 conn.commit()
@@ -399,7 +399,7 @@ class MySQLCache(CacheBackend):
     def _cleanup_expired(self):
         """Clean up expired cache entries"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM cache WHERE ttl IS NOT NULL AND ttl < UNIX_TIMESTAMP()')
             conn.commit()
@@ -414,7 +414,7 @@ class MySQLCache(CacheBackend):
         try:
             self._cleanup_expired()
 
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('SELECT `value`, ttl FROM cache WHERE `key` = %s', (key,))
             row = cursor.fetchone()
@@ -447,7 +447,7 @@ class MySQLCache(CacheBackend):
             # Calculate TTL timestamp if provided
             ttl_timestamp = time.time() + ttl if ttl else None
 
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO cache (`key`, `value`, ttl)
@@ -462,7 +462,7 @@ class MySQLCache(CacheBackend):
 
     def delete(self, key: str) -> None:
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM cache WHERE `key` = %s', (key,))
             conn.commit()
@@ -477,7 +477,7 @@ class MySQLCache(CacheBackend):
         try:
             self._cleanup_expired()
 
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('SELECT ttl FROM cache WHERE `key` = %s', (key,))
             row = cursor.fetchone()
@@ -499,7 +499,7 @@ class MySQLCache(CacheBackend):
 
     def clear(self) -> None:
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM cache')
             conn.commit()
@@ -560,8 +560,23 @@ class FileCache(CacheBackend):
             logger.warning(f"File cache clear error: {e}")
 
 
-class NumpyFileCache:
-    """Specialized cache for numpy arrays (for model embeddings)"""
+class NumpyCacheBackend:
+    """Abstract base class for numpy array cache backends"""
+    def save_array(self, key: str, array: Any, metadata: Optional[Dict] = None) -> None:
+        raise NotImplementedError
+
+    def load_array(self, key: str) -> tuple[Optional[Any], Optional[Dict]]:
+        raise NotImplementedError
+
+    def exists(self, key: str) -> bool:
+        raise NotImplementedError
+
+    def delete(self, key: str) -> None:
+        raise NotImplementedError
+
+
+class NumpyFileCache(NumpyCacheBackend):
+    """File-based cache for numpy arrays (for model embeddings)"""
 
     def __init__(self, cache_dir: str = '~/.aisbf/cache'):
         self.cache_dir = Path(cache_dir).expanduser()
@@ -622,6 +637,74 @@ class NumpyFileCache:
             logger.warning(f"Numpy cache delete error for {key}: {e}")
 
 
+class NumpyRedisCache(NumpyCacheBackend):
+    """Redis-based cache for numpy arrays"""
+
+    def __init__(self, redis_client, key_prefix: str = 'aisbf:numpy:'):
+        self.redis = redis_client
+        self.key_prefix = key_prefix
+
+    def _make_key(self, key: str, suffix: str = '') -> str:
+        return f"{self.key_prefix}{key}{suffix}"
+
+    def save_array(self, key: str, array: Any, metadata: Optional[Dict] = None) -> None:
+        """Save numpy array with optional metadata to Redis"""
+        if not NUMPY_AVAILABLE:
+            raise ImportError("NumPy is not available")
+
+        try:
+            # Serialize numpy array to bytes
+            import io
+            buf = io.BytesIO()
+            np.save(buf, array)
+            buf.seek(0)
+            array_bytes = buf.read()
+
+            # Store array
+            self.redis.set(self._make_key(key), array_bytes)
+
+            # Store metadata if present
+            if metadata:
+                self.redis.set(self._make_key(key, ':meta'), json.dumps(metadata))
+
+        except Exception as e:
+            logger.warning(f"Numpy Redis cache save error for {key}: {e}")
+
+    def load_array(self, key: str) -> tuple[Optional[Any], Optional[Dict]]:
+        """Load numpy array and metadata from Redis"""
+        if not NUMPY_AVAILABLE:
+            return None, None
+
+        try:
+            array_bytes = self.redis.get(self._make_key(key))
+            if not array_bytes:
+                return None, None
+
+            import io
+            buf = io.BytesIO(array_bytes)
+            array = np.load(buf)
+
+            metadata = None
+            meta_bytes = self.redis.get(self._make_key(key, ':meta'))
+            if meta_bytes:
+                metadata = json.loads(meta_bytes)
+
+            return array, metadata
+        except Exception as e:
+            logger.warning(f"Numpy Redis cache load error for {key}: {e}")
+            return None, None
+
+    def exists(self, key: str) -> bool:
+        return bool(self.redis.exists(self._make_key(key)))
+
+    def delete(self, key: str) -> None:
+        try:
+            self.redis.delete(self._make_key(key))
+            self.redis.delete(self._make_key(key, ':meta'))
+        except Exception as e:
+            logger.warning(f"Numpy Redis cache delete error for {key}: {e}")
+
+
 class CacheManager:
     """Unified cache manager with support for multiple backends"""
 
@@ -652,10 +735,35 @@ class CacheManager:
         return self._backend
 
     @property
-    def numpy_cache(self) -> NumpyFileCache:
+    def numpy_cache(self) -> NumpyCacheBackend:
         if self._numpy_cache is None:
-            self._numpy_cache = NumpyFileCache()
+            self._numpy_cache = self._create_numpy_backend()
         return self._numpy_cache
+
+    def _create_numpy_backend(self) -> NumpyCacheBackend:
+        """Create appropriate numpy cache backend based on configuration"""
+        cache_type = self.cache_type.lower()
+
+        if cache_type == 'redis' and REDIS_AVAILABLE:
+            try:
+                redis_client = redis.Redis(
+                    host=self.config.get('redis_host', 'localhost'),
+                    port=self.config.get('redis_port', 6379),
+                    db=self.config.get('redis_db', 0),
+                    password=self.config.get('redis_password', ''),
+                    decode_responses=False
+                )
+                # Test connection
+                redis_client.ping()
+                return NumpyRedisCache(
+                    redis_client,
+                    key_prefix=self.config.get('redis_key_prefix', 'aisbf:') + 'numpy:'
+                )
+            except Exception as e:
+                logger.warning(f"Failed to create Redis numpy cache, falling back to file: {e}")
+
+        # Default to file cache for all other backends
+        return NumpyFileCache()
 
     def _create_backend(self) -> CacheBackend:
         """Create appropriate cache backend based on configuration"""
@@ -891,7 +999,7 @@ class MySQLResponseCache:
     def _init_db(self):
         """Initialize MySQL database"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('''
                 CREATE TABLE IF NOT EXISTS response_cache (
@@ -908,11 +1016,11 @@ class MySQLResponseCache:
             conn.commit()
             cursor.close()
             conn.close()
-        except mysql.connector.Error as e:
+        except _mysql_connector.Error as e:
             if e.errno == 1049:
                 temp_config = self.mysql_config.copy()
                 del temp_config['database']
-                conn = mysql.connector.connect(**temp_config)
+                conn = _mysql_connector.connect(**temp_config)
                 cursor = conn.cursor()
                 cursor.execute(f"CREATE DATABASE IF NOT EXISTS `{self.mysql_config['database']}`")
                 conn.commit()
@@ -925,7 +1033,7 @@ class MySQLResponseCache:
     def _cleanup_expired(self):
         """Clean up expired entries"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM response_cache WHERE ttl IS NOT NULL AND ttl < UNIX_TIMESTAMP()')
             conn.commit()
@@ -938,7 +1046,7 @@ class MySQLResponseCache:
         """Get cached response"""
         try:
             self._cleanup_expired()
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('SELECT `value`, ttl FROM response_cache WHERE `key` = %s', (key,))
             row = cursor.fetchone()
@@ -960,7 +1068,7 @@ class MySQLResponseCache:
         try:
             value_str = json.dumps(value, ensure_ascii=False)
             ttl_timestamp = time.time() + ttl
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('''
                 INSERT INTO response_cache (`key`, `value`, ttl)
@@ -976,7 +1084,7 @@ class MySQLResponseCache:
     def delete(self, key: str) -> None:
         """Delete cached response"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM response_cache WHERE `key` = %s', (key,))
             conn.commit()
@@ -988,7 +1096,7 @@ class MySQLResponseCache:
     def clear(self) -> None:
         """Clear all cached responses"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('DELETE FROM response_cache')
             conn.commit()
@@ -1000,7 +1108,7 @@ class MySQLResponseCache:
     def get_size(self) -> int:
         """Get number of cached items"""
         try:
-            conn = mysql.connector.connect(**self.mysql_config)
+            conn = _mysql_connector.connect(**self.mysql_config)
             cursor = conn.cursor()
             cursor.execute('SELECT COUNT(*) FROM response_cache')
             count = cursor.fetchone()[0]

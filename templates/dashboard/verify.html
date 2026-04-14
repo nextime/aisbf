@@ -1,0 +1,54 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
+{% extends "base.html" %}
+
+{% block title %}Verify Email - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<div style="max-width: 500px; margin: 50px auto;">
+    <h2 style="margin-bottom: 30px; text-align: center;">Verify Your Email</h2>
+
+    <p style="text-align: center; margin-bottom: 30px;">
+        Please check your email inbox and click the verification link to activate your account.
+    </p>
+
+    {% if error %}
+    <div class="alert alert-error">{{ error }}</div>
+    {% endif %}
+
+    {% if message %}
+    <div class="alert alert-success">{{ message }}</div>
+    {% endif %}
+
+    <div style="background: #f5f5f5; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+        <h3 style="margin-top: 0; color: #333;">Didn't receive the email?</h3>
+        <p style="margin-bottom: 20px;">Check your spam/junk folder, or request a new verification email.</p>
+
+        {% if can_resend %}
+        <form method="POST" action="{{ url_for(request, '/dashboard/resend-verification') }}">
+            <button type="submit" class="btn" style="width: 100%;">Resend Verification Email</button>
+        </form>
+        {% else %}
+        <p style="color: #666; font-style: italic;">You can request another verification email in a few minutes.</p>
+        {% endif %}
+    </div>
+
+    <div style="text-align: center;">
+        <p><a href="{{ url_for(request, '/dashboard/logout') }}" style="color: #2196F3; text-decoration: none;">Logout</a></p>
+    </div>
+</div>
+{% endblock %}

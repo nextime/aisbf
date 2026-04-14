@@ -24,7 +24,7 @@ import asyncio
 import time
 import os
 import random
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from ..models import Provider, Model, ErrorTracking
 from ..config import config
 from ..utils import count_messages_tokens
@@ -1262,6 +1262,51 @@ class BaseProviderHandler:
          
         # Fall back to direct processing (either batching disabled, streaming, or batching returned None)
         return await self._handle_request_direct(model, messages, max_tokens, temperature, stream, tools, tool_choice)
+
+    def _get_models_cache_key(self) -> str:
+        """Get unified cache key for provider models list"""
+        return f"provider_models:{self.provider_id}"
+
+    def _save_models_cache(self, models: List[Any]) -> None:
+        """Save models list to unified cache system"""
+        import logging
+        try:
+            from ..cache import get_cache_manager
+            cache = get_cache_manager()
+            
+            cache_data = {
+                'models': [m.dict() if hasattr(m, 'dict') else dict(m) for m in models],
+                'cached_at': time.time()
+            }
+            
+            # Cache for 24 hours (86400 seconds)
+            cache.set(self._get_models_cache_key(), cache_data, ttl=86400)
+            logging.info(f"{self.__class__.__name__}: ✓ Saved {len(models)} models to cache")
+        except Exception as e:
+            logging.warning(f"{self.__class__.__name__}: Failed to save models cache: {e}")
+
+    def _load_models_cache(self) -> Optional[List[Any]]:
+        """Load models list from unified cache system if available and not expired"""
+        import logging
+        try:
+            from ..cache import get_cache_manager
+            from ..models import Model
+            
+            cache = get_cache_manager()
+            cache_data = cache.get(self._get_models_cache_key())
+            
+            if not cache_data:
+                return None
+                
+            models = []
+            for model_dict in cache_data.get('models', []):
+                models.append(Model(**model_dict))
+            
+            logging.info(f"{self.__class__.__name__}: ✓ Loaded {len(models)} models from cache")
+            return models
+        except Exception as e:
+            logging.warning(f"{self.__class__.__name__}: Failed to load models cache: {e}")
+            return None
 
     async def _handle_request_direct(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                                     temperature: Optional[float] = 1.0, stream: Optional[bool] = False,

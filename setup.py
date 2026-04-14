@@ -112,6 +112,7 @@ setup(
             'aisbf/classifier.py',
             'aisbf/streaming_optimization.py',
             'aisbf/analytics.py',
+            'aisbf/email_utils.py',
         ]),
         # aisbf.providers subpackage
         ('share/aisbf/aisbf/providers', [
@@ -170,8 +171,13 @@ setup(
             'templates/dashboard/rate_limits.html',
             'templates/dashboard/users.html',
             'templates/dashboard/signup.html',
+            'templates/dashboard/verify.html',
+            'templates/dashboard/forgot_password.html',
+            'templates/dashboard/reset_password.html',
             'templates/dashboard/profile.html',
             'templates/dashboard/change_password.html',
+            'templates/dashboard/change_email.html',
+            'templates/dashboard/delete_account.html',
             'templates/dashboard/admin_tiers.html',
             'templates/dashboard/admin_tier_form.html',
             'templates/dashboard/pricing.html',

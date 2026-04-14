@@ -137,8 +137,17 @@ class TorHiddenService:
                     ('HiddenServicePort', f'{self.config.hidden_service_port} 127.0.0.1:{local_port}')
                 ])
                 
-                # Read the hostname file to get onion address
+                # Wait for Tor daemon to create the hostname file (can take up to 30 seconds)
+                import time
                 hostname_file = hidden_service_dir / 'hostname'
+                
+                # Wait up to 30 seconds with 1 second intervals
+                for attempt in range(30):
+                    if hostname_file.exists() and hostname_file.stat().st_size > 0:
+                        break
+                    time.sleep(1)
+                    logger.debug(f"Waiting for hostname file... attempt {attempt + 1}/30")
+                
                 if hostname_file.exists():
                     self.onion_address = hostname_file.read_text().strip()
                     logger.info(f"Persistent hidden service created: {self.onion_address}")

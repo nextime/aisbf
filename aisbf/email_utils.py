@@ -1,3 +1,4 @@
+
 """
 Copyleft (C) 2026 Stefy Lanza <stefy@nexlab.net>
 
@@ -17,8 +18,6 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
-Why did the programmer quit his job? Because he didn't get arrays!
 """
 import smtplib
 import hashlib
@@ -27,6 +26,9 @@ from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from typing import Optional
 import logging
+import traceback
+import sys
+from aisbf.config import SMTPConfig
 
 logger = logging.getLogger(__name__)
 
@@ -47,11 +49,21 @@ def hash_password(password: str) -> str:
 def generate_verification_token() -> str:
     """
     Generate a secure random verification token.
-    
+
     Returns:
         Random token string (32 bytes hex)
     """
     return secrets.token_hex(32)
+
+
+def generate_password_reset_token() -> str:
+    """
+    Generate a secure random password reset token.
+
+    Returns:
+        Random token string (32 bytes hex)
+    """
+    return generate_verification_token()
 
 
 def send_verification_email(
@@ -59,7 +71,7 @@ def send_verification_email(
     username: str,
     verification_token: str,
     base_url: str,
-    smtp_config: dict
+    smtp_config: SMTPConfig
 ) -> bool:
     """
     Send email verification email to a user.
@@ -76,12 +88,12 @@ def send_verification_email(
     """
     try:
         # Create verification URL
-        verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}"
+        verification_url = f"{base_url}/dashboard/verify-email?token={verification_token}&email={to_email}"
         
         # Create message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = 'Verify your AISBF account'
-        msg['From'] = f"{smtp_config.get('from_name', 'AISBF')} <{smtp_config.get('from_email')}>"
+        msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>"
         msg['To'] = to_email
         
         # Create plain text and HTML versions
@@ -92,9 +104,9 @@ Thank you for signing up for AISBF!
 
 Please verify your email address by clicking the link below:
 
-{verification_url}
+ {verification_url}
 
-This link will expire in {smtp_config.get('verification_token_expiry_hours', 24)} hours.
+ This link will expire in 24 hours.
 
 If you did not create this account, please ignore this email.
 
@@ -118,7 +130,7 @@ AISBF Team
     </p>
     <p>Or copy and paste this link into your browser:</p>
     <p><a href="{verification_url}">{verification_url}</a></p>
-    <p>This link will expire in {smtp_config.get('verification_token_expiry_hours', 24)} hours.</p>
+    <p>This link will expire in 24 hours.</p>
     <p>If you did not create this account, please ignore this email.</p>
     <br>
     <p>Best regards,<br>AISBF Team</p>
@@ -132,21 +144,48 @@ AISBF Team
         msg.attach(part1)
         msg.attach(part2)
         
+        logger.debug(f"SMTP Config:")
+        logger.debug(f"  Host: {smtp_config.host}")
+        logger.debug(f"  Port: {smtp_config.port}")
+        logger.debug(f"  Use SSL: {smtp_config.use_ssl}")
+        logger.debug(f"  Use TLS: {smtp_config.use_tls}")
+        logger.debug(f"  Username: {smtp_config.username}")
+        logger.debug(f"  Password length: {len(smtp_config.password)} chars")
+        logger.debug(f"  From Email: {smtp_config.from_email}")
+        logger.debug(f"  From Name: {smtp_config.from_name}")
+
         # Send email
-        if smtp_config.get('use_ssl', False):
+        if smtp_config.use_ssl:
             # Use SSL
-            with smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port']) as server:
-                if smtp_config.get('username') and smtp_config.get('password'):
-                    server.login(smtp_config['username'], smtp_config['password'])
+            logger.debug("Connecting with SSL")
+            with smtplib.SMTP_SSL(smtp_config.host, smtp_config.port) as server:
+                server.set_debuglevel(1)
+                if smtp_config.username and smtp_config.password:
+                    logger.debug("Sending EHLO")
+                    server.ehlo()
+                    logger.debug(f"Logging in with user: {smtp_config.username}")
+                    server.login(smtp_config.username, smtp_config.password)
+                logger.debug("Sending message")
                 server.send_message(msg)
+                logger.debug("Message sent successfully")
         else:
             # Use TLS or no encryption
-            with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
-                if smtp_config.get('use_tls', True):
+            logger.debug("Connecting plaintext")
+            with smtplib.SMTP(smtp_config.host, smtp_config.port) as server:
+                server.set_debuglevel(1)
+                logger.debug("Sending EHLO")
+                server.ehlo()
+                if smtp_config.use_tls:
+                    logger.debug("Starting TLS")
                     server.starttls()
-                if smtp_config.get('username') and smtp_config.get('password'):
-                    server.login(smtp_config['username'], smtp_config['password'])
+                    logger.debug("Sending EHLO after STARTTLS")
+                    server.ehlo()
+                if smtp_config.username and smtp_config.password:
+                    logger.debug(f"Logging in with user: {smtp_config.username}")
+                    server.login(smtp_config.username, smtp_config.password)
+                logger.debug("Sending message")
                 server.send_message(msg)
+                logger.debug("Message sent successfully")
         
         logger.info(f"Verification email sent to {to_email}")
         return True
@@ -161,7 +200,7 @@ def send_password_reset_email(
     username: str,
     reset_token: str,
     base_url: str,
-    smtp_config: dict
+    smtp_config: SMTPConfig
 ) -> bool:
     """
     Send password reset email to a user.
@@ -183,7 +222,7 @@ def send_password_reset_email(
         # Create message
         msg = MIMEMultipart('alternative')
         msg['Subject'] = 'Reset your AISBF password'
-        msg['From'] = f"{smtp_config.get('from_name', 'AISBF')} <{smtp_config.get('from_email')}>"
+        msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>"
         msg['To'] = to_email
         
         # Create plain text and HTML versions
@@ -234,25 +273,176 @@ AISBF Team
         msg.attach(part1)
         msg.attach(part2)
         
+        logger.debug(f"SMTP Config:")
+        logger.debug(f"  Host: {smtp_config.host}")
+        logger.debug(f"  Port: {smtp_config.port}")
+        logger.debug(f"  Use SSL: {smtp_config.use_ssl}")
+        logger.debug(f"  Use TLS: {smtp_config.use_tls}")
+        logger.debug(f"  Username: {smtp_config.username}")
+        logger.debug(f"  Password length: {len(smtp_config.password)} chars")
+        logger.debug(f"  From Email: {smtp_config.from_email}")
+        logger.debug(f"  From Name: {smtp_config.from_name}")
+
         # Send email
-        if smtp_config.get('use_ssl', False):
+        if smtp_config.use_ssl:
             # Use SSL
-            with smtplib.SMTP_SSL(smtp_config['host'], smtp_config['port']) as server:
-                if smtp_config.get('username') and smtp_config.get('password'):
-                    server.login(smtp_config['username'], smtp_config['password'])
+            logger.debug("Connecting with SSL")
+            with smtplib.SMTP_SSL(smtp_config.host, smtp_config.port) as server:
+                server.set_debuglevel(1)
+                if smtp_config.username and smtp_config.password:
+                    logger.debug("Sending EHLO")
+                    server.ehlo()
+                    logger.debug(f"Logging in with user: {smtp_config.username}")
+                    server.login(smtp_config.username, smtp_config.password)
+                logger.debug("Sending message")
                 server.send_message(msg)
+                logger.debug("Message sent successfully")
         else:
             # Use TLS or no encryption
-            with smtplib.SMTP(smtp_config['host'], smtp_config['port']) as server:
-                if smtp_config.get('use_tls', True):
+            logger.debug("Connecting plaintext")
+            with smtplib.SMTP(smtp_config.host, smtp_config.port) as server:
+                server.set_debuglevel(1)
+                logger.debug("Sending EHLO")
+                server.ehlo()
+                if smtp_config.use_tls:
+                    logger.debug("Starting TLS")
                     server.starttls()
-                if smtp_config.get('username') and smtp_config.get('password'):
-                    server.login(smtp_config['username'], smtp_config['password'])
+                    logger.debug("Sending EHLO after STARTTLS")
+                    server.ehlo()
+                if smtp_config.username and smtp_config.password:
+                    logger.debug(f"Logging in with user: {smtp_config.username}")
+                    server.login(smtp_config.username, smtp_config.password)
+                logger.debug("Sending message")
                 server.send_message(msg)
+                logger.debug("Message sent successfully")
         
         logger.info(f"Password reset email sent to {to_email}")
         return True
         
     except Exception as e:
         logger.error(f"Failed to send password reset email to {to_email}: {e}")
+        return False
+
+
+def send_test_email(
+    to_email: str,
+    smtp_config: SMTPConfig
+) -> bool:
+    """
+    Send a test email to verify SMTP configuration.
+    
+    Args:
+        to_email: Recipient email address
+        smtp_config: SMTP configuration dictionary
+        
+    Returns:
+        True if email sent successfully, False otherwise
+    """
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = 'AISBF SMTP Test Email'
+        msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>"
+        msg['To'] = to_email
+        
+        text = """
+This is a test email sent from your AISBF server.
+
+If you received this email, your SMTP configuration is working correctly!
+
+Best regards,
+AISBF Team
+"""
+        
+        html = """
+<html>
+  <head></head>
+  <body>
+    <h2>AISBF SMTP Test Email</h2>
+    <p>This is a test email sent from your AISBF server.</p>
+    <p style="color: #4CAF50; font-weight: bold;">✅ If you received this email, your SMTP configuration is working correctly!</p>
+    <br>
+    <p>Best regards,<br>AISBF Team</p>
+  </body>
+</html>
+"""
+        
+        part1 = MIMEText(text, 'plain')
+        part2 = MIMEText(html, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        logger.info(f"Sending test email to {to_email}")
+        
+        logger.info(f"SMTP Config:")
+        logger.info(f"  Host: {smtp_config.host}")
+        logger.info(f"  Port: {smtp_config.port}")
+        logger.info(f"  Use SSL: {smtp_config.use_ssl}")
+        logger.info(f"  Use TLS: {smtp_config.use_tls}")
+        logger.info(f"  Username: {smtp_config.username}")
+        logger.info(f"  Password length: {len(smtp_config.password)} chars")
+        logger.info(f"  From Email: {smtp_config.from_email}")
+        logger.info(f"  From Name: {smtp_config.from_name}")
+
+        # Enable SMTP debug logging at INFO level always
+        old_stdout = sys.stdout
+        log_buffer = []
+        
+        class LogBuffer:
+            def write(self, data):
+                line = data.strip()
+                if line:
+                    log_buffer.append(line)
+                    logger.info(f"SMTP: {line}")
+            def flush(self):
+                pass
+        
+        sys.stdout = LogBuffer()
+        
+        try:
+            # Send email
+            if smtp_config.use_ssl:
+                # Use SSL
+                logger.info("Connecting with SSL")
+                with smtplib.SMTP_SSL(smtp_config.host, smtp_config.port) as server:
+                    server.set_debuglevel(2)
+                    if smtp_config.username and smtp_config.password:
+                        logger.info("Sending EHLO")
+                        server.ehlo()
+                        logger.info(f"Logging in with user: {smtp_config.username}")
+                        server.login(smtp_config.username, smtp_config.password)
+                    logger.info("Sending message")
+                    server.send_message(msg)
+                    logger.info("Message sent successfully")
+            else:
+                # Use TLS or no encryption
+                logger.info("Connecting plaintext")
+                with smtplib.SMTP(smtp_config.host, smtp_config.port) as server:
+                    server.set_debuglevel(2)
+                    logger.info("Sending EHLO")
+                    server.ehlo()
+                    if smtp_config.use_tls:
+                        logger.info("Starting TLS")
+                        server.starttls()
+                        logger.info("Sending EHLO after STARTTLS")
+                        server.ehlo()
+                    if smtp_config.username and smtp_config.password:
+                        logger.info(f"Logging in with user: {smtp_config.username}")
+                        server.login(smtp_config.username, smtp_config.password)
+                    logger.info("Sending message")
+                    server.send_message(msg)
+                    logger.info("Message sent successfully")
+        finally:
+            sys.stdout = old_stdout
+        
+        logger.info(f"Test email sent successfully to {to_email}")
+        return True
+        
+    except smtplib.SMTPException as e:
+        logger.error(f"SMTP Error sending test email to {to_email}: {e}")
+        logger.error(f"SMTP Code: {e.smtp_code}, Message: {e.smtp_error}")
+        logger.error(f"SMTP Server Response: {getattr(e, 'resp', 'N/A')}")
+        return False
+    except Exception as e:
+        logger.error(f"Exception sending test email to {to_email}: {e}")
+        logger.error(f"Traceback: {traceback.format_exc()}")
         return False
