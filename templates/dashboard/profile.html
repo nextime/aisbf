@@ -25,6 +25,14 @@
             </div>
 
             <div class="form-group">
+                <label for="display_name">Display Name</label>
+                <input type="text" id="display_name" name="display_name" value="{{ user.display_name or session.username }}" placeholder="Your display name">
+                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
+                    This is how your name will be displayed throughout the application
+                </small>
+            </div>
+
+            <div class="form-group">
                 <label for="email">Email Address</label>
                 <input type="email" id="email" name="email" value="{{ session.email or '' }}" readonly style="background: #0f1419; cursor: not-allowed;">
                 {% if not session.email %}

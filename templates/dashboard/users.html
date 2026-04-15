@@ -65,6 +65,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <th>Username</th>
             <th>Email</th>
             <th>Role</th>
+            <th>Tier</th>
             <th>Created By</th>
             <th>Created At</th>
             <th>Last Login</th>
@@ -77,7 +78,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% for user in users %}
             <tr>
                 <td>{{ user.id }}</td>
-                <td>{{ user.username }}</td>
+                <td>{{ user.display_name or user.username }}</td>
                 <td>{{ user.email or '-' }}</td>
                 <td>
                     {% if user.role == 'admin' %}
@@ -85,6 +86,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     {% else %}
                     <span style="color: #a0a0a0;">User</span>
                     {% endif %}
+                </td>
+                <td>
+                    <select onchange="updateUserTier({{ user.id }}, this.value)" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 5px; border-radius: 3px;">
+                        {% for tier in tiers %}
+                        <option value="{{ tier.id }}" {% if user.tier_id == tier.id %}selected{% endif %}>
+                            {{ tier.name }}{% if not tier.is_visible %} (Hidden){% endif %}
+                        </option>
+                        {% endfor %}
+                    </select>
                 </td>
                 <td>{{ user.created_by or '-' }}</td>
                 <td>{{ user.created_at }}</td>
@@ -109,7 +119,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% endfor %}
         {% else %}
             <tr>
-                <td colspan="8" style="text-align: center; color: #666;">No users found</td>
+                <td colspan="10" style="text-align: center; color: #666;">No users found</td>
             </tr>
         {% endif %}
     </tbody>
@@ -208,6 +218,32 @@ function deleteUser(userId, username) {
             alert('Error: ' + error);
         });
     }
+}
+
+function updateUserTier(userId, tierId) {
+    fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/tier', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({ tier_id: parseInt(tierId) })
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            // Show success message briefly
+            const msg = document.createElement('div');
+            msg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #4ade80; color: #000; padding: 15px 20px; border-radius: 5px; z-index: 9999;';
+            msg.textContent = 'Tier updated successfully';
+            document.body.appendChild(msg);
+            setTimeout(() => msg.remove(), 2000);
+        } else {
+            alert(data.error || 'Failed to update tier');
+            location.reload(); // Reload to reset dropdown
+        }
+    })
+    .catch(error => {
+        alert('Error: ' + error);
+        location.reload(); // Reload to reset dropdown
+    });
 }
 
 // Close modal when clicking outside
