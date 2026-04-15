@@ -6036,6 +6036,33 @@ async def dashboard_billing(request: Request):
     }
     )
 
+@app.get("/dashboard/billing/add-method")
+async def dashboard_add_payment_method(request: Request):
+    """Add payment method page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    
+    # Get enabled payment gateways
+    enabled_gateways = []
+    gateways = db.get_payment_gateway_settings()
+    for gateway, settings in gateways.items():
+        if settings.get('enabled', False):
+            enabled_gateways.append(gateway)
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/add_payment_method.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "enabled_gateways": enabled_gateways
+        }
+    )
+
 @app.get("/dashboard/rate-limits")
 async def dashboard_rate_limits(request: Request):
     """Rate limits dashboard page"""
