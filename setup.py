@@ -183,6 +183,7 @@ setup(
             'templates/dashboard/pricing.html',
             'templates/dashboard/subscription.html',
             'templates/dashboard/billing.html',
+            'templates/dashboard/add_payment_method.html',
         ]),
         # Install static files (extension and favicon)
         ('share/aisbf/static', [
