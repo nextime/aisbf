@@ -5,90 +5,80 @@
 {% block content %}
 <h2 style="margin-bottom: 30px;">Add Payment Method</h2>
 
-<div style="max-width: 800px; margin: 0 auto;">
-    <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 30px;">
-        <p class="text-muted mb-4">Choose a payment method to add to your account. You can use this for subscription payments and plan upgrades.</p>
+<div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 30px; margin-bottom: 20px;">
+    <p style="color: #a0a0a0; margin-bottom: 30px;">Choose a payment method to add to your account. You can use this for subscription payments and plan upgrades.</p>
 
-        <div class="row g-4">
-            {% if 'stripe' in enabled_gateways %}
-            <div class="col-md-6">
-                <div class="card h-100 border-primary">
-                    <div class="card-body text-center">
-                        <i class="fab fa-cc-stripe fa-4x mb-3 text-primary"></i>
-                        <h5 class="card-title">Credit Card</h5>
-                        <p class="card-text text-muted">Secure payment via Stripe</p>
-                        <button class="btn btn-primary w-100" id="stripe-button">Add Credit Card</button>
-                    </div>
-                </div>
-            </div>
+    <!-- Stripe and PayPal -->
+    {% if 'stripe' in enabled_gateways or 'paypal' in enabled_gateways %}
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 20px; margin-bottom: 30px;">
+        {% if 'stripe' in enabled_gateways %}
+        <div style="background: #1a1a2e; border: 2px solid #4a9eff; border-radius: 8px; padding: 25px; text-align: center; transition: all 0.3s ease;">
+            <i class="fab fa-cc-stripe" style="font-size: 48px; color: #4a9eff; margin-bottom: 15px;"></i>
+            <h3 style="margin: 0 0 10px 0; color: #e0e0e0; font-size: 18px;">Credit Card</h3>
+            <p style="color: #a0a0a0; margin-bottom: 20px; font-size: 14px;">Secure payment via Stripe</p>
+            <button class="btn" id="stripe-button" style="width: 100%; padding: 12px;">
+                <i class="fas fa-plus me-2"></i>Add Credit Card
+            </button>
+        </div>
+        {% endif %}
+
+        {% if 'paypal' in enabled_gateways %}
+        <div style="background: #1a1a2e; border: 2px solid #4a9eff; border-radius: 8px; padding: 25px; text-align: center; transition: all 0.3s ease;">
+            <i class="fab fa-paypal" style="font-size: 48px; color: #4a9eff; margin-bottom: 15px;"></i>
+            <h3 style="margin: 0 0 10px 0; color: #e0e0e0; font-size: 18px;">PayPal</h3>
+            <p style="color: #a0a0a0; margin-bottom: 20px; font-size: 14px;">Connect your PayPal account</p>
+            <button class="btn" id="paypal-button" style="width: 100%; padding: 12px;">
+                <i class="fas fa-link me-2"></i>Connect PayPal
+            </button>
+        </div>
+        {% endif %}
+    </div>
+    {% endif %}
+
+    <!-- Cryptocurrency -->
+    {% if 'bitcoin' in enabled_gateways or 'eth' in enabled_gateways or 'usdt' in enabled_gateways or 'usdc' in enabled_gateways %}
+    <div style="background: #1a1a2e; border: 2px solid #ffc107; border-radius: 8px; padding: 25px; margin-bottom: 20px;">
+        <h3 style="margin: 0 0 10px 0; color: #ffc107; font-size: 18px;">
+            <i class="fab fa-bitcoin me-2"></i>Cryptocurrency Payments
+        </h3>
+        <p style="color: #a0a0a0; margin-bottom: 20px; font-size: 14px;">Set cryptocurrency as your default payment method</p>
+        
+        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 15px;">
+            {% if 'bitcoin' in enabled_gateways %}
+            <button class="crypto-default" data-type="bitcoin" style="background: #0f3460; border: 2px solid #ffc107; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; color: #e0e0e0;">
+                <i class="fab fa-bitcoin" style="font-size: 36px; color: #ffc107; margin-bottom: 10px; display: block;"></i>
+                <strong style="display: block; font-size: 14px;">Bitcoin</strong>
+            </button>
             {% endif %}
-
-            {% if 'paypal' in enabled_gateways %}
-            <div class="col-md-6">
-                <div class="card h-100 border-primary">
-                    <div class="card-body text-center">
-                        <i class="fab fa-paypal fa-4x mb-3 text-primary"></i>
-                        <h5 class="card-title">PayPal</h5>
-                        <p class="card-text text-muted">Connect your PayPal account</p>
-                        <button class="btn btn-primary w-100" id="paypal-button">Connect PayPal</button>
-                    </div>
-                </div>
-            </div>
+            
+            {% if 'eth' in enabled_gateways %}
+            <button class="crypto-default" data-type="eth" style="background: #0f3460; border: 2px solid #627eea; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; color: #e0e0e0;">
+                <i class="fab fa-ethereum" style="font-size: 36px; color: #627eea; margin-bottom: 10px; display: block;"></i>
+                <strong style="display: block; font-size: 14px;">Ethereum</strong>
+            </button>
             {% endif %}
-
-            {% if 'bitcoin' in enabled_gateways or 'eth' in enabled_gateways or 'usdt' in enabled_gateways or 'usdc' in enabled_gateways %}
-            <div class="col-12">
-                <div class="card border-warning">
-                    <div class="card-header bg-warning text-dark">
-                        <h6 class="mb-0">
-                            <i class="fab fa-bitcoin me-2"></i>Cryptocurrency Payments
-                        </h6>
-                    </div>
-                    <div class="card-body">
-                        <p class="text-muted mb-3">Set cryptocurrency as your default payment method</p>
-                        <div class="row g-3">
-                            {% if 'bitcoin' in enabled_gateways %}
-                            <div class="col-md-3">
-                                <button class="btn btn-outline-warning w-100 crypto-default" data-type="bitcoin">
-                                    <i class="fab fa-bitcoin fa-2x mb-2"></i><br>
-                                    <strong>Bitcoin</strong>
-                                </button>
-                            </div>
-                            {% endif %}
-                            {% if 'eth' in enabled_gateways %}
-                            <div class="col-md-3">
-                                <button class="btn btn-outline-purple w-100 crypto-default" data-type="eth">
-                                    <i class="fab fa-ethereum fa-2x mb-2"></i><br>
-                                    <strong>Ethereum</strong>
-                                </button>
-                            </div>
-                            {% endif %}
-                            {% if 'usdt' in enabled_gateways %}
-                            <div class="col-md-3">
-                                <button class="btn btn-outline-success w-100 crypto-default" data-type="usdt">
-                                    <i class="fas fa-coins fa-2x mb-2"></i><br>
-                                    <strong>USDT</strong>
-                                </button>
-                            </div>
-                            {% endif %}
-                            {% if 'usdc' in enabled_gateways %}
-                            <div class="col-md-3">
-                                <button class="btn btn-outline-info w-100 crypto-default" data-type="usdc">
-                                    <i class="fas fa-coins fa-2x mb-2"></i><br>
-                                    <strong>USDC</strong>
-                                </button>
-                            </div>
-                            {% endif %}
-                        </div>
-                    </div>
-                </div>
-            </div>
+            
+            {% if 'usdt' in enabled_gateways %}
+            <button class="crypto-default" data-type="usdt" style="background: #0f3460; border: 2px solid #26a17b; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; color: #e0e0e0;">
+                <i class="fas fa-coins" style="font-size: 36px; color: #26a17b; margin-bottom: 10px; display: block;"></i>
+                <strong style="display: block; font-size: 14px;">USDT</strong>
+            </button>
+            {% endif %}
+            
+            {% if 'usdc' in enabled_gateways %}
+            <button class="crypto-default" data-type="usdc" style="background: #0f3460; border: 2px solid #2775ca; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; color: #e0e0e0;">
+                <i class="fas fa-coins" style="font-size: 36px; color: #2775ca; margin-bottom: 10px; display: block;"></i>
+                <strong style="display: block; font-size: 14px;">USDC</strong>
+            </button>
             {% endif %}
         </div>
+    </div>
+    {% endif %}
 
-        <div class="text-center mt-4">
-            <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn btn-secondary">Back to Billing</a>
-        </div>
+    <div style="text-align: center; margin-top: 30px;">
+        <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn btn-secondary">
+            <i class="fas fa-arrow-left me-2"></i>Back to Billing
+        </a>
     </div>
 </div>
 
@@ -129,46 +119,52 @@ document.addEventListener('DOMContentLoaded', function() {
     });
 
     // PayPal button
-    document.getElementById('paypal-button').addEventListener('click', function() {
-        window.location.href = '/dashboard/billing/add-method/paypal/oauth';
-    });
+    const paypalButton = document.getElementById('paypal-button');
+    if (paypalButton) {
+        paypalButton.addEventListener('click', function() {
+            window.location.href = '/dashboard/billing/add-method/paypal/oauth';
+        });
+    }
 
     // Stripe button - show Stripe form
-    document.getElementById('stripe-button').addEventListener('click', function() {
-        document.getElementById('stripe-form').style.display = 'block';
-        // Initialize Stripe Elements
-        const stripe = Stripe('{{ stripe_publishable_key }}');
-        const elements = stripe.elements();
-        const cardElement = elements.create('card');
-        cardElement.mount('#card-element');
-        
-        const form = document.getElementById('payment-form');
-        form.addEventListener('submit', async (event) => {
-            event.preventDefault();
-            const {error, paymentMethod} = await stripe.createPaymentMethod({
-                type: 'card',
-                card: cardElement,
-            });
-            if (error) {
-                alert(error.message);
-            } else {
-                // Send payment method ID to server
-                fetch('/dashboard/billing/add-method/stripe', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ payment_method_id: paymentMethod.id })
-                })
-                .then(response => response.json())
-                .then(data => {
-                    if (data.success) {
-                        window.location.href = '/dashboard/billing?success=' + encodeURIComponent(data.message);
-                    } else {
-                        alert('Error: ' + data.error);
-                    }
+    const stripeButton = document.getElementById('stripe-button');
+    if (stripeButton) {
+        stripeButton.addEventListener('click', function() {
+            document.getElementById('stripe-form').style.display = 'block';
+            // Initialize Stripe Elements
+            const stripe = Stripe('{{ stripe_publishable_key }}');
+            const elements = stripe.elements();
+            const cardElement = elements.create('card');
+            cardElement.mount('#card-element');
+            
+            const form = document.getElementById('payment-form');
+            form.addEventListener('submit', async (event) => {
+                event.preventDefault();
+                const {error, paymentMethod} = await stripe.createPaymentMethod({
+                    type: 'card',
+                    card: cardElement,
                 });
-            }
+                if (error) {
+                    alert(error.message);
+                } else {
+                    // Send payment method ID to server
+                    fetch('/dashboard/billing/add-method/stripe', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ payment_method_id: paymentMethod.id })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            window.location.href = '/dashboard/billing?success=' + encodeURIComponent(data.message);
+                        } else {
+                            alert('Error: ' + data.error);
+                        }
+                    });
+                }
+            });
         });
-    });
+    }
 });
 </script>
 {% endblock %}
