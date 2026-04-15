@@ -2550,8 +2550,8 @@ async def dashboard_profile(request: Request):
 
 
 @app.post("/dashboard/profile")
-async def dashboard_profile_save(request: Request, username: str = Form(...)):
-    """Save user profile changes (username only)"""
+async def dashboard_profile_save(request: Request, username: str = Form(...), display_name: str = Form("")):
+    """Save user profile changes (username and display_name)"""
     auth_check = require_dashboard_auth(request)
     if isinstance(auth_check, RedirectResponse):
         return auth_check
@@ -2561,7 +2561,7 @@ async def dashboard_profile_save(request: Request, username: str = Form(...)):
     db = DatabaseRegistry.get_config_database()
     
     try:
-        db.update_user_profile(user_id, username, None)
+        db.update_user_profile(user_id, username, None, display_name if display_name else None)
         # Update session with new username
         request.session['username'] = username
         
@@ -4468,7 +4468,8 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
     try:
         # Get current admin username
         admin_username = request.session.get('username', 'admin')
-        user_id = db.create_user(username, password_hash, role, admin_username)
+        # Create user with display_name defaulting to username
+        user_id = db.create_user(username, password_hash, role, admin_username, None, False, username)
         return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
     except Exception as e:
         users = db.get_users()
@@ -4497,9 +4498,9 @@ async def dashboard_users_edit(request: Request, user_id: int, username: str = F
         # Update user (only if password is provided)
         if password:
             password_hash = hashlib.sha256(password.encode()).hexdigest()
-            db.update_user(user_id, username, password_hash, role, is_active)
+            db.update_user(user_id, username, password_hash, role, is_active, username)
         else:
-            db.update_user(user_id, username, None, role, is_active)
+            db.update_user(user_id, username, None, role, is_active, username)
         return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
     except Exception as e:
         users = db.get_users()
