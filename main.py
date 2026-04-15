@@ -3096,8 +3096,8 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             )
         
         email = user_info.get('email')
-        # Use GitHub username or name for the username field
-        github_username = user_info.get('login') or user_info.get('name') or email.split('@')[0]
+        # Get display name from GitHub (name or login)
+        display_name = user_info.get('name', '') or user_info.get('login', '')
         
         db = DatabaseRegistry.get_config_database()
         
@@ -3119,15 +3119,12 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             random_password = secrets.token_urlsafe(32)
             password_hash = hashlib.sha256(random_password.encode()).hexdigest()
             
-            # Handle duplicate username by appending a number
-            final_username = github_username
-            counter = 1
-            while db.get_user_by_username(final_username):
-                final_username = f"{github_username}{counter}"
-                counter += 1
+            # Generate clean username from display_name with email fallback
+            github_username = db.generate_username_from_display_name(display_name, email)
+            final_username = db.find_unique_username(github_username)
             
             # Create user with verified email (no verification required)
-            user_id = db.create_user(final_username, password_hash, 'user', None, email, True)
+            user_id = db.create_user(final_username, password_hash, 'user', None, email, True, display_name)
             
             # Login the new user
             request.session['logged_in'] = True
