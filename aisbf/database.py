@@ -561,7 +561,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, role, is_active
+                SELECT id, username, display_name, role, is_active
                 FROM users
                 WHERE username = {placeholder} AND is_active = 1
             ''', (username,))
@@ -571,13 +571,14 @@ class DatabaseManager:
                 return {
                     'id': row[0],
                     'username': row[1],
-                    'role': row[2],
-                    'is_active': row[3]
+                    'display_name': row[2] or row[1],  # Default to username if display_name empty
+                    'role': row[3],
+                    'is_active': row[4]
                 }
             return None
 
     def create_user(self, username: str, password_hash: str, role: str = 'user', created_by: str = None,
-                   email: str = None, email_verified: bool = False) -> int:
+                email: str = None, email_verified: bool = False, display_name: str = None) -> int:
         """
         Create a new user.
 
@@ -588,6 +589,7 @@ class DatabaseManager:
             created_by: Username of the creator
             email: Email address (optional)
             email_verified: Whether email is verified (default: False)
+            display_name: Display name for the user (optional, defaults to username)
 
         Returns:
             User ID of the created user
@@ -601,9 +603,9 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                INSERT INTO users (username, email, password_hash, role, created_by, email_verified)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            ''', (username, email, password_hash, role, created_by, 1 if email_verified else 0))
+                INSERT INTO users (username, email, password_hash, role, created_by, email_verified, display_name)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+            ''', (username, email, password_hash, role, created_by, 1 if email_verified else 0, display_name or username))
             conn.commit()
             return cursor.lastrowid
     
@@ -621,7 +623,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, email, role, is_active, email_verified
+                SELECT id, username, email, display_name, role, is_active, email_verified
                 FROM users
                 WHERE email = {placeholder}
             ''', (email,))
@@ -632,9 +634,10 @@ class DatabaseManager:
                     'id': row[0],
                     'username': row[1],
                     'email': row[2],
-                    'role': row[3],
-                    'is_active': row[4],
-                    'email_verified': row[5]
+                    'display_name': row[3] or row[1],  # Default to username if display_name empty
+                    'role': row[4],
+                    'is_active': row[5],
+                    'email_verified': row[6]
                 }
             return None
 
@@ -652,7 +655,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, email, role, is_active, email_verified, created_at, last_verification_email_sent
+                SELECT id, username, email, display_name, role, is_active, email_verified, created_at, last_verification_email_sent
                 FROM users
                 WHERE id = {placeholder}
             ''', (user_id,))
@@ -663,11 +666,12 @@ class DatabaseManager:
                     'id': row[0],
                     'username': row[1],
                     'email': row[2],
-                    'role': row[3],
-                    'is_active': row[4],
-                    'email_verified': row[5],
-                    'created_at': row[6],
-                    'last_verification_email_sent': row[7]
+                    'display_name': row[3] or row[1],  # Default to username if display_name empty
+                    'role': row[4],
+                    'is_active': row[5],
+                    'email_verified': row[6],
+                    'created_at': row[7],
+                    'last_verification_email_sent': row[8]
                 }
             return None
 
@@ -921,7 +925,7 @@ class DatabaseManager:
             cursor.execute(f'DELETE FROM users WHERE id = {placeholder}', (user_id,))
             conn.commit()
 
-    def update_user(self, user_id: int, username: str, password_hash: str = None, role: str = None, is_active: bool = None):
+    def update_user(self, user_id: int, username: str, password_hash: str = None, role: str = None, is_active: bool = None, display_name: str = None):
         """
         Update a user.
 
@@ -931,6 +935,7 @@ class DatabaseManager:
             password_hash: New password hash (optional)
             role: New role (optional)
             is_active: New active status (optional)
+            display_name: New display name (optional)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -954,7 +959,11 @@ class DatabaseManager:
             if is_active is not None:
                 updates.append(f"is_active = {placeholder}")
                 params.append(1 if is_active else 0)
-            
+
+            if display_name is not None:
+                updates.append(f"display_name = {placeholder}")
+                params.append(display_name)
+
             params.append(user_id)
             
             query = f"UPDATE users SET {', '.join(updates)} WHERE id = {placeholder}"
@@ -1002,24 +1011,116 @@ class DatabaseManager:
             ''', (new_email, user_id))
             conn.commit()
 
-    def update_user_profile(self, user_id: int, username: str, email: str):
+    def update_user_profile(self, user_id: int, username: str, email: str, display_name: str = None):
         """
-        Update user profile (username only, email is read-only).
+        Update user profile (username and display_name, email is read-only).
 
         Args:
             user_id: User ID
             username: New username
             email: Email (ignored, kept for backward compatibility)
+            display_name: New display name (optional)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
-            cursor.execute(f'''
-                UPDATE users
-                SET username = {placeholder}
-                WHERE id = {placeholder}
-            ''', (username, user_id))
+            
+            if display_name is not None:
+                cursor.execute(f'''
+                    UPDATE users
+                    SET username = {placeholder}, display_name = {placeholder}
+                    WHERE id = {placeholder}
+                ''', (username, display_name, user_id))
+            else:
+                cursor.execute(f'''
+                    UPDATE users
+                    SET username = {placeholder}
+                    WHERE id = {placeholder}
+                ''', (username, user_id))
             conn.commit()
+
+    def sanitize_username(self, input_str: str) -> str:
+        """
+        Sanitize string to valid username format.
+        
+        Args:
+            input_str: Input string to sanitize
+            
+        Returns:
+            Sanitized username string (empty if invalid)
+        """
+        if not input_str:
+            return ""
+        
+        # Lowercase
+        result = input_str.lower()
+        
+        # Replace spaces with underscores
+        result = result.replace(" ", "_")
+        
+        # Remove invalid characters (keep a-z, 0-9, -, _, .)
+        import re
+        result = re.sub(r'[^a-z0-9\-_.]', '', result)
+        
+        # Trim and ensure length
+        result = result.strip("._-")
+        if len(result) < 3:
+            return ""
+        if len(result) > 50:
+            result = result[:50].rstrip("._-")
+        
+        return result
+
+    def generate_username_from_display_name(self, display_name: str, email: str) -> str:
+        """
+        Generate clean username from display_name, fallback to email.
+        
+        Args:
+            display_name: Display name from OAuth provider
+            email: Email address for fallback
+            
+        Returns:
+            Generated username base (not guaranteed unique)
+        """
+        # Try display_name first
+        if display_name and display_name.strip():
+            username_base = self.sanitize_username(display_name)
+            if username_base:
+                return username_base
+        
+        # Fallback to email prefix
+        if email and '@' in email:
+            email_prefix = email.split('@')[0]
+            username_base = self.sanitize_username(email_prefix)
+            if username_base:
+                return username_base
+        
+        # Final fallback
+        return "user"
+
+    def find_unique_username(self, base_username: str) -> str:
+        """
+        Find a unique username, appending counter if needed.
+        
+        Args:
+            base_username: Base username to start with
+            
+        Returns:
+            Unique username
+            
+        Raises:
+            ValueError: If cannot generate unique username after 100 attempts
+        """
+        username = base_username
+        counter = 1
+        
+        while self.get_user_by_username(username):
+            username = f"{base_username}{counter}"
+            counter += 1
+            if counter > 100:  # Prevent infinite loop
+                raise ValueError("Could not generate unique username")
+        
+        return username
 
     # User-specific provider methods
     def save_user_provider(self, user_id: int, provider_name: str, config: Dict):
@@ -1927,7 +2028,7 @@ class DatabaseManager:
                 SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
                        max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                        max_autoselections, max_rotation_models, max_autoselection_models,
-                       created_at, updated_at
+                       created_at, updated_at, is_visible
                 FROM account_tiers
                 ORDER BY price_monthly ASC
             ''')
@@ -1950,7 +2051,8 @@ class DatabaseManager:
                     'max_rotation_models': row[12],
                     'max_autoselection_models': row[13],
                     'created_at': row[14],
-                    'updated_at': row[15]
+                    'updated_at': row[15],
+                    'is_visible': bool(row[16]) if len(row) > 16 else True
                 })
             return tiers
     
@@ -1971,7 +2073,7 @@ class DatabaseManager:
                 SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
                        max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                        max_autoselections, max_rotation_models, max_autoselection_models,
-                       created_at, updated_at
+                       created_at, updated_at, is_visible
                 FROM account_tiers
                 WHERE id = {placeholder}
             ''', (tier_id,))
@@ -1994,7 +2096,8 @@ class DatabaseManager:
                     'max_rotation_models': row[12],
                     'max_autoselection_models': row[13],
                     'created_at': row[14],
-                    'updated_at': row[15]
+                    'updated_at': row[15],
+                    'is_visible': bool(row[16]) if len(row) > 16 else True
                 }
             return None
     
@@ -2002,7 +2105,7 @@ class DatabaseManager:
                     max_requests_per_day: int = -1, max_requests_per_month: int = -1,
                     max_providers: int = -1, max_rotations: int = -1,
                     max_autoselections: int = -1, max_rotation_models: int = -1,
-                    max_autoselection_models: int = -1, is_active: bool = True) -> int:
+                    max_autoselection_models: int = -1, is_active: bool = True, is_visible: bool = True) -> int:
         """
         Create a new account tier.
         
@@ -2019,6 +2122,7 @@ class DatabaseManager:
             max_rotation_models: Max models per rotation (-1 for unlimited)
             max_autoselection_models: Max models per autoselection (-1 for unlimited)
             is_active: Whether tier is active
+            is_visible: Whether tier is visible to users (default True)
             
         Returns:
             Created tier ID
@@ -2028,13 +2132,13 @@ class DatabaseManager:
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
                 INSERT INTO account_tiers
-                (name, description, price_monthly, price_yearly, is_active,
+                (name, description, price_monthly, price_yearly, is_active, is_visible,
                  max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                  max_autoselections, max_rotation_models, max_autoselection_models)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
                         {placeholder}, {placeholder}, {placeholder}, {placeholder},
                         {placeholder}, {placeholder}, {placeholder})
-            ''', (name, description, price_monthly, price_yearly, 1 if is_active else 0,
+            ''', (name, description, price_monthly, price_yearly, 1 if is_active else 0, 1 if is_visible else 0,
                   max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                   max_autoselections, max_rotation_models, max_autoselection_models))
             conn.commit()
@@ -2058,7 +2162,7 @@ class DatabaseManager:
             updates = []
             params = []
             
-            allowed_fields = ['name', 'description', 'price_monthly', 'price_yearly', 'is_active',
+            allowed_fields = ['name', 'description', 'price_monthly', 'price_yearly', 'is_active', 'is_visible',
                               'max_requests_per_day', 'max_requests_per_month', 'max_providers',
                               'max_rotations', 'max_autoselections', 'max_rotation_models',
                               'max_autoselection_models']
@@ -2161,6 +2265,48 @@ class DatabaseManager:
             ''', (tier_id, user_id))
             conn.commit()
             return cursor.rowcount > 0
+    
+    def get_visible_tiers(self) -> List[Dict]:
+        """
+        Get only visible account tiers (for user selection).
+        
+        Returns:
+            List of visible tier dictionaries
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
+                       max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
+                       max_autoselections, max_rotation_models, max_autoselection_models,
+                       created_at, updated_at, is_visible
+                FROM account_tiers
+                WHERE is_visible = 1 AND is_active = 1
+                ORDER BY price_monthly ASC
+            ''')
+            
+            tiers = []
+            for row in cursor.fetchall():
+                tiers.append({
+                    'id': row[0],
+                    'name': row[1],
+                    'description': row[2],
+                    'price_monthly': float(row[3]),
+                    'price_yearly': float(row[4]),
+                    'is_default': bool(row[5]),
+                    'is_active': bool(row[6]),
+                    'max_requests_per_day': row[7],
+                    'max_requests_per_month': row[8],
+                    'max_providers': row[9],
+                    'max_rotations': row[10],
+                    'max_autoselections': row[11],
+                    'max_rotation_models': row[12],
+                    'max_autoselection_models': row[13],
+                    'created_at': row[14],
+                    'updated_at': row[15],
+                    'is_visible': bool(row[16]) if len(row) > 16 else True
+                })
+            return tiers
 
     # Payment and Subscription methods
     def get_user_payment_methods(self, user_id: int) -> List[Dict]:
@@ -2576,6 +2722,7 @@ def DatabaseManager__initialize_database(self):
                     id INTEGER PRIMARY KEY {auto_increment},
                     username VARCHAR(255) UNIQUE NOT NULL,
                     email VARCHAR(255) UNIQUE,
+                    display_name VARCHAR(255),
                     password_hash VARCHAR(255) NOT NULL,
                     role VARCHAR(50) DEFAULT 'user',
                     created_by VARCHAR(255),
@@ -2588,6 +2735,33 @@ def DatabaseManager__initialize_database(self):
                     last_verification_email_sent TIMESTAMP NULL
                 )
             ''')
+
+            # Migration: Add display_name column if it doesn't exist
+            try:
+                # Check if display_name column exists
+                if self.db_type == 'sqlite':
+                    cursor.execute("PRAGMA table_info(users)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                else:
+                    cursor.execute("""
+                        SELECT COLUMN_NAME 
+                        FROM INFORMATION_SCHEMA.COLUMNS 
+                        WHERE TABLE_NAME = 'users'
+                    """)
+                    columns = [row[0] for row in cursor.fetchall()]
+                
+                if 'display_name' not in columns:
+                    logger.info("Adding display_name column to users table")
+                    cursor.execute("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)")
+                    conn.commit()
+                    
+                    # Populate display_name for existing users
+                    cursor.execute("UPDATE users SET display_name = username WHERE display_name IS NULL")
+                    conn.commit()
+                    logger.info("Migration complete: display_name column added and populated")
+            except Exception as e:
+                logger.warning(f"Migration warning (display_name): {e}")
+                # Continue even if migration fails - column might already exist
 
             # User-specific configuration tables for multi-user isolation
             cursor.execute(f'''
@@ -2780,7 +2954,8 @@ def DatabaseManager__initialize_database(self):
                         ('max_rotation_models', 'INTEGER DEFAULT -1'),
                         ('max_autoselection_models', 'INTEGER DEFAULT -1'),
                         ('is_default', f'{boolean_type} DEFAULT 0'),
-                        ('is_active', f'{boolean_type} DEFAULT 1')
+                        ('is_active', f'{boolean_type} DEFAULT 1'),
+                        ('is_visible', f'{boolean_type} DEFAULT 1')
                     ]
                     col_count = 0
                     for col_name, col_def in tier_columns:
@@ -2788,6 +2963,35 @@ def DatabaseManager__initialize_database(self):
                             cursor.execute(f'ALTER TABLE account_tiers ADD COLUMN {col_name} {col_def}')
                             col_count += 1
                     if col_count > 0:
+                        logger.info(f"✅ Migration: Added {col_count} missing columns to account_tiers")
+                else:
+                    # MySQL/MariaDB
+                    cursor.execute("""
+                        SELECT COLUMN_NAME 
+                        FROM INFORMATION_SCHEMA.COLUMNS 
+                        WHERE TABLE_NAME = 'account_tiers' 
+                        AND TABLE_SCHEMA = DATABASE()
+                    """)
+                    existing_columns = [row[0] for row in cursor.fetchall()]
+                    tier_columns = [
+                        ('max_requests_per_day', 'INTEGER DEFAULT -1'),
+                        ('max_requests_per_month', 'INTEGER DEFAULT -1'),
+                        ('max_providers', 'INTEGER DEFAULT -1'),
+                        ('max_rotations', 'INTEGER DEFAULT -1'),
+                        ('max_autoselections', 'INTEGER DEFAULT -1'),
+                        ('max_rotation_models', 'INTEGER DEFAULT -1'),
+                        ('max_autoselection_models', 'INTEGER DEFAULT -1'),
+                        ('is_default', f'{boolean_type} DEFAULT 0'),
+                        ('is_active', f'{boolean_type} DEFAULT 1'),
+                        ('is_visible', f'{boolean_type} DEFAULT 1')
+                    ]
+                    col_count = 0
+                    for col_name, col_def in tier_columns:
+                        if col_name not in existing_columns:
+                            cursor.execute(f'ALTER TABLE account_tiers ADD COLUMN {col_name} {col_def}')
+                            col_count += 1
+                    if col_count > 0:
+                        conn.commit()
                         logger.info(f"✅ Migration: Added {col_count} missing columns to account_tiers")
             except Exception as e:
                 logger.warning(f"Migration check for account_tiers columns: {e}")
