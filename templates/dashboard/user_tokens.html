@@ -33,37 +33,37 @@
             <tbody>
                 <tr>
                     <td><code class="method GET">GET</code></td>
-                    <td><code>/api/user/models</code></td>
+                    <td><code>/api/u/{{ session.username }}/models</code></td>
                     <td>List your models</td>
                 </tr>
                 <tr>
                     <td><code class="method GET">GET</code></td>
-                    <td><code>/api/user/providers</code></td>
+                    <td><code>/api/u/{{ session.username }}/providers</code></td>
                     <td>List your providers</td>
                 </tr>
                 <tr>
                     <td><code class="method GET">GET</code></td>
-                    <td><code>/api/user/rotations</code></td>
+                    <td><code>/api/u/{{ session.username }}/rotations</code></td>
                     <td>List your rotations</td>
                 </tr>
                 <tr>
                     <td><code class="method GET">GET</code></td>
-                    <td><code>/api/user/autoselects</code></td>
+                    <td><code>/api/u/{{ session.username }}/autoselects</code></td>
                     <td>List your autoselects</td>
                 </tr>
                 <tr>
                     <td><code class="method POST">POST</code></td>
-                    <td><code>/api/user/chat/completions</code></td>
+                    <td><code>/api/u/{{ session.username }}/chat/completions</code></td>
                     <td>Chat using your configs</td>
                 </tr>
                 <tr>
                     <td><code class="method GET">GET</code></td>
-                    <td><code>/mcp/tools</code></td>
+                    <td><code>/mcp/u/{{ session.username }}/tools</code></td>
                     <td>List MCP tools</td>
                 </tr>
                 <tr>
                     <td><code class="method POST">POST</code></td>
-                    <td><code>/mcp/tools/call</code></td>
+                    <td><code>/mcp/u/{{ session.username }}/tools/call</code></td>
                     <td>Call MCP tools</td>
                 </tr>
             </tbody>
@@ -71,16 +71,16 @@
         
         <h3>Example curl commands:</h3>
         <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code># List your models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+curl -H "Authorization: Bearer YOUR_TOKEN" {{ request.base_url }}api/u/{{ session.username }}/models
 
-# List your providers  
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+# List your providers
+curl -H "Authorization: Bearer YOUR_TOKEN" {{ request.base_url }}api/u/{{ session.username }}/providers
 
 # Send a chat request
 curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
-  http://localhost:17765/api/user/chat/completions</code></pre>
+  {{ request.base_url }}api/u/{{ session.username }}/chat/completions</code></pre>
     </div>
 
     <div class="card">

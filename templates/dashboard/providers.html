@@ -60,6 +60,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             OpenAI-compatible provider. Uses standard API key authentication.
         </p>
     </div>
+
+    <div id="new-provider-claude-warning" style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px; display: none;">
+        <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice for Claude Provider</h4>
+        <p style="margin: 0; color: #2d3436;">
+            Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+            <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
+            <br>• You use this software at your own risk and responsibility
+            <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+        </p>
+    </div>
     
     <div style="display: flex; gap: 10px;">
         <button type="button" class="btn" onclick="confirmAddProvider()">Create Provider</button>
@@ -317,13 +327,13 @@ function renderProviderDetails(key) {
                 <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
                     Claude uses OAuth2 authentication. Click "Authenticate" to start the OAuth2 flow in your browser.
                 </small>
-                
+
                 <div class="form-group">
                     <label>Credentials File Path</label>
                     <input type="text" value="${claudeConfig.credentials_file || '~/.claude_credentials.json'}" onchange="updateClaudeConfig('${key}', 'credentials_file', this.value)" placeholder="~/.claude_credentials.json">
                     <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
                 </div>
-                
+
                 <div style="margin-top: 15px;">
                     <button type="button" class="btn" onclick="authenticateClaude('${key}')" style="background: #4a9eff;">
                         🔐 Authenticate with Claude
@@ -332,11 +342,11 @@ function renderProviderDetails(key) {
                         Check Status
                     </button>
                 </div>
-                
+
                 <div id="claude-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
                     <!-- Auth status will be displayed here -->
                 </div>
-                
+
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
                 <div class="form-group">
                     <label>Upload Credentials File</label>
@@ -344,6 +354,16 @@ function renderProviderDetails(key) {
                     <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Claude OAuth2 credentials JSON file</small>
                 </div>
                 <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+
+            <div style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice</h4>
+                <p style="margin: 0; color: #2d3436;">
+                    Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+                    <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
+                    <br>• You use this software at your own risk and responsibility
+                    <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+                </p>
             </div>
         `;
     } else if (isQwenProvider) {
@@ -737,7 +757,7 @@ function cancelAddProvider() {
 function updateNewProviderDefaults() {
     const providerType = document.getElementById('new-provider-type').value;
     const descriptionEl = document.getElementById('new-provider-type-description');
-    
+
     const descriptions = {
         'openai': 'OpenAI-compatible provider. Uses standard API key authentication. Endpoint: https://api.openai.com/v1',
         'google': 'Google AI provider (Gemini). Uses API key authentication. Endpoint: https://generativelanguage.googleapis.com/v1beta',
@@ -749,8 +769,16 @@ function updateNewProviderDefaults() {
         'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
     };
-    
+
     descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
+
+    // Show/hide Claude warning
+    const claudeWarningEl = document.getElementById('new-provider-claude-warning');
+    if (providerType === 'claude') {
+        claudeWarningEl.style.display = 'block';
+    } else {
+        claudeWarningEl.style.display = 'none';
+    }
 }
 
 function confirmAddProvider() {

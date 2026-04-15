@@ -249,12 +249,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 - **User-Specific API Endpoints**: New API endpoints for authenticated users to access their own configurations
-  - `GET /api/user/models` - List user's own models
-  - `GET /api/user/providers` - List user's provider configurations  
-  - `GET /api/user/rotations` - List user's rotation configurations
-  - `GET /api/user/autoselects` - List user's autoselect configurations
-  - `POST /api/user/chat/completions` - Chat completions using user's own models
-  - `GET /api/user/{config_type}/models` - List models for specific config type
+  - `GET /api/u/{username}/models` - List user's own models
+  - `GET /api/u/{username}/providers` - List user's provider configurations
+  - `GET /api/u/{username}/rotations` - List user's rotation configurations
+  - `GET /api/u/{username}/autoselects` - List user's autoselect configurations
+  - `POST /api/u/{username}/chat/completions` - Chat completions using user's own models
+  - `GET /api/u/{username}/{config_type}/models` - List models for specific config type
   - Requires Bearer token or query parameter authentication
   - Admin users get access to global + user configs, regular users get user-only configs
   - Global tokens (in aisbf.json) have full access to all configurations

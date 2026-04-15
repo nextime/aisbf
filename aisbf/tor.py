@@ -84,7 +84,7 @@ class TorHiddenService:
             )
             
             # Authenticate
-            if self.config.control_password:
+            if self.config.control_password and self.config.control_password.strip():
                 logger.info("Authenticating with TOR control port using password")
                 self.controller.authenticate(password=self.config.control_password)
             else:
@@ -106,6 +106,50 @@ class TorHiddenService:
             logger.error(f"Error connecting to TOR: {e}")
             return False
     
+    def _check_existing_hidden_service(self, hidden_service_dir: Path) -> Optional[str]:
+        """
+        Check if a hidden service already exists in torrc and retrieve its onion address.
+        
+        Args:
+            hidden_service_dir: Path to the hidden service directory
+            
+        Returns:
+            str: Onion address if found, None otherwise
+        """
+        try:
+            hostname_file = hidden_service_dir / 'hostname'
+            if hostname_file.exists() and hostname_file.stat().st_size > 0:
+                onion_address = hostname_file.read_text().strip()
+                logger.info(f"Found existing hidden service: {onion_address}")
+                return onion_address
+        except Exception as e:
+            logger.debug(f"Could not read existing hostname file: {e}")
+        return None
+    
+    def _print_manual_configuration_instructions(self, hidden_service_dir: Path, local_port: int):
+        """
+        Print manual configuration instructions for persistent hidden service.
+        
+        Args:
+            hidden_service_dir: Path to the hidden service directory
+            local_port: Local port where AISBF is running
+        """
+        logger.error("=" * 80)
+        logger.error("MANUAL CONFIGURATION REQUIRED")
+        logger.error("=" * 80)
+        logger.error("To set up a persistent Tor hidden service, add the following lines")
+        logger.error("to your torrc file (usually /etc/tor/torrc):")
+        logger.error("")
+        logger.error(f"  HiddenServiceDir {hidden_service_dir}")
+        logger.error(f"  HiddenServicePort {self.config.hidden_service_port} 127.0.0.1:{local_port}")
+        logger.error("")
+        logger.error("Then restart Tor:")
+        logger.error("  sudo systemctl restart tor")
+        logger.error("")
+        logger.error("After Tor restarts, your onion address will be in:")
+        logger.error(f"  {hidden_service_dir}/hostname")
+        logger.error("=" * 80)
+    
     def create_hidden_service(self, local_port: int) -> Optional[str]:
         """
         Create a TOR hidden service.
@@ -122,38 +166,44 @@ class TorHiddenService:
         
         try:
             from stem.control import Controller
+            import time
             
             # Determine if we should use persistent or ephemeral hidden service
-            if self.config.hidden_service_dir:
+            if self.config.hidden_service_dir and self.config.hidden_service_dir.strip():
                 # Persistent hidden service
-                hidden_service_dir = Path(self.config.hidden_service_dir).expanduser()
+                hidden_service_dir = Path(self.config.hidden_service_dir).expanduser().resolve()
                 hidden_service_dir.mkdir(parents=True, exist_ok=True)
                 
-                logger.info(f"Creating persistent hidden service in {hidden_service_dir}")
+                logger.info(f"Setting up persistent hidden service in {hidden_service_dir}")
                 
-                # Set hidden service configuration
-                self.controller.set_options([
-                    ('HiddenServiceDir', str(hidden_service_dir)),
-                    ('HiddenServicePort', f'{self.config.hidden_service_port} 127.0.0.1:{local_port}')
-                ])
+                # Check if hidden service already exists
+                existing_address = self._check_existing_hidden_service(hidden_service_dir)
+                if existing_address:
+                    self.onion_address = existing_address
+                    logger.info(f"Using existing persistent hidden service: {self.onion_address}")
+                    return self.onion_address
                 
-                # Wait for Tor daemon to create the hostname file (can take up to 30 seconds)
+                # Persistent hidden services must be configured in torrc
+                logger.warning("Persistent hidden service not found")
+                self._print_manual_configuration_instructions(hidden_service_dir, local_port)
+                
+                # Wait a bit to see if user configured it
+                logger.info("Waiting 10 seconds for manual configuration...")
+                logger.info("(Configure torrc now, or press Ctrl+C to cancel)")
+                
                 import time
                 hostname_file = hidden_service_dir / 'hostname'
                 
-                # Wait up to 30 seconds with 1 second intervals
-                for attempt in range(30):
-                    if hostname_file.exists() and hostname_file.stat().st_size > 0:
-                        break
+                for attempt in range(10):
                     time.sleep(1)
-                    logger.debug(f"Waiting for hostname file... attempt {attempt + 1}/30")
+                    if hostname_file.exists() and hostname_file.stat().st_size > 0:
+                        self.onion_address = hostname_file.read_text().strip()
+                        logger.info(f"Persistent hidden service detected: {self.onion_address}")
+                        return self.onion_address
                 
-                if hostname_file.exists():
-                    self.onion_address = hostname_file.read_text().strip()
-                    logger.info(f"Persistent hidden service created: {self.onion_address}")
-                else:
-                    logger.error("Failed to read onion address from hostname file")
-                    return None
+                logger.error("Persistent hidden service not configured")
+                logger.error("Please configure torrc manually and restart aisbf")
+                return None
             else:
                 # Ephemeral hidden service
                 logger.info("Creating ephemeral hidden service")

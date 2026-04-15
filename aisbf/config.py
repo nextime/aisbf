@@ -249,6 +249,18 @@ class SMTPConfig(BaseModel):
     from_email: str = ""
     from_name: str = "AISBF"
 
+class OAuth2ProviderConfig(BaseModel):
+    """Configuration for an OAuth2 provider"""
+    enabled: bool = False
+    client_id: str = ""
+    client_secret: str = ""
+    scopes: List[str] = []
+
+class OAuth2Config(BaseModel):
+    """Configuration for OAuth2 authentication providers"""
+    google: Optional[OAuth2ProviderConfig] = None
+    github: Optional[OAuth2ProviderConfig] = None
+
 class AISBFConfig(BaseModel):
     """Global AISBF configuration from aisbf.json"""
     classify_nsfw: bool = False
@@ -267,6 +279,7 @@ class AISBFConfig(BaseModel):
     adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
     signup: Optional[SignupConfig] = None
     smtp: Optional[SMTPConfig] = None
+    oauth2: Optional[OAuth2Config] = None
     currency: Optional[CurrencyConfig] = None
     payment_gateways: Optional[Dict[str, PaymentGatewayConfig]] = None
 

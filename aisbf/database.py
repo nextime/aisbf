@@ -2406,6 +2406,105 @@ class DatabaseManager:
                 })
             return transactions
 
+    def get_payment_gateway_settings(self) -> Dict:
+        """Get payment gateway settings from admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            default_gateways = {
+                "paypal": {"enabled": False, "client_id": "", "client_secret": "", "webhook_secret": "", "sandbox": True},
+                "stripe": {"enabled": False, "publishable_key": "", "secret_key": "", "webhook_secret": "", "test_mode": True},
+                "bitcoin": {"enabled": False, "address": "", "confirmations": 3, "expiration_minutes": 120},
+                "ethereum": {"enabled": False, "address": "", "confirmations": 12, "chain_id": 1},
+                "usdt": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3},
+                "usdc": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3}
+            }
+            
+            try:
+                cursor.execute(f'''
+                    SELECT setting_value
+                    FROM admin_settings
+                    WHERE setting_key = {placeholder}
+                ''', ('payment_gateways',))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    import json
+                    return json.loads(row[0])
+            except Exception as e:
+                logger.warning(f"Error loading payment gateway settings: {e}")
+            
+            return default_gateways
+
+    def save_payment_gateway_settings(self, settings: Dict) -> bool:
+        """Save payment gateway settings to admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            import json
+            settings_json = json.dumps(settings)
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                insert_syntax = 'INSERT OR REPLACE' if self.db_type == 'sqlite' else 'REPLACE'
+                cursor.execute(f'''
+                    {insert_syntax} INTO admin_settings (setting_key, setting_value, updated_at)
+                    VALUES ({placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', ('payment_gateways', settings_json))
+                conn.commit()
+                logger.info("Payment gateway settings saved to database")
+                return True
+            except Exception as e:
+                logger.error(f"Error saving payment gateway settings: {e}")
+                return False
+
+    def get_currency_settings(self) -> Dict:
+        """Get currency settings from admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            default_currency = {
+                "currency_code": "USD",
+                "currency_symbol": "$",
+                "currency_decimals": 2
+            }
+            
+            try:
+                cursor.execute(f'''
+                    SELECT setting_value
+                    FROM admin_settings
+                    WHERE setting_key = {placeholder}
+                ''', ('currency',))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    import json
+                    return json.loads(row[0])
+            except Exception as e:
+                logger.warning(f"Error loading currency settings: {e}")
+            
+            return default_currency
+
+    def save_currency_settings(self, settings: Dict) -> bool:
+        """Save currency settings to admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            import json
+            settings_json = json.dumps(settings)
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                insert_syntax = 'INSERT OR REPLACE' if self.db_type == 'sqlite' else 'REPLACE'
+                cursor.execute(f'''
+                    {insert_syntax} INTO admin_settings (setting_key, setting_value, updated_at)
+                    VALUES ({placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', ('currency', settings_json))
+                conn.commit()
+                logger.info("Currency settings saved to database")
+                return True
+            except Exception as e:
+                logger.error(f"Error saving currency settings: {e}")
+                return False
+
 
 # ============================================================
 # DATABASE REGISTRY - EXPLICIT NAMED INSTANCES
@@ -2909,34 +3008,6 @@ def DatabaseManager__initialize_database(self):
                         ''')
                         conn.commit()
                         logger.info("✅ Migration: Created missing account_tiers table")
-                else:
-                    cursor.execute("""
-                        SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
-                        WHERE TABLE_NAME = 'account_tiers'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute(f'''
-                            CREATE TABLE account_tiers (
-                                id INTEGER PRIMARY KEY {auto_increment},
-                                name VARCHAR(255) UNIQUE NOT NULL,
-                                description TEXT,
-                                price_monthly DECIMAL(10,2) DEFAULT 0.00,
-                                price_yearly DECIMAL(10,2) DEFAULT 0.00,
-                                is_default {boolean_type} DEFAULT 0,
-                                is_active {boolean_type} DEFAULT 1,
-                                max_requests_per_day INTEGER DEFAULT -1,
-                                max_requests_per_month INTEGER DEFAULT -1,
-                                max_providers INTEGER DEFAULT -1,
-                                max_rotations INTEGER DEFAULT -1,
-                                max_autoselections INTEGER DEFAULT -1,
-                                max_rotation_models INTEGER DEFAULT -1,
-                                max_autoselection_models INTEGER DEFAULT -1,
-                                created_at TIMESTAMP DEFAULT {timestamp_default},
-                                updated_at TIMESTAMP DEFAULT {timestamp_default}
-                            )
-                        ''')
-                        conn.commit()
-                        logger.info("✅ Migration: Created missing account_tiers table")
             except Exception as e:
                 logger.warning(f"Migration check for account_tiers table: {e}")
 
@@ -3089,6 +3160,14 @@ def DatabaseManager__initialize_database(self):
                         created_at TIMESTAMP DEFAULT {timestamp_default},
                         updated_at TIMESTAMP DEFAULT {timestamp_default},
                         FOREIGN KEY (user_id) REFERENCES users(id)
+                    )
+                '''),
+                ('admin_settings', f'''
+                    CREATE TABLE admin_settings (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        setting_key VARCHAR(255) UNIQUE NOT NULL,
+                        setting_value TEXT,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default}
                     )
                 '''),
                 ('user_subscriptions', f'''

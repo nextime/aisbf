@@ -24,6 +24,7 @@ Main application for AISBF.
 """
 from typing import Optional
 from fastapi import FastAPI, HTTPException, Request, status, Form, Query, UploadFile, File
+from aisbf import __version__
 from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, RedirectResponse, Response
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
@@ -493,6 +494,7 @@ def setup_template_globals():
     """Setup Jinja2 template globals for proxy-aware URLs"""
     templates.env.globals['url_for'] = url_for
     templates.env.globals['get_base_url'] = get_base_url
+    templates.env.globals['__version__'] = __version__
     # Add md5 filter for Gravatar email hashing (handles None/empty values gracefully)
     def md5_filter(s):
         if not s:
@@ -1311,6 +1313,22 @@ async def auth_middleware(request: Request, call_next):
                     return RedirectResponse(url=url_for(request, "/dashboard/login") + "?error=Your email verification status has changed. Please log in again.", status_code=303)
             except Exception as e:
                 logger.error(f"Error checking email verification status for user {user_id}: {e}")
+
+        # Check if user still exists (handle case where user was deleted by admin)
+        # This ensures deleted users are logged out on their next request
+        user_id = request.session.get('user_id')
+        if user_id:
+            try:
+                from aisbf.database import get_database
+                db = DatabaseRegistry.get_config_database()
+                current_user = db.get_user_by_id(user_id)
+                if not current_user:
+                    # User has been deleted, log them out
+                    logger.info(f"User {user_id} has been deleted, logging out session")
+                    request.session.clear()
+                    return RedirectResponse(url=url_for(request, "/dashboard/login") + "?error=Your account has been deleted. Please contact an administrator.", status_code=303)
+            except Exception as e:
+                logger.error(f"Error checking user existence for user {user_id}: {e}")
 
         # Only check email_verified if verification is required
         if require_verification and not request.session.get('email_verified'):
@@ -2496,53 +2514,24 @@ async def dashboard_logout(request: Request):
 
 @app.get("/dashboard/profile", response_class=HTMLResponse)
 async def dashboard_profile(request: Request):
-    """User profile edit page"""
+    """User profile page"""
     auth_check = require_dashboard_auth(request)
     if isinstance(auth_check, RedirectResponse):
         return auth_check
-    
-    # User dashboard - load usage stats same as main dashboard user route
+
     from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
-    
-    # Get user statistics
-    usage_stats = {
-        'total_tokens': 0,
-        'requests_today': 0
-    }
-    
-    if user_id:
-        # Get token usage for this user
-        token_usage = db.get_user_token_usage(user_id)
-        usage_stats['total_tokens'] = sum(row['token_count'] for row in token_usage)
-        
-        # Count requests today
-        from datetime import datetime, timedelta
-        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-        usage_stats['requests_today'] = len([
-            row for row in token_usage
-            if datetime.fromisoformat(row['timestamp']) >= today
-        ])
-        
-        # Get user config counts
-        providers_count = len(db.get_user_providers(user_id))
-        rotations_count = len(db.get_user_rotations(user_id))
-        autoselects_count = len(db.get_user_autoselects(user_id))
-        
-        # Get recent activity (last 10)
-        recent_activity = token_usage[-10:] if token_usage else []
-    else:
-        providers_count = 0
-        rotations_count = 0
-        autoselects_count = 0
-        recent_activity = []
-    
+
+    # Get user data for profile
+    user = db.get_user_by_id(user_id)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/profile.html",
         context={
             "session": request.session,
+            "user": user,
             "success": request.query_params.get('success'),
             "error": request.query_params.get('error')
         }
@@ -3198,6 +3187,7 @@ async def dashboard_index(request: Request):
             context={
                 "request": request,
                 "session": request.session,
+                "__version__": __version__,
                 "providers_count": len(config.providers) if config else 0,
                 "rotations_count": len(config.rotations) if config else 0,
                 "autoselect_count": len(config.autoselect) if config else 0,
@@ -3248,6 +3238,7 @@ async def dashboard_index(request: Request):
         context={
             "request": request,
             "session": request.session,
+            "__version__": __version__,
             "usage_stats": usage_stats,
             "providers_count": providers_count,
             "rotations_count": rotations_count,
@@ -3302,6 +3293,7 @@ async def dashboard_providers(request: Request):
         context={
         "request": request,
         "session": request.session,
+        "__version__": __version__,
         "providers_json": json.dumps(providers_data),
         "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
     }
@@ -3719,6 +3711,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             context={
                 "request": request,
                 "session": request.session,
+                "__version__": __version__,
                 "rotations_json": json.dumps(rotations_data),
                 "available_providers": json.dumps(available_providers),
                 "success": "Configuration saved successfully! Restart server for changes to take effect."
@@ -3878,6 +3871,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             context={
                 "request": request,
                 "session": request.session,
+                "__version__": __version__,
                 "autoselect_json": json.dumps(autoselect_data),
                 "available_rotations": json.dumps(available_rotations),
                 "success": "Configuration saved successfully! Restart server for changes to take effect."
@@ -4145,7 +4139,9 @@ async def dashboard_settings(request: Request):
         context={
         "request": request,
         "session": request.session,
-        "config": aisbf_config
+        "__version__": __version__,
+        "config": aisbf_config,
+        "os": os
     }
     )
 
@@ -5505,6 +5501,7 @@ async def dashboard_user_tokens(request: Request):
         context={
         "request": request,
         "session": request.session,
+        "__version__": __version__,
         "user_tokens": user_tokens,
         "user_id": user_id
     }
@@ -5860,13 +5857,13 @@ async def api_get_currency_settings(request: Request):
     if auth_check:
         return auth_check
     
-    # Return default currency settings
-    # These could be stored in database or config file in the future
-    return JSONResponse({
-        "currency_code": "USD",
-        "currency_symbol": "$",
-        "currency_decimals": 2
-    })
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    
+    # Get currency settings from database
+    settings = db.get_currency_settings()
+    
+    return JSONResponse(settings)
 
 @app.post("/api/admin/settings/currency")
 async def api_save_currency_settings(request: Request):
@@ -5877,8 +5874,13 @@ async def api_save_currency_settings(request: Request):
     
     try:
         body = await request.json()
-        # In the future, save to database or config file
-        # For now, just return success
+        
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        
+        # Save currency settings to database
+        db.save_currency_settings(body)
+        
         return JSONResponse({"success": True, "message": "Currency settings saved"})
     except Exception as e:
         logger.error(f"Error saving currency settings: {e}")
@@ -5892,16 +5894,13 @@ async def api_get_payment_gateways(request: Request):
     if auth_check:
         return auth_check
     
-    # Return default/empty payment gateway settings
-    # These could be stored in database or config file in the future
-    return JSONResponse({
-        "paypal": {"enabled": False, "client_id": "", "client_secret": "", "webhook_secret": "", "sandbox": True},
-        "stripe": {"enabled": False, "publishable_key": "", "secret_key": "", "webhook_secret": "", "sandbox": True},
-        "bitcoin": {"enabled": False, "address": "", "confirmations": 3, "expiration_minutes": 120},
-        "ethereum": {"enabled": False, "address": "", "confirmations": 12, "chain_id": 1},
-        "usdt": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3},
-        "usdc": {"enabled": False, "address": "", "network": "erc20", "confirmations": 3}
-    })
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    
+    # Get payment gateway settings from database
+    gateways = db.get_payment_gateway_settings()
+    
+    return JSONResponse(gateways)
 
 @app.post("/api/admin/settings/payment-gateways")
 async def api_save_payment_gateways(request: Request):
@@ -5912,8 +5911,13 @@ async def api_save_payment_gateways(request: Request):
     
     try:
         body = await request.json()
-        # In the future, save to database or config file
-        # For now, just return success
+        
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        
+        # Save payment gateway settings to database
+        db.save_payment_gateway_settings(body)
+        
         return JSONResponse({"success": True, "message": "Payment gateway settings saved"})
     except Exception as e:
         logger.error(f"Error saving payment gateway settings: {e}")
@@ -5936,16 +5940,16 @@ async def dashboard_pricing(request: Request):
     
     # Get enabled payment gateways
     enabled_gateways = []
-    from aisbf.config import config
-    if config.aisbf and hasattr(config.aisbf, 'payment_gateways') and config.aisbf.payment_gateways:
-        for gateway, settings in config.aisbf.payment_gateways.items():
-            if settings.get('enabled', False):
-                enabled_gateways.append(gateway)
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    gateways = db.get_payment_gateway_settings()
+    for gateway, settings in gateways.items():
+        if settings.get('enabled', False):
+            enabled_gateways.append(gateway)
     
     # Get currency settings
-    currency_symbol = "$"
-    if config.aisbf and config.aisbf.currency:
-        currency_symbol = config.aisbf.currency.get('symbol', "$")
+    currency_settings = db.get_currency_settings()
+    currency_symbol = currency_settings.get('currency_symbol', '$')
     
     return templates.TemplateResponse(
         request=request,
@@ -5978,16 +5982,14 @@ async def dashboard_subscription(request: Request):
     
     # Get enabled payment gateways
     enabled_gateways = []
-    from aisbf.config import config
-    if config.aisbf and hasattr(config.aisbf, 'payment_gateways') and config.aisbf.payment_gateways:
-        for gateway, settings in config.aisbf.payment_gateways.items():
-            if settings.get('enabled', False):
-                enabled_gateways.append(gateway)
+    gateways = db.get_payment_gateway_settings()
+    for gateway, settings in gateways.items():
+        if settings.get('enabled', False):
+            enabled_gateways.append(gateway)
     
     # Get currency settings
-    currency_symbol = "$"
-    if config.aisbf and config.aisbf.currency:
-        currency_symbol = config.aisbf.currency.get('symbol', "$")
+    currency_settings = db.get_currency_settings()
+    currency_symbol = currency_settings.get('currency_symbol', '$')
     
     return templates.TemplateResponse(
         request=request,
@@ -6016,13 +6018,21 @@ async def dashboard_billing(request: Request):
     
     transactions = db.get_user_payment_transactions(user_id)
     
+    # Get enabled payment gateways
+    enabled_gateways = []
+    gateways = db.get_payment_gateway_settings()
+    for gateway, settings in gateways.items():
+        if settings.get('enabled', False):
+            enabled_gateways.append(gateway)
+    
     return templates.TemplateResponse(
         request=request,
         name="dashboard/billing.html",
         context={
         "request": request,
         "session": request.session,
-        "transactions": transactions
+        "transactions": transactions,
+        "enabled_gateways": enabled_gateways
     }
     )
 
@@ -7871,6 +7881,98 @@ async def mcp_post(request: Request):
     )
 
 
+@app.get("/mcp/u/{username}/tools")
+async def mcp_user_list_tools(request: Request, username: str):
+    """
+    List available MCP tools for the authenticated user.
+    """
+    user_id = getattr(request.state, 'user_id', None)
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required"}
+        )
+    
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
+    
+    # User-specific MCP tools
+    tools = mcp_server.get_available_tools(MCPAuthLevel.USER, user_id)
+    return {"tools": tools}
+
+
+@app.post("/mcp/u/{username}/tools/call")
+async def mcp_user_call_tool(request: Request, username: str):
+    """
+    Call an MCP tool for the authenticated user via HTTP POST.
+    """
+    user_id = getattr(request.state, 'user_id', None)
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    
+    if not user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required"}
+        )
+    
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
+    
+    # Parse request body
+    try:
+        body = await request.body()
+        body_data = json.loads(body.decode('utf-8')) if body else {}
+    except Exception:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Invalid JSON request body"}
+        )
+    
+    tool_name = body_data.get('name')
+    arguments = body_data.get('arguments', {})
+    
+    if not tool_name:
+        return JSONResponse(
+            status_code=400,
+            content={"error": "Tool name is required"}
+        )
+    
+    try:
+        result = await mcp_server.handle_tool_call(tool_name, arguments, MCPAuthLevel.USER, user_id)
+        return {"result": result}
+    except HTTPException as e:
+        return JSONResponse(
+            status_code=e.status_code,
+            content={"error": e.detail}
+        )
+    except Exception as e:
+        logger.error(f"Error calling MCP tool: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"error": str(e)}
+        )
+
+
 @app.get("/mcp/tools")
 async def mcp_list_tools(request: Request):
     """
@@ -8149,26 +8251,37 @@ async def user_list_models_by_username(request: Request, username: str):
     return {"object": "list", "data": all_models}
 
 
-@app.get("/api/user/models")
-async def user_list_models(request: Request):
+@app.get("/api/u/{username}/models")
+async def user_list_models(request: Request, username: str):
     """
     List all available models for the authenticated user.
-    
+
     This includes the user's own providers, rotations, and autoselects.
     Admin users can also access all users' configurations.
     Authentication is done via Bearer token in the Authorization header.
-    
+
     Returns models from:
     - User-configured providers
-    - User-configured rotations  
+    - User-configured rotations
     - User-configured autoselects
-    
+
     Example:
-        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/username/models
     """
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     is_global_token = getattr(request.state, 'is_global_token', False)
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
     
     # Global tokens and admin users can access all configurations
     if is_global_token or is_admin:
@@ -8343,20 +8456,31 @@ async def user_list_models(request: Request):
     return {"object": "list", "data": all_models}
 
 
-@app.get("/api/user/providers")
-async def user_list_providers(request: Request):
+@app.get("/api/u/{username}/providers")
+async def user_list_providers(request: Request, username: str):
     """
     List all provider configurations for the authenticated user.
-    
+
     Admin users and global tokens can access all configurations.
     Authentication is done via Bearer token in the Authorization header.
-    
+
     Example:
-        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/username/providers
     """
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     is_global_token = getattr(request.state, 'is_global_token', False)
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
     
     # Global tokens and admin users can access all configurations
     if is_global_token or is_admin:
@@ -8452,20 +8576,31 @@ async def user_list_providers(request: Request):
     return {"providers": providers_info}
 
 
-@app.get("/api/user/rotations")
-async def user_list_rotations(request: Request):
+@app.get("/api/u/{username}/rotations")
+async def user_list_rotations(request: Request, username: str):
     """
     List all rotation configurations for the authenticated user.
-    
+
     Admin users and global tokens can access all configurations.
     Authentication is done via Bearer token in the Authorization header.
-    
+
     Example:
-        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/username/rotations
     """
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     is_global_token = getattr(request.state, 'is_global_token', False)
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
     
     # Global tokens and admin users can access all configurations
     if is_global_token or is_admin:
@@ -8519,20 +8654,31 @@ async def user_list_rotations(request: Request):
     return {"rotations": rotations_info}
 
 
-@app.get("/api/user/autoselects")
-async def user_list_autoselects(request: Request):
+@app.get("/api/u/{username}/autoselects")
+async def user_list_autoselects(request: Request, username: str):
     """
     List all autoselect configurations for the authenticated user.
-    
+
     Admin users and global tokens can access all configurations.
     Authentication is done via Bearer token in the Authorization header.
-    
+
     Example:
-        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/autoselects
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/username/autoselects
     """
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     is_global_token = getattr(request.state, 'is_global_token', False)
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
     
     # Global tokens and admin users can access all configurations
     if is_global_token or is_admin:
@@ -9146,8 +9292,8 @@ async def user_list_config_models_by_username(request: Request, username: str, c
 # These endpoints allow authenticated users to use their own configurations
 # Admin users and global tokens can also access global configurations
 
-@app.post("/api/user/chat/completions")
-async def user_chat_completions(request: Request, body: ChatCompletionRequest):
+@app.post("/api/u/{username}/chat/completions")
+async def user_chat_completions(request: Request, username: str, body: ChatCompletionRequest):
     """
     Handle chat completions using the authenticated user's configurations.
     
@@ -9172,7 +9318,18 @@ async def user_chat_completions(request: Request, body: ChatCompletionRequest):
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     is_global_token = getattr(request.state, 'is_global_token', False)
-    
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            raise HTTPException(
+                status_code=403,
+                detail="Access denied. Username in URL must match authenticated user."
+            )
+
     # Parse provider from model field
     provider_id, actual_model = parse_provider_from_model(body.model)
     
@@ -9289,20 +9446,34 @@ async def user_chat_completions(request: Request, body: ChatCompletionRequest):
 
 
 # User-specific model listing endpoint
-@app.get("/api/user/{config_type}/models")
-async def user_list_config_models(request: Request, config_type: str):
+@app.get("/api/u/{username}/{config_type}/models")
+async def user_list_config_models(request: Request, username: str, config_type: str):
     """
     List models for a specific user configuration type.
-    
+
     Args:
+        username: Username of the user
         config_type: One of 'providers', 'rotations', or 'autoselects'
-    
+
     Authentication is done via Bearer token in the Authorization header.
-    
+
     Example:
-        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations/models
+        curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/username/rotations/models
     """
     user_id = getattr(request.state, 'user_id', None)
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+
+    # Validate username matches authenticated user (unless admin/global token)
+    if not is_global_token and not is_admin and user_id:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        authenticated_user = db.get_user_by_id(user_id)
+        if authenticated_user and authenticated_user['username'] != username:
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Access denied. Username in URL must match authenticated user."}
+            )
     
     if not user_id:
         return JSONResponse(

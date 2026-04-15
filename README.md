@@ -2,7 +2,11 @@
 
 A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, and AI-assisted model selection to optimize AI service usage across multiple providers.
 
-![AISBF Dashboard](screenshot.png)
+## Try AISBF
+
+Try AISBF live at [https://aisbf.cloud](https://aisbf.cloud) or via TOR at [http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion](http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion) - no installation required!
+
+![AISBF Dashboard](https://git.nexlab.net/nexlab/aisbf/raw/master/screenshot.png)
 
 ## Web Dashboard
 
@@ -394,8 +398,21 @@ brew install tor
 Edit `/etc/tor/torrc` (or `~/.torrc` on macOS) and add:
 ```
 ControlPort 9051
-CookieAuthentication 1
+HashedControlPassword 16:YOUR_HASHED_PASSWORD_HERE
 ```
+
+Generate a hashed password:
+```bash
+tor --hash-password "your_secure_password"
+```
+
+**For persistent hidden services, also add:**
+```
+HiddenServiceDir /home/yourusername/.aisbf/tor_hidden_service
+HiddenServicePort 80 127.0.0.1:17765
+```
+
+**Important:** Replace `/home/yourusername` with your actual home directory path. Tor does NOT expand `~` in torrc - you must use absolute paths.
 
 Then restart TOR:
 ```bash
@@ -427,14 +444,16 @@ Edit `~/.aisbf/aisbf.json`:
     "enabled": true,
     "control_port": 9051,
     "control_host": "127.0.0.1",
-    "control_password": null,
-    "hidden_service_dir": null,
+    "control_password": "your_secure_password",
+    "hidden_service_dir": "~/.aisbf/tor_hidden_service",
     "hidden_service_port": 80,
     "socks_port": 9050,
     "socks_host": "127.0.0.1"
   }
 }
 ```
+
+**Important:** Set `control_password` to match the password you used when generating the HashedControlPassword for torrc.
 
 #### Ephemeral vs Persistent Hidden Services
 
@@ -451,6 +470,7 @@ Edit `~/.aisbf/aisbf.json`:
 - Keys stored in specified directory
 - Ideal for production use
 - Set `hidden_service_dir` to a path (e.g., `~/.aisbf/tor_hidden_service`)
+- **Must be manually configured in torrc** - see configuration instructions above
 
 #### Accessing Your Hidden Service
 
@@ -1040,15 +1060,7 @@ Authenticated users can access their configurations using their username in the 
 | `POST /api/u/{username}/chat/completions` | Chat completions using user's own models |
 | `GET /api/u/{username}/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
 
-Legacy `/api/user/...` endpoints remain fully supported for backward compatibility:
-| Legacy Endpoint | Description |
-|-----------------|-------------|
-| `GET /api/user/models` | Legacy endpoint for authenticated user |
-| `GET /api/user/providers` | Legacy endpoint for authenticated user |
-| `GET /api/user/rotations` | Legacy endpoint for authenticated user |
-| `GET /api/user/autoselects` | Legacy endpoint for authenticated user |
-| `POST /api/user/chat/completions` | Legacy chat completions endpoint |
-| `GET /api/user/{config_type}/models` | Legacy model listing endpoint |
+Legacy `/api/user/...` endpoints have been replaced with `/api/u/{username}/...` endpoints for better clarity and security.
 
 #### Access Control
 
@@ -1101,6 +1113,29 @@ All requests are properly authenticated and authorized using the standard Bearer
 #### MCP Integration
 
 User tokens also work with MCP (Model Context Protocol) endpoints:
+
+**Global MCP Endpoints (Admin-configured tokens in aisbf.json):**
+- `GET /mcp` - SSE endpoint for MCP communication
+- `POST /mcp` - HTTP POST endpoint for MCP
+- `GET /mcp/tools` - List available global MCP tools
+- `POST /mcp/tools/call` - Call global MCP tools
+
+**User-Specific MCP Endpoints (User API tokens):**
+- `GET /mcp/u/{username}/tools` - List user's MCP tools
+- `POST /mcp/u/{username}/tools/call` - Call user's MCP tools
+
+Example:
+```bash
+# List user's MCP tools
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/mcp/u/johnsmith/tools
+
+# Call a user MCP tool
+curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "list_user_models", "arguments": {}}' \
+  http://localhost:17765/mcp/u/johnsmith/tools/call
+```
+
 - Admin users get access to both global and user-specific MCP tools
 - Regular users get access to user-only MCP tools
 - Tools include model access, configuration management, and usage statistics

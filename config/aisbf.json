@@ -83,8 +83,8 @@
     "enabled": false,
     "control_port": 9051,
     "control_host": "127.0.0.1",
-    "control_password": null,
-    "hidden_service_dir": null,
+    "control_password": "",
+    "hidden_service_dir": "",
     "hidden_service_port": 80,
     "socks_port": 9050,
     "socks_host": "127.0.0.1"

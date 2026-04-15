@@ -89,6 +89,13 @@
                     Tier is active and available for users
                 </label>
             </div>
+
+            <div style="margin-bottom: 15px;">
+                <label style="cursor: pointer; font-weight: 500; color: #e0e0e0;">
+                    <input type="checkbox" name="is_visible" value="1" {{ 'checked' if not tier or tier.is_visible else '' }} style="margin-right: 10px;">
+                    Tier is visible to users (if unchecked, only admin can assign this tier)
+                </label>
+            </div>
         </div>
 
         <div style="display: flex; gap: 10px;">

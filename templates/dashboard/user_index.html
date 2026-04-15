@@ -66,12 +66,12 @@
             <h3>MCP Tools</h3>
             <div class="endpoint">
                 <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/mcp/tools</code>
+                <code class="url">{{ get_base_url(request) }}/mcp/u/{{ session.username }}/tools</code>
                 <p>List available MCP tools for your configurations</p>
             </div>
             <div class="endpoint">
                 <code class="method POST">POST</code>
-                <code class="url">{{ get_base_url(request) }}/mcp/tools/call</code>
+                <code class="url">{{ get_base_url(request) }}/mcp/u/{{ session.username }}/tools/call</code>
                 <p>Call MCP tools to manage your configurations</p>
             </div>
         </div>

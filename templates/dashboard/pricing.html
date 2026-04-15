@@ -262,9 +262,10 @@ function downgradeToFree() {
 
 function showToast(message, type) {
     const toastContainer = document.createElement('div');
-    toastContainer.className = `position-fixed bottom-0 end-0 p-3`;
+    toastContainer.className = `position-fixed top-0 end-0 p-3`;
+    toastContainer.style.zIndex = '9999';
     toastContainer.innerHTML = `
-        <div class="toast show" role="alert">
+        <div class="toast show" role="alert" style="min-width: 300px;">
             <div class="toast-header bg-${type} text-white">
                 <strong class="me-auto">Notification</strong>
                 <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
@@ -275,8 +276,13 @@ function showToast(message, type) {
         </div>
     `;
     document.body.appendChild(toastContainer);
-    
-    setTimeout(() => toastContainer.remove(), 3000);
+
+    // Auto-dismiss after 5 seconds
+    setTimeout(() => {
+        if (toastContainer.parentNode) {
+            toastContainer.remove();
+        }
+    }, 5000);
 }
 </script>
 {% endblock %}

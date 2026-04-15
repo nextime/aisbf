@@ -39,6 +39,7 @@ class MCPAuthLevel:
     NONE = 0
     AUTOSELECT = 1  # Can access autoselection and autorotation settings
     FULLCONFIG = 2  # Can access all configurations (providers, rotations, autoselect, aisbf)
+    USER = 3  # User-specific access via API token
 
 
 def load_mcp_config() -> Dict:
@@ -1597,13 +1598,19 @@ class MCPServer:
         # Route to appropriate handler
         from starlette.requests import Request
         from main import get_user_handler
-        
+
+        # Get username for the path
+        from .database import get_database
+        db = get_database()
+        user = db.get_user_by_id(user_id)
+        username = user['username'] if user else 'unknown'
+
         scope = {
             "type": "http",
             "method": "POST",
             "headers": [],
             "query_string": b"",
-            "path": "/api/user/chat/completions"
+            "path": f"/api/u/{username}/chat/completions"
         }
         dummy_request = Request(scope)
         

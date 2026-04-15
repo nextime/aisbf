@@ -231,7 +231,7 @@ class KiroAuthManager:
             return self._access_token
     
     async def _refresh_kiro_desktop_token(self):
-        """Refresh token using Kiro Desktop Auth"""
+        """Refresh token using Kiro Desktop Auth with retry logic"""
         if not self.refresh_token:
             raise ValueError("No refresh token available")
         
@@ -242,25 +242,48 @@ class KiroAuthManager:
         }
         payload = {"refreshToken": self.refresh_token}
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, json=payload, headers=headers)
-            response.raise_for_status()
-            data = response.json()
-            
-            self._access_token = data['accessToken']
-            if 'refreshToken' in data:
-                self.refresh_token = data['refreshToken']
-                self._refresh_token = data['refreshToken']  # Keep private token in sync
-            
-            # Calculate expiration (1 hour default)
-            self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=3600)
-            
-            # Save if we have a credentials file
-            if self.creds_file:
-                self._save_credentials()
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                    response = await client.post(url, json=payload, headers=headers)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    self._access_token = data['accessToken']
+                    if 'refreshToken' in data:
+                        self.refresh_token = data['refreshToken']
+                        self._refresh_token = data['refreshToken']  # Keep private token in sync
+                    
+                    # Calculate expiration (1 hour default)
+                    self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=3600)
+                    
+                    # Save if we have a credentials file
+                    if self.creds_file:
+                        self._save_credentials()
+                    
+                    if attempt > 0:
+                        logger.info(f"Token refresh succeeded on attempt {attempt + 1}")
+                    return
+                    
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TimeoutException) as e:
+                logger.warning(f"Token refresh timeout on attempt {attempt + 1}/{max_retries}: {type(e).__name__}")
+                
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay:.1f} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error(f"Token refresh failed after {max_retries} attempts")
+                    raise
+            except Exception as e:
+                logger.error(f"Token refresh failed with non-timeout error: {type(e).__name__}: {e}")
+                raise
     
     async def _refresh_aws_sso_token(self):
-        """Refresh token using AWS SSO OIDC"""
+        """Refresh token using AWS SSO OIDC with retry logic"""
         if not all([self.refresh_token, self.client_id, self.client_secret]):
             raise ValueError("Missing credentials for AWS SSO OIDC")
         
@@ -272,18 +295,41 @@ class KiroAuthManager:
             "refresh_token": self.refresh_token
         }
         
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, data=payload)
-            response.raise_for_status()
-            data = response.json()
-            
-            self._access_token = data['access_token']
-            if 'refresh_token' in data:
-                self.refresh_token = data['refresh_token']
-                self._refresh_token = data['refresh_token']  # Keep private token in sync
-            
-            expires_in = data.get('expires_in', 3600)
-            self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+        max_retries = 3
+        retry_delay = 1.0  # Start with 1 second
+        
+        for attempt in range(max_retries):
+            try:
+                async with httpx.AsyncClient(timeout=httpx.Timeout(30.0, connect=10.0)) as client:
+                    response = await client.post(url, data=payload)
+                    response.raise_for_status()
+                    data = response.json()
+                    
+                    self._access_token = data['access_token']
+                    if 'refresh_token' in data:
+                        self.refresh_token = data['refresh_token']
+                        self._refresh_token = data['refresh_token']  # Keep private token in sync
+                    
+                    expires_in = data.get('expires_in', 3600)
+                    self._expires_at = datetime.now(timezone.utc) + timedelta(seconds=expires_in)
+                    
+                    if attempt > 0:
+                        logger.info(f"AWS SSO token refresh succeeded on attempt {attempt + 1}")
+                    return
+                    
+            except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TimeoutException) as e:
+                logger.warning(f"AWS SSO token refresh timeout on attempt {attempt + 1}/{max_retries}: {type(e).__name__}")
+                
+                if attempt < max_retries - 1:
+                    logger.info(f"Retrying in {retry_delay:.1f} seconds...")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                else:
+                    logger.error(f"AWS SSO token refresh failed after {max_retries} attempts")
+                    raise
+            except Exception as e:
+                logger.error(f"AWS SSO token refresh failed with non-timeout error: {type(e).__name__}: {e}")
+                raise
     
     def _save_credentials(self):
         """Save updated credentials to file"""

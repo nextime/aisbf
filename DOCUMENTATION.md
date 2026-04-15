@@ -131,8 +131,21 @@ pip install stem
 Edit `/etc/tor/torrc` (or `~/.torrc` on macOS):
 ```
 ControlPort 9051
-CookieAuthentication 1
+HashedControlPassword 16:YOUR_HASHED_PASSWORD_HERE
 ```
+
+Generate a hashed password:
+```bash
+tor --hash-password "your_secure_password"
+```
+
+**For persistent hidden services, also add:**
+```
+HiddenServiceDir /home/yourusername/.aisbf/tor_hidden_service
+HiddenServicePort 80 127.0.0.1:17765
+```
+
+**Important:** Replace `/home/yourusername` with your actual home directory path. Tor does NOT expand `~` in torrc - you must use absolute paths.
 
 Restart TOR:
 ```bash
@@ -151,14 +164,16 @@ TOR hidden service can be configured via the dashboard or configuration file.
     "enabled": true,
     "control_port": 9051,
     "control_host": "127.0.0.1",
-    "control_password": null,
-    "hidden_service_dir": null,
+    "control_password": "your_secure_password",
+    "hidden_service_dir": "~/.aisbf/tor_hidden_service",
     "hidden_service_port": 80,
     "socks_port": 9050,
     "socks_host": "127.0.0.1"
   }
 }
 ```
+
+**Important:** Set `control_password` to match the password you used when generating the HashedControlPassword for torrc.
 
 **Configuration Options:**
 
@@ -186,17 +201,26 @@ TOR hidden service can be configured via the dashboard or configuration file.
 - Keys stored in specified directory
 - Ideal for production use
 - Set `hidden_service_dir` to a path (e.g., `~/.aisbf/tor_hidden_service`)
+- **Must be manually configured in torrc** - see configuration instructions above
 
 Example persistent configuration:
 ```json
 {
   "tor": {
     "enabled": true,
+    "control_password": "your_secure_password",
     "hidden_service_dir": "~/.aisbf/tor_hidden_service",
     "hidden_service_port": 80
   }
 }
 ```
+
+When you start aisbf with a persistent hidden service directory configured:
+1. It checks if the hidden service already exists (looks for hostname file)
+2. If found, it uses the existing onion address
+3. If not found, it displays manual configuration instructions
+4. You must add the HiddenServiceDir and HiddenServicePort to torrc manually
+5. After configuring torrc and restarting Tor, start aisbf again
 
 ### Dashboard Configuration
 
@@ -258,9 +282,11 @@ All AISBF endpoints are available over TOR:
 - Check AISBF logs for detailed error messages
 
 **Authentication Failed:**
-- Verify CookieAuthentication is enabled in torrc
-- Check control_password matches torrc configuration
-- Ensure AISBF has permission to read TOR cookie file
+- Use password authentication instead of CookieAuthentication
+- Generate hashed password: `tor --hash-password "your_password"`
+- Add to torrc: `HashedControlPassword 16:YOUR_HASH`
+- Set `control_password` in aisbf.json to match your password
+- Restart Tor: `sudo systemctl restart tor`
 
 **Onion Address Not Generated:**
 - Check TOR logs: `journalctl -u tor` or `tail -f /var/log/tor/log`
@@ -585,12 +611,12 @@ Authorization: Bearer YOUR_API_TOKEN
 
 | Endpoint | Description |
 |----------|-------------|
-| `GET /api/user/models` | List available models from user's own configurations |
-| `GET /api/user/providers` | List user's provider configurations |
-| `GET /api/user/rotations` | List user's rotation configurations |
-| `GET /api/user/autoselects` | List user's autoselect configurations |
-| `POST /api/user/chat/completions` | Chat completions using user's own models |
-| `GET /api/user/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
+| `GET /api/u/{username}/models` | List available models from user's own configurations |
+| `GET /api/u/{username}/providers` | List user's provider configurations |
+| `GET /api/u/{username}/rotations` | List user's rotation configurations |
+| `GET /api/u/{username}/autoselects` | List user's autoselect configurations |
+| `POST /api/u/{username}/chat/completions` | Chat completions using user's own models |
+| `GET /api/u/{username}/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
 
 **Access Control:**
 - **Admin Users** have access to both global and user configurations when using user API endpoints
@@ -601,21 +627,28 @@ Authorization: Bearer YOUR_API_TOKEN
 
 ```bash
 # List user models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/models
 
 # Chat using user's own models
 curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{"model": "your-rotation/model", "messages": [{"role": "user", "content": "Hello"}]}' \
-  http://localhost:17765/api/user/chat/completions
+  http://localhost:17765/api/u/yourusername/chat/completions
 ```
 
 ### MCP (Model Context Protocol)
 
 AISBF provides an MCP server for remote agent configuration and model access:
 
+**Global MCP Endpoints (Admin-configured tokens):**
 - **SSE Endpoint**: `GET /mcp` - Server-Sent Events for MCP communication
 - **HTTP Endpoint**: `POST /mcp` - Direct HTTP transport for MCP
+- **Tools**: `GET /mcp/tools` - List available MCP tools
+- **Call Tool**: `POST /mcp/tools/call` - Call an MCP tool
+
+**User-Specific MCP Endpoints (User API tokens):**
+- **Tools**: `GET /mcp/u/{username}/tools` - List user's MCP tools
+- **Call Tool**: `POST /mcp/u/{username}/tools/call` - Call user's MCP tool
 
 MCP tools include:
 - `list_models` - List available models (user or global depending on auth)

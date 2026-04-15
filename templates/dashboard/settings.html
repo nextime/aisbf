@@ -470,6 +470,49 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
     
     <div id="tor-fields" style="display: {% if config.tor and config.tor.enabled %}block{% else %}none{% endif %};">
+        
+        <!-- torrc Configuration Instructions -->
+        <div style="background: #16213e; padding: 15px; border-radius: 6px; margin-bottom: 20px; border-left: 4px solid #2196f3;">
+            <h4 style="margin: 0 0 10px 0; color: #2196f3;">⚙️ Required torrc Configuration</h4>
+            <p style="margin: 0 0 10px 0; color: #ccc;">Before enabling Tor, you must configure your torrc file (usually <code style="background: #0f3460; padding: 2px 6px; border-radius: 3px;">/etc/tor/torrc</code>):</p>
+            
+            <div style="background: #0f3460; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                <strong style="color: #4caf50;">Step 1: Generate Password Hash</strong>
+                <pre style="margin: 8px 0 0 0; padding: 8px; background: #000; border-radius: 3px; overflow-x: auto;"><code>tor --hash-password "your_secure_password"</code></pre>
+            </div>
+            
+            <div style="background: #0f3460; padding: 12px; border-radius: 4px; margin-bottom: 10px;">
+                <strong style="color: #4caf50;">Step 2: Add to torrc</strong>
+                <div style="margin-top: 8px;">
+                    <button type="button" onclick="toggleTorrcExample('ephemeral')" style="background: #2196f3; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer; margin-right: 8px;">Ephemeral Service</button>
+                    <button type="button" onclick="toggleTorrcExample('persistent')" style="background: #2196f3; color: white; border: none; padding: 6px 12px; border-radius: 3px; cursor: pointer;">Persistent Service</button>
+                </div>
+                
+                <div id="torrc-ephemeral" style="display: none; margin-top: 10px;">
+                    <p style="margin: 0 0 8px 0; color: #ccc; font-size: 0.9em;">For temporary hidden service (new address each restart):</p>
+                    <pre style="margin: 0; padding: 8px; background: #000; border-radius: 3px; overflow-x: auto;"><code>ControlPort 9051
+HashedControlPassword 16:YOUR_HASHED_PASSWORD_HERE</code></pre>
+                    <p style="margin: 8px 0 0 0; color: #ff9800; font-size: 0.85em;">⚠️ Leave "Hidden Service Directory" field blank below for ephemeral service</p>
+                </div>
+                
+                <div id="torrc-persistent" style="display: none; margin-top: 10px;">
+                    <p style="margin: 0 0 8px 0; color: #ccc; font-size: 0.9em;">For permanent hidden service (same address across restarts):</p>
+                    <pre style="margin: 0; padding: 8px; background: #000; border-radius: 3px; overflow-x: auto;"><code>ControlPort 9051
+HashedControlPassword 16:YOUR_HASHED_PASSWORD_HERE
+
+HiddenServiceDir <span id="torrc-hs-dir">/home/yourusername/.aisbf/tor_hidden_service</span>
+HiddenServicePort <span id="torrc-hs-port">80</span> 127.0.0.1:<span id="torrc-local-port">{{ config.server.port if config.server else 17765 }}</span></code></pre>
+                    <p style="margin: 8px 0 0 0; color: #ff9800; font-size: 0.85em;">⚠️ Replace <code style="background: #16213e; padding: 2px 4px; border-radius: 2px;">/home/yourusername</code> with your actual home directory path (torrc does NOT expand ~)</p>
+                </div>
+            </div>
+            
+            <div style="background: #0f3460; padding: 12px; border-radius: 4px;">
+                <strong style="color: #4caf50;">Step 3: Restart Tor</strong>
+                <pre style="margin: 8px 0 0 0; padding: 8px; background: #000; border-radius: 3px; overflow-x: auto;"><code>sudo systemctl restart tor  # Linux
+brew services restart tor   # macOS</code></pre>
+            </div>
+        </div>
+        
         <div class="form-group">
             <label for="tor_control_host">TOR Control Host</label>
             <input type="text" id="tor_control_host" name="tor_control_host" value="{{ config.tor.control_host if config.tor else '127.0.0.1' }}">
@@ -479,28 +522,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <div class="form-group">
             <label for="tor_control_port">TOR Control Port</label>
             <input type="number" id="tor_control_port" name="tor_control_port" value="{{ config.tor.control_port if config.tor else 9051 }}">
-            <small style="color: #666; display: block; margin-top: 5px;">TOR control port (default: 9051)</small>
+            <small style="color: #666; display: block; margin-top: 5px;">TOR control port (default: 9051) - must match ControlPort in torrc</small>
         </div>
         
         <div class="form-group">
             <label for="tor_control_password">TOR Control Password</label>
-            <input type="password" id="tor_control_password" name="tor_control_password" value="{{ config.tor.control_password if config.tor and config.tor.control_password else '' }}" placeholder="Leave blank if no password">
-            <small style="color: #666; display: block; margin-top: 5px;">Password for TOR control port authentication (optional)</small>
+            <input type="password" id="tor_control_password" name="tor_control_password" value="{{ config.tor.control_password if config.tor and config.tor.control_password else '' }}" placeholder="Enter the password you used to generate the hash">
+            <small style="color: #666; display: block; margin-top: 5px;">The password you used with <code>tor --hash-password</code> (NOT the hash itself)</small>
         </div>
         
         <div class="form-group">
             <label for="tor_hidden_service_dir">Hidden Service Directory</label>
             <div style="display: flex; gap: 10px; align-items: flex-start;">
-                <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service" style="flex: 1;">
-                <button type="button" onclick="createPersistentService()" class="btn btn-secondary" style="white-space: nowrap;">Create Persistent</button>
+                <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service" style="flex: 1;" onchange="updateTorrcExample()">
+                <button type="button" onclick="createPersistentService()" class="btn btn-secondary" style="white-space: nowrap;">Use Default</button>
             </div>
-            <small style="color: #666; display: block; margin-top: 5px;">Directory for persistent hidden service. Leave blank for ephemeral (temporary) service. Click "Create Persistent" to use default directory.</small>
+            <small style="color: #666; display: block; margin-top: 5px;">
+                <strong>Ephemeral:</strong> Leave blank for temporary service (new address each restart)<br>
+                <strong>Persistent:</strong> Enter full absolute path (e.g., /home/username/.aisbf/tor_hidden_service) - must match HiddenServiceDir in torrc<br>
+                <span style="color: #ff9800;">⚠️ Note: torrc does NOT expand ~ - use full paths like /home/username instead</span>
+            </small>
         </div>
         
         <div class="form-group">
             <label for="tor_hidden_service_port">Hidden Service Port</label>
-            <input type="number" id="tor_hidden_service_port" name="tor_hidden_service_port" value="{{ config.tor.hidden_service_port if config.tor else 80 }}">
-            <small style="color: #666; display: block; margin-top: 5px;">Port exposed on the hidden service (default: 80)</small>
+            <input type="number" id="tor_hidden_service_port" name="tor_hidden_service_port" value="{{ config.tor.hidden_service_port if config.tor else 80 }}" onchange="updateTorrcExample()">
+            <small style="color: #666; display: block; margin-top: 5px;">Port exposed on the onion address (default: 80) - must match HiddenServicePort in torrc for persistent services</small>
         </div>
         
         <div class="form-group">
@@ -926,7 +973,8 @@ function toggleResponseCacheFields() {
 
 function createPersistentService() {
     const dirInput = document.getElementById('tor_hidden_service_dir');
-    const defaultDir = '~/.aisbf/tor_hidden_service';
+    // Use absolute path instead of ~ since torrc doesn't expand it
+    const defaultDir = '/home/{{ os.environ.get("USER", "yourusername") }}/.aisbf/tor_hidden_service';
     
     if (dirInput.value && dirInput.value.trim() !== '') {
         if (!confirm('This will replace the current directory path. Continue?')) {
@@ -936,12 +984,49 @@ function createPersistentService() {
     
     dirInput.value = defaultDir;
     dirInput.focus();
+    updateTorrcExample();
     
     // Visual feedback
     dirInput.style.backgroundColor = '#1a4d2e';
     setTimeout(() => {
         dirInput.style.backgroundColor = '';
     }, 500);
+}
+
+function toggleTorrcExample(type) {
+    const ephemeralDiv = document.getElementById('torrc-ephemeral');
+    const persistentDiv = document.getElementById('torrc-persistent');
+    
+    if (type === 'ephemeral') {
+        ephemeralDiv.style.display = 'block';
+        persistentDiv.style.display = 'none';
+    } else {
+        ephemeralDiv.style.display = 'none';
+        persistentDiv.style.display = 'block';
+        updateTorrcExample();
+    }
+}
+
+function updateTorrcExample() {
+    const hsDir = document.getElementById('tor_hidden_service_dir').value || '/home/yourusername/.aisbf/tor_hidden_service';
+    const hsPort = document.getElementById('tor_hidden_service_port').value || '80';
+    const localPort = document.getElementById('port').value || '{{ config.server.port if config.server else 17765 }}';
+    
+    // Expand ~ to actual home directory path for torrc display
+    let expandedHsDir = hsDir;
+    if (hsDir.startsWith('~')) {
+        // Get home directory from server (we'll add an endpoint for this)
+        // For now, show a placeholder that makes it clear it needs expansion
+        expandedHsDir = hsDir.replace('~', '/home/yourusername');
+    }
+    
+    const hsDirSpan = document.getElementById('torrc-hs-dir');
+    const hsPortSpan = document.getElementById('torrc-hs-port');
+    const localPortSpan = document.getElementById('torrc-local-port');
+    
+    if (hsDirSpan) hsDirSpan.textContent = expandedHsDir;
+    if (hsPortSpan) hsPortSpan.textContent = hsPort;
+    if (localPortSpan) localPortSpan.textContent = localPort;
 }
 
 async function checkTorStatus() {

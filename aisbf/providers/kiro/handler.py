@@ -127,8 +127,28 @@ class KiroProviderHandler(BaseProviderHandler):
             # Apply rate limiting
             await self.apply_rate_limit()
 
-            # Get access token and profile ARN
-            access_token = await self.auth_manager.get_access_token()
+            # Get access token and profile ARN with retry logic
+            max_retries = 3
+            retry_delay = 1.0
+            access_token = None
+            
+            for attempt in range(max_retries):
+                try:
+                    access_token = await self.auth_manager.get_access_token()
+                    break
+                except (Exception) as e:
+                    if "ConnectTimeout" in str(type(e).__name__) or "TimeoutException" in str(type(e).__name__):
+                        logging.warning(f"Token retrieval timeout on attempt {attempt + 1}/{max_retries}")
+                        if attempt < max_retries - 1:
+                            logging.info(f"Retrying in {retry_delay:.1f} seconds...")
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2
+                        else:
+                            logging.error(f"Token retrieval failed after {max_retries} attempts")
+                            raise
+                    else:
+                        raise
+            
             profile_arn = self.auth_manager.profile_arn
 
             # Determine effective profileArn based on auth type
@@ -176,12 +196,30 @@ class KiroProviderHandler(BaseProviderHandler):
                     model=model
                 )
 
-            # Non-streaming request
-            response = await self.client.post(
-                kiro_api_url,
-                json=payload,
-                headers=headers
-            )
+            # Non-streaming request with retry logic
+            max_api_retries = 2
+            api_retry_delay = 2.0
+            response = None
+            
+            for api_attempt in range(max_api_retries):
+                try:
+                    response = await self.client.post(
+                        kiro_api_url,
+                        json=payload,
+                        headers=headers
+                    )
+                    break
+                except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TimeoutException) as e:
+                    logging.warning(f"API request timeout on attempt {api_attempt + 1}/{max_api_retries}: {type(e).__name__}")
+                    
+                    if api_attempt < max_api_retries - 1:
+                        logging.info(f"Retrying API request in {api_retry_delay:.1f} seconds...")
+                        await asyncio.sleep(api_retry_delay)
+                        api_retry_delay *= 1.5
+                    else:
+                        logging.error(f"API request failed after {max_api_retries} attempts")
+                        self.record_failure()
+                        raise
 
             # Check for 429 rate limit error before raising
             if response.status_code == 429:
@@ -234,6 +272,11 @@ class KiroProviderHandler(BaseProviderHandler):
             self.record_success()
             return openai_response
 
+        except (httpx.ConnectTimeout, httpx.ReadTimeout, httpx.TimeoutException) as e:
+            logging.error(f"KiroProviderHandler: Timeout error after retries: {type(e).__name__}")
+            logging.debug(f"KiroProviderHandler: Timeout details", exc_info=True)
+            self.record_failure()
+            raise Exception(f"Kiro API timeout after retries: {type(e).__name__}")
         except Exception as e:
             logging.error(f"KiroProviderHandler: Error: {str(e)}", exc_info=True)
             self.record_failure()

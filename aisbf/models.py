@@ -98,6 +98,7 @@ class AccountTier(BaseModel):
     price_yearly: float = 0.0
     is_default: bool = False
     is_active: bool = True
+    is_visible: bool = True  # If False, tier is hidden from user selection but can be assigned by admin
     
     # Limits
     max_requests_per_day: int = -1

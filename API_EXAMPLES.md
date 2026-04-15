@@ -775,7 +775,7 @@ AISBF provides user-specific API endpoints that allow authenticated users to acc
 All user-specific endpoints require authentication via Bearer token:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_USER_TOKEN" http://localhost:17765/api/user/models
+curl -H "Authorization: Bearer YOUR_USER_TOKEN" http://localhost:17765/api/u/yourusername/models
 ```
 
 Generate a user token from the dashboard: **Dashboard > My Account > API Tokens**
@@ -788,7 +788,7 @@ Returns all models from the user's own providers, rotations, and autoselects:
 
 ```bash
 # Get all user models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/models
 ```
 
 Response includes:
@@ -801,7 +801,7 @@ Response includes:
 Returns all user-configured providers:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/providers
 ```
 
 #### List User Rotations
@@ -809,7 +809,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/provi
 Returns all user-configured rotations:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/rotations
 ```
 
 #### List User Autoselects
@@ -817,7 +817,7 @@ curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotat
 Returns all user-configured autoselects:
 
 ```bash
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/autoselects
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/autoselects
 ```
 
 #### User Chat Completions
@@ -831,7 +831,7 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
     "model": "user-rotation/myrotation",
     "messages": [{"role": "user", "content": "Hello"}]
   }' \
-  http://localhost:17765/api/user/chat/completions
+  http://localhost:17765/api/u/yourusername/chat/completions
 ```
 
 **Model formats for user endpoints:**
@@ -850,13 +850,13 @@ Get models for a specific user configuration type:
 
 ```bash
 # Get user provider models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/providers/models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/providers/models
 
-# Get user rotation models  
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/rotations/models
+# Get user rotation models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/rotations/models
 
 # Get user autoselect models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/user/autoselects/models
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/autoselects/models
 ```
 
 ### Python Examples
@@ -870,16 +870,16 @@ TOKEN = "YOUR_USER_TOKEN"
 headers = {"Authorization": f"Bearer {TOKEN}"}
 
 # List user models
-response = requests.get(f"{BASE_URL}/api/user/models", headers=headers)
+response = requests.get(f"{BASE_URL}/api/u/yourusername/models", headers=headers)
 print(response.json())
 
 # List user providers
-response = requests.get(f"{BASE_URL}/api/user/providers", headers=headers)
+response = requests.get(f"{BASE_URL}/api/u/yourusername/providers", headers=headers)
 print(response.json())
 
 # Send chat completion using user rotation
 response = requests.post(
-    f"{BASE_URL}/api/user/chat/completions",
+    f"{BASE_URL}/api/u/yourusername/chat/completions",
     headers=headers,
     json={
         "model": "user-rotation/myrotation",
