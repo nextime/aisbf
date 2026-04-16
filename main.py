@@ -6565,17 +6565,26 @@ async def update_payment_consolidation_config(request: Request):
                 for key, crypto_type in crypto_map.items():
                     if key in body:
                         threshold = float(body[key])
-                        cursor.execute(f"""
-                            UPDATE crypto_consolidation_settings
-                            SET threshold_amount = {placeholder}
-                            WHERE crypto_type = {placeholder}
-                        """, (threshold, crypto_type))
+                        
+                        # Use UPSERT to handle missing records
+                        if db.db_type == 'sqlite':
+                            cursor.execute(f"""
+                                INSERT INTO crypto_consolidation_settings (crypto_type, threshold_amount, admin_address, is_enabled)
+                                VALUES (?, ?, '', 0)
+                                ON CONFLICT(crypto_type) DO UPDATE SET threshold_amount = ?
+                            """, (crypto_type, threshold, threshold))
+                        else:  # MySQL
+                            cursor.execute(f"""
+                                INSERT INTO crypto_consolidation_settings (crypto_type, threshold_amount, admin_address, is_enabled)
+                                VALUES (%s, %s, '', 0)
+                                ON DUPLICATE KEY UPDATE threshold_amount = %s
+                            """, (crypto_type, threshold, threshold))
+                        
                         rows_affected = cursor.rowcount
-                        logger.info(f"Updated {crypto_type} threshold to {threshold}, rows affected: {rows_affected}")
+                        logger.info(f"Upserted {crypto_type} threshold to {threshold}, rows affected: {rows_affected}")
                         updated_count += rows_affected
                 
-                if updated_count == 0:
-                    logger.warning("No rows were updated - records may not exist in database")
+                logger.info(f"Total rows affected: {updated_count}")
             
             conn.commit()
             logger.info("Consolidation settings committed to database")
