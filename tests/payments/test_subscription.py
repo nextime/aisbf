@@ -254,3 +254,240 @@ async def test_upgrade_subscription_invalid_tier(db_manager):
     
     assert result['success'] == False
     assert 'Invalid tier' in result['error']
+
+
+@pytest.mark.anyio
+async def test_downgrade_subscription(db_manager):
+    """Test subscription downgrade scheduled at period end"""
+    class MockStripeHandler:
+        async def charge_subscription(self, subscription_id, amount):
+            return {'success': True, 'transaction_id': 'test_tx'}
+    
+    manager = SubscriptionManager(
+        db_manager,
+        MockStripeHandler(),
+        None, None, None
+    )
+    
+    # Create Premium tier
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO account_tiers (name, price_monthly, price_yearly, is_default)
+            VALUES ('Premium', 20.00, 200.00, 0)
+        """)
+        conn.commit()
+        premium_tier_id = cursor.lastrowid
+    
+    # Create subscription at Premium tier
+    result = await manager.create_subscription(
+        user_id=1,
+        tier_id=premium_tier_id,
+        payment_method_id=1,
+        billing_cycle='monthly'
+    )
+    assert result['success'] == True
+    
+    # Downgrade to Pro tier (scheduled at period end)
+    result = await manager.downgrade_subscription(user_id=1, new_tier_id=db_manager._test_pro_tier_id)
+    
+    assert result['success'] == True
+    assert 'downgrade_date' in result
+    
+    # Verify pending_tier_id is set
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT tier_id, pending_tier_id FROM subscriptions 
+            WHERE user_id = 1 AND status = 'active'
+        """)
+        row = cursor.fetchone()
+        assert row[0] == premium_tier_id  # Still on Premium
+        assert row[1] == db_manager._test_pro_tier_id  # Downgrade scheduled
+    
+    # Verify user still has Premium tier
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT tier_id FROM users WHERE id = 1")
+        row = cursor.fetchone()
+        assert row[0] == premium_tier_id
+
+
+@pytest.mark.anyio
+async def test_downgrade_subscription_no_charge(db_manager):
+    """Test downgrade does not charge immediately"""
+    charge_called = False
+    
+    class MockStripeHandler:
+        async def charge_subscription(self, subscription_id, amount):
+            nonlocal charge_called
+            charge_called = True
+            return {'success': True, 'transaction_id': 'test_tx'}
+    
+    manager = SubscriptionManager(
+        db_manager,
+        MockStripeHandler(),
+        None, None, None
+    )
+    
+    # Create Premium tier
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            INSERT INTO account_tiers (name, price_monthly, price_yearly, is_default)
+            VALUES ('Premium', 20.00, 200.00, 0)
+        """)
+        conn.commit()
+        premium_tier_id = cursor.lastrowid
+    
+    # Create subscription
+    result = await manager.create_subscription(
+        user_id=1,
+        tier_id=premium_tier_id,
+        payment_method_id=1,
+        billing_cycle='monthly'
+    )
+    assert result['success'] == True
+    
+    # Reset charge flag
+    charge_called = False
+    
+    # Downgrade
+    result = await manager.downgrade_subscription(user_id=1, new_tier_id=db_manager._test_pro_tier_id)
+    
+    assert result['success'] == True
+    assert charge_called == False  # No charge should occur
+
+
+@pytest.mark.anyio
+async def test_downgrade_subscription_no_active_subscription(db_manager):
+    """Test downgrade fails when no active subscription exists"""
+    manager = SubscriptionManager(db_manager, None, None, None, None)
+    
+    result = await manager.downgrade_subscription(user_id=1, new_tier_id=db_manager._test_pro_tier_id)
+    
+    assert result['success'] == False
+    assert 'No active subscription' in result['error']
+
+
+@pytest.mark.anyio
+async def test_downgrade_subscription_invalid_tier(db_manager):
+    """Test downgrade fails with invalid tier ID"""
+    class MockStripeHandler:
+        async def charge_subscription(self, subscription_id, amount):
+            return {'success': True, 'transaction_id': 'test_tx'}
+    
+    manager = SubscriptionManager(
+        db_manager,
+        MockStripeHandler(),
+        None, None, None
+    )
+    
+    # Create subscription
+    result = await manager.create_subscription(
+        user_id=1,
+        tier_id=db_manager._test_pro_tier_id,
+        payment_method_id=1,
+        billing_cycle='monthly'
+    )
+    assert result['success'] == True
+    
+    # Try to downgrade to non-existent tier
+    result = await manager.downgrade_subscription(user_id=1, new_tier_id=99999)
+    
+    assert result['success'] == False
+    assert 'Invalid tier' in result['error']
+
+
+@pytest.mark.anyio
+async def test_cancel_subscription(db_manager):
+    """Test subscription cancellation at period end"""
+    class MockStripeHandler:
+        async def charge_subscription(self, subscription_id, amount):
+            return {'success': True, 'transaction_id': 'test_tx'}
+    
+    manager = SubscriptionManager(
+        db_manager,
+        MockStripeHandler(),
+        None, None, None
+    )
+    
+    # Create subscription
+    result = await manager.create_subscription(
+        user_id=1,
+        tier_id=db_manager._test_pro_tier_id,
+        payment_method_id=1,
+        billing_cycle='monthly'
+    )
+    assert result['success'] == True
+    
+    # Cancel subscription
+    result = await manager.cancel_subscription(user_id=1)
+    
+    assert result['success'] == True
+    assert 'cancellation_date' in result
+    
+    # Verify cancel_at_period_end is set
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT status, cancel_at_period_end FROM subscriptions 
+            WHERE user_id = 1
+        """)
+        row = cursor.fetchone()
+        assert row[0] == 'active'  # Still active
+        assert row[1] == 1  # Cancel scheduled
+    
+    # Verify user still has Pro tier
+    with db_manager._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT tier_id FROM users WHERE id = 1")
+        row = cursor.fetchone()
+        assert row[0] == db_manager._test_pro_tier_id
+
+
+@pytest.mark.anyio
+async def test_cancel_subscription_no_refund(db_manager):
+    """Test cancellation does not issue refund"""
+    refund_called = False
+    
+    class MockStripeHandler:
+        async def charge_subscription(self, subscription_id, amount):
+            return {'success': True, 'transaction_id': 'test_tx'}
+        
+        async def refund_payment(self, transaction_id, amount):
+            nonlocal refund_called
+            refund_called = True
+            return {'success': True}
+    
+    manager = SubscriptionManager(
+        db_manager,
+        MockStripeHandler(),
+        None, None, None
+    )
+    
+    # Create subscription
+    result = await manager.create_subscription(
+        user_id=1,
+        tier_id=db_manager._test_pro_tier_id,
+        payment_method_id=1,
+        billing_cycle='monthly'
+    )
+    assert result['success'] == True
+    
+    # Cancel subscription
+    result = await manager.cancel_subscription(user_id=1)
+    
+    assert result['success'] == True
+    assert refund_called == False  # No refund should occur
+
+
+@pytest.mark.anyio
+async def test_cancel_subscription_no_active_subscription(db_manager):
+    """Test cancellation fails when no active subscription exists"""
+    manager = SubscriptionManager(db_manager, None, None, None, None)
+    
+    result = await manager.cancel_subscription(user_id=1)
+    
+    assert result['success'] == False
+    assert 'No active subscription' in result['error']

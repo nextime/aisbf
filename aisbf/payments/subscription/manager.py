@@ -369,3 +369,126 @@ class SubscriptionManager:
             import traceback
             logger.error(traceback.format_exc())
             return {'success': False, 'error': str(e)}
+    
+    async def downgrade_subscription(self, user_id: int, new_tier_id: int) -> dict:
+        """Schedule subscription downgrade at period end (no immediate charge/refund)"""
+        try:
+            # Get current subscription
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT s.id, s.user_id, s.tier_id, s.status, 
+                           s.current_period_end
+                    FROM subscriptions s
+                    WHERE s.user_id = ? AND s.status = 'active'
+                """, (user_id,))
+                sub_row = cursor.fetchone()
+            
+            if not sub_row:
+                return {'success': False, 'error': 'No active subscription'}
+            
+            subscription = {
+                'id': sub_row[0],
+                'user_id': sub_row[1],
+                'tier_id': sub_row[2],
+                'status': sub_row[3],
+                'current_period_end': sub_row[4]
+            }
+            
+            # Verify new tier exists
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(
+                    "SELECT id, name FROM account_tiers WHERE id = ?",
+                    (new_tier_id,)
+                )
+                tier_row = cursor.fetchone()
+            
+            if not tier_row:
+                return {'success': False, 'error': 'Invalid tier'}
+            
+            new_tier = {
+                'id': tier_row[0],
+                'name': tier_row[1]
+            }
+            
+            # Set pending_tier_id (downgrade scheduled at period end)
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE subscriptions
+                    SET pending_tier_id = ?
+                    WHERE id = ?
+                """, (new_tier_id, subscription['id']))
+                conn.commit()
+            
+            # Parse period_end if needed
+            period_end = subscription['current_period_end']
+            if isinstance(period_end, str):
+                period_end = datetime.fromisoformat(period_end)
+            
+            logger.info(f"Scheduled downgrade for subscription {subscription['id']} to tier {new_tier_id} at {period_end}")
+            
+            return {
+                'success': True,
+                'downgrade_date': period_end.isoformat(),
+                'message': f"Downgrade to {new_tier['name']} scheduled for {period_end.date()}"
+            }
+            
+        except Exception as e:
+            logger.error(f"Error scheduling downgrade: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {'success': False, 'error': str(e)}
+    
+    async def cancel_subscription(self, user_id: int) -> dict:
+        """Cancel subscription at period end (no refund, access until period end)"""
+        try:
+            # Get current subscription
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT s.id, s.user_id, s.status, s.current_period_end
+                    FROM subscriptions s
+                    WHERE s.user_id = ? AND s.status = 'active'
+                """, (user_id,))
+                sub_row = cursor.fetchone()
+            
+            if not sub_row:
+                return {'success': False, 'error': 'No active subscription'}
+            
+            subscription = {
+                'id': sub_row[0],
+                'user_id': sub_row[1],
+                'status': sub_row[2],
+                'current_period_end': sub_row[3]
+            }
+            
+            # Set cancel_at_period_end flag
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    UPDATE subscriptions
+                    SET cancel_at_period_end = 1
+                    WHERE id = ?
+                """, (subscription['id'],))
+                conn.commit()
+            
+            # Parse period_end if needed
+            period_end = subscription['current_period_end']
+            if isinstance(period_end, str):
+                period_end = datetime.fromisoformat(period_end)
+            
+            logger.info(f"Scheduled cancellation for subscription {subscription['id']} at {period_end}")
+            
+            return {
+                'success': True,
+                'cancellation_date': period_end.isoformat(),
+                'message': f"Subscription will be canceled on {period_end.date()}. You will retain access until then."
+            }
+            
+        except Exception as e:
+            logger.error(f"Error canceling subscription: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+            return {'success': False, 'error': str(e)}
