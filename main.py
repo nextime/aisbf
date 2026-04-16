@@ -3232,6 +3232,15 @@ async def dashboard_index(request: Request):
             autoselects_count = 0
             recent_activity = []
         
+        # Get subscription info
+        subscription = db.get_user_subscription(user_id) if user_id else None
+        current_tier = db.get_user_tier(user_id) if user_id else None
+        payment_methods = db.get_user_payment_methods(user_id) if user_id else []
+
+        # Get currency settings
+        currency_settings = db.get_currency_settings()
+        currency_symbol = currency_settings.get('currency_symbol', '$')
+
         return templates.TemplateResponse(
         request=request,
         name="dashboard/user_index.html",
@@ -3243,7 +3252,11 @@ async def dashboard_index(request: Request):
             "providers_count": providers_count,
             "rotations_count": rotations_count,
             "autoselects_count": autoselects_count,
-            "recent_activity": recent_activity
+            "recent_activity": recent_activity,
+            "subscription": subscription,
+            "current_tier": current_tier,
+            "payment_methods": payment_methods,
+            "currency_symbol": currency_symbol
         }
     )
 
@@ -6016,6 +6029,10 @@ async def dashboard_billing(request: Request):
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
+    # Get user payment methods
+    payment_methods = db.get_user_payment_methods(user_id)
+    
+    # Get payment transactions
     transactions = db.get_user_payment_transactions(user_id)
     
     # Get enabled payment gateways
@@ -6031,6 +6048,7 @@ async def dashboard_billing(request: Request):
         context={
         "request": request,
         "session": request.session,
+        "payment_methods": payment_methods,
         "transactions": transactions,
         "enabled_gateways": enabled_gateways
     }
@@ -6053,15 +6071,208 @@ async def dashboard_add_payment_method(request: Request):
         if settings.get('enabled', False):
             enabled_gateways.append(gateway)
     
+    # Get Stripe publishable key
+    stripe_publishable_key = ""
+    if 'stripe' in gateways and gateways['stripe'].get('enabled'):
+        stripe_publishable_key = gateways['stripe'].get('publishable_key', '')
+    
     return templates.TemplateResponse(
         request=request,
         name="dashboard/add_payment_method.html",
         context={
             "request": request,
             "session": request.session,
-            "enabled_gateways": enabled_gateways
+            "enabled_gateways": enabled_gateways,
+            "stripe_publishable_key": stripe_publishable_key
         }
     )
+
+@app.post("/dashboard/billing/add-method")
+async def dashboard_add_payment_method_post(request: Request):
+    """Handle crypto default setting"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    data = await request.json()
+    user_id = request.session.get('user_id')
+    payment_type = data.get('type')
+    
+    if payment_type in ['bitcoin', 'eth', 'usdt', 'usdc']:
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        
+        # Set as default payment method
+        db.set_user_default_payment_method(user_id, payment_type)
+        
+        return JSONResponse({"success": True, "message": f"{payment_type.upper()} set as default payment method"})
+    
+    return JSONResponse({"success": False, "error": "Invalid payment type"}, status_code=400)
+
+@app.post("/dashboard/billing/add-method/stripe")
+async def dashboard_add_payment_method_stripe(request: Request):
+    """Handle Stripe payment method addition"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    data = await request.json()
+    user_id = request.session.get('user_id')
+    payment_method_id = data.get('payment_method_id')
+    
+    if not payment_method_id:
+        return JSONResponse({"success": False, "error": "Payment method ID required"}, status_code=400)
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    
+    # Store payment method in database
+    try:
+        method_id = db.add_payment_method(user_id, 'stripe', payment_method_id, is_default=True, metadata={'stripe_payment_method_id': payment_method_id})
+        return JSONResponse({"success": True, "message": "Credit card added successfully"})
+    except Exception as e:
+        logger.error(f"Error adding Stripe payment method: {e}")
+        return JSONResponse({"success": False, "error": "Failed to add payment method"}, status_code=500)
+
+@app.delete("/dashboard/billing/payment-methods/{method_id}")
+async def dashboard_delete_payment_method(request: Request, method_id: int):
+    """Delete a payment method"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    try:
+        # Delete the payment method
+        success = db.delete_payment_method(user_id, method_id)
+        
+        if success:
+            logger.info(f"Payment method {method_id} deleted for user {user_id}")
+            return JSONResponse({"success": True, "message": "Payment method deleted successfully"})
+        else:
+            return JSONResponse({"success": False, "error": "Payment method not found or already deleted"}, status_code=404)
+    except Exception as e:
+        logger.error(f"Error deleting payment method: {e}")
+        return JSONResponse({"success": False, "error": "Failed to delete payment method"}, status_code=500)
+
+@app.post("/dashboard/billing/payment-methods/{method_id}/set-default")
+async def dashboard_set_default_payment_method(request: Request, method_id: int):
+    """Set a payment method as default"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    try:
+        # Get the payment method to verify it belongs to the user
+        payment_methods = db.get_user_payment_methods(user_id)
+        method_exists = any(m['id'] == method_id for m in payment_methods)
+        
+        if not method_exists:
+            return JSONResponse({"success": False, "error": "Payment method not found"}, status_code=404)
+        
+        # Set as default by updating all methods for this user
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            
+            # Unset all defaults for this user
+            cursor.execute(f'''
+                UPDATE payment_methods SET is_default = 0
+                WHERE user_id = {placeholder}
+            ''', (user_id,))
+            
+            # Set the selected method as default
+            cursor.execute(f'''
+                UPDATE payment_methods SET is_default = 1
+                WHERE id = {placeholder} AND user_id = {placeholder}
+            ''', (method_id, user_id))
+            
+            conn.commit()
+        
+        logger.info(f"Payment method {method_id} set as default for user {user_id}")
+        return JSONResponse({"success": True, "message": "Payment method set as default"})
+    except Exception as e:
+        logger.error(f"Error setting default payment method: {e}")
+        return JSONResponse({"success": False, "error": "Failed to set default payment method"}, status_code=500)
+
+@app.get("/dashboard/billing/add-method/paypal/oauth")
+async def dashboard_add_payment_method_paypal_oauth(request: Request):
+    """Add PayPal as payment preference (simplified approach)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    # Get PayPal settings
+    gateways = db.get_payment_gateway_settings()
+    paypal_settings = gateways.get('paypal', {})
+    
+    if not paypal_settings.get('enabled'):
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/paypal_connect.html",
+            context={
+                "request": request,
+                "session": request.session,
+                "message": "PayPal is not enabled. Please contact the administrator."
+            }
+        )
+    
+    # Check if user already has PayPal as payment method
+    existing_methods = db.get_user_payment_methods(user_id)
+    for method in existing_methods:
+        if method.get('type') == 'paypal':
+            return RedirectResponse(
+                url="/dashboard/billing?error=PayPal is already added as a payment method",
+                status_code=302
+            )
+    
+    # Add PayPal as payment preference (no OAuth needed)
+    # This is a simplified approach - PayPal will be used at checkout time
+    try:
+        is_default = len(existing_methods) == 0  # First payment method is default
+        method_id = db.add_payment_method(
+            user_id=user_id,
+            method_type='paypal',
+            identifier='paypal_account',
+            is_default=is_default,
+            metadata={'type': 'preference', 'note': 'PayPal will be used at checkout'}
+        )
+        
+        if method_id:
+            logger.info(f"PayPal added as payment preference for user {user_id}")
+            return RedirectResponse(
+                url="/dashboard/billing?success=PayPal added as payment method. You'll be able to pay with PayPal at checkout.",
+                status_code=302
+            )
+        else:
+            return RedirectResponse(
+                url="/dashboard/billing?error=Failed to add PayPal as payment method",
+                status_code=302
+            )
+    except Exception as e:
+        logger.error(f"Error adding PayPal payment preference: {e}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=An error occurred while adding PayPal",
+            status_code=302
+        )
+
+@app.get("/dashboard/billing/add-method/paypal/callback")
+async def dashboard_add_payment_method_paypal_callback(request: Request):
+    """PayPal OAuth callback - deprecated, redirects to billing"""
+    # This endpoint is kept for backward compatibility but is no longer used
+    # with the simplified PayPal integration
+    return RedirectResponse(url="/dashboard/billing", status_code=302)
 
 @app.get("/dashboard/rate-limits")
 async def dashboard_rate_limits(request: Request):

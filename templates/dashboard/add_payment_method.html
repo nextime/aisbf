@@ -51,7 +51,7 @@
             </button>
             {% endif %}
             
-            {% if 'eth' in enabled_gateways %}
+             {% if 'ethereum' in enabled_gateways or 'eth' in enabled_gateways %}
             <button class="crypto-default" data-type="eth" style="background: #0f3460; border: 2px solid #627eea; border-radius: 8px; padding: 20px; text-align: center; cursor: pointer; transition: all 0.3s ease; color: #e0e0e0;">
                 <i class="fab fa-ethereum" style="font-size: 36px; color: #627eea; margin-bottom: 10px; display: block;"></i>
                 <strong style="display: block; font-size: 14px;">Ethereum</strong>
@@ -82,12 +82,30 @@
     </div>
 </div>
 
-<!-- Stripe Elements Container -->
-<div id="stripe-form" style="display: none;">
-    <form id="payment-form">
-        <div id="card-element"></div>
-        <button id="submit-button">Add Card</button>
-    </form>
+<!-- Stripe Elements Container (Modal) -->
+<div id="stripe-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000; align-items: center; justify-content: center;">
+    <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 30px; max-width: 500px; width: 90%; position: relative;">
+        <button id="close-stripe-modal" style="position: absolute; top: 15px; right: 15px; background: transparent; border: none; color: #e0e0e0; font-size: 24px; cursor: pointer; padding: 0; width: 30px; height: 30px; line-height: 1;">&times;</button>
+        
+        <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
+            <i class="fab fa-cc-stripe me-2"></i>Add Credit Card
+        </h3>
+        
+        <form id="payment-form">
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 8px; color: #e0e0e0; font-weight: 500;">Card Details</label>
+                <div id="card-element" style="background: #1a1a2e; padding: 12px; border: 1px solid #0f3460; border-radius: 4px;"></div>
+                <div id="card-errors" style="color: #dc3545; margin-top: 8px; font-size: 14px;"></div>
+            </div>
+            
+            <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button type="button" id="cancel-stripe" class="btn btn-secondary">Cancel</button>
+                <button type="submit" id="submit-button" class="btn">
+                    <i class="fas fa-plus me-2"></i>Add Card
+                </button>
+            </div>
+        </form>
+    </div>
 </div>
 
 {% endblock %}
@@ -96,6 +114,10 @@
 <script src="https://js.stripe.com/v3/"></script>
 <script>
 document.addEventListener('DOMContentLoaded', function() {
+    let stripe = null;
+    let cardElement = null;
+    let stripeInitialized = false;
+
     // Crypto default buttons
     document.querySelectorAll('.crypto-default').forEach(button => {
         button.addEventListener('click', function() {
@@ -126,43 +148,121 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
-    // Stripe button - show Stripe form
+    // Stripe button - show Stripe modal
     const stripeButton = document.getElementById('stripe-button');
-    if (stripeButton) {
+    const stripeModal = document.getElementById('stripe-modal');
+    const closeStripeModal = document.getElementById('close-stripe-modal');
+    const cancelStripe = document.getElementById('cancel-stripe');
+    
+    if (stripeButton && stripeModal) {
         stripeButton.addEventListener('click', function() {
-            document.getElementById('stripe-form').style.display = 'block';
-            // Initialize Stripe Elements
-            const stripe = Stripe('{{ stripe_publishable_key }}');
-            const elements = stripe.elements();
-            const cardElement = elements.create('card');
-            cardElement.mount('#card-element');
+            const stripeKey = '{{ stripe_publishable_key }}';
             
-            const form = document.getElementById('payment-form');
-            form.addEventListener('submit', async (event) => {
-                event.preventDefault();
+            if (!stripeKey) {
+                alert('Stripe is not configured. Please contact the administrator.');
+                return;
+            }
+            
+            // Show modal
+            stripeModal.style.display = 'flex';
+            
+            // Initialize Stripe Elements only once
+            if (!stripeInitialized) {
+                stripe = Stripe(stripeKey);
+                const elements = stripe.elements();
+                
+                // Create card element with custom styling
+                cardElement = elements.create('card', {
+                    style: {
+                        base: {
+                            color: '#e0e0e0',
+                            fontFamily: '"Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif',
+                            fontSize: '16px',
+                            '::placeholder': {
+                                color: '#a0a0a0'
+                            }
+                        },
+                        invalid: {
+                            color: '#dc3545',
+                            iconColor: '#dc3545'
+                        }
+                    }
+                });
+                
+                cardElement.mount('#card-element');
+                
+                // Handle real-time validation errors
+                cardElement.on('change', function(event) {
+                    const displayError = document.getElementById('card-errors');
+                    if (event.error) {
+                        displayError.textContent = event.error.message;
+                    } else {
+                        displayError.textContent = '';
+                    }
+                });
+                
+                stripeInitialized = true;
+            }
+        });
+        
+        // Close modal handlers
+        closeStripeModal.addEventListener('click', function() {
+            stripeModal.style.display = 'none';
+        });
+        
+        cancelStripe.addEventListener('click', function() {
+            stripeModal.style.display = 'none';
+        });
+        
+        // Close modal when clicking outside
+        stripeModal.addEventListener('click', function(e) {
+            if (e.target === stripeModal) {
+                stripeModal.style.display = 'none';
+            }
+        });
+        
+        // Handle form submission
+        const form = document.getElementById('payment-form');
+        form.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            
+            const submitButton = document.getElementById('submit-button');
+            submitButton.disabled = true;
+            submitButton.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing...';
+            
+            try {
                 const {error, paymentMethod} = await stripe.createPaymentMethod({
                     type: 'card',
                     card: cardElement,
                 });
+                
                 if (error) {
-                    alert(error.message);
+                    document.getElementById('card-errors').textContent = error.message;
+                    submitButton.disabled = false;
+                    submitButton.innerHTML = '<i class="fas fa-plus me-2"></i>Add Card';
                 } else {
                     // Send payment method ID to server
-                    fetch('/dashboard/billing/add-method/stripe', {
+                    const response = await fetch('/dashboard/billing/add-method/stripe', {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ payment_method_id: paymentMethod.id })
-                    })
-                    .then(response => response.json())
-                    .then(data => {
-                        if (data.success) {
-                            window.location.href = '/dashboard/billing?success=' + encodeURIComponent(data.message);
-                        } else {
-                            alert('Error: ' + data.error);
-                        }
                     });
+                    
+                    const data = await response.json();
+                    
+                    if (data.success) {
+                        window.location.href = '/dashboard/billing?success=' + encodeURIComponent(data.message);
+                    } else {
+                        document.getElementById('card-errors').textContent = data.error || 'Failed to add payment method';
+                        submitButton.disabled = false;
+                        submitButton.innerHTML = '<i class="fas fa-plus me-2"></i>Add Card';
+                    }
                 }
-            });
+            } catch (err) {
+                document.getElementById('card-errors').textContent = 'An unexpected error occurred. Please try again.';
+                submitButton.disabled = false;
+                submitButton.innerHTML = '<i class="fas fa-plus me-2"></i>Add Card';
+            }
         });
     }
 });

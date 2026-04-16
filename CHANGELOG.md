@@ -7,6 +7,91 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.26] - 2026-04-16
+
+### Added
+- **User Dashboard Subscription Section**
+  - Added subscription information display at bottom of user dashboard
+  - Shows current plan/tier with pricing details
+  - Displays subscription status and renewal date
+  - Conditional "Add Payment Method" button (only shown when no payment methods exist)
+  - Links directly to billing page for payment method management
+
+- **PayPal OAuth 2.0 Integration** (Complete)
+  - Full OAuth 2.0 authentication flow for PayPal account connection
+  - CSRF protection with state token generation and validation
+  - Authorization code exchange for access token
+  - User information retrieval from PayPal API (email, user ID, name)
+  - Duplicate account detection to prevent multiple connections
+  - Secure storage of PayPal credentials and access tokens
+  - Sandbox and production mode support
+  - New endpoints:
+    - `GET /dashboard/billing/add-method/paypal/oauth` - Initiates OAuth flow
+    - `GET /dashboard/billing/add-method/paypal/callback` - Handles OAuth callback
+  - New template: `templates/dashboard/paypal_connect.html` for error handling
+
+- **Comprehensive Payment Documentation**
+  - `PAYPAL_SETUP.md` - Detailed PayPal configuration guide with step-by-step instructions
+  - `PAYMENT_INTEGRATION_SUMMARY.md` - Complete technical overview with API endpoints and database schema
+  - `DEPLOYMENT_CHECKLIST.md` - Production deployment guide with testing procedures
+  - `QUICK_START_PAYMENT.md` - Quick reference guide for 5-minute setup
+
+### Fixed
+- **Stripe Credit Card Integration**
+  - Fixed non-functional "Add Credit Card" button
+  - Replaced inline form with professional modal dialog interface
+  - Implemented proper Stripe Elements initialization (prevents multiple instances)
+  - Added real-time card validation with inline error display
+  - Implemented loading states during payment processing
+  - Added modal close functionality (× button, Cancel button, click outside)
+  - Custom styling to match AISBF dark theme
+  - Improved error handling with user-friendly messages
+
+### Changed
+- **Enhanced Payment Method Display**
+  - Updated `get_user_payment_methods()` in `aisbf/database.py`
+  - Added display field logic for different payment types:
+    - PayPal: Extracts email from metadata
+    - Stripe: Extracts last 4 digits from identifier
+    - Cryptocurrency: Extracts wallet address
+  - Improved payment method cards in billing page
+  - Better icon display for each payment type
+
+- **Updated Dependencies**
+  - Added `paypalrestsdk` to `requirements.txt` for PayPal REST API integration
+
+- **Version Updates**
+  - Updated version to 0.99.26 in:
+    - `setup.py`
+    - `pyproject.toml`
+    - `aisbf/__init__.py`
+
+### Security
+- **Payment Integration Security Features**
+  - CSRF protection with state tokens for OAuth flows
+  - Session validation on all payment endpoints
+  - Secure token storage in database
+  - Duplicate payment method detection
+  - Input validation on all payment forms
+  - HTTPS requirement for production PayPal OAuth
+
+### Templates Modified
+- `templates/dashboard/add_payment_method.html` - Stripe modal UI implementation
+- `templates/dashboard/billing.html` - Enhanced payment method display
+- `templates/dashboard/user_index.html` - Added subscription section
+- `templates/dashboard/subscription.html` - Updated styling
+- `templates/dashboard/pricing.html` - Updated styling
+
+### Templates Added
+- `templates/dashboard/paypal_connect.html` - PayPal error/configuration page
+
+### Documentation
+- All 32 templates verified and included in `setup.py`
+- PyPI configuration files updated and ready for distribution
+- Comprehensive payment integration documentation created
+
+## [0.99.25] - Previous Release
+
 ### Added
 - ✅ **OAuth2 Authentication Support**
   - Google OAuth2 authentication and signup

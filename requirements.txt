@@ -25,3 +25,4 @@ mysql-connector-python
 redis
 flask
 curl_cffi>=0.5.0  # Optional: For TLS fingerprinting to bypass Cloudflare (Claude OAuth2)
+paypalrestsdk  # PayPal REST API SDK

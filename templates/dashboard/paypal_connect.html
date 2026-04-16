@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+
+{% block title %}PayPal Connection - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<div style="max-width: 600px; margin: 50px auto; text-align: center;">
+    <div style="background: #16213e; border: 2px solid #ffc107; border-radius: 8px; padding: 40px;">
+        <i class="fab fa-paypal" style="font-size: 64px; color: #0070ba; margin-bottom: 20px;"></i>
+        
+        <h2 style="margin-bottom: 20px; color: #e0e0e0;">PayPal Connection Error</h2>
+        
+        <div style="background: #1a1a2e; border: 1px solid #ffc107; border-radius: 4px; padding: 20px; margin-bottom: 30px;">
+            <p style="color: #a0a0a0; margin: 0;">
+                {{ message if message else "Unable to connect to PayPal at this time." }}
+            </p>
+        </div>
+        
+        <div style="color: #a0a0a0; margin-bottom: 30px;">
+            <p style="margin-bottom: 15px;">You can use these alternative payment methods:</p>
+            <ul style="list-style: none; padding: 0;">
+                <li style="margin-bottom: 10px;">
+                    <i class="fab fa-cc-stripe" style="color: #4a9eff;"></i> Credit Card via Stripe
+                </li>
+                <li style="margin-bottom: 10px;">
+                    <i class="fab fa-bitcoin" style="color: #ffc107;"></i> Cryptocurrency (Bitcoin, Ethereum, USDT, USDC)
+                </li>
+            </ul>
+        </div>
+        
+        <div style="display: flex; gap: 10px; justify-content: center;">
+            <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn">
+                <i class="fas fa-arrow-left me-2"></i>Back to Payment Methods
+            </a>
+            <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn btn-secondary">
+                <i class="fas fa-wallet me-2"></i>Go to Billing
+            </a>
+        </div>
+    </div>
+</div>
+{% endblock %}

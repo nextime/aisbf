@@ -2322,12 +2322,34 @@ class DatabaseManager:
             ''', (user_id,))
             methods = []
             for row in cursor.fetchall():
-                methods.append({
-                    'id': row[0], 'type': row[1], 'identifier': row[2],
-                    'is_default': bool(row[3]), 'is_active': bool(row[4]),
+                method_data = {
+                    'id': row[0], 
+                    'type': row[1], 
+                    'identifier': row[2],
+                    'is_default': bool(row[3]), 
+                    'is_active': bool(row[4]),
                     'metadata': json.loads(row[5]) if row[5] else {},
                     'created_at': row[6]
-                })
+                }
+                
+                # Add display fields based on type
+                if method_data['type'] == 'paypal':
+                    metadata = method_data['metadata']
+                    method_data['email'] = metadata.get('paypal_email', method_data['identifier'])
+                    method_data['last4'] = None
+                elif method_data['type'] == 'stripe':
+                    # Extract last4 from identifier or metadata
+                    method_data['last4'] = method_data['identifier'][-4:] if len(method_data['identifier']) >= 4 else None
+                    method_data['email'] = None
+                elif method_data['type'] in ['bitcoin', 'ethereum', 'eth', 'usdt', 'usdc']:
+                    method_data['address'] = method_data['identifier']
+                    method_data['email'] = None
+                    method_data['last4'] = None
+                else:
+                    method_data['email'] = None
+                    method_data['last4'] = None
+                
+                methods.append(method_data)
             return methods
 
     def add_payment_method(self, user_id: int, method_type: str, identifier: str,
@@ -2360,6 +2382,44 @@ class DatabaseManager:
             ''', (method_id, user_id))
             conn.commit()
             return cursor.rowcount > 0
+
+    def set_user_default_payment_method(self, user_id: int, method_type: str) -> bool:
+        """Set a payment method type as default for crypto payments."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            try:
+                # First, unset any existing default
+                cursor.execute(f'''
+                    UPDATE payment_methods SET is_default = 0
+                    WHERE user_id = {placeholder}
+                ''', (user_id,))
+                
+                # Check if user already has this payment method type
+                cursor.execute(f'''
+                    SELECT id FROM payment_methods
+                    WHERE user_id = {placeholder} AND type = {placeholder}
+                ''', (user_id, method_type))
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing to be default
+                    cursor.execute(f'''
+                        UPDATE payment_methods SET is_default = 1
+                        WHERE id = {placeholder}
+                    ''', (existing[0],))
+                else:
+                    # Create new payment method entry
+                    cursor.execute(f'''
+                        INSERT INTO payment_methods (user_id, type, identifier, is_default, metadata)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, 1, NULL)
+                    ''', (user_id, method_type, 'default'))
+                
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Error setting default payment method: {e}")
+                return False
 
     def get_user_subscription(self, user_id: int) -> Optional[Dict]:
         """Get current active subscription for a user."""

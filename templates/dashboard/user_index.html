@@ -156,6 +156,43 @@
             </tbody>
         </table>
     </div>
+
+    <!-- Subscription Status -->
+    {% if current_tier %}
+    <div class="card">
+        <h2>Subscription</h2>
+        <div class="subscription-info">
+            <div class="plan-info">
+                <h3>{{ current_tier.name }}</h3>
+                {% if current_tier.is_default %}
+                <span class="free-tier-badge">Free Tier</span>
+                {% else %}
+                <div class="plan-price">
+                    <span class="price">{{ currency_symbol }}{{ current_tier.price_monthly }}/month</span>
+                    <span class="price-secondary">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</span>
+                </div>
+                {% endif %}
+            </div>
+
+            {% if subscription %}
+            <div class="subscription-details">
+                <div class="subscription-status">
+                    <span class="status-badge status-{{ subscription.status }}">{{ subscription.status|title }}</span>
+                    {% if subscription.expires_at %}
+                    <span class="renewal-date">Renews: {{ subscription.expires_at }}</span>
+                    {% endif %}
+                </div>
+            </div>
+            {% endif %}
+
+            {% if not payment_methods or payment_methods|length == 0 %}
+            <div class="payment-method-section">
+                <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary">Add Payment Method</a>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <style>
@@ -323,6 +360,96 @@
     background: rgba(0,0,0,0.3);
     padding: 0.2rem 0.4rem;
     border-radius: 3px;
+}
+
+/* Subscription Section */
+.subscription-info {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+
+.plan-info h3 {
+    margin: 0 0 0.5rem 0;
+    color: #e0e0e0;
+}
+
+.free-tier-badge {
+    background: #28a745;
+    color: white;
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.plan-price {
+    margin-top: 0.5rem;
+}
+
+.price {
+    font-size: 1.5rem;
+    font-weight: bold;
+    color: #4ade80;
+}
+
+.price-secondary {
+    color: #a0a0a0;
+    font-size: 0.9rem;
+    margin-left: 0.5rem;
+}
+
+.subscription-details {
+    text-align: center;
+}
+
+.subscription-status {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.status-badge {
+    padding: 4px 12px;
+    border-radius: 15px;
+    font-size: 12px;
+    font-weight: bold;
+}
+
+.status-active {
+    background: #28a745;
+    color: white;
+}
+
+.status-canceled {
+    background: #ffc107;
+    color: black;
+}
+
+.status-expired,
+.status-suspended {
+    background: #dc3545;
+    color: white;
+}
+
+.renewal-date {
+    color: #a0a0a0;
+    font-size: 0.9rem;
+}
+
+.payment-method-section {
+    text-align: center;
+    margin-top: 1rem;
+}
+
+@media (max-width: 768px) {
+    .subscription-info {
+        flex-direction: column;
+        text-align: center;
+    }
 }
 </style>
 {% endblock %}
