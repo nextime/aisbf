@@ -801,6 +801,8 @@ async function saveConsolidationConfig() {
         usdc: parseFloat(document.getElementById('consolidationUSDC').value)
     };
     
+    console.log('Saving consolidation config:', config);
+    
     try {
         const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config/consolidation") }}', {
             method: 'PUT',
@@ -808,12 +810,16 @@ async function saveConsolidationConfig() {
             body: JSON.stringify(config)
         });
         
-        if (response.ok) {
-            showToast('Consolidation settings saved', 'success');
+        const result = await response.json();
+        console.log('Save response:', result);
+        
+        if (response.ok && result.success) {
+            showToast('Consolidation settings saved successfully', 'success');
         } else {
-            showToast('Failed to save consolidation settings', 'danger');
+            showToast(result.error || 'Failed to save consolidation settings', 'danger');
         }
     } catch (error) {
+        console.error('Error saving consolidation settings:', error);
         showToast('Error saving consolidation settings: ' + error.message, 'danger');
     }
 }

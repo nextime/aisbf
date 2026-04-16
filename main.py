@@ -6529,6 +6529,8 @@ async def update_payment_consolidation_config(request: Request):
         body = await request.json()
         db = DatabaseRegistry.get_config_database()
         
+        logger.info(f"Received consolidation config update: {body}")
+        
         with db._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if db.db_type == 'sqlite' else '%s'
@@ -6549,6 +6551,7 @@ async def update_payment_consolidation_config(request: Request):
                         setting.get('enabled', True),
                         setting['crypto_type']
                     ))
+                    logger.info(f"Updated {setting['crypto_type']} threshold to {setting['threshold']}")
             else:
                 # New format - simple key-value pairs
                 crypto_map = {
@@ -6558,6 +6561,7 @@ async def update_payment_consolidation_config(request: Request):
                     'usdc': 'USDC'
                 }
                 
+                updated_count = 0
                 for key, crypto_type in crypto_map.items():
                     if key in body:
                         threshold = float(body[key])
@@ -6566,13 +6570,20 @@ async def update_payment_consolidation_config(request: Request):
                             SET threshold_amount = {placeholder}
                             WHERE crypto_type = {placeholder}
                         """, (threshold, crypto_type))
+                        rows_affected = cursor.rowcount
+                        logger.info(f"Updated {crypto_type} threshold to {threshold}, rows affected: {rows_affected}")
+                        updated_count += rows_affected
+                
+                if updated_count == 0:
+                    logger.warning("No rows were updated - records may not exist in database")
             
             conn.commit()
+            logger.info("Consolidation settings committed to database")
         
         return JSONResponse({'success': True, 'message': 'Consolidation settings updated'})
     except Exception as e:
-        logger.error(f"Error updating consolidation settings: {e}")
-        return JSONResponse({'error': str(e)}, status_code=500)
+        logger.error(f"Error updating consolidation settings: {e}", exc_info=True)
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
 @app.post("/api/admin/config/consolidation")
 async def update_consolidation_config(request: Request):
