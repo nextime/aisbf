@@ -825,27 +825,97 @@ async function saveConsolidationConfig() {
 }
 
 function showToast(message, type) {
-    const toastContainer = document.createElement('div');
-    toastContainer.className = 'position-fixed top-0 end-0 p-3';
-    toastContainer.style.zIndex = '9999';
-    toastContainer.innerHTML = `
-        <div class="toast show" role="alert" style="min-width: 300px;">
-            <div class="toast-header bg-${type} text-white">
-                <strong class="me-auto">Notification</strong>
-                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
-            </div>
-            <div class="toast-body">
-                ${message}
-            </div>
-        </div>
-    `;
-    document.body.appendChild(toastContainer);
+    // Remove any existing alerts
+    const existingAlerts = document.querySelectorAll('.payment-alert');
+    existingAlerts.forEach(alert => alert.remove());
     
+    // Create prominent alert at top of page
+    const alertDiv = document.createElement('div');
+    alertDiv.className = 'payment-alert';
+    alertDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10000;
+        min-width: 400px;
+        max-width: 600px;
+        padding: 20px 30px;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        font-size: 16px;
+        font-weight: 500;
+        text-align: center;
+        animation: slideDown 0.3s ease-out;
+    `;
+    
+    // Set colors based on type
+    if (type === 'success') {
+        alertDiv.style.background = 'linear-gradient(135deg, #27ae60 0%, #2ecc71 100%)';
+        alertDiv.style.color = 'white';
+        alertDiv.style.border = '2px solid #27ae60';
+        alertDiv.innerHTML = `
+            <i class="fas fa-check-circle" style="font-size: 24px; margin-right: 10px; vertical-align: middle;"></i>
+            <span style="vertical-align: middle;">${message}</span>
+        `;
+    } else if (type === 'danger') {
+        alertDiv.style.background = 'linear-gradient(135deg, #e74c3c 0%, #c0392b 100%)';
+        alertDiv.style.color = 'white';
+        alertDiv.style.border = '2px solid #e74c3c';
+        alertDiv.innerHTML = `
+            <i class="fas fa-exclamation-circle" style="font-size: 24px; margin-right: 10px; vertical-align: middle;"></i>
+            <span style="vertical-align: middle;">${message}</span>
+        `;
+    } else if (type === 'warning') {
+        alertDiv.style.background = 'linear-gradient(135deg, #f39c12 0%, #e67e22 100%)';
+        alertDiv.style.color = 'white';
+        alertDiv.style.border = '2px solid #f39c12';
+        alertDiv.innerHTML = `
+            <i class="fas fa-exclamation-triangle" style="font-size: 24px; margin-right: 10px; vertical-align: middle;"></i>
+            <span style="vertical-align: middle;">${message}</span>
+        `;
+    }
+    
+    // Add animation keyframes
+    if (!document.getElementById('alertAnimations')) {
+        const style = document.createElement('style');
+        style.id = 'alertAnimations';
+        style.textContent = `
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateX(-50%) translateY(-20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
+            }
+            @keyframes slideUp {
+                from {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
+                to {
+                    opacity: 0;
+                    transform: translateX(-50%) translateY(-20px);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(alertDiv);
+    
+    // Auto-remove after 4 seconds with fade out animation
     setTimeout(() => {
-        if (toastContainer.parentNode) {
-            toastContainer.parentNode.removeChild(toastContainer);
-        }
-    }, 5000);
+        alertDiv.style.animation = 'slideUp 0.3s ease-out';
+        setTimeout(() => {
+            if (alertDiv.parentNode) {
+                alertDiv.parentNode.removeChild(alertDiv);
+            }
+        }, 300);
+    }, 4000);
 }
 
 
