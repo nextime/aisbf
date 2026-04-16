@@ -732,12 +732,22 @@ function savePaymentGateways() {
         },
         body: JSON.stringify(gatewaysData)
     })
-    .then(response => response.json())
+    .then(response => {
+        if (!response.ok) {
+            throw new Error('Failed to save payment gateway configuration');
+        }
+        return response.json();
+    })
     .then(result => {
-        showToast('Payment gateway configuration saved successfully', 'success');
+        if (result.success) {
+            showToast('Payment gateway configuration saved successfully', 'success');
+        } else {
+            showToast(result.error || 'Error saving payment gateway configuration', 'danger');
+        }
     })
     .catch(error => {
-        showToast('Error saving payment gateway configuration', 'danger');
+        console.error('Error saving payment gateways:', error);
+        showToast('Error saving payment gateway configuration: ' + error.message, 'danger');
     });
 }
 
