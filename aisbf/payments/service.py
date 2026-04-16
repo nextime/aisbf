@@ -18,10 +18,14 @@ class PaymentService:
         from aisbf.payments.crypto.wallet import CryptoWalletManager
         from aisbf.payments.crypto.pricing import CryptoPriceService
         from aisbf.payments.crypto.monitor import BlockchainMonitor
+        from aisbf.payments.fiat.stripe_handler import StripeHandler
+        from aisbf.payments.fiat.paypal_handler import PayPalHandler
         
         self.wallet_manager = CryptoWalletManager(db_manager, config['encryption_key'])
         self.price_service = CryptoPriceService(db_manager, config)
         self.blockchain_monitor = BlockchainMonitor(db_manager, config)
+        self.stripe_handler = StripeHandler(db_manager, config)
+        self.paypal_handler = PayPalHandler(db_manager, config)
     
     async def initialize(self):
         """Initialize payment service (run on startup)"""
@@ -100,4 +104,124 @@ class PaymentService:
             
         except Exception as e:
             logger.error(f"Error adding crypto payment method: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def add_stripe_payment_method(self, user_id: int, payment_method_id: str) -> dict:
+        """Add Stripe payment method for user"""
+        try:
+            result = await self.stripe_handler.add_payment_method(user_id, payment_method_id)
+            return result
+        except Exception as e:
+            logger.error(f"Error adding Stripe payment method: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def initiate_paypal_billing_agreement(self, user_id: int, return_url: str, cancel_url: str) -> dict:
+        """Initiate PayPal billing agreement setup"""
+        try:
+            result = await self.paypal_handler.create_billing_agreement(
+                user_id, 
+                return_url, 
+                cancel_url
+            )
+            return result
+        except Exception as e:
+            logger.error(f"Error initiating PayPal billing agreement: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def complete_paypal_billing_agreement(self, user_id: int, token: str) -> dict:
+        """Complete PayPal billing agreement after user approval"""
+        try:
+            result = await self.paypal_handler.execute_billing_agreement(user_id, token)
+            return result
+        except Exception as e:
+            logger.error(f"Error completing PayPal billing agreement: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def get_payment_methods(self, user_id: int) -> list:
+        """Get all payment methods for user"""
+        try:
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+                cursor.execute(f"""
+                    SELECT id, type, gateway, crypto_type, last4, brand, 
+                           paypal_email, is_default, status, created_at
+                    FROM payment_methods
+                    WHERE user_id = {placeholder}
+                    ORDER BY is_default DESC, created_at DESC
+                """, (user_id,))
+                methods = cursor.fetchall()
+            
+            return [
+                {
+                    'id': method[0],
+                    'type': method[1],
+                    'gateway': method[2],
+                    'crypto_type': method[3],
+                    'last4': method[4],
+                    'brand': method[5],
+                    'paypal_email': method[6],
+                    'is_default': bool(method[7]),
+                    'status': method[8],
+                    'created_at': method[9]
+                }
+                for method in methods
+            ]
+        except Exception as e:
+            logger.error(f"Error getting payment methods: {e}")
+            return []
+    
+    async def delete_payment_method(self, user_id: int, payment_method_id: int) -> dict:
+        """Delete payment method with validation"""
+        try:
+            # Check if payment method is used by active subscription
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+                
+                # Verify ownership
+                cursor.execute(f"""
+                    SELECT id, type, gateway FROM payment_methods
+                    WHERE id = {placeholder} AND user_id = {placeholder}
+                """, (payment_method_id, user_id))
+                method = cursor.fetchone()
+                
+                if not method:
+                    return {'success': False, 'error': 'Payment method not found'}
+                
+                # Check for active subscriptions using this method
+                cursor.execute(f"""
+                    SELECT COUNT(*) FROM subscriptions
+                    WHERE user_id = {placeholder} 
+                    AND payment_method_id = {placeholder}
+                    AND status IN ('active', 'trialing')
+                """, (user_id, payment_method_id))
+                active_count = cursor.fetchone()[0]
+                
+                if active_count > 0:
+                    return {
+                        'success': False, 
+                        'error': 'Cannot delete payment method used by active subscription'
+                    }
+                
+                # Delete from gateway if needed
+                method_type = method[1]
+                gateway = method[2]
+                
+                if method_type == 'card' and gateway == 'stripe':
+                    await self.stripe_handler.delete_payment_method(user_id, payment_method_id)
+                elif method_type == 'paypal':
+                    await self.paypal_handler.cancel_billing_agreement(user_id, payment_method_id)
+                
+                # Delete from database
+                cursor.execute(f"""
+                    DELETE FROM payment_methods
+                    WHERE id = {placeholder} AND user_id = {placeholder}
+                """, (payment_method_id, user_id))
+                conn.commit()
+            
+            return {'success': True}
+            
+        except Exception as e:
+            logger.error(f"Error deleting payment method: {e}")
             return {'success': False, 'error': str(e)}
