@@ -9,6 +9,51 @@
             <i class="fas fa-cog me-2"></i>Payment System Settings
         </h2>
 
+        <!-- Encryption Key Configuration -->
+        <div style="background: #16213e; border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #e74c3c;">
+                <i class="fas fa-key me-2"></i>Encryption Key Configuration
+            </h3>
+            
+            <div style="margin-bottom: 20px; padding: 15px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #e74c3c;">
+                <div style="color: #e74c3c; font-weight: bold; margin-bottom: 5px;">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Critical Security Setting
+                </div>
+                <div style="color: #e0e0e0; font-size: 14px;">
+                    The encryption key is used to encrypt HD wallet master keys. Once set, DO NOT change it or you will lose access to all crypto wallets.
+                    If not set, a temporary key is generated on each restart (not recommended for production).
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">
+                    Encryption Key Status
+                </label>
+                <div id="encryptionKeyStatus" style="padding: 15px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #e0e0e0;">
+                    <i class="fas fa-spinner fa-spin"></i> Loading...
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">
+                    Set New Encryption Key (44 characters, base64)
+                </label>
+                <input type="text" id="encryptionKey" placeholder="Leave empty to auto-generate" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-family: monospace;">
+                <div style="margin-top: 10px; color: #888; font-size: 14px;">
+                    <i class="fas fa-info-circle me-2"></i>Leave empty to auto-generate a secure key. Copy and save it securely - you cannot retrieve it later.
+                </div>
+            </div>
+            
+            <div style="display: flex; gap: 10px;">
+                <button type="button" class="btn" onclick="generateEncryptionKey()" style="background: #9b59b6; color: white;">
+                    <i class="fas fa-random me-2"></i>Generate Random Key
+                </button>
+                <button type="button" class="btn" onclick="saveEncryptionKey()" style="background: #e74c3c; color: white;">
+                    <i class="fas fa-save me-2"></i>Save Encryption Key
+                </button>
+            </div>
+        </div>
+
         <!-- System Status -->
         <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
@@ -395,6 +440,73 @@
 </div>
 
 <script>
+// Load encryption key status
+async function loadEncryptionKeyStatus() {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/settings/encryption-key") }}');
+        const data = await response.json();
+        
+        const statusEl = document.getElementById('encryptionKeyStatus');
+        if (data.is_set) {
+            statusEl.innerHTML = '<i class="fas fa-check-circle" style="color: #27ae60;"></i> Encryption key is configured (Source: ' + data.source + ')';
+        } else {
+            statusEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i> No encryption key set - using temporary key (will change on restart)';
+        }
+    } catch (error) {
+        console.error('Error loading encryption key status:', error);
+        document.getElementById('encryptionKeyStatus').innerHTML = '<i class="fas fa-times-circle" style="color: #e74c3c;"></i> Error loading status';
+    }
+}
+
+// Generate random encryption key
+function generateEncryptionKey() {
+    // Generate 32 random bytes and encode as base64 (44 characters)
+    const array = new Uint8Array(32);
+    crypto.getRandomValues(array);
+    const base64 = btoa(String.fromCharCode.apply(null, array));
+    document.getElementById('encryptionKey').value = base64;
+    showToast('Random encryption key generated. Save it securely!', 'warning');
+}
+
+// Save encryption key
+async function saveEncryptionKey() {
+    const key = document.getElementById('encryptionKey').value.trim();
+    
+    if (!key) {
+        showToast('Please enter or generate an encryption key', 'danger');
+        return;
+    }
+    
+    if (key.length !== 44) {
+        showToast('Encryption key must be 44 characters (base64 encoded)', 'danger');
+        return;
+    }
+    
+    if (!confirm('WARNING: Setting or changing the encryption key will affect all encrypted data. Are you sure?')) {
+        return;
+    }
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/settings/encryption-key") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({encryption_key: key})
+        });
+        
+        const result = await response.json();
+        
+        if (response.ok && result.success) {
+            showToast('Encryption key saved successfully. Server restart required to take effect.', 'success');
+            document.getElementById('encryptionKey').value = '';
+            loadEncryptionKeyStatus();
+        } else {
+            showToast(result.error || 'Failed to save encryption key', 'danger');
+        }
+    } catch (error) {
+        showToast('Error saving encryption key: ' + error.message, 'danger');
+    }
+}
+
 // Load system status
 async function loadSystemStatus() {
     try {
@@ -707,6 +819,7 @@ function savePaymentGateways() {
 
 // Load data on page load - update to include payment gateways
 document.addEventListener('DOMContentLoaded', function() {
+    loadEncryptionKeyStatus();
     loadSystemStatus();
     loadConfiguration();
     loadPaymentGateways();

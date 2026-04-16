@@ -1160,14 +1160,25 @@ async def startup_event():
     # Initialize payment service
     global payment_service
     try:
-        # Generate or load encryption key
-        encryption_key = os.getenv('ENCRYPTION_KEY')
+        # Load encryption key from database, fallback to env var, then generate temporary
+        db_manager = DatabaseRegistry.get_config_database()
+        encryption_key = db_manager.get_encryption_key()
+        encryption_key_source = 'database'
+        
+        if not encryption_key:
+            encryption_key = os.getenv('ENCRYPTION_KEY')
+            encryption_key_source = 'environment'
+        
         if not encryption_key:
             encryption_key = Fernet.generate_key().decode()
-            logger.warning("No ENCRYPTION_KEY set, generated temporary key")
+            encryption_key_source = 'temporary'
+            logger.warning("No ENCRYPTION_KEY set in database or environment, generated temporary key")
+        else:
+            logger.info(f"Loaded ENCRYPTION_KEY from {encryption_key_source}")
         
         payment_config = {
             'encryption_key': encryption_key,
+            'encryption_key_source': encryption_key_source,
             'base_url': os.getenv('BASE_URL', 'http://localhost:17765'),
             'currency_code': 'USD',
             'btc_confirmations': 3,
@@ -6205,6 +6216,67 @@ async def api_save_payment_gateways(request: Request):
     except Exception as e:
         logger.error(f"Error saving payment gateway settings: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/settings/encryption-key")
+async def api_get_encryption_key_status(request: Request):
+    """Get encryption key status - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        db = DatabaseRegistry.get_config_database()
+        encryption_key = db.get_encryption_key()
+        
+        # Check if key is set in database or environment
+        env_key = os.getenv('ENCRYPTION_KEY')
+        
+        if encryption_key:
+            source = 'database'
+            is_set = True
+        elif env_key:
+            source = 'environment'
+            is_set = True
+        else:
+            source = 'temporary'
+            is_set = False
+        
+        return JSONResponse({
+            "is_set": is_set,
+            "source": source
+        })
+    except Exception as e:
+        logger.error(f"Error getting encryption key status: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.post("/api/admin/settings/encryption-key")
+async def api_save_encryption_key(request: Request):
+    """Save encryption key - API endpoint"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        encryption_key = body.get('encryption_key', '').strip()
+        
+        if not encryption_key:
+            return JSONResponse({"success": False, "error": "Encryption key is required"}, status_code=400)
+        
+        if len(encryption_key) != 44:
+            return JSONResponse({"success": False, "error": "Encryption key must be 44 characters (base64 encoded)"}, status_code=400)
+        
+        db = DatabaseRegistry.get_config_database()
+        success = db.save_encryption_key(encryption_key)
+        
+        if success:
+            logger.info("Encryption key saved to database by admin")
+            return JSONResponse({"success": True, "message": "Encryption key saved successfully. Restart server to apply."})
+        else:
+            return JSONResponse({"success": False, "error": "Failed to save encryption key"}, status_code=500)
+    except Exception as e:
+        logger.error(f"Error saving encryption key: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
 # Admin configuration API endpoints

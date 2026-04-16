@@ -2503,6 +2503,45 @@ class DatabaseManager:
             
             return default_gateways
 
+    def get_encryption_key(self) -> Optional[str]:
+        """Get encryption key from admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                cursor.execute(f'''
+                    SELECT setting_value
+                    FROM admin_settings
+                    WHERE setting_key = {placeholder}
+                ''', ('encryption_key',))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return row[0]
+            except Exception as e:
+                logger.warning(f"Error loading encryption key: {e}")
+            
+            return None
+
+    def save_encryption_key(self, encryption_key: str) -> bool:
+        """Save encryption key to admin_settings table."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                insert_syntax = 'INSERT OR REPLACE' if self.db_type == 'sqlite' else 'REPLACE'
+                cursor.execute(f'''
+                    {insert_syntax} INTO admin_settings (setting_key, setting_value, updated_at)
+                    VALUES ({placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', ('encryption_key', encryption_key))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Error saving encryption key: {e}")
+                conn.rollback()
+                return False
+
     def save_payment_gateway_settings(self, settings: Dict) -> bool:
         """Save payment gateway settings to admin_settings table."""
         with self._get_connection() as conn:
