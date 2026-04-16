@@ -1701,6 +1701,108 @@ async def add_crypto_payment_method(request: Request):
     
     return result
 
+
+# Fiat payment API endpoints
+@app.post("/api/payment-methods/stripe")
+async def add_stripe_payment_method(request: Request):
+    """Add Stripe payment method"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.add_stripe_payment_method(
+        current_user['id'],
+        body['payment_method_token']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/payment-methods/paypal/initiate")
+async def initiate_paypal_payment_method(request: Request):
+    """Initiate PayPal billing agreement"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.initiate_paypal_billing_agreement(
+        current_user['id'],
+        body['return_url'],
+        body['cancel_url']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/payment-methods/paypal/complete")
+async def complete_paypal_payment_method(request: Request):
+    """Complete PayPal billing agreement"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.complete_paypal_billing_agreement(
+        current_user['id'],
+        body['token']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.get("/api/payment-methods")
+async def get_payment_methods(request: Request):
+    """Get user's payment methods"""
+    current_user = await get_current_user(request)
+    methods = await payment_service.get_payment_methods(current_user['id'])
+    return {'payment_methods': methods}
+
+
+@app.delete("/api/payment-methods/{payment_method_id}")
+async def delete_payment_method(payment_method_id: int, request: Request):
+    """Delete payment method"""
+    current_user = await get_current_user(request)
+    
+    result = await payment_service.delete_payment_method(
+        current_user['id'],
+        payment_method_id
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/webhooks/stripe")
+async def stripe_webhook(request: Request):
+    """Handle Stripe webhooks"""
+    stripe_signature = request.headers.get("Stripe-Signature")
+    payload = await request.body()
+    
+    result = await payment_service.stripe_handler.handle_webhook(
+        payload,
+        stripe_signature
+    )
+    
+    return result
+
+
+@app.post("/api/webhooks/paypal")
+async def paypal_webhook(request: Request):
+    """Handle PayPal webhooks"""
+    payload = await request.json()
+    headers = dict(request.headers)
+    
+    result = await payment_service.paypal_handler.handle_webhook(payload, headers)
+    
+    return result
+
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
 async def dashboard_analytics(
