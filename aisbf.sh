@@ -161,7 +161,29 @@ ensure_venv() {
         # Install requirements if requirements.txt exists
         if [ -f "$SHARE_DIR/requirements.txt" ]; then
             echo "Installing requirements from $SHARE_DIR/requirements.txt"
-            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: Failed to install Python dependencies"
+                echo "=========================================="
+                echo ""
+                echo "Some packages require system libraries to build."
+                echo "If you see errors about 'coincurve', 'bip32', or 'secp256k1', install:"
+                echo ""
+                echo "  Ubuntu/Debian:"
+                echo "    sudo apt-get update"
+                echo "    sudo apt-get install pkg-config libsecp256k1-dev build-essential"
+                echo ""
+                echo "  RHEL/CentOS/Fedora:"
+                echo "    sudo yum install pkgconfig libsecp256k1-devel gcc"
+                echo ""
+                echo "  Alpine Linux:"
+                echo "    sudo apk add pkgconfig libsecp256k1-dev gcc musl-dev"
+                echo ""
+                echo "After installing system dependencies, run this script again."
+                echo ""
+                exit 1
+            fi
             # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
             "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
         fi
@@ -174,7 +196,17 @@ ensure_venv() {
             echo "Package upgrade detected, updating venv dependencies..."
             # Only update requirements, aisbf is accessed from system site-packages
             if [ -f "$SHARE_DIR/requirements.txt" ]; then
-                "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+                if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
+                    echo ""
+                    echo "=========================================="
+                    echo "ERROR: Failed to update Python dependencies"
+                    echo "=========================================="
+                    echo ""
+                    echo "Some packages require system libraries. See error messages above."
+                    echo "You may need to install system dependencies (pkg-config, libsecp256k1-dev, build-essential)"
+                    echo ""
+                    exit 1
+                fi
                 # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
                 "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             fi
@@ -194,7 +226,22 @@ update_venv() {
         
         if [ $ALREADY_SATISFIED -ne 0 ]; then
             echo "Installing new requirements (this will take a while!) ... "
-            "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"
+            if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
+                echo ""
+                echo "=========================================="
+                echo "ERROR: Failed to install Python dependencies"
+                echo "=========================================="
+                echo ""
+                echo "Some packages require system libraries. Install them with:"
+                echo ""
+                echo "  Ubuntu/Debian:"
+                echo "    sudo apt-get install pkg-config libsecp256k1-dev build-essential"
+                echo ""
+                echo "  RHEL/CentOS:"
+                echo "    sudo yum install pkgconfig libsecp256k1-devel gcc"
+                echo ""
+                exit 1
+            fi
             # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
             "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             echo "[OK]"

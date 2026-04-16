@@ -18,14 +18,14 @@ class PaymentService:
         from aisbf.payments.crypto.wallet import CryptoWalletManager
         from aisbf.payments.crypto.pricing import CryptoPriceService
         from aisbf.payments.crypto.monitor import BlockchainMonitor
-        from aisbf.payments.fiat.stripe_handler import StripeHandler
-        from aisbf.payments.fiat.paypal_handler import PayPalHandler
+        from aisbf.payments.fiat.stripe_handler import StripePaymentHandler
+        from aisbf.payments.fiat.paypal_handler import PayPalPaymentHandler
         
         self.wallet_manager = CryptoWalletManager(db_manager, config['encryption_key'])
         self.price_service = CryptoPriceService(db_manager, config)
         self.blockchain_monitor = BlockchainMonitor(db_manager, config)
-        self.stripe_handler = StripeHandler(db_manager, config)
-        self.paypal_handler = PayPalHandler(db_manager, config)
+        self.stripe_handler = StripePaymentHandler(db_manager, config)
+        self.paypal_handler = PayPalPaymentHandler(db_manager, config)
         
         # Initialize subscription sub-services
         from aisbf.payments.subscription.manager import SubscriptionManager
