@@ -6533,19 +6533,39 @@ async def update_payment_consolidation_config(request: Request):
             cursor = conn.cursor()
             placeholder = '?' if db.db_type == 'sqlite' else '%s'
             
-            for setting in body.get('consolidation_settings', []):
-                cursor.execute(f"""
-                    UPDATE crypto_consolidation_settings
-                    SET threshold_amount = {placeholder},
-                        admin_address = {placeholder},
-                        is_enabled = {placeholder}
-                    WHERE crypto_type = {placeholder}
-                """, (
-                    setting['threshold'],
-                    setting['admin_address'],
-                    setting['enabled'],
-                    setting['crypto_type']
-                ))
+            # Handle both old format (consolidation_settings array) and new format (btc/eth/usdt/usdc keys)
+            if 'consolidation_settings' in body:
+                # Old format
+                for setting in body['consolidation_settings']:
+                    cursor.execute(f"""
+                        UPDATE crypto_consolidation_settings
+                        SET threshold_amount = {placeholder},
+                            admin_address = {placeholder},
+                            is_enabled = {placeholder}
+                        WHERE crypto_type = {placeholder}
+                    """, (
+                        setting['threshold'],
+                        setting.get('admin_address', ''),
+                        setting.get('enabled', True),
+                        setting['crypto_type']
+                    ))
+            else:
+                # New format - simple key-value pairs
+                crypto_map = {
+                    'btc': 'BTC',
+                    'eth': 'ETH',
+                    'usdt': 'USDT',
+                    'usdc': 'USDC'
+                }
+                
+                for key, crypto_type in crypto_map.items():
+                    if key in body:
+                        threshold = float(body[key])
+                        cursor.execute(f"""
+                            UPDATE crypto_consolidation_settings
+                            SET threshold_amount = {placeholder}
+                            WHERE crypto_type = {placeholder}
+                        """, (threshold, crypto_type))
             
             conn.commit()
         
