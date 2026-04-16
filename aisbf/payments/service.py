@@ -34,10 +34,11 @@ class PaymentService:
         # Get enabled crypto types
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            cursor.execute(f"""
                 SELECT crypto_type FROM crypto_consolidation_settings
-                WHERE enabled = TRUE
-            """)
+                WHERE enabled = {placeholder}
+            """, (True,))
             enabled_cryptos = cursor.fetchall()
         
         for crypto_config in enabled_cryptos:
@@ -54,10 +55,11 @@ class PaymentService:
         """Get user's crypto wallet balances"""
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            cursor.execute(f"""
                 SELECT crypto_type, balance_crypto, balance_fiat, last_updated
                 FROM user_crypto_wallets
-                WHERE user_id = ?
+                WHERE user_id = {placeholder}
             """, (user_id,))
             wallets = cursor.fetchall()
         
@@ -82,11 +84,12 @@ class PaymentService:
             # Create payment method entry
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+                cursor.execute(f"""
                     INSERT INTO payment_methods
                     (user_id, type, gateway, crypto_type, is_default, status)
-                    VALUES (?, 'crypto', ?, ?, TRUE, 'active')
-                """, (user_id, crypto_type, crypto_type))
+                    VALUES ({placeholder}, 'crypto', {placeholder}, {placeholder}, {placeholder}, 'active')
+                """, (user_id, crypto_type, crypto_type, True))
                 conn.commit()
             
             return {
