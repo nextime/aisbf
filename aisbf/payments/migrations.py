@@ -86,6 +86,7 @@ class PaymentMigrations:
                 user_id INTEGER NOT NULL,
                 crypto_type VARCHAR(20) NOT NULL,
                 address VARCHAR(255) NOT NULL UNIQUE,
+                derivation_path VARCHAR(100) NOT NULL,
                 derivation_index INTEGER NOT NULL,
                 created_at TIMESTAMP DEFAULT {timestamp_default},
                 FOREIGN KEY (user_id) REFERENCES users(id),
