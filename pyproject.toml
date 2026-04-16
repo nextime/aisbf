@@ -48,7 +48,17 @@ Documentation = "https://git.nexlab.net/nexlab/aisbf.git"
 "Bug Tracker" = "https://git.nexlab.net/nexlab/aisbf.git/issues"
 
 [tool.setuptools]
-packages = ["aisbf", "aisbf.auth", "aisbf.providers", "aisbf.providers.kiro"]
+packages = [
+    "aisbf", 
+    "aisbf.auth", 
+    "aisbf.providers", 
+    "aisbf.providers.kiro",
+    "aisbf.payments",
+    "aisbf.payments.crypto",
+    "aisbf.payments.fiat",
+    "aisbf.payments.subscription",
+    "aisbf.payments.notifications"
+]
 # Note: Provider handler modules (base, google, openai, anthropic, claude, kilo, ollama, codex) are in aisbf.providers package
 py-modules = ["cli"]
 include-package-data = true
