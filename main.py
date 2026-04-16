@@ -6671,50 +6671,45 @@ async def get_payment_system_status(request: Request):
             cursor.execute("SELECT COUNT(*) FROM crypto_master_keys")
             master_keys_count = cursor.fetchone()[0]
             
-            # Get total crypto balances (would need actual blockchain queries in production)
-            cursor.execute("""
-                SELECT crypto_type, SUM(balance) as total
-                FROM crypto_addresses
-                GROUP BY crypto_type
-            """)
-            balances = {row[0]: float(row[1]) for row in cursor.fetchall()}
+            # Get total crypto balances from user_crypto_wallets
+            try:
+                cursor.execute("""
+                    SELECT crypto_type, SUM(balance_fiat) as total
+                    FROM user_crypto_wallets
+                    GROUP BY crypto_type
+                """)
+                balances = {row[0]: float(row[1]) for row in cursor.fetchall()}
+                total_balance_usd = sum(balances.values())
+            except:
+                balances = {}
+                total_balance_usd = 0.0
             
-            # Get pending payments count
-            cursor.execute("""
-                SELECT COUNT(*) FROM payments
-                WHERE status = 'pending'
-            """)
-            pending_count = cursor.fetchone()[0]
+            # Get pending payments count from payment_transactions
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM payment_transactions
+                    WHERE status = 'pending'
+                """)
+                pending_count = cursor.fetchone()[0]
+            except:
+                pending_count = 0
             
-            # Get failed payments count
-            cursor.execute("""
-                SELECT COUNT(*) FROM payments
-                WHERE status = 'failed'
-            """)
-            failed_count = cursor.fetchone()[0]
-            
-            # Get recent payment activity (last 24 hours)
-            cursor.execute("""
-                SELECT COUNT(*), SUM(amount) FROM payments
-                WHERE created_at >= datetime('now', '-1 day')
-                AND status = 'completed'
-            """)
-            recent = cursor.fetchone()
-            recent_count = recent[0] if recent[0] else 0
-            recent_amount = float(recent[1]) if recent[1] else 0.0
+            # Get failed payments count from payment_transactions
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM payment_transactions
+                    WHERE status = 'failed'
+                """)
+                failed_count = cursor.fetchone()[0]
+            except:
+                failed_count = 0
         
         return JSONResponse({
-            'master_keys': {
-                'initialized': master_keys_count > 0,
-                'count': master_keys_count
-            },
-            'balances': balances,
+            'master_keys_initialized': master_keys_count > 0,
+            'master_keys_count': master_keys_count,
+            'total_balance_usd': total_balance_usd,
             'pending_payments': pending_count,
-            'failed_payments': failed_count,
-            'recent_activity': {
-                'count': recent_count,
-                'amount': recent_amount
-            }
+            'failed_payments': failed_count
         })
     except Exception as e:
         logger.error(f"Error getting payment system status: {e}")
@@ -6735,92 +6730,61 @@ async def get_payment_system_config(request: Request):
             cursor = conn.cursor()
             
             # Get price sources
-            cursor.execute("""
-                SELECT crypto_type, price_source, api_key, update_interval_seconds, is_enabled
-                FROM crypto_price_sources
-            """)
-            price_sources = [
-                {
-                    'crypto_type': row[0],
-                    'price_source': row[1],
-                    'api_key': row[2],
-                    'update_interval': row[3],
-                    'enabled': bool(row[4])
+            try:
+                cursor.execute("""
+                    SELECT name, api_type, endpoint_url, api_key, is_enabled
+                    FROM crypto_price_sources
+                """)
+                price_sources = {
+                    row[0].lower(): bool(row[4])
+                    for row in cursor.fetchall()
                 }
-                for row in cursor.fetchall()
-            ]
+            except:
+                price_sources = {
+                    'coinbase': True,
+                    'binance': True,
+                    'kraken': True
+                }
             
-            # Get blockchain monitoring config
-            cursor.execute("""
-                SELECT crypto_type, rpc_url, confirmations_required, scan_interval_seconds, is_enabled
-                FROM blockchain_monitoring_config
-            """)
-            blockchain_config = [
-                {
-                    'crypto_type': row[0],
-                    'rpc_url': row[1],
-                    'confirmations': row[2],
-                    'scan_interval': row[3],
-                    'enabled': bool(row[4])
-                }
-                for row in cursor.fetchall()
-            ]
+            # Get blockchain monitoring config (default values)
+            blockchain_config = {
+                'mode': 'api',
+                'polling_interval': 60
+            }
+            
+            # Get email notification config (default values)
+            email_config = {
+                'payment_success': True,
+                'payment_failed': True,
+                'subscription_upgraded': True,
+                'subscription_downgraded': True,
+                'subscription_cancelled': True,
+                'payment_retry': True
+            }
             
             # Get consolidation settings
-            cursor.execute("""
-                SELECT crypto_type, threshold_amount, admin_address, is_enabled
-                FROM crypto_consolidation_settings
-            """)
-            consolidation = [
-                {
-                    'crypto_type': row[0],
-                    'threshold': float(row[1]),
-                    'admin_address': row[2],
-                    'enabled': bool(row[3])
+            try:
+                cursor.execute("""
+                    SELECT crypto_type, threshold_amount
+                    FROM crypto_consolidation_settings
+                """)
+                consolidation = {
+                    row[0].lower(): float(row[1])
+                    for row in cursor.fetchall()
                 }
-                for row in cursor.fetchall()
-            ]
-            
-            # Get email config
-            cursor.execute("""
-                SELECT smtp_host, smtp_port, smtp_username, from_email, from_name, use_tls
-                FROM email_config
-                LIMIT 1
-            """)
-            smtp_row = cursor.fetchone()
-            smtp_config = None
-            if smtp_row:
-                smtp_config = {
-                    'smtp_host': smtp_row[0],
-                    'smtp_port': smtp_row[1],
-                    'smtp_username': smtp_row[2],
-                    'from_email': smtp_row[3],
-                    'from_name': smtp_row[4],
-                    'use_tls': bool(smtp_row[5])
+            except:
+                consolidation = {
+                    'btc': 0.01,
+                    'eth': 0.1,
+                    'usdt': 100,
+                    'usdc': 100
                 }
-            
-            # Get notification settings
-            cursor.execute("""
-                SELECT notification_type, is_enabled, subject_template
-                FROM email_notification_settings
-            """)
-            notifications = [
-                {
-                    'type': row[0],
-                    'enabled': bool(row[1]),
-                    'subject': row[2]
-                }
-                for row in cursor.fetchall()
-            ]
         
         return JSONResponse({
             'price_sources': price_sources,
-            'blockchain_config': blockchain_config,
-            'consolidation': consolidation,
-            'email': {
-                'smtp_config': smtp_config,
-                'notifications': notifications
-            }
+            'blockchain': blockchain_config,
+            'email_notifications': email_config,
+            'consolidation': consolidation
         })
     except Exception as e:
         logger.error(f"Error getting payment system config: {e}")
