@@ -1803,6 +1803,81 @@ async def paypal_webhook(request: Request):
     
     return result
 
+
+# Subscription API endpoints
+@app.post("/api/subscriptions")
+async def create_subscription(request: Request):
+    """Create new subscription"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.create_subscription(
+        current_user['id'],
+        body['tier_id'],
+        body['payment_method_id'],
+        body['billing_cycle']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/subscriptions/upgrade")
+async def upgrade_subscription(request: Request):
+    """Upgrade subscription"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.upgrade_subscription(
+        current_user['id'],
+        body['tier_id']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/subscriptions/downgrade")
+async def downgrade_subscription(request: Request):
+    """Downgrade subscription"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.downgrade_subscription(
+        current_user['id'],
+        body['tier_id']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.post("/api/subscriptions/cancel")
+async def cancel_subscription(request: Request):
+    """Cancel subscription"""
+    current_user = await get_current_user(request)
+    
+    result = await payment_service.cancel_subscription(current_user['id'])
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
+
+
+@app.get("/api/subscriptions/status")
+async def get_subscription_status(request: Request):
+    """Get subscription status"""
+    current_user = await get_current_user(request)
+    status = await payment_service.get_subscription_status(current_user['id'])
+    return {'subscription': status}
+
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
 async def dashboard_analytics(

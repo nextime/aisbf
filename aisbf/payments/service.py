@@ -26,6 +26,23 @@ class PaymentService:
         self.blockchain_monitor = BlockchainMonitor(db_manager, config)
         self.stripe_handler = StripeHandler(db_manager, config)
         self.paypal_handler = PayPalHandler(db_manager, config)
+        
+        # Initialize subscription sub-services
+        from aisbf.payments.subscription.manager import SubscriptionManager
+        from aisbf.payments.subscription.renewal import SubscriptionRenewalProcessor
+        
+        self.subscription_manager = SubscriptionManager(
+            db_manager,
+            self.stripe_handler,
+            self.paypal_handler,
+            self.wallet_manager,
+            self.price_service
+        )
+        
+        self.renewal_processor = SubscriptionRenewalProcessor(
+            db_manager,
+            self.subscription_manager
+        )
     
     async def initialize(self):
         """Initialize payment service (run on startup)"""
@@ -225,3 +242,57 @@ class PaymentService:
         except Exception as e:
             logger.error(f"Error deleting payment method: {e}")
             return {'success': False, 'error': str(e)}
+    
+    async def create_subscription(self, user_id: int, tier_id: int, 
+                                 payment_method_id: int, 
+                                 billing_cycle: str) -> dict:
+        """Create new subscription"""
+        return await self.subscription_manager.create_subscription(
+            user_id, tier_id, payment_method_id, billing_cycle
+        )
+    
+    async def upgrade_subscription(self, user_id: int, new_tier_id: int) -> dict:
+        """Upgrade subscription"""
+        return await self.subscription_manager.upgrade_subscription(user_id, new_tier_id)
+    
+    async def downgrade_subscription(self, user_id: int, new_tier_id: int) -> dict:
+        """Downgrade subscription"""
+        return await self.subscription_manager.downgrade_subscription(user_id, new_tier_id)
+    
+    async def cancel_subscription(self, user_id: int) -> dict:
+        """Cancel subscription"""
+        return await self.subscription_manager.cancel_subscription(user_id)
+    
+    async def get_subscription_status(self, user_id: int) -> dict:
+        """Get user's subscription status"""
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            cursor.execute(f"""
+                SELECT s.*, t.name as tier_name, t.price_monthly, t.price_yearly,
+                       pm.type as payment_type, pm.gateway
+                FROM subscriptions s
+                JOIN tiers t ON s.tier_id = t.id
+                LEFT JOIN payment_methods pm ON s.payment_method_id = pm.id
+                WHERE s.user_id = {placeholder}
+                ORDER BY s.created_at DESC
+                LIMIT 1
+            """, (user_id,))
+            
+            row = cursor.fetchone()
+            if not row:
+                return None
+            
+            # Get column names
+            columns = [desc[0] for desc in cursor.description]
+            subscription = dict(zip(columns, row))
+            
+            return subscription
+    
+    async def process_renewals(self):
+        """Process subscription renewals (called by scheduler)"""
+        await self.renewal_processor.process_due_renewals()
+    
+    async def process_retries(self):
+        """Process payment retries (called by scheduler)"""
+        await self.renewal_processor.process_retry_queue()
