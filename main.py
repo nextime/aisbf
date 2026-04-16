@@ -6195,6 +6195,327 @@ async def api_save_payment_gateways(request: Request):
         return JSONResponse({"error": str(e)}, status_code=500)
 
 
+# Admin configuration API endpoints
+@app.get("/api/admin/config/price-sources")
+async def get_price_sources(request: Request):
+    """Get crypto price source configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    db = DatabaseRegistry.get_config_database()
+    
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT crypto_type, price_source, api_key, update_interval_seconds, is_enabled
+            FROM crypto_price_sources
+        """)
+        rows = cursor.fetchall()
+    
+    sources = [
+        {
+            'crypto_type': row[0],
+            'price_source': row[1],
+            'api_key': row[2],
+            'update_interval': row[3],
+            'enabled': bool(row[4])
+        }
+        for row in rows
+    ]
+    
+    return JSONResponse({'price_sources': sources})
+
+
+@app.post("/api/admin/config/price-sources")
+async def update_price_sources(request: Request):
+    """Update crypto price source configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            
+            for source in body.get('price_sources', []):
+                cursor.execute(f"""
+                    UPDATE crypto_price_sources
+                    SET price_source = {placeholder},
+                        api_key = {placeholder},
+                        update_interval_seconds = {placeholder},
+                        is_enabled = {placeholder}
+                    WHERE crypto_type = {placeholder}
+                """, (
+                    source['price_source'],
+                    source.get('api_key'),
+                    source['update_interval'],
+                    source['enabled'],
+                    source['crypto_type']
+                ))
+            
+            conn.commit()
+        
+        return JSONResponse({'success': True, 'message': 'Price sources updated'})
+    except Exception as e:
+        logger.error(f"Error updating price sources: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/api/admin/config/consolidation")
+async def get_consolidation_config(request: Request):
+    """Get wallet consolidation configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    db = DatabaseRegistry.get_config_database()
+    
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT crypto_type, threshold_amount, admin_address, is_enabled
+            FROM crypto_consolidation_settings
+        """)
+        rows = cursor.fetchall()
+    
+    settings = [
+        {
+            'crypto_type': row[0],
+            'threshold': float(row[1]),
+            'admin_address': row[2],
+            'enabled': bool(row[3])
+        }
+        for row in rows
+    ]
+    
+    return JSONResponse({'consolidation_settings': settings})
+
+
+@app.post("/api/admin/config/consolidation")
+async def update_consolidation_config(request: Request):
+    """Update wallet consolidation configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            
+            for setting in body.get('consolidation_settings', []):
+                cursor.execute(f"""
+                    UPDATE crypto_consolidation_settings
+                    SET threshold_amount = {placeholder},
+                        admin_address = {placeholder},
+                        is_enabled = {placeholder}
+                    WHERE crypto_type = {placeholder}
+                """, (
+                    setting['threshold'],
+                    setting['admin_address'],
+                    setting['enabled'],
+                    setting['crypto_type']
+                ))
+            
+            conn.commit()
+        
+        return JSONResponse({'success': True, 'message': 'Consolidation settings updated'})
+    except Exception as e:
+        logger.error(f"Error updating consolidation settings: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/api/admin/config/email")
+async def get_email_config(request: Request):
+    """Get email notification configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    db = DatabaseRegistry.get_config_database()
+    
+    # Get SMTP config
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT smtp_host, smtp_port, smtp_username, from_email, from_name, use_tls
+            FROM email_config
+            LIMIT 1
+        """)
+        smtp_row = cursor.fetchone()
+        
+        # Get notification settings
+        cursor.execute("""
+            SELECT notification_type, is_enabled, subject_template
+            FROM email_notification_settings
+        """)
+        notif_rows = cursor.fetchall()
+    
+    smtp_config = None
+    if smtp_row:
+        smtp_config = {
+            'smtp_host': smtp_row[0],
+            'smtp_port': smtp_row[1],
+            'smtp_username': smtp_row[2],
+            'from_email': smtp_row[3],
+            'from_name': smtp_row[4],
+            'use_tls': bool(smtp_row[5])
+        }
+    
+    notifications = [
+        {
+            'type': row[0],
+            'enabled': bool(row[1]),
+            'subject': row[2]
+        }
+        for row in notif_rows
+    ]
+    
+    return JSONResponse({
+        'smtp_config': smtp_config,
+        'notifications': notifications
+    })
+
+
+@app.post("/api/admin/config/email")
+async def update_email_config(request: Request):
+    """Update email notification configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            
+            # Update SMTP config
+            if 'smtp_config' in body:
+                smtp = body['smtp_config']
+                
+                # Check if config exists
+                cursor.execute("SELECT id FROM email_config LIMIT 1")
+                exists = cursor.fetchone()
+                
+                if exists:
+                    cursor.execute(f"""
+                        UPDATE email_config
+                        SET smtp_host = {placeholder},
+                            smtp_port = {placeholder},
+                            smtp_username = {placeholder},
+                            smtp_password = {placeholder},
+                            from_email = {placeholder},
+                            from_name = {placeholder},
+                            use_tls = {placeholder}
+                    """, (
+                        smtp['smtp_host'],
+                        smtp['smtp_port'],
+                        smtp.get('smtp_username'),
+                        smtp.get('smtp_password'),
+                        smtp['from_email'],
+                        smtp.get('from_name'),
+                        smtp.get('use_tls', True)
+                    ))
+                else:
+                    cursor.execute(f"""
+                        INSERT INTO email_config
+                        (smtp_host, smtp_port, smtp_username, smtp_password, from_email, from_name, use_tls)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                    """, (
+                        smtp['smtp_host'],
+                        smtp['smtp_port'],
+                        smtp.get('smtp_username'),
+                        smtp.get('smtp_password'),
+                        smtp['from_email'],
+                        smtp.get('from_name'),
+                        smtp.get('use_tls', True)
+                    ))
+            
+            # Update notification settings
+            if 'notifications' in body:
+                for notif in body['notifications']:
+                    cursor.execute(f"""
+                        UPDATE email_notification_settings
+                        SET is_enabled = {placeholder},
+                            subject_template = {placeholder}
+                        WHERE notification_type = {placeholder}
+                    """, (
+                        notif['enabled'],
+                        notif['subject'],
+                        notif['type']
+                    ))
+            
+            conn.commit()
+        
+        return JSONResponse({'success': True, 'message': 'Email configuration updated'})
+    except Exception as e:
+        logger.error(f"Error updating email configuration: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/api/admin/scheduler/status")
+async def get_scheduler_status(request: Request):
+    """Get payment scheduler status"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    if not payment_service:
+        return JSONResponse({'error': 'Payment service not initialized'}, status_code=503)
+    
+    try:
+        from aisbf.payments.scheduler import PaymentScheduler
+        # Get scheduler from payment service if available
+        if hasattr(payment_service, 'scheduler'):
+            status = payment_service.scheduler.get_job_status()
+            return JSONResponse(status)
+        else:
+            return JSONResponse({'error': 'Scheduler not available'}, status_code=503)
+    except Exception as e:
+        logger.error(f"Error getting scheduler status: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.post("/api/admin/scheduler/run-job")
+async def run_scheduler_job(request: Request):
+    """Manually trigger a scheduler job"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    if not payment_service:
+        return JSONResponse({'error': 'Payment service not initialized'}, status_code=503)
+    
+    try:
+        body = await request.json()
+        job_name = body.get('job_name')
+        
+        if not job_name:
+            return JSONResponse({'error': 'job_name required'}, status_code=400)
+        
+        if hasattr(payment_service, 'scheduler'):
+            await payment_service.scheduler.run_job_now(job_name)
+            return JSONResponse({'success': True, 'message': f'Job {job_name} triggered'})
+        else:
+            return JSONResponse({'error': 'Scheduler not available'}, status_code=503)
+    except ValueError as e:
+        return JSONResponse({'error': str(e)}, status_code=400)
+    except Exception as e:
+        logger.error(f"Error running scheduler job: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
 
 @app.get("/dashboard/pricing")
 async def dashboard_pricing(request: Request):
