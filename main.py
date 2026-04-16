@@ -58,7 +58,7 @@ from collections import defaultdict
 from pathlib import Path
 import json
 import markdown
-from urllib.parse import urljoin
+from urllib.parse import urljoin, urlencode
 
 # Global variable to store custom config directory
 _custom_config_dir = None
@@ -6204,7 +6204,7 @@ async def dashboard_set_default_payment_method(request: Request, method_id: int)
 
 @app.get("/dashboard/billing/add-method/paypal/oauth")
 async def dashboard_add_payment_method_paypal_oauth(request: Request):
-    """Add PayPal as payment preference (simplified approach)"""
+    """Initiate PayPal OAuth 2.0 flow"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -6217,55 +6217,64 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
     gateways = db.get_payment_gateway_settings()
     paypal_settings = gateways.get('paypal', {})
     
+    # Validate PayPal is enabled
     if not paypal_settings.get('enabled'):
-        return templates.TemplateResponse(
-            request=request,
-            name="dashboard/paypal_connect.html",
-            context={
-                "request": request,
-                "session": request.session,
-                "message": "PayPal is not enabled. Please contact the administrator."
-            }
+        logger.warning(f"PayPal OAuth attempted but PayPal is not enabled (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=PayPal is not enabled",
+            status_code=302
+        )
+    
+    # Validate PayPal is configured
+    client_id = paypal_settings.get('client_id', '').strip()
+    if not client_id:
+        logger.error(f"PayPal OAuth attempted but client_id not configured (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=PayPal is not properly configured",
+            status_code=302
         )
     
     # Check if user already has PayPal as payment method
     existing_methods = db.get_user_payment_methods(user_id)
     for method in existing_methods:
         if method.get('type') == 'paypal':
+            logger.info(f"User {user_id} already has PayPal payment method")
             return RedirectResponse(
                 url="/dashboard/billing?error=PayPal is already added as a payment method",
                 status_code=302
             )
     
-    # Add PayPal as payment preference (no OAuth needed)
-    # This is a simplified approach - PayPal will be used at checkout time
-    try:
-        is_default = len(existing_methods) == 0  # First payment method is default
-        method_id = db.add_payment_method(
-            user_id=user_id,
-            method_type='paypal',
-            identifier='paypal_account',
-            is_default=is_default,
-            metadata={'type': 'preference', 'note': 'PayPal will be used at checkout'}
-        )
-        
-        if method_id:
-            logger.info(f"PayPal added as payment preference for user {user_id}")
-            return RedirectResponse(
-                url="/dashboard/billing?success=PayPal added as payment method. You'll be able to pay with PayPal at checkout.",
-                status_code=302
-            )
-        else:
-            return RedirectResponse(
-                url="/dashboard/billing?error=Failed to add PayPal as payment method",
-                status_code=302
-            )
-    except Exception as e:
-        logger.error(f"Error adding PayPal payment preference: {e}")
-        return RedirectResponse(
-            url="/dashboard/billing?error=An error occurred while adding PayPal",
-            status_code=302
-        )
+    # Generate CSRF state token
+    import secrets
+    state_token = secrets.token_hex(32)  # 64 hex characters
+    request.session['paypal_oauth_state'] = state_token
+    
+    # Determine PayPal URLs based on sandbox mode
+    is_sandbox = paypal_settings.get('sandbox', True)
+    if is_sandbox:
+        auth_base_url = "https://www.sandbox.paypal.com/signin/authorize"
+    else:
+        auth_base_url = "https://www.paypal.com/signin/authorize"
+    
+    # Construct callback URL
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = f"{base_url}/dashboard/billing/add-method/paypal/callback"
+    
+    # Build PayPal authorization URL
+    from urllib.parse import urlencode
+    params = {
+        'client_id': client_id,
+        'response_type': 'code',
+        'scope': 'openid profile email',
+        'redirect_uri': redirect_uri,
+        'state': state_token
+    }
+    paypal_auth_url = f"{auth_base_url}?{urlencode(params)}"
+    
+    logger.info(f"Initiating PayPal OAuth for user {user_id}, sandbox={is_sandbox}")
+    logger.debug(f"PayPal OAuth redirect_uri: {redirect_uri}")
+    
+    return RedirectResponse(url=paypal_auth_url, status_code=302)
 
 @app.get("/dashboard/billing/add-method/paypal/callback")
 async def dashboard_add_payment_method_paypal_callback(request: Request):
