@@ -26,3 +26,13 @@ redis
 flask
 curl_cffi>=0.5.0  # Optional: For TLS fingerprinting to bypass Cloudflare (Claude OAuth2)
 paypalrestsdk  # PayPal REST API SDK
+
+# Payment system dependencies
+stripe>=5.0.0
+httpx>=0.24.0
+cryptography>=41.0.0
+bip32>=3.4
+mnemonic>=0.20
+bitcoinlib>=0.6.14
+web3>=6.0.0
+eth-account>=0.9.0
