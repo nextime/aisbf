@@ -305,48 +305,149 @@
                 </label>
             </div>
             
-            <!-- Live BTC Price Display -->
-            <div style="margin-bottom: 20px; padding: 20px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #f7931a;">
-                <div style="color: #f7931a; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center;">
-                    <i class="fab fa-bitcoin me-2"></i>Live Bitcoin Price
-                    <button onclick="refreshBtcPrices()" style="margin-left: auto; background: transparent; border: 1px solid #f7931a; color: #f7931a; padding: 5px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">
+            <!-- Live Crypto Prices Display -->
+            <div style="margin-bottom: 20px; padding: 20px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #4a9eff;">
+                <div style="color: #4a9eff; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center;">
+                    <i class="fas fa-coins me-2"></i>Live Cryptocurrency Prices
+                    <button onclick="refreshCryptoPrices()" style="margin-left: auto; background: transparent; border: 1px solid #4a9eff; color: #4a9eff; padding: 5px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">
                         <i class="fas fa-sync-alt me-1"></i>Refresh
                     </button>
                 </div>
                 
-                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 15px;">
-                    <div style="background: #16213e; padding: 15px; border-radius: 8px;">
-                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">Coinbase</div>
-                        <div id="priceCoinbaseValue" style="color: #4a9eff; font-size: 20px; font-weight: bold;">
-                            <i class="fas fa-spinner fa-spin"></i>
+                <!-- Bitcoin -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #f7931a;">
+                    <div style="color: #f7931a; font-weight: bold; margin-bottom: 10px;">
+                        <i class="fab fa-bitcoin me-2"></i>Bitcoin (BTC)
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                            <div id="priceBtcCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Binance</div>
+                            <div id="priceBtcBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                            <div id="priceBtcKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
                         </div>
                     </div>
-                    
-                    <div style="background: #16213e; padding: 15px; border-radius: 8px;">
-                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">Binance</div>
-                        <div id="priceBinanceValue" style="color: #4a9eff; font-size: 20px; font-weight: bold;">
-                            <i class="fas fa-spinner fa-spin"></i>
-                        </div>
-                    </div>
-                    
-                    <div style="background: #16213e; padding: 15px; border-radius: 8px;">
-                        <div style="color: #888; font-size: 12px; margin-bottom: 5px;">Kraken</div>
-                        <div id="priceKrakenValue" style="color: #4a9eff; font-size: 20px; font-weight: bold;">
+                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #f7931a;">
+                        <div style="color: #f7931a; font-size: 12px; font-weight: bold;">Average (Applied)</div>
+                        <div id="priceBtcAverage" style="color: #f7931a; font-size: 20px; font-weight: bold;">
                             <i class="fas fa-spinner fa-spin"></i>
                         </div>
                     </div>
                 </div>
                 
-                <div style="background: #16213e; padding: 15px; border-radius: 8px; border: 2px solid #f7931a;">
-                    <div style="color: #f7931a; font-size: 14px; font-weight: bold; margin-bottom: 5px;">
-                        <i class="fas fa-calculator me-2"></i>Average Price (Applied)
+                <!-- Ethereum -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #627eea;">
+                    <div style="color: #627eea; font-weight: bold; margin-bottom: 10px;">
+                        <i class="fab fa-ethereum me-2"></i>Ethereum (ETH)
                     </div>
-                    <div id="priceAverageValue" style="color: #f7931a; font-size: 28px; font-weight: bold;">
-                        <i class="fas fa-spinner fa-spin"></i>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                            <div id="priceEthCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Binance</div>
+                            <div id="priceEthBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                            <div id="priceEthKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
                     </div>
-                    <div style="color: #888; font-size: 12px; margin-top: 5px;">
-                        Based on enabled sources • Last updated: <span id="priceLastUpdated">-</span>
+                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #627eea;">
+                        <div style="color: #627eea; font-size: 12px; font-weight: bold;">Average (Applied)</div>
+                        <div id="priceEthAverage" style="color: #627eea; font-size: 20px; font-weight: bold;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
                     </div>
+                </div>
+                
+                <!-- USDT -->
+                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #26a17b;">
+                    <div style="color: #26a17b; font-weight: bold; margin-bottom: 10px;">
+                        <i class="fas fa-dollar-sign me-2"></i>Tether (USDT)
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                            <div id="priceUsdtCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Binance</div>
+                            <div id="priceUsdtBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                            <div id="priceUsdtKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #26a17b;">
+                        <div style="color: #26a17b; font-size: 12px; font-weight: bold;">Average (Applied)</div>
+                        <div id="priceUsdtAverage" style="color: #26a17b; font-size: 20px; font-weight: bold;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- USDC -->
+                <div style="margin-bottom: 15px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #2775ca;">
+                    <div style="color: #2775ca; font-weight: bold; margin-bottom: 10px;">
+                        <i class="fas fa-coins me-2"></i>USD Coin (USDC)
+                    </div>
+                    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                            <div id="priceUsdcCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Binance</div>
+                            <div id="priceUsdcBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
+                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                            <div id="priceUsdcKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
+                                <i class="fas fa-spinner fa-spin"></i>
+                            </div>
+                        </div>
+                    </div>
+                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #2775ca;">
+                        <div style="color: #2775ca; font-size: 12px; font-weight: bold;">Average (Applied)</div>
+                        <div id="priceUsdcAverage" style="color: #2775ca; font-size: 20px; font-weight: bold;">
+                            <i class="fas fa-spinner fa-spin"></i>
+                        </div>
+                    </div>
+                </div>
+                
+                <div style="color: #888; font-size: 12px; text-align: center;">
+                    Last updated: <span id="priceLastUpdated">-</span>
                 </div>
             </div>
             
@@ -868,16 +969,16 @@ document.addEventListener('DOMContentLoaded', function() {
     loadSystemStatus();
     loadConfiguration();
     loadPaymentGateways();
-    loadBtcPrices();
+    loadCryptoPrices();
     
-    // Auto-refresh BTC prices every 60 seconds
-    setInterval(loadBtcPrices, 60000);
+    // Auto-refresh crypto prices every 60 seconds
+    setInterval(loadCryptoPrices, 60000);
 });
 
-// Load BTC prices from all sources
-async function loadBtcPrices() {
+// Load crypto prices from all sources
+async function loadCryptoPrices() {
     try {
-        const response = await fetch('{{ url_for(request, "/api/admin/crypto/btc-prices") }}');
+        const response = await fetch('{{ url_for(request, "/api/admin/crypto/prices") }}');
         const data = await response.json();
         
         // Get currency settings for symbol
@@ -885,56 +986,76 @@ async function loadBtcPrices() {
         const currencyData = await currencyResponse.json();
         const currencySymbol = currencyData.currency_symbol || '$';
         
-        // Update individual prices
-        if (data.coinbase !== null && data.coinbase !== undefined) {
-            document.getElementById('priceCoinbaseValue').textContent = currencySymbol + data.coinbase.toFixed(2);
-            document.getElementById('priceCoinbaseValue').style.color = '#27ae60';
-        } else {
-            document.getElementById('priceCoinbaseValue').innerHTML = '<span style="color: #888;">Disabled</span>';
-        }
+        // Update BTC prices
+        updateCryptoPrice('Btc', data.btc, currencySymbol);
         
-        if (data.binance !== null && data.binance !== undefined) {
-            document.getElementById('priceBinanceValue').textContent = currencySymbol + data.binance.toFixed(2);
-            document.getElementById('priceBinanceValue').style.color = '#27ae60';
-        } else {
-            document.getElementById('priceBinanceValue').innerHTML = '<span style="color: #888;">Disabled</span>';
-        }
+        // Update ETH prices
+        updateCryptoPrice('Eth', data.eth, currencySymbol);
         
-        if (data.kraken !== null && data.kraken !== undefined) {
-            document.getElementById('priceKrakenValue').textContent = currencySymbol + data.kraken.toFixed(2);
-            document.getElementById('priceKrakenValue').style.color = '#27ae60';
-        } else {
-            document.getElementById('priceKrakenValue').innerHTML = '<span style="color: #888;">Disabled</span>';
-        }
+        // Update USDT prices
+        updateCryptoPrice('Usdt', data.usdt, currencySymbol);
         
-        // Update average price
-        if (data.average !== null && data.average !== undefined) {
-            document.getElementById('priceAverageValue').textContent = currencySymbol + data.average.toFixed(2);
-            document.getElementById('priceAverageValue').style.color = '#f7931a';
-        } else {
-            document.getElementById('priceAverageValue').innerHTML = '<span style="color: #e74c3c;">No sources enabled</span>';
-        }
+        // Update USDC prices
+        updateCryptoPrice('Usdc', data.usdc, currencySymbol);
         
         // Update last updated time
         const now = new Date();
         document.getElementById('priceLastUpdated').textContent = now.toLocaleTimeString();
         
     } catch (error) {
-        console.error('Error loading BTC prices:', error);
-        document.getElementById('priceCoinbaseValue').innerHTML = '<span style="color: #e74c3c;">Error</span>';
-        document.getElementById('priceBinanceValue').innerHTML = '<span style="color: #e74c3c;">Error</span>';
-        document.getElementById('priceKrakenValue').innerHTML = '<span style="color: #e74c3c;">Error</span>';
-        document.getElementById('priceAverageValue').innerHTML = '<span style="color: #e74c3c;">Error loading</span>';
+        console.error('Error loading crypto prices:', error);
+        ['Btc', 'Eth', 'Usdt', 'Usdc'].forEach(crypto => {
+            document.getElementById(`price${crypto}Coinbase`).innerHTML = '<span style="color: #e74c3c;">Error</span>';
+            document.getElementById(`price${crypto}Binance`).innerHTML = '<span style="color: #e74c3c;">Error</span>';
+            document.getElementById(`price${crypto}Kraken`).innerHTML = '<span style="color: #e74c3c;">Error</span>';
+            document.getElementById(`price${crypto}Average`).innerHTML = '<span style="color: #e74c3c;">Error</span>';
+        });
     }
 }
 
-// Refresh BTC prices manually
-function refreshBtcPrices() {
-    document.getElementById('priceCoinbaseValue').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    document.getElementById('priceBinanceValue').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    document.getElementById('priceKrakenValue').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    document.getElementById('priceAverageValue').innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
-    loadBtcPrices();
+// Helper function to update individual crypto prices
+function updateCryptoPrice(crypto, priceData, currencySymbol) {
+    // Update Coinbase
+    if (priceData.coinbase !== null && priceData.coinbase !== undefined) {
+        document.getElementById(`price${crypto}Coinbase`).textContent = currencySymbol + priceData.coinbase.toFixed(2);
+        document.getElementById(`price${crypto}Coinbase`).style.color = '#27ae60';
+    } else {
+        document.getElementById(`price${crypto}Coinbase`).innerHTML = '<span style="color: #888;">Disabled</span>';
+    }
+    
+    // Update Binance
+    if (priceData.binance !== null && priceData.binance !== undefined) {
+        document.getElementById(`price${crypto}Binance`).textContent = currencySymbol + priceData.binance.toFixed(2);
+        document.getElementById(`price${crypto}Binance`).style.color = '#27ae60';
+    } else {
+        document.getElementById(`price${crypto}Binance`).innerHTML = '<span style="color: #888;">Disabled</span>';
+    }
+    
+    // Update Kraken
+    if (priceData.kraken !== null && priceData.kraken !== undefined) {
+        document.getElementById(`price${crypto}Kraken`).textContent = currencySymbol + priceData.kraken.toFixed(2);
+        document.getElementById(`price${crypto}Kraken`).style.color = '#27ae60';
+    } else {
+        document.getElementById(`price${crypto}Kraken`).innerHTML = '<span style="color: #888;">Disabled</span>';
+    }
+    
+    // Update Average
+    if (priceData.average !== null && priceData.average !== undefined) {
+        document.getElementById(`price${crypto}Average`).textContent = currencySymbol + priceData.average.toFixed(2);
+    } else {
+        document.getElementById(`price${crypto}Average`).innerHTML = '<span style="color: #e74c3c;">No sources</span>';
+    }
+}
+
+// Refresh crypto prices manually
+function refreshCryptoPrices() {
+    ['Btc', 'Eth', 'Usdt', 'Usdc'].forEach(crypto => {
+        document.getElementById(`price${crypto}Coinbase`).innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        document.getElementById(`price${crypto}Binance`).innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        document.getElementById(`price${crypto}Kraken`).innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+        document.getElementById(`price${crypto}Average`).innerHTML = '<i class="fas fa-spinner fa-spin"></i>';
+    });
+    loadCryptoPrices();
 }
 
 </script>

@@ -6249,9 +6249,9 @@ async def api_get_encryption_key_status(request: Request):
         logger.error(f"Error getting encryption key status: {e}")
         return JSONResponse({"error": str(e)}, status_code=500)
 
-@app.get("/api/admin/crypto/btc-prices")
-async def api_get_btc_prices(request: Request):
-    """Get BTC prices from all enabled sources - API endpoint"""
+@app.get("/api/admin/crypto/prices")
+async def api_get_crypto_prices(request: Request):
+    """Get crypto prices (BTC, ETH, USDT, USDC) from all enabled sources - API endpoint"""
     auth_check = require_admin(request)
     if auth_check:
         return auth_check
@@ -6276,74 +6276,110 @@ async def api_get_btc_prices(request: Request):
         currency_settings = db.get_currency_settings()
         currency_code = currency_settings.get('currency_code', 'USD')
         
-        prices = {}
-        enabled_prices = []
+        result = {}
         
-        # Fetch from Coinbase
-        if sources.get('coinbase', False):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    response = await client.get(f'https://api.coinbase.com/v2/prices/BTC-{currency_code}/spot')
-                    if response.status_code == 200:
-                        data = response.json()
-                        price = float(data['data']['amount'])
-                        prices['coinbase'] = price
-                        enabled_prices.append(price)
-            except Exception as e:
-                logger.warning(f"Error fetching Coinbase BTC price: {e}")
-                prices['coinbase'] = None
-        else:
-            prices['coinbase'] = None
-        
-        # Fetch from Binance
-        if sources.get('binance', False):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Binance uses USDT pairs, convert if needed
-                    symbol = 'BTCUSDT' if currency_code == 'USD' else f'BTC{currency_code}'
-                    response = await client.get(f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}')
-                    if response.status_code == 200:
-                        data = response.json()
-                        price = float(data['price'])
-                        prices['binance'] = price
-                        enabled_prices.append(price)
-            except Exception as e:
-                logger.warning(f"Error fetching Binance BTC price: {e}")
-                prices['binance'] = None
-        else:
-            prices['binance'] = None
-        
-        # Fetch from Kraken
-        if sources.get('kraken', False):
-            try:
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    # Kraken uses XBT instead of BTC
-                    pair = f'XXBTZ{currency_code}' if currency_code == 'USD' else f'XXBTZ{currency_code}'
-                    response = await client.get(f'https://api.kraken.com/0/public/Ticker?pair={pair}')
-                    if response.status_code == 200:
-                        data = response.json()
-                        if 'result' in data and data['result']:
-                            # Get first result key
-                            result_key = list(data['result'].keys())[0]
-                            price = float(data['result'][result_key]['c'][0])
-                            prices['kraken'] = price
+        # Fetch prices for each cryptocurrency
+        for crypto_symbol, crypto_name in [('BTC', 'btc'), ('ETH', 'eth'), ('USDT', 'usdt'), ('USDC', 'usdc')]:
+            prices = {}
+            enabled_prices = []
+            
+            # Fetch from Coinbase
+            if sources.get('coinbase', False):
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        response = await client.get(f'https://api.coinbase.com/v2/prices/{crypto_symbol}-{currency_code}/spot')
+                        if response.status_code == 200:
+                            data = response.json()
+                            price = float(data['data']['amount'])
+                            prices['coinbase'] = price
                             enabled_prices.append(price)
-            except Exception as e:
-                logger.warning(f"Error fetching Kraken BTC price: {e}")
+                except Exception as e:
+                    logger.warning(f"Error fetching Coinbase {crypto_symbol} price: {e}")
+                    prices['coinbase'] = None
+            else:
+                prices['coinbase'] = None
+            
+            # Fetch from Binance
+            if sources.get('binance', False):
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        # Binance uses USDT pairs for most, but handle stablecoins differently
+                        if crypto_symbol in ['USDT', 'USDC']:
+                            symbol = f'{crypto_symbol}USDT' if crypto_symbol == 'USDC' else 'USDCUSDT'
+                        else:
+                            symbol = f'{crypto_symbol}USDT' if currency_code == 'USD' else f'{crypto_symbol}{currency_code}'
+                        response = await client.get(f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}')
+                        if response.status_code == 200:
+                            data = response.json()
+                            price = float(data['price'])
+                            prices['binance'] = price
+                            enabled_prices.append(price)
+                except Exception as e:
+                    logger.warning(f"Error fetching Binance {crypto_symbol} price: {e}")
+                    prices['binance'] = None
+            else:
+                prices['binance'] = None
+            
+            # Fetch from Kraken
+            if sources.get('kraken', False):
+                try:
+                    async with httpx.AsyncClient(timeout=10.0) as client:
+                        # Kraken uses different symbols
+                        if crypto_symbol == 'BTC':
+                            pair = f'XXBTZ{currency_code}'
+                        elif crypto_symbol == 'ETH':
+                            pair = f'XETHZ{currency_code}'
+                        elif crypto_symbol == 'USDT':
+                            pair = f'USDTZ{currency_code}'
+                        elif crypto_symbol == 'USDC':
+                            pair = f'USDCZ{currency_code}'
+                        
+                        response = await client.get(f'https://api.kraken.com/0/public/Ticker?pair={pair}')
+                        if response.status_code == 200:
+                            data = response.json()
+                            if 'result' in data and data['result']:
+                                # Get first result key
+                                result_key = list(data['result'].keys())[0]
+                                price = float(data['result'][result_key]['c'][0])
+                                prices['kraken'] = price
+                                enabled_prices.append(price)
+                except Exception as e:
+                    logger.warning(f"Error fetching Kraken {crypto_symbol} price: {e}")
+                    prices['kraken'] = None
+            else:
                 prices['kraken'] = None
-        else:
-            prices['kraken'] = None
+            
+            # Calculate average
+            if enabled_prices:
+                prices['average'] = sum(enabled_prices) / len(enabled_prices)
+            else:
+                prices['average'] = None
+            
+            result[crypto_name] = prices
         
-        # Calculate average
-        if enabled_prices:
-            prices['average'] = sum(enabled_prices) / len(enabled_prices)
-        else:
-            prices['average'] = None
-        
-        return JSONResponse(prices)
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Error getting crypto prices: {e}")
+        return JSONResponse({"error": str(e)}, status_code=500)
+
+@app.get("/api/admin/crypto/btc-prices")
+async def api_get_btc_prices(request: Request):
+    """Get BTC prices from all enabled sources - API endpoint (legacy, redirects to /prices)"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        # Call the new endpoint and extract BTC data
+        full_response = await api_get_crypto_prices(request)
+        if isinstance(full_response, JSONResponse):
+            import json
+            data = json.loads(full_response.body.decode())
+            if 'btc' in data:
+                return JSONResponse(data['btc'])
+        return full_response
     except Exception as e:
         logger.error(f"Error getting BTC prices: {e}")
-        return JSONResponse({"error": str(e)}, status_code=500)
         return JSONResponse({"error": str(e)}, status_code=500)
 
 @app.post("/api/admin/settings/encryption-key")
