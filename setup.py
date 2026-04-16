@@ -215,6 +215,7 @@ setup(
             'templates/dashboard/delete_account.html',
             'templates/dashboard/admin_tiers.html',
             'templates/dashboard/admin_tier_form.html',
+            'templates/dashboard/admin_payment_settings.html',
             'templates/dashboard/pricing.html',
             'templates/dashboard/subscription.html',
             'templates/dashboard/billing.html',
