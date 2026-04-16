@@ -1175,7 +1175,19 @@ async def startup_event():
         }
         
         from aisbf.payments.service import PaymentService
+        from aisbf.payments.migrations import PaymentMigrations
+        
         db_manager = DatabaseRegistry.get_config_database()
+        
+        # Run payment system migrations before initializing service
+        try:
+            migrations = PaymentMigrations(db_manager)
+            migrations.run_migrations()
+            logger.info("Payment system migrations completed")
+        except Exception as migration_error:
+            logger.error(f"Failed to run payment migrations: {migration_error}")
+            raise
+        
         payment_service = PaymentService(db_manager, payment_config)
         await payment_service.initialize()
         
