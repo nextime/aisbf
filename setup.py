@@ -148,6 +148,41 @@ setup(
             'aisbf/auth/google.py',
             'aisbf/auth/github.py',
         ]),
+        # aisbf.payments subpackage
+        ('share/aisbf/aisbf/payments', [
+            'aisbf/payments/__init__.py',
+            'aisbf/payments/migrations.py',
+            'aisbf/payments/models.py',
+            'aisbf/payments/service.py',
+            'aisbf/payments/scheduler.py',
+        ]),
+        # aisbf.payments.crypto subpackage
+        ('share/aisbf/aisbf/payments/crypto', [
+            'aisbf/payments/crypto/__init__.py',
+            'aisbf/payments/crypto/wallet.py',
+            'aisbf/payments/crypto/pricing.py',
+            'aisbf/payments/crypto/monitor.py',
+            'aisbf/payments/crypto/consolidation.py',
+        ]),
+        # aisbf.payments.fiat subpackage
+        ('share/aisbf/aisbf/payments/fiat', [
+            'aisbf/payments/fiat/__init__.py',
+            'aisbf/payments/fiat/stripe_handler.py',
+            'aisbf/payments/fiat/paypal_handler.py',
+        ]),
+        # aisbf.payments.subscription subpackage
+        ('share/aisbf/aisbf/payments/subscription', [
+            'aisbf/payments/subscription/__init__.py',
+            'aisbf/payments/subscription/manager.py',
+            'aisbf/payments/subscription/renewal.py',
+            'aisbf/payments/subscription/retry.py',
+            'aisbf/payments/subscription/quota.py',
+        ]),
+        # aisbf.payments.notifications subpackage
+        ('share/aisbf/aisbf/payments/notifications', [
+            'aisbf/payments/notifications/__init__.py',
+            'aisbf/payments/notifications/email.py',
+        ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
             'templates/base.html',
