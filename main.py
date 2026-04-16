@@ -6278,10 +6278,223 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
 
 @app.get("/dashboard/billing/add-method/paypal/callback")
 async def dashboard_add_payment_method_paypal_callback(request: Request):
-    """PayPal OAuth callback - deprecated, redirects to billing"""
-    # This endpoint is kept for backward compatibility but is no longer used
-    # with the simplified PayPal integration
-    return RedirectResponse(url="/dashboard/billing", status_code=302)
+    """Handle PayPal OAuth 2.0 callback"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    # Get query parameters
+    code = request.query_params.get('code')
+    state = request.query_params.get('state')
+    error = request.query_params.get('error')
+    
+    # Handle user cancellation
+    if error:
+        logger.info(f"PayPal OAuth cancelled by user {user_id}: {error}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=PayPal connection cancelled",
+            status_code=302
+        )
+    
+    # Validate state token (CSRF protection)
+    session_state = request.session.get('paypal_oauth_state')
+    if not session_state:
+        logger.warning(f"PayPal OAuth callback with no session state (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Session expired, please try again",
+            status_code=302
+        )
+    
+    if state != session_state:
+        logger.warning(f"PayPal OAuth state mismatch (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Invalid request (security check failed)",
+            status_code=302
+        )
+    
+    # Clear state token from session
+    request.session.pop('paypal_oauth_state', None)
+    
+    # Validate authorization code
+    if not code:
+        logger.error(f"PayPal OAuth callback missing authorization code (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Invalid PayPal response",
+            status_code=302
+        )
+    
+    # Get PayPal settings
+    gateways = db.get_payment_gateway_settings()
+    paypal_settings = gateways.get('paypal', {})
+    
+    client_id = paypal_settings.get('client_id', '').strip()
+    client_secret = paypal_settings.get('client_secret', '').strip()
+    is_sandbox = paypal_settings.get('sandbox', True)
+    
+    if not client_id or not client_secret:
+        logger.error(f"PayPal OAuth callback but credentials not configured (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=PayPal is not properly configured",
+            status_code=302
+        )
+    
+    # Determine PayPal API URLs
+    if is_sandbox:
+        token_url = "https://api.sandbox.paypal.com/v1/oauth2/token"
+        userinfo_url = "https://api.sandbox.paypal.com/v1/identity/oauth2/userinfo?schema=openid"
+    else:
+        token_url = "https://api.paypal.com/v1/oauth2/token"
+        userinfo_url = "https://api.paypal.com/v1/identity/oauth2/userinfo?schema=openid"
+    
+    # Construct callback URL (must match what was sent to PayPal)
+    base_url = str(request.base_url).rstrip('/')
+    redirect_uri = f"{base_url}/dashboard/billing/add-method/paypal/callback"
+    
+    try:
+        # Exchange authorization code for access token
+        import base64
+        auth_string = f"{client_id}:{client_secret}"
+        auth_bytes = auth_string.encode('utf-8')
+        auth_b64 = base64.b64encode(auth_bytes).decode('utf-8')
+        
+        async with httpx.AsyncClient() as client:
+            # Token exchange request
+            token_response = await client.post(
+                token_url,
+                headers={
+                    'Authorization': f'Basic {auth_b64}',
+                    'Content-Type': 'application/x-www-form-urlencoded'
+                },
+                data={
+                    'grant_type': 'authorization_code',
+                    'code': code,
+                    'redirect_uri': redirect_uri
+                },
+                timeout=30.0
+            )
+            
+            if token_response.status_code != 200:
+                logger.error(f"PayPal token exchange failed (user_id={user_id}): {token_response.status_code} {token_response.text}")
+                return RedirectResponse(
+                    url="/dashboard/billing?error=Failed to connect PayPal account",
+                    status_code=302
+                )
+            
+            token_data = token_response.json()
+            access_token = token_data.get('access_token')
+            
+            if not access_token:
+                logger.error(f"PayPal token response missing access_token (user_id={user_id})")
+                return RedirectResponse(
+                    url="/dashboard/billing?error=Failed to connect PayPal account",
+                    status_code=302
+                )
+            
+            logger.info(f"PayPal access token obtained for user {user_id}")
+            
+            # Fetch user profile
+            userinfo_response = await client.get(
+                userinfo_url,
+                headers={
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'application/json'
+                },
+                timeout=30.0
+            )
+            
+            if userinfo_response.status_code != 200:
+                logger.error(f"PayPal userinfo fetch failed (user_id={user_id}): {userinfo_response.status_code}")
+                return RedirectResponse(
+                    url="/dashboard/billing?error=Failed to retrieve PayPal account information",
+                    status_code=302
+                )
+            
+            userinfo = userinfo_response.json()
+            paypal_user_id = userinfo.get('user_id')
+            paypal_email = userinfo.get('email')
+            paypal_name = userinfo.get('name', '')
+            
+            if not paypal_user_id or not paypal_email:
+                logger.error(f"PayPal userinfo missing required fields (user_id={user_id})")
+                return RedirectResponse(
+                    url="/dashboard/billing?error=Failed to retrieve PayPal account information",
+                    status_code=302
+                )
+            
+            logger.info(f"PayPal user profile retrieved for user {user_id}: {paypal_email}")
+            
+            # Check for duplicate PayPal account
+            existing_methods = db.get_user_payment_methods(user_id)
+            for method in existing_methods:
+                if method.get('type') == 'paypal':
+                    metadata = method.get('metadata', {})
+                    if isinstance(metadata, str):
+                        import json
+                        metadata = json.loads(metadata)
+                    
+                    existing_email = metadata.get('paypal_email')
+                    existing_user_id = metadata.get('paypal_user_id')
+                    
+                    if existing_email == paypal_email or existing_user_id == paypal_user_id:
+                        logger.info(f"Duplicate PayPal account detected for user {user_id}")
+                        return RedirectResponse(
+                            url="/dashboard/billing?error=This PayPal account is already connected",
+                            status_code=302
+                        )
+            
+            # Store payment method
+            is_default = len(existing_methods) == 0
+            metadata = {
+                'paypal_user_id': paypal_user_id,
+                'paypal_email': paypal_email,
+                'paypal_name': paypal_name,
+                'access_token': access_token,
+                'sandbox': is_sandbox
+            }
+            
+            method_id = db.add_payment_method(
+                user_id=user_id,
+                method_type='paypal',
+                identifier=paypal_email,
+                is_default=is_default,
+                metadata=metadata
+            )
+            
+            if method_id:
+                logger.info(f"PayPal payment method added for user {user_id} (method_id={method_id})")
+                return RedirectResponse(
+                    url="/dashboard/billing?success=PayPal account connected successfully",
+                    status_code=302
+                )
+            else:
+                logger.error(f"Failed to store PayPal payment method for user {user_id}")
+                return RedirectResponse(
+                    url="/dashboard/billing?error=Failed to save payment method",
+                    status_code=302
+                )
+    
+    except httpx.TimeoutException as e:
+        logger.error(f"PayPal OAuth timeout (user_id={user_id}): {e}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Connection timeout, please try again",
+            status_code=302
+        )
+    except httpx.HTTPError as e:
+        logger.error(f"PayPal OAuth HTTP error (user_id={user_id}): {e}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Connection error, please try again",
+            status_code=302
+        )
+    except Exception as e:
+        logger.error(f"PayPal OAuth unexpected error (user_id={user_id}): {e}", exc_info=True)
+        return RedirectResponse(
+            url="/dashboard/billing?error=An error occurred while connecting PayPal",
+            status_code=302
+        )
 
 @app.get("/dashboard/rate-limits")
 async def dashboard_rate_limits(request: Request):
