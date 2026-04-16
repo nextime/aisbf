@@ -4674,6 +4674,7 @@ async def dashboard_settings_save(
         "request": request,
         "session": request.session,
         "config": aisbf_config,
+        "os": os,
         "success": "Settings saved successfully! Restart server for changes to take effect."
     }
     )
