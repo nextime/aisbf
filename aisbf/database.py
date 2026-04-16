@@ -144,6 +144,13 @@ class DatabaseManager:
             conn.commit()
             logger.debug(f"Recorded context dimension for {provider_id}/{model_name}")
     
+    def run_payment_migrations(self):
+        """Run payment system migrations"""
+        from aisbf.payments.migrations import PaymentMigrations
+        
+        migrations = PaymentMigrations(self)
+        migrations.run_migrations()
+    
     def get_context_dimension(
         self,
         provider_id: str,
