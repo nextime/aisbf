@@ -114,23 +114,41 @@ VALUES ('payment_gateways', '{
 ## OAuth Flow Details
 
 ### Step 1: Initiate OAuth
-- User clicks "Connect PayPal"
-- AISBF generates a state token for CSRF protection
-- User is redirected to PayPal OAuth URL
+- User clicks "Connect PayPal" button
+- AISBF generates a cryptographically secure state token (64 hex characters)
+- State token is stored in user session for CSRF protection
+- User is redirected to PayPal OAuth URL with:
+  - `client_id`: Your PayPal app client ID
+  - `response_type=code`: Authorization code flow
+  - `scope=openid profile email`: Requested permissions
+  - `redirect_uri`: Your callback URL
+  - `state`: CSRF protection token
 
 ### Step 2: User Authorization
-- User logs in to PayPal
-- User authorizes AISBF to access their account info
-- PayPal redirects back with authorization code
+- User logs in to PayPal (sandbox or live)
+- User reviews requested permissions
+- User clicks "Agree and Continue" to authorize
+- PayPal redirects back with authorization code and state token
 
 ### Step 3: Token Exchange
-- AISBF exchanges authorization code for access token
-- Access token is used to fetch user information
+- AISBF validates state token matches session (CSRF check)
+- AISBF exchanges authorization code for access token via PayPal API
+- Uses HTTP Basic Auth with base64-encoded client credentials
+- Receives access token from PayPal
 
-### Step 4: Store Payment Method
-- PayPal email, user ID, and name are stored
-- Access token is stored for future API calls
-- Payment method is added to user's account
+### Step 4: Fetch User Profile
+- AISBF calls PayPal Identity API with access token
+- Retrieves user_id, email, and name from PayPal
+- Validates required fields are present
+
+### Step 5: Store Payment Method
+- AISBF checks for duplicate PayPal accounts (by email and user_id)
+- Stores payment method in database with:
+  - Type: 'paypal'
+  - Identifier: PayPal email
+  - Metadata: PayPal user_id, email, name, access token, sandbox flag
+- Sets as default if user's first payment method
+- Redirects to billing page with success message
 
 ## Security Considerations
 
