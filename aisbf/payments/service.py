@@ -41,7 +41,10 @@ class PaymentService:
         
         self.renewal_processor = SubscriptionRenewalProcessor(
             db_manager,
-            self.subscription_manager
+            self.stripe_handler,
+            self.paypal_handler,
+            self.wallet_manager,
+            self.price_service
         )
     
     async def initialize(self):
