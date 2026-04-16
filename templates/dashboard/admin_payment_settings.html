@@ -1,0 +1,416 @@
+{% extends "base.html" %}
+
+{% block title %}Payment System Settings - Admin{% endblock %}
+
+{% block content %}
+<div class="container-fluid" style="padding: 20px; background: #0f3460; min-height: 100vh;">
+    <div style="max-width: 1400px; margin: 0 auto;">
+        <h2 style="color: #4a9eff; margin-bottom: 30px;">
+            <i class="fas fa-cog me-2"></i>Payment System Settings
+        </h2>
+
+        <!-- System Status -->
+        <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
+                <i class="fas fa-heartbeat me-2"></i>System Status
+            </h3>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Master Keys Status</div>
+                    <div id="masterKeysStatus" style="font-size: 24px; font-weight: bold; color: #4a9eff;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                    </div>
+                </div>
+                
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Total Crypto Balance</div>
+                    <div id="totalBalance" style="font-size: 24px; font-weight: bold; color: #4a9eff;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                    </div>
+                </div>
+                
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Pending Payments</div>
+                    <div id="pendingPayments" style="font-size: 24px; font-weight: bold; color: #f39c12;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                    </div>
+                </div>
+                
+                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Failed Payments</div>
+                    <div id="failedPayments" style="font-size: 24px; font-weight: bold; color: #e74c3c;">
+                        <i class="fas fa-spinner fa-spin"></i> Loading...
+                    </div>
+                </div>
+            </div>
+            
+            <div style="margin-top: 15px; padding: 15px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #4a9eff;">
+                <div style="color: #4a9eff; font-weight: bold; margin-bottom: 5px;">
+                    <i class="fas fa-info-circle me-2"></i>About Master Keys
+                </div>
+                <div style="color: #e0e0e0; font-size: 14px;">
+                    Master keys are automatically generated on first startup and encrypted with your ENCRYPTION_KEY. 
+                    They are used to derive unique payment addresses for each user. The actual keys are never displayed for security.
+                </div>
+            </div>
+        </div>
+
+        <!-- Price Sources Configuration -->
+        <div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #f39c12;">
+                <i class="fas fa-chart-line me-2"></i>Crypto Price Sources
+            </h3>
+            
+            <div style="margin-bottom: 15px; color: #e0e0e0;">
+                Select which exchanges to use for cryptocurrency price aggregation:
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                    <input type="checkbox" id="priceCoinbase" checked style="margin-right: 10px; width: 20px; height: 20px;">
+                    <span style="color: #e0e0e0; font-weight: 500;">Coinbase</span>
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                    <input type="checkbox" id="priceBinance" checked style="margin-right: 10px; width: 20px; height: 20px;">
+                    <span style="color: #e0e0e0; font-weight: 500;">Binance</span>
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                    <input type="checkbox" id="priceKraken" checked style="margin-right: 10px; width: 20px; height: 20px;">
+                    <span style="color: #e0e0e0; font-weight: 500;">Kraken</span>
+                </label>
+            </div>
+            
+            <button type="button" class="btn" onclick="savePriceSources()" style="background: #f39c12; color: white;">
+                <i class="fas fa-save me-2"></i>Save Price Sources
+            </button>
+        </div>
+
+        <!-- Blockchain Monitoring -->
+        <div style="background: #16213e; border: 2px solid #9b59b6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #9b59b6;">
+                <i class="fas fa-cube me-2"></i>Blockchain Monitoring
+            </h3>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">Monitoring Mode</label>
+                <select id="blockchainMode" style="width: 100%; max-width: 400px; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                    <option value="api">API Polling (Recommended)</option>
+                    <option value="webhook">Webhook (Requires public URL)</option>
+                </select>
+                <div style="margin-top: 10px; color: #888; font-size: 14px;">
+                    API Polling: Checks blockchain APIs every minute for new transactions<br>
+                    Webhook: Receives instant notifications (requires webhook setup)
+                </div>
+            </div>
+            
+            <div style="margin-bottom: 20px;">
+                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">Polling Interval (seconds)</label>
+                <input type="number" id="pollingInterval" value="60" min="30" max="300" style="width: 100%; max-width: 400px; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+            </div>
+            
+            <button type="button" class="btn" onclick="saveBlockchainConfig()" style="background: #9b59b6; color: white;">
+                <i class="fas fa-save me-2"></i>Save Blockchain Configuration
+            </button>
+        </div>
+
+        <!-- Email Notifications -->
+        <div style="background: #16213e; border: 2px solid #27ae60; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #27ae60;">
+                <i class="fas fa-envelope me-2"></i>Email Notifications
+            </h3>
+            
+            <div style="margin-bottom: 15px; color: #e0e0e0;">
+                Enable or disable email notifications for payment events:
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Payment Success</span>
+                    <input type="checkbox" id="emailPaymentSuccess" checked style="width: 20px; height: 20px;">
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Payment Failed</span>
+                    <input type="checkbox" id="emailPaymentFailed" checked style="width: 20px; height: 20px;">
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Subscription Upgraded</span>
+                    <input type="checkbox" id="emailSubscriptionUpgraded" checked style="width: 20px; height: 20px;">
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Subscription Downgraded</span>
+                    <input type="checkbox" id="emailSubscriptionDowngraded" checked style="width: 20px; height: 20px;">
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Subscription Cancelled</span>
+                    <input type="checkbox" id="emailSubscriptionCancelled" checked style="width: 20px; height: 20px;">
+                </label>
+                
+                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: #e0e0e0;">Payment Retry</span>
+                    <input type="checkbox" id="emailPaymentRetry" checked style="width: 20px; height: 20px;">
+                </label>
+            </div>
+            
+            <button type="button" class="btn" onclick="saveEmailConfig()" style="background: #27ae60; color: white;">
+                <i class="fas fa-save me-2"></i>Save Email Configuration
+            </button>
+        </div>
+
+        <!-- Consolidation Settings -->
+        <div style="background: #16213e; border: 2px solid #e67e22; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #e67e22;">
+                <i class="fas fa-compress-arrows-alt me-2"></i>Wallet Consolidation
+            </h3>
+            
+            <div style="margin-bottom: 15px; color: #e0e0e0;">
+                Set minimum balance thresholds for automatic consolidation to admin addresses:
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                <div>
+                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                        <i class="fab fa-bitcoin me-2"></i>Bitcoin (BTC)
+                    </label>
+                    <input type="number" id="consolidationBTC" value="0.01" step="0.001" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                        <i class="fab fa-ethereum me-2"></i>Ethereum (ETH)
+                    </label>
+                    <input type="number" id="consolidationETH" value="0.1" step="0.01" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                        <i class="fas fa-dollar-sign me-2"></i>USDT
+                    </label>
+                    <input type="number" id="consolidationUSDT" value="100" step="10" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                </div>
+                
+                <div>
+                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                        <i class="fas fa-coins me-2"></i>USDC
+                    </label>
+                    <input type="number" id="consolidationUSDC" value="100" step="10" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                </div>
+            </div>
+            
+            <button type="button" class="btn" onclick="saveConsolidationConfig()" style="background: #e67e22; color: white;">
+                <i class="fas fa-save me-2"></i>Save Consolidation Settings
+            </button>
+        </div>
+
+        <!-- Back Button -->
+        <div style="margin-top: 30px;">
+            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" class="btn" style="background: #0f3460; color: #4a9eff; border: 1px solid #4a9eff;">
+                <i class="fas fa-arrow-left me-2"></i>Back to Tiers
+            </a>
+        </div>
+    </div>
+</div>
+
+<script>
+// Load system status
+async function loadSystemStatus() {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/status") }}');
+        const data = await response.json();
+        
+        // Update master keys status
+        const masterKeysEl = document.getElementById('masterKeysStatus');
+        if (data.master_keys_initialized) {
+            masterKeysEl.innerHTML = '<i class="fas fa-check-circle" style="color: #27ae60;"></i> ' + data.master_keys_count + ' Keys Active';
+        } else {
+            masterKeysEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i> Not Initialized';
+        }
+        
+        // Update balances
+        document.getElementById('totalBalance').textContent = '$' + (data.total_balance_usd || 0).toFixed(2);
+        document.getElementById('pendingPayments').textContent = data.pending_payments || 0;
+        document.getElementById('failedPayments').textContent = data.failed_payments || 0;
+    } catch (error) {
+        console.error('Error loading system status:', error);
+        document.getElementById('masterKeysStatus').innerHTML = '<i class="fas fa-times-circle" style="color: #e74c3c;"></i> Error';
+    }
+}
+
+// Load configuration
+async function loadConfiguration() {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config") }}');
+        const data = await response.json();
+        
+        // Load price sources
+        if (data.price_sources) {
+            document.getElementById('priceCoinbase').checked = data.price_sources.coinbase || false;
+            document.getElementById('priceBinance').checked = data.price_sources.binance || false;
+            document.getElementById('priceKraken').checked = data.price_sources.kraken || false;
+        }
+        
+        // Load blockchain config
+        if (data.blockchain) {
+            document.getElementById('blockchainMode').value = data.blockchain.mode || 'api';
+            document.getElementById('pollingInterval').value = data.blockchain.polling_interval || 60;
+        }
+        
+        // Load email config
+        if (data.email_notifications) {
+            document.getElementById('emailPaymentSuccess').checked = data.email_notifications.payment_success !== false;
+            document.getElementById('emailPaymentFailed').checked = data.email_notifications.payment_failed !== false;
+            document.getElementById('emailSubscriptionUpgraded').checked = data.email_notifications.subscription_upgraded !== false;
+            document.getElementById('emailSubscriptionDowngraded').checked = data.email_notifications.subscription_downgraded !== false;
+            document.getElementById('emailSubscriptionCancelled').checked = data.email_notifications.subscription_cancelled !== false;
+            document.getElementById('emailPaymentRetry').checked = data.email_notifications.payment_retry !== false;
+        }
+        
+        // Load consolidation config
+        if (data.consolidation) {
+            document.getElementById('consolidationBTC').value = data.consolidation.btc || 0.01;
+            document.getElementById('consolidationETH').value = data.consolidation.eth || 0.1;
+            document.getElementById('consolidationUSDT').value = data.consolidation.usdt || 100;
+            document.getElementById('consolidationUSDC').value = data.consolidation.usdc || 100;
+        }
+    } catch (error) {
+        console.error('Error loading configuration:', error);
+    }
+}
+
+// Save functions
+async function savePriceSources() {
+    const config = {
+        coinbase: document.getElementById('priceCoinbase').checked,
+        binance: document.getElementById('priceBinance').checked,
+        kraken: document.getElementById('priceKraken').checked
+    };
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config/price-sources") }}', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        
+        if (response.ok) {
+            showToast('Price sources configuration saved', 'success');
+        } else {
+            showToast('Failed to save price sources', 'danger');
+        }
+    } catch (error) {
+        showToast('Error saving price sources: ' + error.message, 'danger');
+    }
+}
+
+async function saveBlockchainConfig() {
+    const config = {
+        mode: document.getElementById('blockchainMode').value,
+        polling_interval: parseInt(document.getElementById('pollingInterval').value)
+    };
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config/blockchain") }}', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        
+        if (response.ok) {
+            showToast('Blockchain configuration saved', 'success');
+        } else {
+            showToast('Failed to save blockchain configuration', 'danger');
+        }
+    } catch (error) {
+        showToast('Error saving blockchain configuration: ' + error.message, 'danger');
+    }
+}
+
+async function saveEmailConfig() {
+    const config = {
+        payment_success: document.getElementById('emailPaymentSuccess').checked,
+        payment_failed: document.getElementById('emailPaymentFailed').checked,
+        subscription_upgraded: document.getElementById('emailSubscriptionUpgraded').checked,
+        subscription_downgraded: document.getElementById('emailSubscriptionDowngraded').checked,
+        subscription_cancelled: document.getElementById('emailSubscriptionCancelled').checked,
+        payment_retry: document.getElementById('emailPaymentRetry').checked
+    };
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config/email") }}', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        
+        if (response.ok) {
+            showToast('Email configuration saved', 'success');
+        } else {
+            showToast('Failed to save email configuration', 'danger');
+        }
+    } catch (error) {
+        showToast('Error saving email configuration: ' + error.message, 'danger');
+    }
+}
+
+async function saveConsolidationConfig() {
+    const config = {
+        btc: parseFloat(document.getElementById('consolidationBTC').value),
+        eth: parseFloat(document.getElementById('consolidationETH').value),
+        usdt: parseFloat(document.getElementById('consolidationUSDT').value),
+        usdc: parseFloat(document.getElementById('consolidationUSDC').value)
+    };
+    
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/payment-system/config/consolidation") }}', {
+            method: 'PUT',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify(config)
+        });
+        
+        if (response.ok) {
+            showToast('Consolidation settings saved', 'success');
+        } else {
+            showToast('Failed to save consolidation settings', 'danger');
+        }
+    } catch (error) {
+        showToast('Error saving consolidation settings: ' + error.message, 'danger');
+    }
+}
+
+function showToast(message, type) {
+    const toastContainer = document.createElement('div');
+    toastContainer.className = 'position-fixed top-0 end-0 p-3';
+    toastContainer.style.zIndex = '9999';
+    toastContainer.innerHTML = `
+        <div class="toast show" role="alert" style="min-width: 300px;">
+            <div class="toast-header bg-${type} text-white">
+                <strong class="me-auto">Notification</strong>
+                <button type="button" class="btn-close btn-close-white" data-bs-dismiss="toast"></button>
+            </div>
+            <div class="toast-body">
+                ${message}
+            </div>
+        </div>
+    `;
+    document.body.appendChild(toastContainer);
+    
+    setTimeout(() => {
+        if (toastContainer.parentNode) {
+            toastContainer.parentNode.removeChild(toastContainer);
+        }
+    }, 5000);
+}
+
+// Load data on page load
+document.addEventListener('DOMContentLoaded', function() {
+    loadSystemStatus();
+    loadConfiguration();
+});
+</script>
+{% endblock %}

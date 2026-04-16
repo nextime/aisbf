@@ -507,6 +507,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
             <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" {% if '/admin/tiers' in request.path %}class="active"{% endif %}>Tiers</a>
+            <a href="{{ url_for(request, '/dashboard/admin/payment-settings') }}" {% if '/admin/payment-settings' in request.path %}class="active"{% endif %}>Payment Settings</a>
             {% endif %}
             {% if show_upgrade_button %}
             <a href="{{ url_for(request, '/dashboard/pricing') }}" class="upgrade-button rainbow-text">✨ Upgrade! ✨</a>

@@ -6227,8 +6227,8 @@ async def get_price_sources(request: Request):
     return JSONResponse({'price_sources': sources})
 
 
-@app.post("/api/admin/config/price-sources")
-async def update_price_sources(request: Request):
+@app.put("/api/admin/payment-system/config/price-sources")
+async def update_payment_price_sources(request: Request):
     """Update crypto price source configuration"""
     auth_check = require_admin(request)
     if auth_check:
@@ -6265,6 +6265,11 @@ async def update_price_sources(request: Request):
         logger.error(f"Error updating price sources: {e}")
         return JSONResponse({'error': str(e)}, status_code=500)
 
+@app.post("/api/admin/config/price-sources")
+async def update_price_sources(request: Request):
+    """Update crypto price source configuration (legacy endpoint)"""
+    return await update_payment_price_sources(request)
+
 
 @app.get("/api/admin/config/consolidation")
 async def get_consolidation_config(request: Request):
@@ -6296,8 +6301,8 @@ async def get_consolidation_config(request: Request):
     return JSONResponse({'consolidation_settings': settings})
 
 
-@app.post("/api/admin/config/consolidation")
-async def update_consolidation_config(request: Request):
+@app.put("/api/admin/payment-system/config/consolidation")
+async def update_payment_consolidation_config(request: Request):
     """Update wallet consolidation configuration"""
     auth_check = require_admin(request)
     if auth_check:
@@ -6331,6 +6336,11 @@ async def update_consolidation_config(request: Request):
     except Exception as e:
         logger.error(f"Error updating consolidation settings: {e}")
         return JSONResponse({'error': str(e)}, status_code=500)
+
+@app.post("/api/admin/config/consolidation")
+async def update_consolidation_config(request: Request):
+    """Update wallet consolidation configuration (legacy endpoint)"""
+    return await update_payment_consolidation_config(request)
 
 
 @app.get("/api/admin/config/email")
@@ -6385,8 +6395,8 @@ async def get_email_config(request: Request):
     })
 
 
-@app.post("/api/admin/config/email")
-async def update_email_config(request: Request):
+@app.put("/api/admin/payment-system/config/email")
+async def update_payment_email_config(request: Request):
     """Update email notification configuration"""
     auth_check = require_admin(request)
     if auth_check:
@@ -6463,6 +6473,50 @@ async def update_email_config(request: Request):
         logger.error(f"Error updating email configuration: {e}")
         return JSONResponse({'error': str(e)}, status_code=500)
 
+@app.post("/api/admin/config/email")
+async def update_email_config(request: Request):
+    """Update email notification configuration (legacy endpoint)"""
+    return await update_payment_email_config(request)
+
+
+@app.put("/api/admin/payment-system/config/blockchain")
+async def update_payment_blockchain_config(request: Request):
+    """Update blockchain monitoring configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        body = await request.json()
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            
+            for config in body.get('blockchain_config', []):
+                cursor.execute(f"""
+                    UPDATE blockchain_monitoring_config
+                    SET rpc_url = {placeholder},
+                        confirmations_required = {placeholder},
+                        scan_interval_seconds = {placeholder},
+                        is_enabled = {placeholder}
+                    WHERE crypto_type = {placeholder}
+                """, (
+                    config['rpc_url'],
+                    config['confirmations'],
+                    config['scan_interval'],
+                    config['enabled'],
+                    config['crypto_type']
+                ))
+            
+            conn.commit()
+        
+        return JSONResponse({'success': True, 'message': 'Blockchain monitoring configuration updated'})
+    except Exception as e:
+        logger.error(f"Error updating blockchain monitoring configuration: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
 
 @app.get("/api/admin/scheduler/status")
 async def get_scheduler_status(request: Request):
@@ -6516,6 +6570,195 @@ async def run_scheduler_job(request: Request):
         return JSONResponse({'error': str(e)}, status_code=500)
 
 
+@app.get("/api/admin/payment-system/status")
+async def get_payment_system_status(request: Request):
+    """Get payment system status including master keys, balances, and payment counts"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Check master keys status
+            cursor.execute("SELECT COUNT(*) FROM crypto_master_keys")
+            master_keys_count = cursor.fetchone()[0]
+            
+            # Get total crypto balances (would need actual blockchain queries in production)
+            cursor.execute("""
+                SELECT crypto_type, SUM(balance) as total
+                FROM crypto_addresses
+                GROUP BY crypto_type
+            """)
+            balances = {row[0]: float(row[1]) for row in cursor.fetchall()}
+            
+            # Get pending payments count
+            cursor.execute("""
+                SELECT COUNT(*) FROM payments
+                WHERE status = 'pending'
+            """)
+            pending_count = cursor.fetchone()[0]
+            
+            # Get failed payments count
+            cursor.execute("""
+                SELECT COUNT(*) FROM payments
+                WHERE status = 'failed'
+            """)
+            failed_count = cursor.fetchone()[0]
+            
+            # Get recent payment activity (last 24 hours)
+            cursor.execute("""
+                SELECT COUNT(*), SUM(amount) FROM payments
+                WHERE created_at >= datetime('now', '-1 day')
+                AND status = 'completed'
+            """)
+            recent = cursor.fetchone()
+            recent_count = recent[0] if recent[0] else 0
+            recent_amount = float(recent[1]) if recent[1] else 0.0
+        
+        return JSONResponse({
+            'master_keys': {
+                'initialized': master_keys_count > 0,
+                'count': master_keys_count
+            },
+            'balances': balances,
+            'pending_payments': pending_count,
+            'failed_payments': failed_count,
+            'recent_activity': {
+                'count': recent_count,
+                'amount': recent_amount
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting payment system status: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+@app.get("/api/admin/payment-system/config")
+async def get_payment_system_config(request: Request):
+    """Get all payment system configuration"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        db = DatabaseRegistry.get_config_database()
+        
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            
+            # Get price sources
+            cursor.execute("""
+                SELECT crypto_type, price_source, api_key, update_interval_seconds, is_enabled
+                FROM crypto_price_sources
+            """)
+            price_sources = [
+                {
+                    'crypto_type': row[0],
+                    'price_source': row[1],
+                    'api_key': row[2],
+                    'update_interval': row[3],
+                    'enabled': bool(row[4])
+                }
+                for row in cursor.fetchall()
+            ]
+            
+            # Get blockchain monitoring config
+            cursor.execute("""
+                SELECT crypto_type, rpc_url, confirmations_required, scan_interval_seconds, is_enabled
+                FROM blockchain_monitoring_config
+            """)
+            blockchain_config = [
+                {
+                    'crypto_type': row[0],
+                    'rpc_url': row[1],
+                    'confirmations': row[2],
+                    'scan_interval': row[3],
+                    'enabled': bool(row[4])
+                }
+                for row in cursor.fetchall()
+            ]
+            
+            # Get consolidation settings
+            cursor.execute("""
+                SELECT crypto_type, threshold_amount, admin_address, is_enabled
+                FROM crypto_consolidation_settings
+            """)
+            consolidation = [
+                {
+                    'crypto_type': row[0],
+                    'threshold': float(row[1]),
+                    'admin_address': row[2],
+                    'enabled': bool(row[3])
+                }
+                for row in cursor.fetchall()
+            ]
+            
+            # Get email config
+            cursor.execute("""
+                SELECT smtp_host, smtp_port, smtp_username, from_email, from_name, use_tls
+                FROM email_config
+                LIMIT 1
+            """)
+            smtp_row = cursor.fetchone()
+            smtp_config = None
+            if smtp_row:
+                smtp_config = {
+                    'smtp_host': smtp_row[0],
+                    'smtp_port': smtp_row[1],
+                    'smtp_username': smtp_row[2],
+                    'from_email': smtp_row[3],
+                    'from_name': smtp_row[4],
+                    'use_tls': bool(smtp_row[5])
+                }
+            
+            # Get notification settings
+            cursor.execute("""
+                SELECT notification_type, is_enabled, subject_template
+                FROM email_notification_settings
+            """)
+            notifications = [
+                {
+                    'type': row[0],
+                    'enabled': bool(row[1]),
+                    'subject': row[2]
+                }
+                for row in cursor.fetchall()
+            ]
+        
+        return JSONResponse({
+            'price_sources': price_sources,
+            'blockchain_config': blockchain_config,
+            'consolidation': consolidation,
+            'email': {
+                'smtp_config': smtp_config,
+                'notifications': notifications
+            }
+        })
+    except Exception as e:
+        logger.error(f"Error getting payment system config: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
+
+
+
+@app.get("/dashboard/admin/payment-settings")
+async def dashboard_admin_payment_settings(request: Request):
+    """Admin payment system settings page"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/admin_payment_settings.html",
+        context={
+            "request": request,
+            "session": request.session
+        }
+    )
 
 @app.get("/dashboard/pricing")
 async def dashboard_pricing(request: Request):
