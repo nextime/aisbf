@@ -58,6 +58,7 @@ class PaymentMigrations:
             self._create_job_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_config_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_notification_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
+            self._add_stripe_customer_id_column(cursor)
             self._insert_default_data(cursor)
             
             conn.commit()
@@ -383,6 +384,31 @@ class PaymentMigrations:
                 updated_at TIMESTAMP DEFAULT {timestamp_default}
             )
         ''')
+    
+    def _add_stripe_customer_id_column(self, cursor):
+        """Add Stripe customer ID column to users table"""
+        try:
+            if self.db_type == 'sqlite':
+                # Check if column exists
+                cursor.execute("PRAGMA table_info(users)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'stripe_customer_id' not in columns:
+                    cursor.execute("""
+                        ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(100)
+                    """)
+                    logger.info("✅ Added stripe_customer_id column to users table")
+            else:  # mysql
+                cursor.execute("""
+                    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'stripe_customer_id'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("""
+                        ALTER TABLE users ADD COLUMN stripe_customer_id VARCHAR(100)
+                    """)
+                    logger.info("✅ Added stripe_customer_id column to users table")
+        except Exception as e:
+            logger.warning(f"Migration check for stripe_customer_id column: {e}")
     
     def _insert_default_data(self, cursor):
         """Insert default configuration data"""
