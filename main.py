@@ -59,12 +59,16 @@ from pathlib import Path
 import json
 import markdown
 from urllib.parse import urljoin, urlencode
+from cryptography.fernet import Fernet
 
 # Global variable to store custom config directory
 _custom_config_dir = None
 
 # Global variable to store original command line arguments for restart
 _original_argv = None
+
+# Payment service global
+payment_service = None
 
 def set_config_dir(config_dir: str):
     """Set custom config directory before importing config"""
@@ -1153,6 +1157,33 @@ async def startup_event():
         logger.info("=" * 80)
         logger.info("")
     
+    # Initialize payment service
+    global payment_service
+    try:
+        # Generate or load encryption key
+        encryption_key = os.getenv('ENCRYPTION_KEY')
+        if not encryption_key:
+            encryption_key = Fernet.generate_key().decode()
+            logger.warning("No ENCRYPTION_KEY set, generated temporary key")
+        
+        payment_config = {
+            'encryption_key': encryption_key,
+            'base_url': os.getenv('BASE_URL', 'http://localhost:17765'),
+            'currency_code': 'USD',
+            'btc_confirmations': 3,
+            'eth_confirmations': 12
+        }
+        
+        from aisbf.payments.service import PaymentService
+        db_manager = DatabaseRegistry.get_config_database()
+        payment_service = PaymentService(db_manager, payment_config)
+        await payment_service.initialize()
+        
+        logger.info("Payment service started")
+    except Exception as e:
+        logger.error(f"Failed to initialize payment service: {e}")
+        # Continue startup even if payment service fails
+    
     logger.info(f"=== AISBF Server Started ===")
     logger.info(f"Available providers: {list(config.providers.keys()) if config else []}")
     logger.info(f"Available rotations: {list(config.rotations.keys()) if config else []}")
@@ -1619,6 +1650,56 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 2
 # Add proxy headers middleware LAST so it executes FIRST
 # This ensures proxy headers are processed before any other middleware (including auth_middleware)
 app.add_middleware(ProxyHeadersMiddleware)
+
+# Helper function for API authentication
+async def get_current_user(request: Request) -> dict:
+    """Get current authenticated user from request state"""
+    user_id = getattr(request.state, 'user_id', None)
+    if user_id is None:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    
+    # Get user from database
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    user = db.get_user_by_id(user_id)
+    
+    if not user:
+        raise HTTPException(status_code=401, detail="User not found")
+    
+    return user
+
+# Crypto payment API endpoints
+@app.get("/api/crypto/addresses")
+async def get_crypto_addresses(request: Request):
+    """Get user's crypto addresses"""
+    current_user = await get_current_user(request)
+    addresses = await payment_service.get_user_crypto_addresses(current_user['id'])
+    return {'addresses': addresses}
+
+
+@app.get("/api/crypto/wallets")
+async def get_crypto_wallets(request: Request):
+    """Get user's crypto wallet balances"""
+    current_user = await get_current_user(request)
+    balances = await payment_service.get_user_wallet_balances(current_user['id'])
+    return {'wallets': balances}
+
+
+@app.post("/api/payment-methods/crypto")
+async def add_crypto_payment_method(request: Request):
+    """Add crypto payment method"""
+    current_user = await get_current_user(request)
+    body = await request.json()
+    
+    result = await payment_service.add_crypto_payment_method(
+        current_user['id'],
+        body['crypto_type']
+    )
+    
+    if not result['success']:
+        raise HTTPException(status_code=400, detail=result['error'])
+    
+    return result
 
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
