@@ -1,0 +1,12 @@
+# Optional cryptocurrency payment dependencies
+# These require system libraries: pkg-config, libsecp256k1-dev
+# Install system dependencies first:
+#   Ubuntu/Debian: sudo apt-get install pkg-config libsecp256k1-dev build-essential
+#   RHEL/CentOS: sudo yum install pkgconfig libsecp256k1-devel gcc
+#   Alpine: sudo apk add pkgconfig libsecp256k1-dev gcc musl-dev
+
+bip32>=3.4
+mnemonic>=0.20
+bitcoinlib>=0.6.14
+web3>=6.0.0
+eth-account>=0.9.0
