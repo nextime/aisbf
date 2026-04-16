@@ -7,10 +7,12 @@ from aisbf.payments.models import (
     CryptoWallet,
     AddCryptoPaymentMethodRequest
 )
+from aisbf.payments.service import PaymentService
 
 __all__ = [
     'PaymentMigrations',
     'CryptoAddress',
     'CryptoWallet',
-    'AddCryptoPaymentMethodRequest'
+    'AddCryptoPaymentMethodRequest',
+    'PaymentService'
 ]
