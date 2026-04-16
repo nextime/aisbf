@@ -378,3 +378,7 @@ class RenewalProcessor:
         except Exception as e:
             logger.error(f"Error charging crypto wallet: {e}")
             return {'success': False, 'error': str(e)}
+
+
+# Alias for backward compatibility
+SubscriptionRenewalProcessor = RenewalProcessor
