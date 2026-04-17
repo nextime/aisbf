@@ -56,6 +56,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </form>
 </div>
 
+<!-- Search and Filter Controls -->
+<div style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <label for="search-input" style="display: block; margin-bottom: 5px; color: #e0e0e0;">Search Users</label>
+            <input type="text" id="search-input" placeholder="Search by username, email, or display name..."
+                   value="{{ filters.search }}" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <label for="status-filter" style="color: #e0e0e0; margin-right: 5px;">Status:</label>
+            <select id="status-filter" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+                <option value="">All</option>
+                <option value="active" {% if filters.status_filter == 'active' %}selected{% endif %}>Active</option>
+                <option value="inactive" {% if filters.status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+
+            <label for="role-filter" style="color: #e0e0e0; margin-left: 10px; margin-right: 5px;">Role:</label>
+            <select id="role-filter" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+                <option value="">All</option>
+                <option value="admin" {% if filters.role_filter == 'admin' %}selected{% endif %}>Admin</option>
+                <option value="user" {% if filters.role_filter == 'user' %}selected{% endif %}>User</option>
+            </select>
+
+            <button id="search-btn" class="btn" style="padding: 8px 16px;">Search</button>
+            <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;">Clear</button>
+        </div>
+    </div>
+</div>
+
 <!-- Users Table -->
 <h3 style="margin-bottom: 15px;">All Users</h3>
 
@@ -419,12 +449,145 @@ document.addEventListener('DOMContentLoaded', function() {
         });
     }
 
+    // Filter change handlers
+    document.getElementById('status-filter').addEventListener('change', function() {
+        updateUsers({ status_filter: this.value || null });
+    });
+
+    document.getElementById('role-filter').addEventListener('change', function() {
+        updateUsers({ role_filter: this.value || null });
+    });
+
     // Initial sorting listeners
     attachSortingListeners();
 
     // Initial pagination listeners
     attachPaginationListeners();
+
+    // Bulk selection handlers
+    document.getElementById('select-all').addEventListener('change', function() {
+        const checkboxes = document.querySelectorAll('.user-checkbox');
+        checkboxes.forEach(cb => cb.checked = this.checked);
+        updateBulkActionsVisibility();
+    });
+
+    document.addEventListener('change', function(e) {
+        if (e.target.classList.contains('user-checkbox')) {
+            updateBulkActionsVisibility();
+            updateSelectAllState();
+        }
+    });
+
+    // Bulk action handlers
+    document.getElementById('bulk-enable').addEventListener('click', function() {
+        performBulkAction('enable', 'enable selected users');
+    });
+
+    document.getElementById('bulk-disable').addEventListener('click', function() {
+        performBulkAction('disable', 'disable selected users');
+    });
+
+    document.getElementById('bulk-delete').addEventListener('click', function() {
+        performBulkAction('delete', 'delete selected users', true);
+    });
+
+    document.getElementById('bulk-tier-select').addEventListener('change', function() {
+        if (this.value) {
+            performBulkAction('tier', `change tier for selected users`, false, this.value);
+            this.value = '';
+        }
+    });
+
+    document.getElementById('bulk-clear').addEventListener('click', function() {
+        clearSelection();
+    });
+
+    // Initialize bulk actions visibility
+    updateBulkActionsVisibility();
 });
+
+// Bulk action helper functions
+function updateBulkActionsVisibility() {
+    const selectedCount = document.querySelectorAll('.user-checkbox:checked').length;
+    const bulkActions = document.getElementById('bulk-actions');
+    const selectedCountEl = document.getElementById('selected-count');
+
+    if (selectedCount > 0) {
+        bulkActions.style.display = 'block';
+        selectedCountEl.textContent = selectedCount;
+    } else {
+        bulkActions.style.display = 'none';
+    }
+}
+
+function updateSelectAllState() {
+    const checkboxes = document.querySelectorAll('.user-checkbox');
+    const selectAll = document.getElementById('select-all');
+    const checkedBoxes = document.querySelectorAll('.user-checkbox:checked');
+
+    selectAll.checked = checkboxes.length > 0 && checkedBoxes.length === checkboxes.length;
+    selectAll.indeterminate = checkedBoxes.length > 0 && checkedBoxes.length < checkboxes.length;
+}
+
+function clearSelection() {
+    document.querySelectorAll('.user-checkbox, #select-all').forEach(cb => {
+        cb.checked = false;
+        cb.indeterminate = false;
+    });
+    updateBulkActionsVisibility();
+}
+
+function performBulkAction(action, description, destructive = false, extraData = null) {
+    const selectedIds = Array.from(document.querySelectorAll('.user-checkbox:checked')).map(cb => parseInt(cb.value));
+
+    if (selectedIds.length === 0) {
+        showNotification('No users selected', 'error');
+        return;
+    }
+
+    if (destructive && !confirm(`Are you sure you want to ${description}? This action cannot be undone.`)) {
+        return;
+    }
+
+    // Show loading state
+    const bulkActions = document.getElementById('bulk-actions');
+    const originalContent = bulkActions.innerHTML;
+    bulkActions.innerHTML = '<div style="text-align: center; padding: 10px; color: #e0e0e0;"><div class="spinner"></div> Processing...</div>';
+
+    // Prepare request data
+    const requestData = {
+        action: action,
+        user_ids: selectedIds
+    };
+    if (extraData) {
+        requestData.extra_data = extraData;
+    }
+
+    fetch('/dashboard/users/bulk', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(requestData)
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            showNotification(data.message || `Successfully ${action}d ${selectedIds.length} users`, 'success');
+            clearSelection();
+            // Refresh the current page data
+            updateUsers({});
+        } else {
+            showNotification(data.error || 'Bulk operation failed', 'error');
+            bulkActions.innerHTML = originalContent;
+        }
+    })
+    .catch(error => {
+        console.error('Bulk action error:', error);
+        showNotification('Error performing bulk action', 'error');
+        bulkActions.innerHTML = originalContent;
+    });
+}
 
 function editUser(userId, username, email, role, isActive) {
     document.getElementById('edit-user-id').value = userId;
