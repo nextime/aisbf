@@ -994,9 +994,10 @@ class DatabaseManager:
             return users
 
     def get_users_paginated(self, page: int = 1, limit: int = 25, search: str = None,
-                           order_by: str = 'created_at', direction: str = 'desc') -> Dict:
+                           order_by: str = 'created_at', direction: str = 'desc',
+                           status_filter: str = None, role_filter: str = None) -> Dict:
         """
-        Get paginated users with search and sorting support.
+        Get paginated users with search, sorting, and filtering support.
 
         Args:
             page: Page number (1-indexed)
@@ -1004,6 +1005,8 @@ class DatabaseManager:
             search: Optional search term (searches username, email, display_name)
             order_by: Column to sort by (username, last_login, created_at, tier_name)
             direction: Sort direction (asc or desc)
+            status_filter: Optional status filter ('active', 'inactive', or None)
+            role_filter: Optional role filter ('admin', 'user', or None)
 
         Returns:
             Dictionary with 'users' list and 'total' count
@@ -1011,13 +1014,22 @@ class DatabaseManager:
         # Validate and sanitize sorting parameters
         valid_columns = ['username', 'last_login', 'created_at', 'tier_name']
         valid_directions = ['asc', 'desc']
-        
+
         if order_by not in valid_columns:
             order_by = 'created_at'
         if direction.lower() not in valid_directions:
             direction = 'desc'
-        
+
         direction = direction.upper()
+
+        # Validate filter parameters
+        valid_status_filters = ['active', 'inactive', None]
+        valid_role_filters = ['admin', 'user', None]
+
+        if status_filter not in valid_status_filters:
+            status_filter = None
+        if role_filter not in valid_role_filters:
+            role_filter = None
         
         # Calculate offset
         offset = (page - 1) * limit
@@ -1026,19 +1038,37 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             
-            # Build WHERE clause for search
-            where_clause = ''
-            search_params = []
+            # Build WHERE clause
+            where_conditions = []
+            params = []
+
+            # Add search condition
             if search:
                 search_term = f'%{search}%'
-                where_clause = f'''
-                    WHERE (
+                where_conditions.append(f'''
+                    (
                         u.username LIKE {placeholder}
                         OR u.email LIKE {placeholder}
                         OR u.display_name LIKE {placeholder}
                     )
-                '''
-                search_params = [search_term, search_term, search_term]
+                ''')
+                params.extend([search_term, search_term, search_term])
+
+            # Add status filter
+            if status_filter == 'active':
+                where_conditions.append(f'u.is_active = {placeholder}')
+                params.append(1)
+            elif status_filter == 'inactive':
+                where_conditions.append(f'u.is_active = {placeholder}')
+                params.append(0)
+
+            # Add role filter
+            if role_filter:
+                where_conditions.append(f'u.role = {placeholder}')
+                params.append(role_filter)
+
+            # Build final WHERE clause
+            where_clause = 'WHERE ' + ' AND '.join(where_conditions) if where_conditions else ''
             
             # Build ORDER BY clause - map tier_name to the joined column
             if order_by == 'tier_name':
@@ -1053,7 +1083,7 @@ class DatabaseManager:
                 LEFT JOIN account_tiers t ON u.tier_id = t.id
                 {where_clause}
             '''
-            cursor.execute(count_query, search_params)
+            cursor.execute(count_query, params)
             total = cursor.fetchone()[0]
             
             # Get paginated users
@@ -1077,7 +1107,7 @@ class DatabaseManager:
                 LIMIT {placeholder} OFFSET {placeholder}
             '''
             
-            query_params = search_params + [limit, offset]
+            query_params = params + [limit, offset]
             cursor.execute(users_query, query_params)
             
             # Use column names from cursor description
