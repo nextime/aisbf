@@ -5000,6 +5000,76 @@ async def dashboard_users_update_tier(request: Request, user_id: int):
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+@app.post("/dashboard/users/bulk")
+async def dashboard_users_bulk(request: Request):
+    """Handle bulk user operations"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+
+    try:
+        body = await request.json()
+        action = body.get('action')
+        user_ids = body.get('user_ids', [])
+        extra_data = body.get('extra_data')
+
+        if not action or not user_ids:
+            return JSONResponse({"success": False, "error": "Action and user_ids required"}, status_code=400)
+
+        # Validate user_ids
+        if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+            return JSONResponse({"success": False, "error": "user_ids must be a list of integers"}, status_code=400)
+
+        if action == 'enable':
+            success_count = 0
+            for user_id in user_ids:
+                if db.update_user(user_id, None, None, None, True):
+                    success_count += 1
+            return JSONResponse({"success": True, "message": f"Enabled {success_count} of {len(user_ids)} users"})
+
+        elif action == 'disable':
+            success_count = 0
+            for user_id in user_ids:
+                if db.update_user(user_id, None, None, None, False):
+                    success_count += 1
+            return JSONResponse({"success": True, "message": f"Disabled {success_count} of {len(user_ids)} users"})
+
+        elif action == 'delete':
+            success_count = 0
+            for user_id in user_ids:
+                try:
+                    db.delete_user(user_id)
+                    success_count += 1
+                except Exception:
+                    pass  # Continue with other deletions
+            return JSONResponse({"success": True, "message": f"Deleted {success_count} of {len(user_ids)} users"})
+
+        elif action == 'tier':
+            tier_id = extra_data
+            if not tier_id:
+                return JSONResponse({"success": False, "error": "tier_id required for tier action"}, status_code=400)
+
+            # Verify tier exists
+            tier = db.get_tier_by_id(tier_id)
+            if not tier:
+                return JSONResponse({"success": False, "error": "Tier not found"}, status_code=404)
+
+            success_count = 0
+            for user_id in user_ids:
+                if db.set_user_tier(user_id, tier_id):
+                    success_count += 1
+            return JSONResponse({"success": True, "message": f"Changed tier for {success_count} of {len(user_ids)} users"})
+
+        else:
+            return JSONResponse({"success": False, "error": "Invalid action"}, status_code=400)
+
+    except Exception as e:
+        logger.error(f"Bulk operation error: {e}")
+        return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
 @app.post("/dashboard/restart")
 async def dashboard_restart(request: Request):
     """Reload configuration from disk"""
