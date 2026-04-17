@@ -279,6 +279,79 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
+// Utility functions
+function getUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    return {
+        search: params.get('search') || '',
+        order_by: params.get('order_by') || 'created_at',
+        direction: params.get('direction') || 'desc',
+        page: parseInt(params.get('page')) || 1,
+        limit: parseInt(params.get('limit')) || 25
+    };
+}
+
+// Main function to update users list via AJAX
+function updateUsers(params) {
+    // Show loading state
+    const tableContainer = document.querySelector('table').parentElement;
+    const originalContent = tableContainer.innerHTML;
+    tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e0e0e0;"><div class="spinner"></div> Loading...</div>';
+
+    // Build query parameters
+    const currentParams = new URLSearchParams(window.location.search);
+    Object.keys(params).forEach(key => {
+        if (params[key] !== '' && params[key] !== null && params[key] !== undefined) {
+            currentParams.set(key, params[key]);
+        } else {
+            currentParams.delete(key);
+        }
+    });
+
+    // Reset to page 1 if search/sort changed
+    if (params.search !== undefined || params.order_by !== undefined) {
+        currentParams.set('page', '1');
+    }
+
+    // Update URL without reload
+    const newURL = window.location.pathname + (currentParams.toString() ? '?' + currentParams.toString() : '');
+    window.history.pushState({}, '', newURL);
+
+    // Fetch updated content
+    fetch(newURL, {
+        headers: {
+            'X-Requested-With': 'XMLHttpRequest'
+        }
+    })
+    .then(response => response.text())
+    .then(html => {
+        // Parse and update just the table and pagination
+        const parser = new DOMParser();
+        const newDoc = parser.parseFromString(html, 'text/html');
+
+        const newTable = newDoc.querySelector('table');
+        const newPagination = newDoc.querySelector('[style*="margin-top: 20px"]');
+
+        tableContainer.innerHTML = originalContent;
+        document.querySelector('table').replaceWith(newTable);
+
+        const existingPagination = document.querySelector('[style*="margin-top: 20px"]');
+        if (existingPagination) {
+            existingPagination.replaceWith(newPagination);
+        } else if (newPagination) {
+            document.querySelector('table').after(newPagination);
+        }
+
+        // Reattach event listeners after DOM update
+        attachEventListeners();
+    })
+    .catch(error => {
+        console.error('Error updating users:', error);
+        tableContainer.innerHTML = originalContent;
+        showNotification('Error loading users', 'error');
+    });
+}
+
 // Search functionality with AJAX
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('search-input');
@@ -289,18 +362,6 @@ document.addEventListener('DOMContentLoaded', function() {
     const nextBtn = document.getElementById('next-btn');
 
     let searchTimeout = null;
-
-    // Get current URL parameters
-    function getUrlParams() {
-        const params = new URLSearchParams(window.location.search);
-        return {
-            search: params.get('search') || '',
-            order_by: params.get('order_by') || 'created_at',
-            direction: params.get('direction') || 'desc',
-            page: parseInt(params.get('page')) || 1,
-            limit: parseInt(params.get('limit')) || 25
-        };
-    }
 
     // Main function to update users list via AJAX
     function updateUsers(params) {
@@ -468,45 +529,55 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('select-all').addEventListener('change', function() {
         const checkboxes = document.querySelectorAll('.user-checkbox');
         checkboxes.forEach(cb => cb.checked = this.checked);
-        updateBulkActionsVisibility();
-    });
-
-    document.addEventListener('change', function(e) {
-        if (e.target.classList.contains('user-checkbox')) {
-            updateBulkActionsVisibility();
-            updateSelectAllState();
-        }
-    });
-
-    // Bulk action handlers
-    document.getElementById('bulk-enable').addEventListener('click', function() {
-        performBulkAction('enable', 'enable selected users');
-    });
-
-    document.getElementById('bulk-disable').addEventListener('click', function() {
-        performBulkAction('disable', 'disable selected users');
-    });
-
-    document.getElementById('bulk-delete').addEventListener('click', function() {
-        performBulkAction('delete', 'delete selected users', true);
-    });
-
-    document.getElementById('bulk-tier-select').addEventListener('change', function() {
-        if (this.value) {
-            performBulkAction('tier', `change tier for selected users`, false, this.value);
-            this.value = '';
-        }
-    });
-
-    document.getElementById('bulk-clear').addEventListener('click', function() {
-        clearSelection();
-    });
-
-    // Initialize bulk actions visibility
     updateBulkActionsVisibility();
 });
 
-// Bulk action helper functions
+// Function to attach event listeners to dynamic elements
+function attachEventListeners() {
+    // Reattach sortable header listeners
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.addEventListener('click', function() {
+            const column = this.dataset.column;
+            const currentOrder = getUrlParams().order_by;
+            const currentDir = getUrlParams().direction || 'desc';
+
+            let newDir = 'asc';
+            if (currentOrder === column && currentDir === 'asc') {
+                newDir = 'desc';
+            }
+
+            updateUsers({ order_by: column, direction: newDir });
+        });
+    });
+
+    // Reattach pagination listeners
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+    const pageSize = document.getElementById('page-size');
+
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function() {
+            const currentPage = parseInt(getUrlParams().page) || 1;
+            if (currentPage > 1) {
+                updateUsers({ page: currentPage - 1 });
+            }
+        });
+    }
+
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function() {
+            const currentPage = parseInt(getUrlParams().page) || 1;
+            updateUsers({ page: currentPage + 1 });
+        });
+    }
+
+    if (pageSize) {
+        pageSize.addEventListener('change', function() {
+            updateUsers({ limit: this.value, page: 1 });
+        });
+    }
+}
+
 function updateBulkActionsVisibility() {
     const selectedCount = document.querySelectorAll('.user-checkbox:checked').length;
     const bulkActions = document.getElementById('bulk-actions');
