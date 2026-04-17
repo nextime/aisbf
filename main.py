@@ -32,6 +32,7 @@ from fastapi.templating import Jinja2Templates
 from jinja2 import Environment, FileSystemLoader
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+from aisbf.config import Config
 from aisbf.mcp import mcp_server, MCPAuthLevel, load_mcp_config
 from aisbf.database import DatabaseRegistry
 from aisbf.cache import initialize_cache
@@ -5757,6 +5758,88 @@ async def dashboard_provider_file_delete(
         return JSONResponse({"message": "File deleted successfully"})
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
+
+
+# OAuth authentication check endpoints for providers
+@app.get("/dashboard/providers/{provider_name}/auth/check")
+async def dashboard_provider_auth_check(request: Request, provider_name: str):
+    """Check OAuth authentication status for a provider"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        # Load current provider configuration
+        config = Config()
+        provider_config = config.providers.get(provider_name)
+
+        if not provider_config:
+            return JSONResponse(
+                status_code=404,
+                content={"authenticated": False, "error": f"Provider '{provider_name}' not found"}
+            )
+
+        provider_type = provider_config.type
+
+        if provider_type == 'claude':
+            from aisbf.auth.claude import ClaudeAuth
+            claude_config = provider_config.claude_config or {}
+            auth = ClaudeAuth(credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'))
+            is_auth = auth.is_authenticated()
+            result = {"authenticated": is_auth}
+            if is_auth and auth.tokens and 'expires_at' in auth.tokens:
+                result["expires_at"] = auth.tokens['expires_at']
+            return JSONResponse(result)
+
+        elif provider_type == 'kilocode':
+            from aisbf.auth.kilo import KiloOAuth2
+            kilo_config = provider_config.kilo_config or {}
+            auth = KiloOAuth2(credentials_file=kilo_config.get('credentials_file', '~/.kilo_credentials.json'))
+            is_auth = auth.is_authenticated()
+            result = {"authenticated": is_auth}
+            if is_auth and auth.credentials:
+                expires = auth.credentials.get('expires', 0)
+                if expires:
+                    result["expires_at"] = expires
+            return JSONResponse(result)
+
+        elif provider_type == 'qwen':
+            from aisbf.auth.qwen import QwenOAuth2
+            qwen_config = provider_config.qwen_config or {}
+            auth = QwenOAuth2(credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'))
+            is_auth = auth.is_authenticated()
+            result = {"authenticated": is_auth}
+            if is_auth and auth.credentials:
+                expiry_date = auth.credentials.get('expiry_date', 0)
+                if expiry_date:
+                    # Convert from milliseconds to seconds
+                    result["expires_at"] = expiry_date / 1000
+            return JSONResponse(result)
+
+        elif provider_type == 'codex':
+            from aisbf.auth.codex import CodexOAuth2
+            codex_config = provider_config.codex_config or {}
+            auth = CodexOAuth2(credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'))
+            is_auth = auth.is_authenticated()
+            result = {"authenticated": is_auth}
+            if is_auth and auth.credentials:
+                expires = auth.credentials.get('expires', 0)
+                if expires:
+                    result["expires_at"] = expires
+            return JSONResponse(result)
+
+        else:
+            return JSONResponse(
+                status_code=400,
+                content={"authenticated": False, "error": f"Provider type '{provider_type}' does not support OAuth authentication checks"}
+            )
+
+    except Exception as e:
+        logger.error(f"Error checking auth for provider {provider_name}: {e}")
+        return JSONResponse(
+            status_code=500,
+            content={"authenticated": False, "error": str(e)}
+        )
 
 
 # User-specific rotation management routes
@@ -12065,7 +12148,7 @@ async def dashboard_kilo_auth_poll(request: Request):
             
             return JSONResponse({
                 "success": True,
-                "status": "approved",
+                "status": "completed",
                 "message": "Authentication completed successfully"
             })
         elif result['status'] == 'pending':
@@ -12750,7 +12833,7 @@ async def dashboard_qwen_auth_poll(request: Request):
             
             return JSONResponse({
                 "success": True,
-                "status": "approved",
+                "status": "completed",
                 "message": "Authentication completed successfully"
             })
         elif result is None:

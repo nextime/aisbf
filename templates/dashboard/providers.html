@@ -632,9 +632,7 @@ function renderProviderDetails(key) {
                 </div>
             </div>
         </div>
-        
-        ${authFieldsHtml}
-        
+
         <div class="form-group">
             <label>Rate Limit (seconds)</label>
             <input type="number" value="${provider.rate_limit || 0}" onchange="updateProvider('${key}', 'rate_limit', parseFloat(this.value))" step="0.1">
@@ -876,6 +874,615 @@ function togglePricingFields(key) {
     if (pricingFields) {
         pricingFields.style.display = provider.is_subscription ? 'none' : 'block';
     }
+}
+
+// Helper function to format expiration time
+function formatExpirationTime(expiresAt) {
+    if (!expiresAt) return 'Unknown';
+    
+    const now = Math.floor(Date.now() / 1000);
+    const secondsRemaining = expiresAt - now;
+    
+    if (secondsRemaining <= 0) {
+        return 'Expired';
+    }
+    
+    const days = Math.floor(secondsRemaining / 86400);
+    const hours = Math.floor((secondsRemaining % 86400) / 3600);
+    const minutes = Math.floor((secondsRemaining % 3600) / 60);
+    const seconds = secondsRemaining % 60;
+    
+    if (days > 0) {
+        return `${days} day${days > 1 ? 's' : ''} ${hours} hour${hours !== 1 ? 's' : ''}`;
+    } else if (hours > 0) {
+        return `${hours} hour${hours > 1 ? 's' : ''} ${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else if (minutes > 0) {
+        return `${minutes} minute${minutes > 1 ? 's' : ''} ${seconds} second${seconds !== 1 ? 's' : ''}`;
+    } else {
+        return `${seconds} second${seconds > 1 ? 's' : ''}`;
+    }
+}
+
+// OAuth authentication check functions
+async function checkClaudeAuth(providerKey) {
+    const statusDiv = document.getElementById(`claude-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Claude authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Claude authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Claude authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Claude auth: ${error.message}`;
+    }
+}
+
+async function checkQwenAuth(providerKey) {
+    const statusDiv = document.getElementById(`qwen-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Qwen authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Qwen authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Qwen authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Qwen auth: ${error.message}`;
+    }
+}
+
+async function checkCodexAuth(providerKey) {
+    const statusDiv = document.getElementById(`codex-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Codex authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Codex authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Codex authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Codex auth: ${error.message}`;
+    }
+}
+
+async function checkKiloAuth(providerKey) {
+    const statusDiv = document.getElementById(`kilo-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Kilocode authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Kilocode authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Kilocode authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Kilocode auth: ${error.message}`;
+    }
+}
+
+// OAuth authentication functions
+async function authenticateClaude(key) {
+    const statusEl = document.getElementById(`claude-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/claude/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].claude_config?.credentials_file || '~/.claude_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success || !data.auth_url) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Opening authentication window...</p>';
+        
+        // Open OAuth2 URL in popup window
+        const authWindow = window.open(data.auth_url, 'claude-auth', 'width=600,height=700');
+        
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Please complete authentication in the popup window...</p>';
+        
+        // Poll for completion
+        let pollCount = 0;
+        const maxPolls = 60;
+        let isCompleting = false;
+        
+        await new Promise(resolve => setTimeout(resolve, 8000));
+        
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const statusResponse = await fetch('/dashboard/claude/auth/callback-status');
+                const statusData = await statusResponse.json();
+                
+                if (statusData.received) {
+                    clearInterval(pollInterval);
+                    
+                    if (authWindow && !authWindow.closed) {
+                        authWindow.close();
+                    }
+                    
+                    if (statusData.error) {
+                        statusEl.style.background = '#402010';
+                        statusEl.style.border = '1px solid #ff4a4a';
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ OAuth2 error: ${statusData.error}</p>`;
+                        return;
+                    }
+                    
+                    if (isCompleting) return;
+                    isCompleting = true;
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    try {
+                        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication...</p>';
+                        
+                        const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            }
+                        });
+                        
+                        const completeData = await completeResponse.json();
+                        
+                        if (completeData.success) {
+                            statusEl.style.background = '#0f4020';
+                            statusEl.style.border = '1px solid #4eff9e';
+                            statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
+                        } else {
+                            statusEl.style.background = '#402010';
+                            statusEl.style.border = '1px solid #ff4a4a';
+                            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication incomplete. ${completeData.error || 'Please try again.'}</p>`;
+                        }
+                    } catch (error) {
+                        statusEl.style.background = '#402010';
+                        statusEl.style.border = '1px solid #ff4a4a';
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error completing authentication: ${error.message}</p>`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking callback status:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                if (authWindow && !authWindow.closed) {
+                    authWindow.close();
+                }
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, 2000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function authenticateQwen(key) {
+    const statusEl = document.getElementById(`qwen-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/qwen/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].qwen_config?.credentials_file || '~/.aisbf/qwen_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Qwen Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'qwen-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/qwen/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Qwen authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Qwen auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function pollQwenAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateQwen
+}
+
+async function authenticateCodex(key) {
+    const statusEl = document.getElementById(`codex-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/codex/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].codex_config?.credentials_file || '~/.aisbf/codex_credentials.json',
+                issuer: providersData[key].codex_config?.issuer || 'https://auth.openai.com'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Codex Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'codex-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/codex/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'approved') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Codex authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Codex auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function pollCodexAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateCodex
+}
+
+async function authenticateKilo(key) {
+    const statusEl = document.getElementById(`kilo-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Kilocode OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/kilo/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                credentials_file: providersData[key].kilo_config?.credentials_file || '~/.kilo_credentials.json'
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Kilocode Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'kilo-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/kilo/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Kilocode authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Kilo auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function pollKiloAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateKilo
 }
 
 // Initialize providers list immediately (DOM is already loaded since script is at end of body)
