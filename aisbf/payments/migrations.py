@@ -525,15 +525,13 @@ class PaymentMigrations:
         
         logger.info("✅ Default payment system data checked (existing records preserved)")
         
-        # Insert default free tier if it doesn't exist
+        # Insert default free tier ONLY if account_tiers table is completely empty
         try:
-            if self.db_type == 'sqlite':
-                cursor.execute('SELECT COUNT(*) FROM account_tiers WHERE is_default = 1')
-            else:
-                cursor.execute('SELECT COUNT(*) FROM account_tiers WHERE is_default = 1')
+            cursor.execute('SELECT COUNT(*) FROM account_tiers')
+            tier_count = cursor.fetchone()[0]
             
-            free_tier_count = cursor.fetchone()[0]
-            if free_tier_count == 0:
+            if tier_count == 0:
+                # Table is empty, insert default free tier
                 if self.db_type == 'sqlite':
                     cursor.execute('''
                         INSERT INTO account_tiers
@@ -552,6 +550,8 @@ class PaymentMigrations:
                         VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
                     ''', ('Free Tier', 'Default free account tier with unlimited access', 0.00, 0.00, 1, 1, 1,
                           -1, -1, -1, -1, -1, -1, -1))
-                logger.info("✅ Inserted default free tier")
+                logger.info("✅ Inserted default free tier (table was empty)")
+            else:
+                logger.info(f"✅ Account tiers table has {tier_count} record(s), skipping default tier insertion")
         except Exception as e:
-            logger.warning(f"Failed to insert default free tier: {e}")
+            logger.warning(f"Failed to check/insert default free tier: {e}")
