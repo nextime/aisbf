@@ -4805,7 +4805,14 @@ async def dashboard_test_smtp(request: Request):
 
 # Admin user management routes
 @app.get("/dashboard/users", response_class=HTMLResponse)
-async def dashboard_users(request: Request):
+async def dashboard_users(
+    request: Request,
+    page: int = Query(1, ge=1),
+    limit: int = Query(25, ge=1, le=100),
+    search: str = Query(None, max_length=100),
+    order_by: str = Query('created_at', regex='^(username|last_login|created_at|tier_name)$'),
+    direction: str = Query('desc', regex='^(asc|desc)$')
+):
     """Admin user management page"""
     auth_check = require_admin(request)
     if auth_check:
@@ -4814,8 +4821,23 @@ async def dashboard_users(request: Request):
     from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
-    # Get all users
-    users = db.get_users()
+    # Get paginated users
+    result = db.get_users_paginated(
+        page=page,
+        limit=limit,
+        search=search,
+        order_by=order_by,
+        direction=direction
+    )
+    
+    users = result['users']
+    total_users = result['total']
+    
+    # Calculate pagination metadata
+    total_pages = (total_users + limit - 1) // limit  # Ceiling division
+    current_page = min(page, total_pages) if total_pages > 0 else 1
+    start_item = (current_page - 1) * limit + 1
+    end_item = min(current_page * limit, total_users)
     
     # Get all tiers for assignment dropdown
     tiers = db.get_all_tiers()
@@ -4824,11 +4846,26 @@ async def dashboard_users(request: Request):
         request=request,
         name="dashboard/users.html",
         context={
-        "request": request,
-        "session": request.session,
-        "users": users,
-        "tiers": tiers
-    }
+            "request": request,
+            "session": request.session,
+            "users": users,
+            "tiers": tiers,
+            "pagination": {
+                "current_page": current_page,
+                "total_pages": total_pages,
+                "total_users": total_users,
+                "start_item": start_item,
+                "end_item": end_item,
+                "limit": limit,
+                "has_prev": current_page > 1,
+                "has_next": current_page < total_pages
+            },
+            "filters": {
+                "search": search or "",
+                "order_by": order_by,
+                "direction": direction
+            }
+        }
     )
 
 @app.post("/dashboard/users/add")
