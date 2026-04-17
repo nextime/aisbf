@@ -71,6 +71,45 @@ class Analytics:
         self._latencies = {}  # {provider_id: {count: int, total_ms: float, min_ms: float, max_ms: float}}
         self._error_types = {}  # {provider_id: {error_type: count}}
     
+    def _get_provider_pricing(self, provider_id: str) -> Dict[str, float]:
+        """
+        Get pricing for a provider, checking config first, then defaults.
+        
+        Args:
+            provider_id: Provider identifier
+            
+        Returns:
+            Dictionary with 'prompt' and 'completion' pricing per million tokens
+        """
+        from .config import config
+        
+        # Try to get provider config
+        try:
+            provider_config = config.get_provider(provider_id)
+            if provider_config:
+                # Check if it's a subscription provider (free)
+                is_subscription = getattr(provider_config, 'is_subscription', False)
+                if is_subscription:
+                    return {'prompt': 0.0, 'completion': 0.0}
+                
+                # Check for custom pricing
+                price_prompt = getattr(provider_config, 'price_per_million_prompt', None)
+                price_completion = getattr(provider_config, 'price_per_million_completion', None)
+                
+                if price_prompt is not None and price_completion is not None:
+                    return {'prompt': price_prompt, 'completion': price_completion}
+        except Exception:
+            pass
+        
+        # Fall back to default pricing
+        for key, pricing in self.pricing.items():
+            if key in provider_id.lower():
+                return pricing
+        
+        # Ultimate fallback
+        return self.pricing.get('openrouter', {'prompt': 5.0, 'completion': 15.0})
+    
+    
     def record_request(
         self,
         provider_id: str,
@@ -80,11 +119,13 @@ class Analytics:
         success: bool = True,
         error_type: Optional[str] = None,
         rotation_id: Optional[str] = None,
-        autoselect_id: Optional[str] = None
+        autoselect_id: Optional[str] = None,
+        user_id: Optional[int] = None,
+        token_id: Optional[int] = None
     ):
         """
         Record a request for analytics.
-        
+
         Args:
             provider_id: Provider identifier
             model_name: Model name
@@ -94,6 +135,8 @@ class Analytics:
             error_type: Optional error type if failed
             rotation_id: Optional rotation identifier if request went through rotation
             autoselect_id: Optional autoselect identifier if request went through autoselect
+            user_id: Optional user ID if request was made with API token
+            token_id: Optional API token ID if request was made with API token
         """
         # Initialize provider tracking if needed
         if provider_id not in self._request_counts:
@@ -118,7 +161,11 @@ class Analytics:
         
         # Persist to database
         if tokens_used > 0:
-            self.db.record_token_usage(provider_id, model_name, tokens_used)
+            self.db.record_token_usage(provider_id, model_name, tokens_used, user_id)
+
+            # Also record user token usage if this was an API token request
+            if user_id is not None and token_id is not None:
+                self.db.record_user_token_usage(user_id, token_id, provider_id, model_name, tokens_used)
     
     def get_provider_stats(
         self,
@@ -140,19 +187,16 @@ class Analytics:
         """
         # Use in-memory stats if no date range specified, otherwise query DB
         if from_datetime is None and to_datetime is None:
-            stats = {
-                'provider_id': provider_id,
-                'requests': self._request_counts.get(provider_id, {'total': 0, 'success': 0, 'error': 0}),
-                'latency': self._latencies.get(provider_id, {'count': 0, 'total_ms': 0.0, 'min_ms': 0, 'max_ms': 0}),
-                'errors': self._error_types.get(provider_id, {}),
-                'tokens': self._get_token_usage_by_provider(provider_id)
-            }
+            # Default to last 24 hours from database instead of in-memory
+            from_datetime = datetime.now() - timedelta(days=1)
+            to_datetime = datetime.now()
+            stats = self._get_provider_stats_from_db(provider_id, from_datetime, to_datetime, user_filter)
         else:
             # Query database for date range stats
             start = from_datetime or (datetime.now() - timedelta(days=1))
             end = to_datetime or datetime.now()
             
-            stats = self._get_provider_stats_from_db(provider_id, start, end)
+            stats = self._get_provider_stats_from_db(provider_id, start, end, user_filter)
         
         # Calculate error rate
         total = stats['requests']['total']
@@ -182,15 +226,79 @@ class Analytics:
         user_filter: Optional[int] = None
     ) -> Dict[str, Any]:
         """Get provider stats from database for a specific date range."""
-        # This is a placeholder - in a real implementation, you'd query the database
-        # For now, return empty stats
-        return {
-            'provider_id': provider_id,
-            'requests': {'total': 0, 'success': 0, 'error': 0},
-            'latency': {'count': 0, 'total_ms': 0.0, 'min_ms': 0, 'max_ms': 0},
-            'errors': {},
-            'tokens': {'TPM': 0, 'TPH': 0, 'TPD': 0}
-        }
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            
+            # Build query with optional user filter
+            user_condition = f" AND user_id = {placeholder}" if user_filter is not None else ""
+            params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
+            if user_filter is not None:
+                params.append(user_filter)
+            
+            # Get token usage and actual time range of requests
+            cursor.execute(f'''
+                SELECT 
+                    COUNT(*) as total_requests,
+                    SUM(tokens_used) as total_tokens,
+                    MIN(timestamp) as first_request,
+                    MAX(timestamp) as last_request
+                FROM token_usage
+                WHERE provider_id = {placeholder}
+                  AND timestamp >= {placeholder}
+                  AND timestamp <= {placeholder}
+                  {user_condition}
+            ''', params)
+            
+            result = cursor.fetchone()
+            total_requests = result[0] if result else 0
+            total_tokens = result[1] if result else 0
+            first_request = result[2] if result and result[2] else None
+            last_request = result[3] if result and result[3] else None
+            
+            # Calculate time-based rates using ACTUAL usage window, not query window
+            # This gives more accurate rate limiting metrics
+            if first_request and last_request and total_tokens > 0:
+                try:
+                    first_dt = datetime.fromisoformat(first_request)
+                    last_dt = datetime.fromisoformat(last_request)
+                    
+                    # Use actual duration between first and last request
+                    # Add a minimum of 1 minute to avoid division by very small numbers
+                    actual_duration_seconds = max((last_dt - first_dt).total_seconds(), 60)
+                    duration_minutes = actual_duration_seconds / 60
+                    duration_hours = actual_duration_seconds / 3600
+                    duration_days = actual_duration_seconds / 86400
+                    
+                    # Calculate rates based on actual usage period
+                    tpm = int(total_tokens / duration_minutes) if duration_minutes > 0 else 0
+                    tph = int(total_tokens / duration_hours) if duration_hours > 0 else 0
+                    tpd = int(total_tokens / duration_days) if duration_days > 0 else 0
+                except Exception as e:
+                    # Fallback to query window if parsing fails
+                    duration_seconds = (to_datetime - from_datetime).total_seconds()
+                    duration_minutes = duration_seconds / 60
+                    duration_hours = duration_seconds / 3600
+                    duration_days = duration_seconds / 86400
+                    
+                    tpm = int(total_tokens / duration_minutes) if duration_minutes > 0 else 0
+                    tph = int(total_tokens / duration_hours) if duration_hours > 0 else 0
+                    tpd = int(total_tokens / duration_days) if duration_days > 0 else 0
+            else:
+                tpm = tph = tpd = 0
+            
+            return {
+                'provider_id': provider_id,
+                'requests': {'total': total_requests, 'success': total_requests, 'error': 0},
+                'latency': {'count': 0, 'total_ms': 0.0, 'min_ms': 0, 'max_ms': 0},
+                'errors': {},
+                'tokens': {
+                    'total': total_tokens,
+                    'TPM': tpm,
+                    'TPH': tph,
+                    'TPD': tpd
+                }
+            }
     
     def get_token_usage_by_date_range(
         self,
@@ -266,14 +374,36 @@ class Analytics:
         Args:
             from_datetime: Optional start datetime for filtering
             to_datetime: Optional end datetime for filtering
+            user_filter: Optional user ID filter
             
         Returns:
-            List of provider statistics
+            List of provider statistics dictionaries
         """
-        all_providers = set(self._request_counts.keys())
-        all_providers.update(self.db.get_all_context_dimensions())
+        # Get all unique providers from database
+        start = from_datetime or (datetime.now() - timedelta(days=1))
+        end = to_datetime or datetime.now()
         
-        return [self.get_provider_stats(pid, from_datetime, to_datetime) for pid in sorted(all_providers)]
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            
+            # Build query with optional user filter
+            user_condition = f" AND user_id = {placeholder}" if user_filter is not None else ""
+            params = [start.isoformat(), end.isoformat()]
+            if user_filter is not None:
+                params.append(user_filter)
+            
+            cursor.execute(f'''
+                SELECT DISTINCT provider_id
+                FROM token_usage
+                WHERE timestamp >= {placeholder}
+                  AND timestamp <= {placeholder}
+                  {user_condition}
+            ''', params)
+            
+            all_providers = [row[0] for row in cursor.fetchall()]
+        
+        return [self.get_provider_stats(pid, from_datetime, to_datetime, user_filter) for pid in sorted(all_providers)]
     
     def _get_token_usage_by_provider(self, provider_id: str) -> Dict[str, int]:
         """
@@ -589,15 +719,8 @@ class Analytics:
         Returns:
             Estimated cost in USD
         """
-        # Determine provider pricing
-        provider_pricing = None
-        for key, pricing in self.pricing.items():
-            if key.lower() in provider_id.lower():
-                provider_pricing = pricing
-                break
-        
-        if not provider_pricing:
-            provider_pricing = self.pricing.get('openrouter', {'prompt': 5.0, 'completion': 15.0})
+        # Get provider-specific pricing (checks subscription status and custom pricing)
+        provider_pricing = self._get_provider_pricing(provider_id)
         
         # Calculate cost
         if prompt_tokens is not None:

@@ -83,6 +83,11 @@ class Provider(BaseModel):
     endpoint: str
     api_key_required: bool
     models: List[Model] = []
+    
+    # Pricing configuration
+    is_subscription: bool = False  # If True, pricing is 0 (subscription-based provider)
+    price_per_million_prompt: Optional[float] = None  # Price per million prompt tokens (USD)
+    price_per_million_completion: Optional[float] = None  # Price per million completion tokens (USD)
 
 class ErrorTracking(BaseModel):
     failures: int
