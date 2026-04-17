@@ -521,6 +521,13 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
         </small>
         {% endif %}
     </div>
+    
+    <div style="background: #3498db; color: white; padding: 20px; border-radius: 8px;">
+        <h4 style="font-size: 14px; margin-bottom: 10px;">💰 Estimated Savings</h4>
+        <p style="font-size: 28px; font-weight: bold;" id="savings-amount">$0.00</p>
+        <small style="color: rgba(255,255,255,0.8);">From cache hits & optimization</small>
+    </div>
+    
     {% for pc in cost_overview.providers %}
     <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
         <h4 style="font-size: 14px; margin-bottom: 5px;">{{ pc.provider_id }}</h4>
@@ -529,6 +536,23 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
     </div>
     {% endfor %}
 </div>
+
+<script>
+// Fetch and display savings estimation
+fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
+    .then(response => response.json())
+    .then(data => {
+        if (data.enabled && data.hits > 0) {
+            // Estimate savings: assume average cost of $0.002 per cached request
+            const avgCostPerRequest = 0.002;
+            const estimatedSavings = data.hits * avgCostPerRequest;
+            document.getElementById('savings-amount').textContent = '$' + estimatedSavings.toFixed(2);
+        }
+    })
+    .catch(error => {
+        console.error('Error fetching cache stats:', error);
+    });
+</script>
 
 <h3 style="margin-top: 30px; margin-bottom: 15px;">Model Performance</h3>
 {% if model_performance %}
