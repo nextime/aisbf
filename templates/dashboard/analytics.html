@@ -537,6 +537,59 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
     {% endfor %}
 </div>
 
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Optimization Savings</h3>
+{% if optimization_savings and optimization_savings.total_tokens_saved > 0 %}
+<div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px; margin-bottom: 20px;">
+    <div style="background: #27ae60; color: white; padding: 20px; border-radius: 8px;">
+        <h4 style="font-size: 14px; margin-bottom: 10px;">Total Tokens Saved</h4>
+        <p style="font-size: 28px; font-weight: bold;">{{ format_tokens(optimization_savings.total_tokens_saved) }}</p>
+        {% if optimization_savings.date_range %}
+        <small style="color: rgba(255,255,255,0.8);">
+            {{ optimization_savings.date_range.start[:10] }} to {{ optimization_savings.date_range.end[:10] }}
+        </small>
+        {% endif %}
+    </div>
+    <div style="background: #16a085; color: white; padding: 20px; border-radius: 8px;">
+        <h4 style="font-size: 14px; margin-bottom: 10px;">Total Cost Saved</h4>
+        <p style="font-size: 28px; font-weight: bold;">${{ "%.2f"|format(optimization_savings.total_cost_saved) }}</p>
+        <small style="color: rgba(255,255,255,0.8);">From optimizations</small>
+    </div>
+</div>
+
+{% if optimization_savings.savings_by_type %}
+<table>
+    <tr>
+        <th>Optimization Type</th>
+        <th>Count</th>
+        <th>Tokens Saved</th>
+        <th>Cost Saved</th>
+        <th>Avg Tokens/Optimization</th>
+        <th>Max Tokens Saved</th>
+    </tr>
+    {% for opt_type, stats in optimization_savings.savings_by_type.items() %}
+    <tr>
+        <td><strong>{{ opt_type.title() }}</strong></td>
+        <td>{{ stats.count }}</td>
+        <td>{{ format_tokens(stats.tokens_saved) }}</td>
+        <td>${{ "%.4f"|format(stats.cost_saved) }}</td>
+        <td>{{ format_tokens(stats.avg_tokens_saved) }}</td>
+        <td>{{ format_tokens(stats.max_tokens_saved) }}</td>
+    </tr>
+    {% endfor %}
+    <tr style="background: #0f3460; font-weight: bold;">
+        <td><strong>Total</strong></td>
+        <td>{{ optimization_savings.savings_by_type.values() | sum(attribute='count') }}</td>
+        <td>{{ format_tokens(optimization_savings.total_tokens_saved) }}</td>
+        <td>${{ "%.4f"|format(optimization_savings.total_cost_saved) }}</td>
+        <td>-</td>
+        <td>-</td>
+    </tr>
+</table>
+{% endif %}
+{% else %}
+<p style="color: #a0a0a0;">No optimization savings recorded yet. Enable deduplication, condensation, batching, or caching to see savings.</p>
+{% endif %}
+
 <script>
 // Fetch and display savings estimation
 fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
@@ -680,7 +733,11 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
 <p style="color: #a0a0a0;">No token usage data available for the selected period.</p>
 {% endif %}
 
-<div style="margin-top: 30px; display: flex; gap: 10px;">
+<div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">
     <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+    {% if is_admin %}
+    <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn">Rate Limits</a>
+    <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn">Response Cache</a>
+    {% endif %}
 </div>
 {% endblock %}

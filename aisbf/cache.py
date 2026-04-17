@@ -1168,6 +1168,9 @@ class ResponseCache:
             'deletes': 0,
             'errors': 0
         }
+        
+        # Per-provider statistics
+        self.provider_stats = {}
 
         # Initialize backends
         self.redis_client = None
@@ -1358,12 +1361,14 @@ class ResponseCache:
 
         try:
             cache_key = self._generate_cache_key(request_data)
+            provider_id = request_data.get('provider_id', 'unknown')
 
             if self.backend == 'redis' and self.redis_client:
                 # Try Redis first
                 data = self.redis_client.get(cache_key)
                 if data:
                     self.stats['hits'] += 1
+                    self._update_provider_stats(provider_id, 'hits')
                     logger.debug(f"Cache hit (Redis): {cache_key}")
                     return self._deserialize_response(data)
             elif self.backend == 'sqlite' and self.sqlite_backend:
@@ -1371,6 +1376,7 @@ class ResponseCache:
                 data = self.sqlite_backend.get(cache_key)
                 if data:
                     self.stats['hits'] += 1
+                    self._update_provider_stats(provider_id, 'hits')
                     logger.debug(f"Cache hit (SQLite): {cache_key}")
                     return data
             elif self.backend == 'mysql' and self.mysql_backend:
@@ -1378,6 +1384,7 @@ class ResponseCache:
                 data = self.mysql_backend.get(cache_key)
                 if data:
                     self.stats['hits'] += 1
+                    self._update_provider_stats(provider_id, 'hits')
                     logger.debug(f"Cache hit (MySQL): {cache_key}")
                     return data
             elif self.backend == 'memory':
@@ -1399,10 +1406,12 @@ class ResponseCache:
                             self._memory_access_order.append(cache_key)
 
                             self.stats['hits'] += 1
+                            self._update_provider_stats(provider_id, 'hits')
                             logger.debug(f"Cache hit (Memory): {cache_key}")
                             return self._memory_cache[cache_key]
 
             self.stats['misses'] += 1
+            self._update_provider_stats(provider_id, 'misses')
             logger.debug(f"Cache miss: {cache_key}")
             return None
 
