@@ -252,17 +252,19 @@ class KiroProviderHandler(BaseProviderHandler):
             # Extract content and tool calls
             content = parser.get_content()
             tool_calls = parser.get_tool_calls()
+            usage_data = parser.get_usage()
 
             if AISBF_DEBUG:
                 logging.info(f"KiroProviderHandler: Parsed content length: {len(content)}")
                 logging.info(f"KiroProviderHandler: Parsed tool calls: {len(tool_calls)}")
+                logging.info(f"KiroProviderHandler: Usage credits: {usage_data.get('usage_credits', 0)}")
                 if tool_calls:
                     logging.info(f"KiroProviderHandler: Tool calls: {json.dumps(tool_calls, indent=2)}")
 
             logging.info(f"KiroProviderHandler: Response parsed successfully")
 
             # Build OpenAI-format response
-            openai_response = self._build_openai_response(model, content, tool_calls)
+            openai_response = self._build_openai_response(model, content, tool_calls, usage_data)
 
             if AISBF_DEBUG:
                 logging.info(f"=== FINAL KIRO RESPONSE DICT ===")
@@ -282,9 +284,13 @@ class KiroProviderHandler(BaseProviderHandler):
             self.record_failure()
             raise e
 
-    def _build_openai_response(self, model: str, content: str, tool_calls: List[Dict]) -> Dict:
+    def _build_openai_response(self, model: str, content: str, tool_calls: List[Dict], usage_data: Dict = None) -> Dict:
         """Build OpenAI-format response from parsed Kiro data."""
         finish_reason = "tool_calls" if tool_calls else "stop"
+        
+        # Convert Kiro usage credits to approximate token count
+        # Kiro usage is in credits, roughly 1 credit ≈ 1 token
+        usage_credits = usage_data.get('usage_credits', 0) if usage_data else 0
 
         openai_response = {
             "id": f"kiro-{int(time.time())}",
@@ -302,7 +308,7 @@ class KiroProviderHandler(BaseProviderHandler):
             "usage": {
                 "prompt_tokens": 0,
                 "completion_tokens": 0,
-                "total_tokens": 0
+                "total_tokens": usage_credits  # Use actual usage from Kiro API
             }
         }
 
@@ -371,9 +377,14 @@ class KiroProviderHandler(BaseProviderHandler):
                 logger.info(f"KiroProviderHandler: Streaming completed")
 
                 final_tool_calls = parser.get_tool_calls()
+                usage_data = parser.get_usage()
                 finish_reason = "tool_calls" if final_tool_calls else "stop"
+                
+                # Convert Kiro usage credits to approximate token count
+                usage_credits = usage_data.get('usage_credits', 0)
 
                 logger.info(f"KiroProviderHandler: Final tool calls count: {len(final_tool_calls)}")
+                logger.info(f"KiroProviderHandler: Usage credits: {usage_credits}")
 
                 if final_tool_calls:
                     indexed_tool_calls = []
@@ -423,7 +434,7 @@ class KiroProviderHandler(BaseProviderHandler):
                     "usage": {
                         "prompt_tokens": 0,
                         "completion_tokens": 0,
-                        "total_tokens": 0
+                        "total_tokens": usage_credits  # Use actual usage from Kiro API
                     }
                 }
 

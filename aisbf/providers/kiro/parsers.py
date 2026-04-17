@@ -265,6 +265,8 @@ class AwsEventStreamParser:
         self.current_tool_call: Optional[Dict[str, Any]] = None
         self.tool_calls: List[Dict[str, Any]] = []
         self.content_chunks: List[str] = []
+        self.usage_credits: int = 0  # Track usage credits from Kiro API
+        self.context_usage_percentage: float = 0.0  # Track context usage percentage
     
     def feed(self, chunk: bytes) -> List[Dict[str, Any]]:
         """
@@ -336,9 +338,11 @@ class AwsEventStreamParser:
         elif event_type == 'tool_stop':
             return self._process_tool_stop_event(data)
         elif event_type == 'usage':
-            return {"type": "usage", "data": data.get('usage', 0)}
+            self.usage_credits = data.get('usage', 0)
+            return {"type": "usage", "data": self.usage_credits}
         elif event_type == 'context_usage':
-            return {"type": "context_usage", "data": data.get('contextUsagePercentage', 0)}
+            self.context_usage_percentage = data.get('contextUsagePercentage', 0)
+            return {"type": "context_usage", "data": self.context_usage_percentage}
         
         return None
     
@@ -572,6 +576,18 @@ class AwsEventStreamParser:
             self._finalize_tool_call()
         return deduplicate_tool_calls(self.tool_calls)
     
+    def get_usage(self) -> Dict[str, int]:
+        """
+        Returns usage information from Kiro API.
+        
+        Returns:
+            Dictionary with usage_credits and context_usage_percentage
+        """
+        return {
+            "usage_credits": self.usage_credits,
+            "context_usage_percentage": self.context_usage_percentage
+        }
+    
     def reset(self) -> None:
         """Resets parser state."""
         self.buffer = ""
@@ -579,3 +595,5 @@ class AwsEventStreamParser:
         self.current_tool_call = None
         self.tool_calls = []
         self.content_chunks = []
+        self.usage_credits = 0
+        self.context_usage_percentage = 0.0
