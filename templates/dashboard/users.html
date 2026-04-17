@@ -59,17 +59,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <!-- Users Table -->
 <h3 style="margin-bottom: 15px;">All Users</h3>
 
-<!-- Search and Filter Controls -->
-<div style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
-    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-        <div style="flex: 1; min-width: 200px;">
-            <label for="search-input" style="display: block; margin-bottom: 5px; color: #e0e0e0;">Search Users</label>
-            <input type="text" id="search-input" placeholder="Search by username, email, or display name..."
-                   value="{{ filters.search }}" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+<!-- Bulk Actions Bar -->
+<div id="bulk-actions" style="display: none; margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+    <div style="display: flex; justify-content: space-between; align-items: center;">
+        <div style="color: #e0e0e0;">
+            <span id="selected-count">0</span> users selected
         </div>
-        <div style="display: flex; gap: 10px; align-items: flex-end;">
-            <button id="search-btn" class="btn" style="padding: 8px 16px;">Search</button>
-            <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;">Clear</button>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <select id="bulk-tier-select" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+                {% for tier in tiers %}
+                <option value="{{ tier.id }}">{{ tier.name }}{% if not tier.is_visible %} (Hidden){% endif %}</option>
+                {% endfor %}
+            </select>
+            <button id="bulk-enable" class="btn">Enable Selected</button>
+            <button id="bulk-disable" class="btn">Disable Selected</button>
+            <button id="bulk-delete" class="btn btn-danger">Delete Selected</button>
+            <button id="bulk-clear" class="btn btn-secondary">Clear Selection</button>
         </div>
     </div>
 </div>
@@ -77,6 +83,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <table>
     <thead>
         <tr>
+            <th style="width: 40px;">
+                <input type="checkbox" id="select-all" title="Select all visible users">
+            </th>
             <th>ID</th>
             <th class="sortable" data-column="username">
                 Username
@@ -114,6 +123,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% if users %}
             {% for user in users %}
             <tr>
+                <td>
+                    <input type="checkbox" class="user-checkbox" value="{{ user.id }}" title="Select user {{ user.display_name or user.username }}">
+                </td>
                 <td>{{ user.id }}</td>
                 <td>{{ user.display_name or user.username }}</td>
                 <td>{{ user.email or '-' }}</td>
@@ -156,7 +168,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% endfor %}
         {% else %}
             <tr>
-                <td colspan="10" style="text-align: center; color: #666;">No users found</td>
+                <td colspan="11" style="text-align: center; color: #666;">No users found</td>
             </tr>
         {% endif %}
     </tbody>
