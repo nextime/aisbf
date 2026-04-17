@@ -164,7 +164,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <!-- Pagination Controls -->
 {% if pagination.total_pages > 1 %}
-<div style="margin-top: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+<div id="pagination-controls" style="margin-top: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
         <div style="color: #e0e0e0;">
             Showing {{ pagination.start_item }}-{{ pagination.end_item }} of {{ pagination.total_users }} users
@@ -237,7 +237,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
-// Search functionality
+// Search functionality with AJAX
 document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('search-input');
     const searchBtn = document.getElementById('search-btn');
@@ -245,6 +245,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const pageSize = document.getElementById('page-size');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
+
+    let searchTimeout = null;
 
     // Get current URL parameters
     function getUrlParams() {
@@ -258,34 +260,139 @@ document.addEventListener('DOMContentLoaded', function() {
         };
     }
 
-    // Update URL with new parameters
-    function updateUrl(params) {
-        const url = new URL(window.location.href);
+    // Main function to update users list via AJAX
+    function updateUsers(params) {
+        // Show loading state
+        const tableContainer = document.querySelector('table').parentElement;
+        const originalContent = tableContainer.innerHTML;
+        tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e0e0e0;"><div class="spinner"></div> Loading...</div>';
+
+        // Build query parameters
+        const currentParams = new URLSearchParams(window.location.search);
         Object.keys(params).forEach(key => {
-            if (params[key]) {
-                url.searchParams.set(key, params[key]);
+            if (params[key] !== '' && params[key] !== null && params[key] !== undefined) {
+                currentParams.set(key, params[key]);
             } else {
-                url.searchParams.delete(key);
+                currentParams.delete(key);
             }
         });
-        window.location.href = url.toString();
+
+        // Reset to page 1 if search/sort changed
+        if (params.search !== undefined || params.order_by !== undefined) {
+            currentParams.set('page', '1');
+        }
+
+        // Update URL without reload
+        const newURL = window.location.pathname + (currentParams.toString() ? '?' + currentParams.toString() : '');
+        window.history.pushState({}, '', newURL);
+
+        // Fetch updated content
+        fetch(newURL, {
+            headers: {
+                'X-Requested-With': 'XMLHttpRequest'
+            }
+        })
+        .then(response => response.text())
+        .then(html => {
+            // Parse and update just the table and pagination
+            const parser = new DOMParser();
+            const newDoc = parser.parseFromString(html, 'text/html');
+
+            const newTable = newDoc.querySelector('table');
+            const newPagination = newDoc.getElementById('pagination-controls');
+
+            tableContainer.innerHTML = originalContent;
+            document.querySelector('table').replaceWith(newTable);
+
+            const existingPagination = document.getElementById('pagination-controls');
+            if (existingPagination && newPagination) {
+                existingPagination.replaceWith(newPagination);
+            } else if (newPagination) {
+                document.querySelector('table').after(newPagination);
+            }
+
+            // Re-attach event listeners to new elements
+            attachPaginationListeners();
+            attachSortingListeners();
+        })
+        .catch(error => {
+            console.error('Error updating users:', error);
+            tableContainer.innerHTML = originalContent;
+            showNotification('Error loading users', 'error');
+        });
+    }
+
+    // Attach pagination event listeners
+    function attachPaginationListeners() {
+        const newPageSize = document.getElementById('page-size');
+        const newPrevBtn = document.getElementById('prev-btn');
+        const newNextBtn = document.getElementById('next-btn');
+
+        if (newPageSize) {
+            newPageSize.addEventListener('change', function() {
+                updateUsers({ limit: this.value, page: 1 });
+            });
+        }
+
+        if (newPrevBtn) {
+            newPrevBtn.addEventListener('click', function() {
+                const params = getUrlParams();
+                updateUsers({ page: Math.max(1, params.page - 1) });
+            });
+        }
+
+        if (newNextBtn) {
+            newNextBtn.addEventListener('click', function() {
+                const params = getUrlParams();
+                updateUsers({ page: params.page + 1 });
+            });
+        }
+    }
+
+    // Attach sorting event listeners
+    function attachSortingListeners() {
+        document.querySelectorAll('.sortable').forEach(header => {
+            header.style.cursor = 'pointer';
+            header.addEventListener('click', function() {
+                const column = this.getAttribute('data-column');
+                const params = getUrlParams();
+                
+                // Toggle direction if clicking same column, otherwise default to desc
+                if (params.order_by === column) {
+                    params.direction = params.direction === 'asc' ? 'desc' : 'asc';
+                } else {
+                    params.order_by = column;
+                    params.direction = 'desc';
+                }
+                updateUsers({ order_by: params.order_by, direction: params.direction, page: 1 });
+            });
+        });
+    }
+
+    // Debounced search input
+    if (searchInput) {
+        searchInput.addEventListener('input', function() {
+            clearTimeout(searchTimeout);
+            searchTimeout = setTimeout(() => {
+                updateUsers({ search: searchInput.value.trim(), page: 1 });
+            }, 300);
+        });
+
+        // Search on Enter key (immediate)
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                clearTimeout(searchTimeout);
+                updateUsers({ search: searchInput.value.trim(), page: 1 });
+            }
+        });
     }
 
     // Search button click
     if (searchBtn) {
         searchBtn.addEventListener('click', function() {
-            const params = getUrlParams();
-            params.search = searchInput.value.trim();
-            params.page = 1; // Reset to first page on new search
-            updateUrl(params);
-        });
-    }
-
-    // Search on Enter key
-    if (searchInput) {
-        searchInput.addEventListener('keypress', function(e) {
-            if (e.key === 'Enter') {
-                searchBtn.click();
+            clearTimeout(searchTimeout);
+            if (searchInput) {
+                updateUsers({ search: searchInput.value.trim(), page: 1 });
             }
         });
     }
@@ -293,59 +400,18 @@ document.addEventListener('DOMContentLoaded', function() {
     // Clear button click
     if (clearBtn) {
         clearBtn.addEventListener('click', function() {
-            const params = getUrlParams();
-            params.search = '';
-            params.page = 1;
-            updateUrl(params);
-        });
-    }
-
-    // Sortable headers
-    document.querySelectorAll('.sortable').forEach(header => {
-        header.style.cursor = 'pointer';
-        header.addEventListener('click', function() {
-            const column = this.getAttribute('data-column');
-            const params = getUrlParams();
-            
-            // Toggle direction if clicking same column, otherwise default to desc
-            if (params.order_by === column) {
-                params.direction = params.direction === 'asc' ? 'desc' : 'asc';
-            } else {
-                params.order_by = column;
-                params.direction = 'desc';
+            if (searchInput) {
+                searchInput.value = '';
+                updateUsers({ search: '', page: 1 });
             }
-            params.page = 1; // Reset to first page on sort
-            updateUrl(params);
-        });
-    });
-
-    // Page size change
-    if (pageSize) {
-        pageSize.addEventListener('change', function() {
-            const params = getUrlParams();
-            params.limit = this.value;
-            params.page = 1; // Reset to first page on limit change
-            updateUrl(params);
         });
     }
 
-    // Previous page button
-    if (prevBtn) {
-        prevBtn.addEventListener('click', function() {
-            const params = getUrlParams();
-            params.page = Math.max(1, params.page - 1);
-            updateUrl(params);
-        });
-    }
+    // Initial sorting listeners
+    attachSortingListeners();
 
-    // Next page button
-    if (nextBtn) {
-        nextBtn.addEventListener('click', function() {
-            const params = getUrlParams();
-            params.page = params.page + 1;
-            updateUrl(params);
-        });
-    }
+    // Initial pagination listeners
+    attachPaginationListeners();
 });
 
 function editUser(userId, username, email, role, isActive) {
@@ -505,6 +571,24 @@ th {
     margin-left: 5px;
     font-size: 10px;
     color: #16c79a;
+}
+
+/* Loading spinner */
+.spinner {
+    border: 3px solid #0f3460;
+    border-top: 3px solid #4ade80;
+    border-radius: 50%;
+    width: 20px;
+    height: 20px;
+    animation: spin 1s linear infinite;
+    display: inline-block;
+    margin-right: 10px;
+    vertical-align: middle;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
 }
 
 /* Notification animations */
