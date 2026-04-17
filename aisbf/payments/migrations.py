@@ -52,6 +52,7 @@ class PaymentMigrations:
                 decimal_type = 'DECIMAL(18,8)'
             
             # Create all payment system tables
+            self._create_account_tiers_table(cursor, auto_increment, timestamp_default, boolean_type)
             self._create_crypto_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_payment_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_subscription_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
@@ -63,6 +64,32 @@ class PaymentMigrations:
             
             conn.commit()
             logger.info("✅ Payment system migrations completed successfully")
+    
+    def _create_account_tiers_table(self, cursor, auto_increment, timestamp_default, boolean_type):
+        """Create account_tiers table if it doesn't exist"""
+        
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS account_tiers (
+                id INTEGER PRIMARY KEY {auto_increment},
+                name VARCHAR(255) UNIQUE NOT NULL,
+                description TEXT,
+                price_monthly DECIMAL(10,2) DEFAULT 0.00,
+                price_yearly DECIMAL(10,2) DEFAULT 0.00,
+                is_default {boolean_type} DEFAULT 0,
+                is_active {boolean_type} DEFAULT 1,
+                is_visible {boolean_type} DEFAULT 1,
+                max_requests_per_day INTEGER DEFAULT -1,
+                max_requests_per_month INTEGER DEFAULT -1,
+                max_providers INTEGER DEFAULT -1,
+                max_rotations INTEGER DEFAULT -1,
+                max_autoselections INTEGER DEFAULT -1,
+                max_rotation_models INTEGER DEFAULT -1,
+                max_autoselection_models INTEGER DEFAULT -1,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default}
+            )
+        ''')
+        logger.info("✅ Created/verified account_tiers table")
     
     def _create_crypto_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
         """Create cryptocurrency-related tables"""
@@ -285,17 +312,27 @@ class PaymentMigrations:
             pass
     
     def _create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
-        """Create configuration tables"""
+        """Create configuration tables for payment system"""
+        
+        # Admin settings table (for payment gateway configs, encryption keys, etc.)
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS admin_settings (
+                id INTEGER PRIMARY KEY {auto_increment},
+                setting_key VARCHAR(255) UNIQUE NOT NULL,
+                setting_value {text_type},
+                updated_at TIMESTAMP DEFAULT {timestamp_default}
+            )
+        ''')
         
         # Crypto price sources
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS crypto_price_sources (
                 id INTEGER PRIMARY KEY {auto_increment},
-                name VARCHAR(50) NOT NULL UNIQUE,
-                api_type VARCHAR(50) NOT NULL,
-                endpoint_url VARCHAR(255) NOT NULL,
+                name VARCHAR(100) NOT NULL UNIQUE,
+                api_type VARCHAR(20) NOT NULL,
+                endpoint_url VARCHAR(500) NOT NULL,
                 api_key VARCHAR(255),
-                priority INTEGER DEFAULT 0,
+                priority INTEGER DEFAULT 1,
                 is_enabled {boolean_type} DEFAULT 1,
                 created_at TIMESTAMP DEFAULT {timestamp_default},
                 updated_at TIMESTAMP DEFAULT {timestamp_default}
@@ -487,3 +524,34 @@ class PaymentMigrations:
                 pass
         
         logger.info("✅ Default payment system data inserted")
+        
+        # Insert default free tier if it doesn't exist
+        try:
+            if self.db_type == 'sqlite':
+                cursor.execute('SELECT COUNT(*) FROM account_tiers WHERE is_default = 1')
+            else:
+                cursor.execute('SELECT COUNT(*) FROM account_tiers WHERE is_default = 1')
+            
+            free_tier_count = cursor.fetchone()[0]
+            if free_tier_count == 0:
+                if self.db_type == 'sqlite':
+                    cursor.execute('''
+                        INSERT INTO account_tiers
+                        (name, description, price_monthly, price_yearly, is_default, is_active, is_visible,
+                         max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
+                         max_autoselections, max_rotation_models, max_autoselection_models)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ''', ('Free Tier', 'Default free account tier with unlimited access', 0.00, 0.00, 1, 1, 1,
+                          -1, -1, -1, -1, -1, -1, -1))
+                else:
+                    cursor.execute('''
+                        INSERT INTO account_tiers
+                        (name, description, price_monthly, price_yearly, is_default, is_active, is_visible,
+                         max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
+                         max_autoselections, max_rotation_models, max_autoselection_models)
+                        VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                    ''', ('Free Tier', 'Default free account tier with unlimited access', 0.00, 0.00, 1, 1, 1,
+                          -1, -1, -1, -1, -1, -1, -1))
+                logger.info("✅ Inserted default free tier")
+        except Exception as e:
+            logger.warning(f"Failed to insert default free tier: {e}")
