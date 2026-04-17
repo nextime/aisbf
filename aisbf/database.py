@@ -993,6 +993,108 @@ class DatabaseManager:
                 users.append(user)
             return users
 
+    def get_users_paginated(self, page: int = 1, limit: int = 25, search: str = None,
+                           order_by: str = 'created_at', direction: str = 'desc') -> Dict:
+        """
+        Get paginated users with search and sorting support.
+
+        Args:
+            page: Page number (1-indexed)
+            limit: Number of users per page
+            search: Optional search term (searches username, email, display_name)
+            order_by: Column to sort by (username, last_login, created_at, tier_name)
+            direction: Sort direction (asc or desc)
+
+        Returns:
+            Dictionary with 'users' list and 'total' count
+        """
+        # Validate and sanitize sorting parameters
+        valid_columns = ['username', 'last_login', 'created_at', 'tier_name']
+        valid_directions = ['asc', 'desc']
+        
+        if order_by not in valid_columns:
+            order_by = 'created_at'
+        if direction.lower() not in valid_directions:
+            direction = 'desc'
+        
+        direction = direction.upper()
+        
+        # Calculate offset
+        offset = (page - 1) * limit
+        
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            # Build WHERE clause for search
+            where_clause = ''
+            search_params = []
+            if search:
+                search_term = f'%{search}%'
+                where_clause = f'''
+                    WHERE (
+                        u.username LIKE {placeholder}
+                        OR u.email LIKE {placeholder}
+                        OR u.display_name LIKE {placeholder}
+                    )
+                '''
+                search_params = [search_term, search_term, search_term]
+            
+            # Build ORDER BY clause - map tier_name to the joined column
+            if order_by == 'tier_name':
+                order_clause = f't.name {direction}'
+            else:
+                order_clause = f'u.{order_by} {direction}'
+            
+            # Get total count
+            count_query = f'''
+                SELECT COUNT(*)
+                FROM users u
+                LEFT JOIN account_tiers t ON u.tier_id = t.id
+                {where_clause}
+            '''
+            cursor.execute(count_query, search_params)
+            total = cursor.fetchone()[0]
+            
+            # Get paginated users
+            users_query = f'''
+                SELECT
+                    u.id,
+                    u.username,
+                    u.email,
+                    u.role,
+                    u.created_by,
+                    u.created_at,
+                    u.last_login,
+                    u.is_active,
+                    u.tier_id,
+                    u.display_name,
+                    t.name as tier_name
+                FROM users u
+                LEFT JOIN account_tiers t ON u.tier_id = t.id
+                {where_clause}
+                ORDER BY {order_clause}
+                LIMIT {placeholder} OFFSET {placeholder}
+            '''
+            
+            query_params = search_params + [limit, offset]
+            cursor.execute(users_query, query_params)
+            
+            # Use column names from cursor description
+            columns = [col[0] for col in cursor.description]
+            
+            users = []
+            for row in cursor.fetchall():
+                user = dict(zip(columns, row))
+                # Normalize boolean fields
+                user['is_active'] = bool(user['is_active']) if user['is_active'] is not None else True
+                users.append(user)
+            
+            return {
+                'users': users,
+                'total': total
+            }
+
     def delete_user(self, user_id: int):
         """
         Delete a user and all their configurations.
