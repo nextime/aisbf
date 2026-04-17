@@ -152,16 +152,17 @@ class QwenOAuth2:
         
         return code_verifier, code_challenge
     
-    def _acquire_lock(self, max_attempts: int = 20) -> bool:
+    async def _acquire_lock(self, max_attempts: int = 20) -> bool:
         """
         Acquire a file lock to prevent concurrent token refreshes.
-        
+
         Returns:
             True if lock acquired, False otherwise.
         """
+        import asyncio
         lock_id = str(uuid.uuid4())
         interval = 0.1
-        
+
         for _ in range(max_attempts):
             try:
                 # Try to create lock file atomically (exclusive mode)
@@ -173,7 +174,7 @@ class QwenOAuth2:
                 try:
                     stat = os.stat(self.lock_file)
                     lock_age = time.time() - stat.st_mtime
-                    
+
                     if lock_age > LOCK_TIMEOUT_MS / 1000:
                         # Remove stale lock
                         os.unlink(self.lock_file)
@@ -181,10 +182,10 @@ class QwenOAuth2:
                 except (OSError, FileNotFoundError):
                     # Lock might have been removed by another process
                     continue
-                
-                time.sleep(interval)
+
+                await asyncio.sleep(interval)
                 interval = min(interval * 1.5, 2.0)  # Exponential backoff
-        
+
         return False
     
     def _release_lock(self) -> None:
@@ -461,7 +462,7 @@ class QwenOAuth2:
         logger.info("QwenOAuth2: Refreshing access token...")
         
         # Acquire lock to prevent concurrent refreshes
-        if not self._acquire_lock():
+        if not await self._acquire_lock():
             logger.error("QwenOAuth2: Failed to acquire lock for token refresh")
             return False
         

@@ -229,21 +229,58 @@ function updateUserTier(userId, tierId) {
     .then(response => response.json())
     .then(data => {
         if (data.success) {
-            // Show success message briefly
-            const msg = document.createElement('div');
-            msg.style.cssText = 'position: fixed; top: 20px; right: 20px; background: #4ade80; color: #000; padding: 15px 20px; border-radius: 5px; z-index: 9999;';
-            msg.textContent = 'Tier updated successfully';
-            document.body.appendChild(msg);
-            setTimeout(() => msg.remove(), 2000);
+            // Show success notification
+            showNotification('Tier updated successfully', 'success');
         } else {
-            alert(data.error || 'Failed to update tier');
+            // Show error notification
+            showNotification(data.error || 'Failed to update tier', 'error');
             location.reload(); // Reload to reset dropdown
         }
     })
     .catch(error => {
-        alert('Error: ' + error);
+        showNotification('Error: ' + error, 'error');
         location.reload(); // Reload to reset dropdown
     });
+}
+
+function showNotification(message, type) {
+    // Remove any existing notifications
+    const existingNotifications = document.querySelectorAll('.notification-toast');
+    existingNotifications.forEach(notification => notification.remove());
+
+    // Create new notification
+    const notification = document.createElement('div');
+    notification.className = `notification-toast alert alert-${type === 'success' ? 'success' : 'error'}`;
+    notification.style.cssText = `
+        position: fixed;
+        top: 20px;
+        right: 20px;
+        z-index: 9999;
+        min-width: 300px;
+        max-width: 500px;
+        box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+        border: none;
+        animation: slideIn 0.3s ease-out;
+    `;
+
+    notification.innerHTML = `
+        <div style="display: flex; align-items: center; gap: 10px;">
+            <i class="fas fa-${type === 'success' ? 'check-circle' : 'exclamation-triangle'}" style="font-size: 18px;"></i>
+            <span>${message}</span>
+        </div>
+    `;
+
+    document.body.appendChild(notification);
+
+    // Auto-remove after 3 seconds
+    setTimeout(() => {
+        notification.style.animation = 'slideOut 0.3s ease-in';
+        setTimeout(() => {
+            if (notification.parentNode) {
+                notification.parentNode.removeChild(notification);
+            }
+        }, 300);
+    }, 3000);
 }
 
 // Close modal when clicking outside
@@ -269,6 +306,43 @@ th {
     background: #0f3460;
     font-weight: 600;
 }
+
+/* Notification animations */
+@keyframes slideIn {
+    from {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+    to {
+        transform: translateX(0);
+        opacity: 1;
+    }
+}
+
+@keyframes slideOut {
+    from {
+        transform: translateX(0);
+        opacity: 1;
+    }
+    to {
+        transform: translateX(100%);
+        opacity: 0;
+    }
+}
+
+/* Custom alert styles for dark theme */
+.alert-success {
+    background-color: #10b981 !important;
+    color: #ffffff !important;
+    border-color: #059669 !important;
+}
+
+.alert-error {
+    background-color: #ef4444 !important;
+    color: #ffffff !important;
+    border-color: #dc2626 !important;
+}
+
 /* Prevent browser autofill from overriding dark theme */
 input:-webkit-autofill,
 input:-webkit-autofill:hover,

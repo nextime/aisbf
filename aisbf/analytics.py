@@ -121,7 +121,10 @@ class Analytics:
         rotation_id: Optional[str] = None,
         autoselect_id: Optional[str] = None,
         user_id: Optional[int] = None,
-        token_id: Optional[int] = None
+        token_id: Optional[int] = None,
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None,
+        actual_cost: Optional[float] = None
     ):
         """
         Record a request for analytics.
@@ -137,6 +140,9 @@ class Analytics:
             autoselect_id: Optional autoselect identifier if request went through autoselect
             user_id: Optional user ID if request was made with API token
             token_id: Optional API token ID if request was made with API token
+            prompt_tokens: Optional number of input/prompt tokens
+            completion_tokens: Optional number of output/completion tokens
+            actual_cost: Optional actual cost returned by provider (in USD)
         """
         # Initialize provider tracking if needed
         if provider_id not in self._request_counts:
@@ -161,7 +167,8 @@ class Analytics:
         
         # Persist to database
         if tokens_used > 0:
-            self.db.record_token_usage(provider_id, model_name, tokens_used, user_id)
+            logger.info(f"Analytics.record_request: Recording to DB - provider={provider_id}, latency_ms={latency_ms}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
+            self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost)
 
             # Also record user token usage if this was an API token request
             if user_id is not None and token_id is not None:
@@ -231,16 +238,32 @@ class Analytics:
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             
             # Build query with optional user filter
-            user_condition = f" AND user_id = {placeholder}" if user_filter is not None else ""
-            params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
-            if user_filter is not None:
-                params.append(user_filter)
+            # user_filter = -1 means "only global requests" (user_id IS NULL)
+            # user_filter = None means "all requests"
+            # user_filter = <id> means "only requests from that user"
+            if user_filter == -1:
+                user_condition = " AND user_id IS NULL"
+                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
+            elif user_filter is not None:
+                user_condition = f" AND user_id = {placeholder}"
+                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat(), user_filter]
+            else:
+                user_condition = ""
+                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
             
             # Get token usage and actual time range of requests
             cursor.execute(f'''
-                SELECT 
+                SELECT
                     COUNT(*) as total_requests,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_count,
+                    AVG(COALESCE(latency_ms, 0)) as avg_latency,
+                    MIN(COALESCE(latency_ms, 0)) as min_latency,
+                    MAX(COALESCE(latency_ms, 0)) as max_latency,
                     SUM(tokens_used) as total_tokens,
+                    SUM(COALESCE(prompt_tokens, 0)) as total_prompt_tokens,
+                    SUM(COALESCE(completion_tokens, 0)) as total_completion_tokens,
+                    SUM(COALESCE(actual_cost, 0)) as total_actual_cost,
                     MIN(timestamp) as first_request,
                     MAX(timestamp) as last_request
                 FROM token_usage
@@ -252,9 +275,17 @@ class Analytics:
             
             result = cursor.fetchone()
             total_requests = result[0] if result else 0
-            total_tokens = result[1] if result else 0
-            first_request = result[2] if result and result[2] else None
-            last_request = result[3] if result and result[3] else None
+            success_count = result[1] if result else 0
+            error_count = result[2] if result else 0
+            avg_latency = result[3] if result and result[3] else 0
+            min_latency = result[4] if result and result[4] else 0
+            max_latency = result[5] if result and result[5] else 0
+            total_tokens = result[6] if result else 0
+            total_prompt_tokens = result[7] if result else 0
+            total_completion_tokens = result[8] if result else 0
+            total_actual_cost = result[9] if result else 0
+            first_request = result[10] if result and result[10] else None
+            last_request = result[11] if result and result[11] else None
             
             # Calculate time-based rates using ACTUAL usage window, not query window
             # This gives more accurate rate limiting metrics
@@ -289,15 +320,18 @@ class Analytics:
             
             return {
                 'provider_id': provider_id,
-                'requests': {'total': total_requests, 'success': total_requests, 'error': 0},
-                'latency': {'count': 0, 'total_ms': 0.0, 'min_ms': 0, 'max_ms': 0},
-                'errors': {},
+                'requests': {'total': total_requests, 'success': success_count, 'error': error_count},
+                'latency': {'count': total_requests, 'total_ms': avg_latency * total_requests if total_requests > 0 else 0, 'min_ms': min_latency, 'max_ms': max_latency},
+                'errors': {},  # Could be populated from error_type column if needed
                 'tokens': {
                     'total': total_tokens,
+                    'prompt': total_prompt_tokens,
+                    'completion': total_completion_tokens,
                     'TPM': tpm,
                     'TPH': tph,
                     'TPD': tpd
-                }
+                },
+                'actual_cost': total_actual_cost  # Actual cost from provider responses
             }
     
     def get_token_usage_by_date_range(
@@ -374,7 +408,7 @@ class Analytics:
         Args:
             from_datetime: Optional start datetime for filtering
             to_datetime: Optional end datetime for filtering
-            user_filter: Optional user ID filter
+            user_filter: Optional user ID filter (-1 for global only, None for all, or user ID)
             
         Returns:
             List of provider statistics dictionaries
@@ -388,10 +422,15 @@ class Analytics:
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             
             # Build query with optional user filter
-            user_condition = f" AND user_id = {placeholder}" if user_filter is not None else ""
-            params = [start.isoformat(), end.isoformat()]
-            if user_filter is not None:
-                params.append(user_filter)
+            if user_filter == -1:
+                user_condition = " AND user_id IS NULL"
+                params = [start.isoformat(), end.isoformat()]
+            elif user_filter is not None:
+                user_condition = f" AND user_id = {placeholder}"
+                params = [start.isoformat(), end.isoformat(), user_filter]
+            else:
+                user_condition = ""
+                params = [start.isoformat(), end.isoformat()]
             
             cursor.execute(f'''
                 SELECT DISTINCT provider_id
@@ -503,7 +542,18 @@ class Analytics:
                 time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
             
             if provider_id:
-                if user_filter:
+                if user_filter == -1:
+                    # Global requests only
+                    cursor.execute(f'''
+                        SELECT 
+                            {time_bucket_expr} as time_bucket,
+                            SUM(tokens_used) as tokens
+                        FROM token_usage
+                        WHERE provider_id = {placeholder} AND user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket
+                        ORDER BY time_bucket
+                    ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
+                elif user_filter:
                     cursor.execute(f'''
                         SELECT 
                             {time_bucket_expr} as time_bucket,
@@ -524,7 +574,19 @@ class Analytics:
                         ORDER BY time_bucket
                     ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
             else:
-                if user_filter:
+                if user_filter == -1:
+                    # Global requests only
+                    cursor.execute(f'''
+                        SELECT 
+                            {time_bucket_expr} as time_bucket,
+                            SUM(tokens_used) as tokens,
+                            provider_id
+                        FROM token_usage
+                        WHERE user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
+                        GROUP BY time_bucket, provider_id
+                        ORDER BY time_bucket
+                    ''', (cutoff.isoformat(), end_time.isoformat()))
+                elif user_filter:
                     cursor.execute(f'''
                         SELECT 
                             {time_bucket_expr} as time_bucket,
@@ -706,7 +768,8 @@ class Analytics:
         self,
         provider_id: str,
         tokens_used: int,
-        prompt_tokens: Optional[int] = None
+        prompt_tokens: Optional[int] = None,
+        completion_tokens: Optional[int] = None
     ) -> float:
         """
         Estimate cost for token usage.
@@ -715,6 +778,7 @@ class Analytics:
             provider_id: Provider identifier
             tokens_used: Total tokens used
             prompt_tokens: Optional breakdown of prompt tokens
+            completion_tokens: Optional breakdown of completion tokens
             
         Returns:
             Estimated cost in USD
@@ -722,14 +786,19 @@ class Analytics:
         # Get provider-specific pricing (checks subscription status and custom pricing)
         provider_pricing = self._get_provider_pricing(provider_id)
         
-        # Calculate cost
-        if prompt_tokens is not None:
-            completion_tokens = tokens_used - prompt_tokens
+        # Calculate cost with actual token breakdown if available
+        if prompt_tokens is not None and completion_tokens is not None:
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens / 1_000_000) * provider_pricing.get('completion', 0)
             return prompt_cost + completion_cost
+        elif prompt_tokens is not None:
+            # Only prompt tokens provided, calculate completion from total
+            completion_tokens_calc = tokens_used - prompt_tokens
+            prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
+            completion_cost = (completion_tokens_calc / 1_000_000) * provider_pricing.get('completion', 0)
+            return prompt_cost + completion_cost
         else:
-            # Assume 25% prompt, 75% completion (common for chat)
+            # No breakdown available - use estimation (25% prompt, 75% completion is common for chat)
             prompt_tokens_est = tokens_used * 0.25
             completion_tokens_est = tokens_used * 0.75
             prompt_cost = (prompt_tokens_est / 1_000_000) * provider_pricing.get('prompt', 0)
@@ -776,13 +845,24 @@ class Analytics:
                 tokens = provider['tokens']
                 total_tokens = tokens['TPD']  # Use daily tokens for cost estimation
             
-            cost = self.estimate_cost(provider_id, total_tokens)
+            # Get actual prompt/completion tokens from provider stats
+            prompt_tokens = tokens.get('prompt', 0) if not (from_datetime or to_datetime) else None
+            completion_tokens = tokens.get('completion', 0) if not (from_datetime or to_datetime) else None
+            
+            # Use actual cost if available, otherwise estimate
+            actual_cost = provider.get('actual_cost', 0)
+            if actual_cost > 0:
+                cost = actual_cost
+            else:
+                cost = self.estimate_cost(provider_id, total_tokens, prompt_tokens, completion_tokens)
+            
             total_cost += cost
             
             provider_costs.append({
                 'provider_id': provider_id,
                 'tokens_today': total_tokens,
-                'estimated_cost': cost
+                'estimated_cost': cost,
+                'is_actual': actual_cost > 0
             })
         
         return {

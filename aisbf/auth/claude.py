@@ -27,6 +27,7 @@ import hashlib
 import base64
 import webbrowser
 import time
+import asyncio
 import httpx
 from pathlib import Path
 from typing import Optional, Dict
@@ -223,7 +224,7 @@ class ClaudeAuth:
         )
         return response
     
-    def refresh_token(self, max_retries: int = 3) -> bool:
+    async def refresh_token(self, max_retries: int = 3) -> bool:
         """
         Use the refresh token to get a new access token without logging in.
         
@@ -270,7 +271,7 @@ class ClaudeAuth:
                     # Rate limited - wait and retry with exponential backoff
                     wait_time = (2 ** attempt) * 5  # 5, 10, 20 seconds
                     logger.warning(f"Rate limited (429). Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 else:
                     logger.error(f"Token refresh failed: {response.status_code} - {response.text}")
@@ -280,14 +281,14 @@ class ClaudeAuth:
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 5
                     logger.info(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 return False
         
         logger.error(f"Token refresh failed after {max_retries} attempts")
         return False
     
-    def get_valid_token(self, auto_login: bool = False) -> str:
+    async def get_valid_token(self, auto_login: bool = False) -> str:
         """
         Get a valid access token, refreshing it if necessary.
         
@@ -311,7 +312,7 @@ class ClaudeAuth:
         # Refresh if less than 5 minutes remain
         if time.time() > (self.tokens.get('expires_at', 0) - 300):
             logger.info("Token expiring soon, refreshing...")
-            if not self.refresh_token():
+            if not await self.refresh_token():
                 if not auto_login:
                     logger.error("Token refresh failed and auto_login is disabled")
                     raise Exception("Claude token refresh failed. Please re-authenticate via /dashboard/claude/auth/start or MCP tool.")
@@ -540,7 +541,7 @@ class ClaudeAuth:
         
         logger.info("OAuth2 login flow completed successfully")
     
-    def exchange_code_for_tokens(self, code: str, state: str, verifier: str = None, max_retries: int = 3) -> bool:
+    async def exchange_code_for_tokens(self, code: str, state: str, verifier: str = None, max_retries: int = 3) -> bool:
         """
         Exchange authorization code for access tokens.
         Matches CLIProxyAPI implementation exactly.
@@ -621,7 +622,7 @@ class ClaudeAuth:
                     # Rate limited - wait and retry with exponential backoff
                     wait_time = (2 ** attempt) * 5  # 5, 10, 20 seconds
                     logger.warning(f"Rate limited (429). Waiting {wait_time} seconds before retry {attempt + 1}/{max_retries}")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 else:
                     logger.error(f"Token exchange failed: {response.status_code} - {response.text}")
@@ -631,7 +632,7 @@ class ClaudeAuth:
                 if attempt < max_retries - 1:
                     wait_time = (2 ** attempt) * 5
                     logger.info(f"Retrying in {wait_time} seconds...")
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)
                     continue
                 return False
         
@@ -652,25 +653,29 @@ class ClaudeAuth:
 
 # Example usage
 if __name__ == "__main__":
+    import asyncio
     logging.basicConfig(level=logging.INFO)
-    
-    auth = ClaudeAuth()
-    token = auth.get_valid_token()
-    
-    # Use the token for an API call
-    client = httpx.Client()
-    response = client.post(
-        "https://api.anthropic.com/v1/messages",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "anthropic-version": "2023-06-01",
-            "anthropic-beta": "claude-code-20250219",  # Required for subscription usage
-            "Content-Type": "application/json"
-        },
-        json={
-            "model": "claude-3-7-sonnet-20250219",
-            "max_tokens": 1024,
-            "messages": [{"role": "user", "content": "How's the weather in the CLI today?"}]
-        }
-    )
-    print(response.json())
+
+    async def main():
+        auth = ClaudeAuth()
+        token = auth.get_valid_token()
+
+        # Use the token for an API call
+        async with httpx.AsyncClient() as client:
+            response = await client.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "Authorization": f"Bearer {token}",
+                    "anthropic-version": "2023-06-01",
+                    "anthropic-beta": "claude-code-20250219",  # Required for subscription usage
+                    "Content-Type": "application/json"
+                },
+                json={
+                    "model": "claude-3-7-sonnet-20250219",
+                    "max_tokens": 1024,
+                    "messages": [{"role": "user", "content": "How's the weather in the CLI today?"}]
+                }
+            )
+            print(response.json())
+
+    asyncio.run(main())

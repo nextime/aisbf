@@ -534,7 +534,7 @@ class ContextManager:
                     "max_tokens": 1000,
                     "stream": False
                 }
-                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
+                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request, None, None)
                 if isinstance(response, dict):
                     summary_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
             else:
@@ -642,7 +642,7 @@ Provide only the relevant information in a concise format."""
                     "max_tokens": 2000,
                     "stream": False
                 }
-                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request)
+                response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request, None, None)
                 if isinstance(response, dict):
                     pruned_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
             else:

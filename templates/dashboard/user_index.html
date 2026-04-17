@@ -2,6 +2,21 @@
 
 {% block title %}User Dashboard - AISBF{% endblock %}
 
+{% macro format_tokens(value) %}
+{% if value is none or value == 0 %}0{% else %}
+{% set val = value | float %}
+{% if val >= 1000000000 %}
+{{ "%.2f"|format(val / 1000000000) }}B
+{% elif val >= 1000000 %}
+{{ "%.2f"|format(val / 1000000) }}M
+{% elif val >= 1000 %}
+{{ "%.2f"|format(val / 1000) }}K
+{% else %}
+{{ value }}
+{% endif %}
+{% endif %}
+{% endmacro %}
+
 {% block content %}
 <div class="container">
     <h1>User Dashboard</h1>
@@ -98,7 +113,7 @@
         <div class="stats-grid">
             <div class="stat-item">
                 <h3>Total Tokens Used</h3>
-                <p class="stat-value">{{ usage_stats.total_tokens|default(0) }}</p>
+                <p class="stat-value">{{ format_tokens(usage_stats.total_tokens|default(0)) }}</p>
             </div>
             <div class="stat-item">
                 <h3>Requests Today</h3>

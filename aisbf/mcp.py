@@ -855,12 +855,12 @@ class MCPServer:
             if stream:
                 return {"error": "Streaming not supported in MCP, use SSE endpoint instead"}
             else:
-                return await handler.handle_autoselect_request(actual_model, request_data)
+                return await handler.handle_autoselect_request(actual_model, request_data, user_id, None)
         elif provider_id == "rotation":
             handler = get_user_handler('rotation', user_id)
             if actual_model not in self.config.rotations and (not user_id or actual_model not in handler.user_rotations):
                 raise HTTPException(status_code=400, detail=f"Rotation '{actual_model}' not found")
-            return await handler.handle_rotation_request(actual_model, request_data)
+            return await handler.handle_rotation_request(actual_model, request_data, user_id, None)
         else:
             handler = get_user_handler('request', user_id)
             if provider_id not in self.config.providers and (not user_id or provider_id not in handler.user_providers):

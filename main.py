@@ -647,6 +647,13 @@ def initialize_app(custom_config_dir=None):
             'password': '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
         }
     
+    # Initialize analytics with the config database
+    from aisbf.analytics import initialize_analytics
+    from aisbf.database import DatabaseRegistry
+    db = DatabaseRegistry.get_config_database()
+    initialize_analytics(db)
+    logger.info("Analytics module initialized")
+    
     _initialized = True
     logger.info("App initialization complete")
 
@@ -1314,11 +1321,6 @@ async def auth_middleware(request: Request, call_next):
                 request.state.is_global_token = False
                 # Store user role - admin users get full access
                 request.state.is_admin = (user_auth.get('role') == 'admin')
-
-                # Record token usage for analytics
-                # We'll do this asynchronously to avoid blocking the request
-                import asyncio
-                asyncio.create_task(record_token_usage_async(user_auth['user_id'], user_auth['token_id']))
             else:
                 return JSONResponse(
                     status_code=403,
@@ -1901,6 +1903,42 @@ async def get_subscription_status(request: Request):
     status = await payment_service.get_subscription_status(current_user['id'])
     return {'subscription': status}
 
+# User search API endpoint for autocomplete
+@app.get("/api/users/search")
+async def search_users(request: Request, q: str = Query("", min_length=0)):
+    """Search users by username for autocomplete (admin only)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+    
+    # Check if user is admin
+    is_admin = request.session.get('role') == 'admin'
+    if not is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    
+    db = DatabaseRegistry.get_config_database()
+    if not db:
+        return {"users": []}
+    
+    # Get all users
+    all_users = db.get_users()
+    
+    # Filter by query string (case-insensitive)
+    if q:
+        filtered_users = [
+            {"id": user['id'], "username": user['username'], "role": user.get('role', 'user')}
+            for user in all_users
+            if q.lower() in user['username'].lower()
+        ]
+    else:
+        filtered_users = [
+            {"id": user['id'], "username": user['username'], "role": user.get('role', 'user')}
+            for user in all_users
+        ]
+    
+    # Limit to 50 results
+    return {"users": filtered_users[:50]}
+
 # Dashboard routes
 @app.get("/dashboard/analytics", response_class=HTMLResponse)
 async def dashboard_analytics(
@@ -1912,7 +1950,8 @@ async def dashboard_analytics(
     model_filter: Optional[str] = Query(None),
     rotation_filter: Optional[str] = Query(None),
     autoselect_filter: Optional[str] = Query(None),
-    user_filter: Optional[int] = Query(None)
+    user_filter: Optional[str] = Query(None),
+    global_only: Optional[str] = Query(None)
 ):
     """Token usage analytics dashboard"""
     auth_check = require_dashboard_auth(request)
@@ -1950,9 +1989,21 @@ async def dashboard_analytics(
     is_admin = request.session.get('role') == 'admin'
     current_user_id = request.session.get('user_id')
     
+    # Parse user_filter from string to int, handling empty strings
+    user_filter_int = None
+    if user_filter:
+        try:
+            user_filter_int = int(user_filter)
+        except (ValueError, TypeError):
+            user_filter_int = None
+    
+    # Handle global_only filter - if checked, set user_filter to -1 (special value for global requests)
+    if global_only == '1':
+        user_filter_int = -1  # Special value to indicate "only global requests"
+    
     # For non-admin users, force user filter to current user
     if not is_admin and current_user_id is not None:
-        user_filter = current_user_id
+        user_filter_int = current_user_id
     
     # Get all users for filter dropdown (only for admins)
     all_users = db.get_users() if db and is_admin else []
@@ -1972,9 +2023,9 @@ async def dashboard_analytics(
     
     # Get provider statistics (with optional filter)
     if provider_filter:
-        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime, user_filter=user_filter)]
+        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime, user_filter=user_filter_int)]
     else:
-        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime, user_filter=user_filter)
+        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime, user_filter=user_filter_int)
     
     # Get token usage over time (with optional filters)
     token_over_time = analytics.get_token_usage_over_time(
@@ -1982,7 +2033,7 @@ async def dashboard_analytics(
         time_range=time_range,
         from_datetime=from_datetime,
         to_datetime=to_datetime,
-        user_filter=user_filter
+        user_filter=user_filter_int
     )
     
     # Get model performance (with optional filters)
@@ -1991,21 +2042,21 @@ async def dashboard_analytics(
         model_filter=model_filter,
         rotation_filter=rotation_filter,
         autoselect_filter=autoselect_filter,
-        user_filter=user_filter
+        user_filter=user_filter_int
     )
     
     # Get cost overview
-    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter)
+    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
     
     # Get optimization recommendations
-    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter)
+    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter_int)
     
     # Get date range usage summary
     date_range_usage = None
     if from_datetime or to_datetime:
         start = from_datetime or (datetime.now() - timedelta(days=1))
         end = to_datetime or datetime.now()
-        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter)
+        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter_int)
     
     return templates.TemplateResponse(
         request=request,
@@ -2032,7 +2083,8 @@ async def dashboard_analytics(
         "selected_model": model_filter,
         "selected_rotation": rotation_filter,
         "selected_autoselect": autoselect_filter,
-        "selected_user": user_filter
+        "selected_user": user_filter,
+        "global_only": global_only
     }
     )
 
@@ -2150,6 +2202,13 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         else:
             # For non-remember-me sessions, set expiry to 2 weeks (default session length)
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+        # Update last login timestamp
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if db.db_type == 'sqlite' else '%s'
+            cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (user['id'],))
+            conn.commit()
 
         # Check if email is verified
         if not user['email_verified']:
@@ -3236,6 +3295,13 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             request.session['user_id'] = existing_user['id']
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+            # Update last login timestamp
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if db.db_type == 'sqlite' else '%s'
+                cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (existing_user['id'],))
+                conn.commit()
         else:
             # New user - create account automatically (no password required)
             if not email_verified:
@@ -3244,18 +3310,19 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
                     name="dashboard/login.html",
                     context={"request": request, "config": config, "error": "Google email must be verified to create an account"}
                 )
-            
+
             # Generate secure random password for OAuth users (never used for login)
             random_password = secrets.token_urlsafe(32)
             password_hash = hashlib.sha256(random_password.encode()).hexdigest()
-            
+
             # Generate clean username from display_name with email fallback
             google_username = db.generate_username_from_display_name(display_name, email)
             final_username = db.find_unique_username(google_username)
-            
+
+
             # Create user with verified email (no verification required)
             user_id = db.create_user(final_username, password_hash, 'user', None, email, True, display_name)
-            
+
             # Login the new user
             request.session['logged_in'] = True
             request.session['username'] = final_username
@@ -3264,6 +3331,13 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             request.session['user_id'] = user_id
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+            # Update last login timestamp for new user
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if db.db_type == 'sqlite' else '%s'
+                cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (user_id,))
+                conn.commit()
         
         # Cleanup session data
         request.session.pop('oauth2_google', None)
@@ -3383,6 +3457,13 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             request.session['user_id'] = existing_user['id']
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+            # Update last login timestamp
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if db.db_type == 'sqlite' else '%s'
+                cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (existing_user['id'],))
+                conn.commit()
         else:
             # New user - create account automatically (no password required)
             # Generate secure random password for OAuth users (never used for login)
@@ -3404,7 +3485,14 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             request.session['user_id'] = user_id
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
-        
+
+            # Update last login timestamp for new user
+            with db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if db.db_type == 'sqlite' else '%s'
+                cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (user_id,))
+                conn.commit()
+
         # Cleanup session data
         request.session.pop('oauth2_github', None)
         
@@ -3639,7 +3727,7 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
             kilo_config = provider.get('kilo_config', {})
             credentials_file = kilo_config.get('credentials_file', '~/.kilo_credentials.json')
             oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=endpoint)
-            token = oauth2.get_valid_token()
+            token = await oauth2.get_valid_token()
             if token:
                 api_key = token
                 logger.info(f"Using OAuth2 token for Kilo provider '{provider_key}'")
@@ -6992,7 +7080,7 @@ async def dashboard_pricing(request: Request):
     from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
-    tiers = db.get_all_tiers()
+    tiers = db.get_visible_tiers()
     current_tier = db.get_user_tier(request.session.get('user_id'))
     
     # Get enabled payment gateways
@@ -7874,12 +7962,13 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
         body_dict['model'] = actual_model
         # Get user-specific handler
         user_id = getattr(request.state, 'user_id', None)
+        token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('autoselect', user_id)
-    
+
         if body.stream:
             return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
         else:
-            return await handler.handle_autoselect_request(actual_model, body_dict)
+            return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
     
     # PATH 2: Check if it's a rotation (format: rotation/{name})
     if provider_id == "rotation":
@@ -7891,8 +7980,9 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
         body_dict['model'] = actual_model
         # Get user-specific handler
         user_id = getattr(request.state, 'user_id', None)
+        token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('rotation', user_id)
-        return await handler.handle_rotation_request(actual_model, body_dict)
+        return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
     
     # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
@@ -8405,11 +8495,12 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     try:
         # Get user-specific handler
         user_id = getattr(request.state, 'user_id', None)
+        token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('rotation', user_id)
 
         # The rotation handler handles streaming internally and returns
         # a StreamingResponse for streaming requests or a dict for non-streaming
-        result = await handler.handle_rotation_request(body.model, body_dict)
+        result = await handler.handle_rotation_request(body.model, body_dict, user_id, token_id)
         logger.debug(f"Rotation response result type: {type(result)}")
         return result
     except Exception as e:
@@ -8482,6 +8573,7 @@ async def autoselect_chat_completions(request: Request, body: ChatCompletionRequ
 
     # Get user-specific handler
     user_id = getattr(request.state, 'user_id', None)
+    token_id = getattr(request.state, 'token_id', None)
     handler = get_user_handler('autoselect', user_id)
 
     # Check if the model name corresponds to an autoselect configuration
@@ -8502,7 +8594,7 @@ async def autoselect_chat_completions(request: Request, body: ChatCompletionRequ
             return await handler.handle_autoselect_streaming_request(body.model, body_dict)
         else:
             logger.debug("Handling non-streaming autoselect request")
-            result = await handler.handle_autoselect_request(body.model, body_dict)
+            result = await handler.handle_autoselect_request(body.model, body_dict, user_id, token_id)
             logger.debug(f"Autoselect response result: {result}")
             return result
     except Exception as e:
@@ -8550,6 +8642,7 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     # Check if it's an autoselect
     if provider_id in config.autoselect or (user_id and provider_id in get_user_handler('autoselect', user_id).user_autoselects):
         logger.debug("Handling autoselect request")
+        token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('autoselect', user_id)
         try:
             if body.stream:
@@ -8557,7 +8650,7 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
                 return await handler.handle_autoselect_streaming_request(provider_id, body_dict)
             else:
                 logger.debug("Handling non-streaming autoselect request")
-                result = await handler.handle_autoselect_request(provider_id, body_dict)
+                result = await handler.handle_autoselect_request(provider_id, body_dict, user_id, token_id)
                 logger.debug(f"Autoselect response result: {result}")
                 return result
         except Exception as e:
@@ -8568,8 +8661,9 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).user_rotations):
         logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation request")
+        token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('rotation', user_id)
-        return await handler.handle_rotation_request(provider_id, body_dict)
+        return await handler.handle_rotation_request(provider_id, body_dict, user_id, token_id)
 
     # Check if it's a provider
     handler = get_user_handler('request', user_id)
@@ -10596,11 +10690,12 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
                 detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}"
             )
         body_dict['model'] = actual_model
-        
+
         if body.stream:
             return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
         else:
-            return await handler.handle_autoselect_request(actual_model, body_dict)
+            token_id = getattr(request.state, 'token_id', None)
+            return await handler.handle_autoselect_request(actual_model, body_dict, authenticated_user_id, token_id)
     
     if provider_id == "user-rotation":
         handler = get_user_handler('rotation', target_user_id)
@@ -10610,7 +10705,8 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
                 detail=f"User rotation '{actual_model}' not found. Available: {list(handler.user_rotations.keys())}"
             )
         body_dict['model'] = actual_model
-        return await handler.handle_rotation_request(actual_model, body_dict)
+        token_id = getattr(request.state, 'token_id', None)
+        return await handler.handle_rotation_request(actual_model, body_dict, authenticated_user_id, token_id)
     
     if provider_id == "user-provider":
         handler = get_user_handler('request', target_user_id)
@@ -10644,12 +10740,13 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
                 )
             handler = get_user_handler('autoselect', None)
             body_dict['model'] = actual_model
-            
+
             if body.stream:
                 return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
             else:
-                return await handler.handle_autoselect_request(actual_model, body_dict)
-        
+                token_id = getattr(request.state, 'token_id', None)
+                return await handler.handle_autoselect_request(actual_model, body_dict, authenticated_user_id, token_id)
+
         if provider_id == "rotation":
             if actual_model not in config.rotations:
                 raise HTTPException(
@@ -10658,7 +10755,8 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
                 )
             handler = get_user_handler('rotation', None)
             body_dict['model'] = actual_model
-            return await handler.handle_rotation_request(actual_model, body_dict)
+            token_id = getattr(request.state, 'token_id', None)
+            return await handler.handle_rotation_request(actual_model, body_dict, authenticated_user_id, token_id)
         
         if provider_id in config.providers:
             provider_config = config.get_provider(provider_id)
@@ -10854,11 +10952,12 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
                 detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}"
             )
         body_dict['model'] = actual_model
-        
+
         if body.stream:
             return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
         else:
-            return await handler.handle_autoselect_request(actual_model, body_dict)
+            token_id = getattr(request.state, 'token_id', None)
+            return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
     
     # Handle user rotation (format: user-rotation/{name})
     if provider_id == "user-rotation":
@@ -10869,7 +10968,8 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
                 detail=f"User rotation '{actual_model}' not found. Available: {list(handler.user_rotations.keys())}"
             )
         body_dict['model'] = actual_model
-        return await handler.handle_rotation_request(actual_model, body_dict)
+        token_id = getattr(request.state, 'token_id', None)
+        return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
     
     # Handle user provider (format: user-provider/{name})
     if provider_id == "user-provider":
@@ -10907,11 +11007,12 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
                 )
             handler = get_user_handler('autoselect', None)
             body_dict['model'] = actual_model
-            
+
             if body.stream:
                 return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
             else:
-                return await handler.handle_autoselect_request(actual_model, body_dict)
+                token_id = getattr(request.state, 'token_id', None)
+                return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
         
         # Handle global rotation
         if provider_id == "rotation":
@@ -10922,7 +11023,8 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
                 )
             handler = get_user_handler('rotation', None)
             body_dict['model'] = actual_model
-            return await handler.handle_rotation_request(actual_model, body_dict)
+            token_id = getattr(request.state, 'token_id', None)
+            return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
         
         # Handle global provider
         if provider_id in config.providers:
@@ -11920,11 +12022,11 @@ async def dashboard_kilo_auth_status(request: Request):
         
         # Config admin or no database credentials: check file
         auth = KiloOAuth2(credentials_file=credentials_file)
-        
+
         # Check if authenticated
         if auth.is_authenticated():
             # Try to get a valid token (will refresh if needed)
-            token = auth.get_valid_token()
+            token = await auth.get_valid_token()
             if token:
                 # Get token expiration info
                 expires_at = auth.credentials.get('expires', 0)
@@ -12240,7 +12342,7 @@ async def dashboard_codex_auth_status(request: Request):
         # Check if authenticated
         if auth.is_authenticated():
             # Try to get a valid token (will refresh if needed)
-            token = auth.get_valid_token()
+            token = await auth.get_valid_token_with_refresh()
             if token:
                 # Get user email from ID token
                 email = auth.get_user_email()

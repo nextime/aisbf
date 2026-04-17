@@ -159,7 +159,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
         logger.info("ClaudeProviderHandler: Initializing session for quota tracking")
         
         try:
-            headers = self._get_auth_headers(stream=False)
+            headers = await self._get_auth_headers(stream=False)
             
             payload = {
                 'model': 'claude-haiku-4-5-20251001',
@@ -257,12 +257,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
             if old_util != new_util:
                 logger.debug(f"ClaudeProviderHandler: Quota utilization updated: {old_util} -> {new_util}")
     
-    def _get_sdk_client(self):
+    async def _get_sdk_client(self):
         """Get or create an Anthropic SDK client configured with OAuth2 auth token."""
         import logging
         logger = logging.getLogger(__name__)
-        
-        access_token = self.auth.get_valid_token()
+
+        access_token = await self.auth.get_valid_token()
         
         if not access_token:
             logger.error("ClaudeProviderHandler: No OAuth2 access token available")
@@ -277,14 +277,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
         logger.info("ClaudeProviderHandler: Created SDK client with OAuth2 auth token")
         return self._sdk_client
     
-    def _get_auth_headers(self, stream: bool = False):
+    async def _get_auth_headers(self, stream: bool = False):
         """Get HTTP headers with OAuth2 Bearer token."""
         import logging
         import uuid
         import platform
         logger = logging.getLogger(__name__)
-        
-        access_token = self.auth.get_valid_token()
+
+        access_token = await self.auth.get_valid_token()
         
         if not self.session_state.get('session_id'):
             self.session_state['session_id'] = str(uuid.uuid4())
@@ -849,7 +849,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
             if anthropic_tool_choice:
                 payload['tool_choice'] = anthropic_tool_choice
         
-        headers = self._get_auth_headers(stream=stream)
+        headers = await self._get_auth_headers(stream=stream)
         api_url = 'https://api.anthropic.com/v1/messages?beta=true'
         
         logger.info(f"ClaudeProviderHandler: Request payload keys: {list(payload.keys())}")
@@ -1639,8 +1639,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
             try:
                 logging.info("ClaudeProviderHandler: [1/3] Attempting primary API endpoint...")
-                
-                headers = self._get_auth_headers(stream=False)
+
+                headers = await self._get_auth_headers(stream=False)
                 
                 api_endpoint = 'https://api.anthropic.com/v1/models'
                 logging.info(f"ClaudeProviderHandler: Calling API endpoint: {api_endpoint}")

@@ -103,7 +103,7 @@ class QwenProviderHandler(BaseProviderHandler):
         logging.getLogger(__name__).info(f"QwenProviderHandler: Falling back to file-based credentials for user {self.user_id}")
         return QwenOAuth2(credentials_file=credentials_file)
     
-    def _get_sdk_client(self):
+    async def _get_sdk_client(self):
         """Get or create an OpenAI SDK client configured with authentication (OAuth2 or API key)."""
         import logging
         logger = logging.getLogger(__name__)
@@ -122,7 +122,7 @@ class QwenProviderHandler(BaseProviderHandler):
             base_url = self._get_region_endpoint(qwen_config)
         else:
             # Use OAuth2 authentication
-            access_token = self.auth.get_valid_token()
+            access_token = await self.auth.get_valid_token()
 
             if not access_token:
                 logger.error("QwenProviderHandler: No OAuth2 access token available")
@@ -221,7 +221,7 @@ class QwenProviderHandler(BaseProviderHandler):
         await self.apply_rate_limit()
         
         # Get SDK client with current OAuth token
-        client = self._get_sdk_client()
+        client = await self._get_sdk_client()
         
         # Build request parameters
         request_params = {
@@ -308,7 +308,7 @@ class QwenProviderHandler(BaseProviderHandler):
                 if refresh_success:
                     logger.info("QwenProviderHandler: Token refreshed, retrying request")
                     # Retry with new token
-                    client = self._get_sdk_client()
+                    client = await self._get_sdk_client()
                     
                     if stream:
                         return self._handle_streaming_request(client, request_params, model)
@@ -472,7 +472,7 @@ class QwenProviderHandler(BaseProviderHandler):
 
         try:
             # Get SDK client with API key authentication
-            client = self._get_sdk_client()
+            client = await self._get_sdk_client()
 
             # List models using OpenAI SDK
             models_response = await client.models.list()

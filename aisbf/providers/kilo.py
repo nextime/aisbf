@@ -169,9 +169,9 @@ class KiloProviderHandler(BaseProviderHandler):
                 "status": "authenticated",
                 "token": self.api_key
             }
-        
-        token = self.oauth2.get_valid_token()
-        
+
+        token = await self.oauth2.get_valid_token()
+
         if token:
             logger.info("KiloProviderHandler: Using existing OAuth2 token")
             return {
@@ -182,7 +182,7 @@ class KiloProviderHandler(BaseProviderHandler):
         # Try to reload credentials one more time - this handles the case where credentials
         # were saved by another process/handler instance after this handler was created
         self.oauth2._load_credentials()
-        token = self.oauth2.get_valid_token()
+        token = await self.oauth2.get_valid_token()
         
         if token:
             logger.info("KiloProviderHandler: Found OAuth2 token after reloading credentials")
