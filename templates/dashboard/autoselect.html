@@ -40,9 +40,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
-let autoselectConfig = {{ autoselect_json | safe }};
-let availableRotations = {{ available_rotations | safe }};
-let availableModels = {{ available_models | safe }};
+const autoselectData = {
+    config: {{ autoselect_json | safe }},
+    rotations: {{ available_rotations | safe }},
+    models: {{ available_models | safe }},
+    saveUrl: "{{ url_for(request, '/dashboard/autoselect') }}",
+    successUrl: "{{ url_for(request, '/dashboard/autoselect?success=1') }}"
+};
+let autoselectConfig = autoselectData.config;
+let availableRotations = autoselectData.rotations;
+let availableModels = autoselectData.models;
 let expandedAutoselects = new Set();
 
 function renderAutoselectList() {
@@ -381,7 +388,7 @@ function updateAutoselectModel(autoselectKey, index, field, value) {
 
 async function saveAutoselect() {
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/autoselect") }}', {
+        const response = await fetch(autoselectData.saveUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -390,7 +397,7 @@ async function saveAutoselect() {
         });
         
         if (response.ok) {
-            window.location.href = '{{ url_for(request, "/dashboard/autoselect?success=1") }}';
+            window.location.href = autoselectData.successUrl;
         } else {
             alert('Error saving configuration');
         }

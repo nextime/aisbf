@@ -214,6 +214,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
+const analyticsData = {
+    selectedUser: {{ selected_user or 'null' }},
+    availableUsers: {{ available_users|tojson }}
+};
+</script>
+
+<script>
 document.getElementById('timeRangeSelect').addEventListener('change', function() {
     var customRange = document.getElementById('customDateRange');
     if (this.value === 'custom') {
@@ -262,16 +269,15 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
     const resultsDiv = document.getElementById('userSearchResults');
     const hiddenInput = document.getElementById('userFilterValue');
     let debounceTimer;
-    let selectedUserId = {{ selected_user or 'null' }};
-    
+    let selectedUserId = analyticsData.selectedUser;
+
     // Set initial display value if a user is selected
-    {% if selected_user %}
-    {% for user in available_users %}
-    {% if user.id == selected_user %}
-    searchInput.value = '{{ user.username }}{% if user.role == "admin" %} (admin){% endif %}';
-    {% endif %}
-    {% endfor %}
-    {% endif %}
+    if (analyticsData.selectedUser) {
+        const user = analyticsData.availableUsers.find(u => u.id == analyticsData.selectedUser);
+        if (user) {
+            searchInput.value = user.username + (user.role === 'admin' ? ' (admin)' : '');
+        }
+    }
     
     // Search users via API
     async function searchUsers(query) {

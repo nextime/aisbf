@@ -54,7 +54,7 @@ from .auth.qwen import QwenOAuth2
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
 from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
 
-__version__ = "0.99.29"
+__version__ = "0.99.31"
 __all__ = [
     # Config
     "config",

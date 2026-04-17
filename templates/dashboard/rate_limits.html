@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block content %}
 <h2 style="margin-bottom: 30px;">Adaptive Rate Limits</h2>
 
+<div id="rate-limits-data" data-data-url="{{ url_for(request, '/dashboard/rate-limits/data') }}" style="display:none;"></div>
+
 <!-- Quick Links Navigation -->
 <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
@@ -93,12 +95,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </style>
 
 <script>
+const dataUrl = document.getElementById('rate-limits-data').dataset.dataUrl;
+
 async function loadRateLimits() {
     const content = document.getElementById('rate-limits-content');
     content.innerHTML = '<p>Loading rate limit data...</p>';
-    
+
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/rate-limits/data") }}');
+        const response = await fetch(dataUrl);
         const data = await response.json();
         
         if (Object.keys(data).length === 0) {
@@ -196,7 +200,7 @@ async function clearAllRateLimiters() {
     
     // First get the list of providers
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/rate-limits/data") }}');
+        const response = await fetch(dataUrl);
         const data = await response.json();
         
         for (const providerId of Object.keys(data)) {

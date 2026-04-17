@@ -21,6 +21,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block content %}
 <h2 style="margin-bottom: 30px;">User Management</h2>
 
+<div id="url-data" data-base-url="{{ url_for(request, '/dashboard/users/') }}" style="display:none;"></div>
+
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
 {% endif %}
@@ -280,6 +282,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <script>
 // Utility functions
+const baseUrl = document.getElementById('url-data').dataset.baseUrl;
 function getUrlParams() {
     const params = new URLSearchParams(window.location.search);
     return {
@@ -334,6 +337,14 @@ function updateUsers(params) {
 
         tableContainer.innerHTML = originalContent;
         document.querySelector('table').replaceWith(newTable);
+
+        // Reset select-all state
+        const selectAll = document.getElementById('select-all');
+        if (selectAll) {
+            selectAll.checked = false;
+            selectAll.indeterminate = false;
+        }
+        updateBulkActionsVisibility();
 
         const existingPagination = document.querySelector('[style*="margin-top: 20px"]');
         if (existingPagination) {
@@ -414,9 +425,34 @@ document.addEventListener('DOMContentLoaded', function() {
                 document.querySelector('table').after(newPagination);
             }
 
+            // Reset select-all state
+            const selectAll = document.getElementById('select-all');
+            if (selectAll) {
+                selectAll.checked = false;
+                selectAll.indeterminate = false;
+            }
+            updateBulkActionsVisibility();
+
             // Re-attach event listeners to new elements
             attachPaginationListeners();
             attachSortingListeners();
+
+            // Reattach select-all listener
+            if (selectAll) {
+                selectAll.addEventListener('change', function() {
+                    const checkboxes = document.querySelectorAll('.user-checkbox');
+                    checkboxes.forEach(cb => cb.checked = this.checked);
+                    updateBulkActionsVisibility();
+                });
+            }
+
+            // Reattach individual checkbox listeners
+            document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+                checkbox.addEventListener('change', function() {
+                    updateBulkActionsVisibility();
+                    updateSelectAllState();
+                });
+            });
         })
         .catch(error => {
             console.error('Error updating users:', error);
@@ -529,7 +565,33 @@ document.addEventListener('DOMContentLoaded', function() {
     document.getElementById('select-all').addEventListener('change', function() {
         const checkboxes = document.querySelectorAll('.user-checkbox');
         checkboxes.forEach(cb => cb.checked = this.checked);
-    updateBulkActionsVisibility();
+        updateBulkActionsVisibility();
+    });
+
+    // Individual checkbox change handlers
+    document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateBulkActionsVisibility();
+            updateSelectAllState();
+        });
+    });
+
+    // Bulk action button handlers
+    document.getElementById('bulk-enable')?.addEventListener('click', function() {
+        performBulkAction('enable', 'enable these users');
+    });
+
+    document.getElementById('bulk-disable')?.addEventListener('click', function() {
+        performBulkAction('disable', 'disable these users');
+    });
+
+    document.getElementById('bulk-delete')?.addEventListener('click', function() {
+        performBulkAction('delete', 'delete these users', true);
+    });
+
+    document.getElementById('bulk-clear')?.addEventListener('click', function() {
+        clearSelection();
+    });
 });
 
 // Function to attach event listeners to dynamic elements
@@ -576,6 +638,24 @@ function attachEventListeners() {
             updateUsers({ limit: this.value, page: 1 });
         });
     }
+
+    // Reattach select-all listener
+    const selectAll = document.getElementById('select-all');
+    if (selectAll) {
+        selectAll.addEventListener('change', function() {
+            const checkboxes = document.querySelectorAll('.user-checkbox');
+            checkboxes.forEach(cb => cb.checked = this.checked);
+            updateBulkActionsVisibility();
+        });
+    }
+
+    // Reattach individual checkbox listeners
+    document.querySelectorAll('.user-checkbox').forEach(checkbox => {
+        checkbox.addEventListener('change', function() {
+            updateBulkActionsVisibility();
+            updateSelectAllState();
+        });
+    });
 }
 
 function updateBulkActionsVisibility() {
@@ -666,7 +746,7 @@ function editUser(userId, username, email, role, isActive) {
     document.getElementById('edit-email').value = email;
     document.getElementById('edit-role').value = role;
     document.getElementById('edit-is-active').checked = isActive;
-    document.getElementById('edit-form').action = '{{ url_for(request, "/dashboard/users/") }}' + userId + '/edit';
+    document.getElementById('edit-form').action = baseUrl + userId + '/edit';
     document.getElementById('edit-modal').style.display = 'block';
 }
 
@@ -677,7 +757,7 @@ function closeEditModal() {
 function toggleUserStatus(userId, currentStatus) {
     const action = currentStatus ? 'disable' : 'enable';
     if (confirm('Are you sure you want to ' + action + ' this user?')) {
-        fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/toggle', {
+        fetch(baseUrl + userId + '/toggle', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })
@@ -697,7 +777,7 @@ function toggleUserStatus(userId, currentStatus) {
 
 function deleteUser(userId, username) {
     if (confirm('Are you sure you want to delete user "' + username + '"? This action cannot be undone.')) {
-        fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/delete', {
+        fetch(baseUrl + userId + '/delete', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'}
         })
@@ -716,7 +796,7 @@ function deleteUser(userId, username) {
 }
 
 function updateUserTier(userId, tierId) {
-    fetch('{{ url_for(request, "/dashboard/users/") }}' + userId + '/tier', {
+    fetch(baseUrl + userId + '/tier', {
         method: 'POST',
         headers: {'Content-Type': 'application/json'},
         body: JSON.stringify({ tier_id: parseInt(tierId) })

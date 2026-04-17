@@ -47,8 +47,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
-let rotationsConfig = {{ rotations_json | safe }};
-let availableProviders = {{ available_providers | safe }};
+const rotationsData = {
+    config: {{ rotations_json | safe }},
+    providers: {{ available_providers | safe }},
+    saveUrl: "{{ url_for(request, '/dashboard/rotations') }}",
+    successUrl: "{{ url_for(request, '/dashboard/rotations?success=1') }}"
+};
+let rotationsConfig = rotationsData.config;
+let availableProviders = rotationsData.providers;
 let expandedRotations = new Set();
 
 document.getElementById('global-notify').checked = rotationsConfig.notifyerrors || false;
@@ -376,7 +382,7 @@ function updateRotationModelCondenseMethod(rotationKey, providerIndex, modelInde
 
 async function saveRotations() {
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/rotations") }}', {
+        const response = await fetch(rotationsData.saveUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -385,7 +391,7 @@ async function saveRotations() {
         });
         
         if (response.ok) {
-            window.location.href = '{{ url_for(request, "/dashboard/rotations?success=1") }}';
+            window.location.href = rotationsData.successUrl;
         } else {
             alert('Error saving configuration');
         }
