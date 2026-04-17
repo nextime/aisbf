@@ -448,9 +448,9 @@ class PaymentMigrations:
             logger.warning(f"Migration check for stripe_customer_id column: {e}")
     
     def _insert_default_data(self, cursor):
-        """Insert default configuration data"""
+        """Insert default configuration data (only if not already present)"""
         
-        # Insert default price sources
+        # Insert default price sources (INSERT OR IGNORE = only if not exists)
         default_sources = [
             ('Coinbase', 'rest', 'https://api.coinbase.com/v2/prices', None, 1),
             ('Binance', 'rest', 'https://api.binance.com/api/v3/ticker/price', None, 2),
@@ -472,7 +472,7 @@ class PaymentMigrations:
             except:
                 pass
         
-        # Insert default consolidation settings
+        # Insert default consolidation settings (INSERT OR IGNORE = only if not exists)
         default_consolidation = [
             ('BTC', '0.1', ''),
             ('ETH', '1.0', ''),
@@ -495,7 +495,7 @@ class PaymentMigrations:
             except:
                 pass
         
-        # Insert default email notification settings
+        # Insert default email notification settings (INSERT OR IGNORE = only if not exists)
         default_notifications = [
             ('payment_failed', 'Payment Failed'),
             ('payment_retry_success', 'Payment Successful'),
@@ -523,7 +523,7 @@ class PaymentMigrations:
             except:
                 pass
         
-        logger.info("✅ Default payment system data inserted")
+        logger.info("✅ Default payment system data checked (existing records preserved)")
         
         # Insert default free tier if it doesn't exist
         try:
