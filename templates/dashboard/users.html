@@ -58,17 +58,54 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <!-- Users Table -->
 <h3 style="margin-bottom: 15px;">All Users</h3>
+
+<!-- Search and Filter Controls -->
+<div style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+    <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
+        <div style="flex: 1; min-width: 200px;">
+            <label for="search-input" style="display: block; margin-bottom: 5px; color: #e0e0e0;">Search Users</label>
+            <input type="text" id="search-input" placeholder="Search by username, email, or display name..."
+                   value="{{ filters.search }}" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+        </div>
+        <div style="display: flex; gap: 10px; align-items: flex-end;">
+            <button id="search-btn" class="btn" style="padding: 8px 16px;">Search</button>
+            <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;">Clear</button>
+        </div>
+    </div>
+</div>
+
 <table>
     <thead>
         <tr>
             <th>ID</th>
-            <th>Username</th>
+            <th class="sortable" data-column="username">
+                Username
+                <span class="sort-indicator" data-column="username">
+                    {% if filters.order_by == 'username' %}
+                        {% if filters.direction == 'asc' %}▲{% else %}▼{% endif %}
+                    {% endif %}
+                </span>
+            </th>
             <th>Email</th>
             <th>Role</th>
             <th>Tier</th>
             <th>Created By</th>
-            <th>Created At</th>
-            <th>Last Login</th>
+            <th class="sortable" data-column="created_at">
+                Created At
+                <span class="sort-indicator" data-column="created_at">
+                    {% if filters.order_by == 'created_at' %}
+                        {% if filters.direction == 'asc' %}▲{% else %}▼{% endif %}
+                    {% endif %}
+                </span>
+            </th>
+            <th class="sortable" data-column="last_login">
+                Last Login
+                <span class="sort-indicator" data-column="last_login">
+                    {% if filters.order_by == 'last_login' %}
+                        {% if filters.direction == 'asc' %}▲{% else %}▼{% endif %}
+                    {% endif %}
+                </span>
+            </th>
             <th>Active</th>
             <th>Actions</th>
         </tr>
@@ -125,6 +162,41 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </tbody>
 </table>
 
+<!-- Pagination Controls -->
+{% if pagination.total_pages > 1 %}
+<div style="margin-top: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+    <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
+        <div style="color: #e0e0e0;">
+            Showing {{ pagination.start_item }}-{{ pagination.end_item }} of {{ pagination.total_users }} users
+        </div>
+
+        <div style="display: flex; gap: 10px; align-items: center;">
+            <label for="page-size" style="color: #e0e0e0; margin-right: 5px;">Show:</label>
+            <select id="page-size" style="padding: 5px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+                <option value="10" {% if pagination.limit == 10 %}selected{% endif %}>10</option>
+                <option value="25" {% if pagination.limit == 25 %}selected{% endif %}>25</option>
+                <option value="50" {% if pagination.limit == 50 %}selected{% endif %}>50</option>
+                <option value="100" {% if pagination.limit == 100 %}selected{% endif %}>100</option>
+            </select>
+
+            <div style="display: flex; gap: 5px;">
+                <button id="prev-btn" class="btn btn-secondary" {% if not pagination.has_prev %}disabled{% endif %} style="padding: 8px 12px;">
+                    ← Previous
+                </button>
+
+                <span style="color: #e0e0e0; padding: 8px 12px; background: #1a1a2e; border-radius: 4px;">
+                    Page {{ pagination.current_page }} of {{ pagination.total_pages }}
+                </span>
+
+                <button id="next-btn" class="btn btn-secondary" {% if not pagination.has_next %}disabled{% endif %} style="padding: 8px 12px;">
+                    Next →
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+{% endif %}
+
 <!-- Edit User Modal -->
 <div id="edit-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000;">
     <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 30px; border-radius: 8px; width: 90%; max-width: 500px;">
@@ -165,6 +237,117 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
+// Search functionality
+document.addEventListener('DOMContentLoaded', function() {
+    const searchInput = document.getElementById('search-input');
+    const searchBtn = document.getElementById('search-btn');
+    const clearBtn = document.getElementById('clear-btn');
+    const pageSize = document.getElementById('page-size');
+    const prevBtn = document.getElementById('prev-btn');
+    const nextBtn = document.getElementById('next-btn');
+
+    // Get current URL parameters
+    function getUrlParams() {
+        const params = new URLSearchParams(window.location.search);
+        return {
+            search: params.get('search') || '',
+            order_by: params.get('order_by') || 'created_at',
+            direction: params.get('direction') || 'desc',
+            page: parseInt(params.get('page')) || 1,
+            limit: parseInt(params.get('limit')) || 25
+        };
+    }
+
+    // Update URL with new parameters
+    function updateUrl(params) {
+        const url = new URL(window.location.href);
+        Object.keys(params).forEach(key => {
+            if (params[key]) {
+                url.searchParams.set(key, params[key]);
+            } else {
+                url.searchParams.delete(key);
+            }
+        });
+        window.location.href = url.toString();
+    }
+
+    // Search button click
+    if (searchBtn) {
+        searchBtn.addEventListener('click', function() {
+            const params = getUrlParams();
+            params.search = searchInput.value.trim();
+            params.page = 1; // Reset to first page on new search
+            updateUrl(params);
+        });
+    }
+
+    // Search on Enter key
+    if (searchInput) {
+        searchInput.addEventListener('keypress', function(e) {
+            if (e.key === 'Enter') {
+                searchBtn.click();
+            }
+        });
+    }
+
+    // Clear button click
+    if (clearBtn) {
+        clearBtn.addEventListener('click', function() {
+            const params = getUrlParams();
+            params.search = '';
+            params.page = 1;
+            updateUrl(params);
+        });
+    }
+
+    // Sortable headers
+    document.querySelectorAll('.sortable').forEach(header => {
+        header.style.cursor = 'pointer';
+        header.addEventListener('click', function() {
+            const column = this.getAttribute('data-column');
+            const params = getUrlParams();
+            
+            // Toggle direction if clicking same column, otherwise default to desc
+            if (params.order_by === column) {
+                params.direction = params.direction === 'asc' ? 'desc' : 'asc';
+            } else {
+                params.order_by = column;
+                params.direction = 'desc';
+            }
+            params.page = 1; // Reset to first page on sort
+            updateUrl(params);
+        });
+    });
+
+    // Page size change
+    if (pageSize) {
+        pageSize.addEventListener('change', function() {
+            const params = getUrlParams();
+            params.limit = this.value;
+            params.page = 1; // Reset to first page on limit change
+            updateUrl(params);
+        });
+    }
+
+    // Previous page button
+    if (prevBtn) {
+        prevBtn.addEventListener('click', function() {
+            const params = getUrlParams();
+            params.page = Math.max(1, params.page - 1);
+            updateUrl(params);
+        });
+    }
+
+    // Next page button
+    if (nextBtn) {
+        nextBtn.addEventListener('click', function() {
+            const params = getUrlParams();
+            params.page = params.page + 1;
+            updateUrl(params);
+        });
+    }
+});
+
 function editUser(userId, username, email, role, isActive) {
     document.getElementById('edit-user-id').value = userId;
     document.getElementById('edit-username').value = username;
@@ -305,6 +488,23 @@ th, td {
 th {
     background: #0f3460;
     font-weight: 600;
+}
+
+/* Sortable header styles */
+.sortable {
+    cursor: pointer;
+    user-select: none;
+    position: relative;
+}
+
+.sortable:hover {
+    background: #1a4d7a;
+}
+
+.sort-indicator {
+    margin-left: 5px;
+    font-size: 10px;
+    color: #16c79a;
 }
 
 /* Notification animations */
