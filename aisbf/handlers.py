@@ -363,6 +363,30 @@ class RequestHandler:
             api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
             logger.info(f"API key from request: {'***' if api_key else 'None'}")
             if not api_key:
+                # Record analytics for authentication failure
+                try:
+                    analytics = get_analytics()
+                    # Estimate tokens for the request
+                    try:
+                        messages = request_data.get('messages', [])
+                        model_name = request_data.get('model', 'unknown')
+                        estimated_tokens = count_messages_tokens(messages, model_name)
+                    except Exception:
+                        estimated_tokens = 50
+                    
+                    analytics.record_request(
+                        provider_id=provider_id,
+                        model_name=request_data.get('model', 'unknown'),
+                        tokens_used=estimated_tokens,
+                        latency_ms=0,
+                        success=False,
+                        error_type='AuthenticationError',
+                        user_id=getattr(request.state, 'user_id', None),
+                        token_id=getattr(request.state, 'token_id', None)
+                    )
+                except Exception as analytics_error:
+                    logger.warning(f"Analytics recording for auth failure failed: {analytics_error}")
+                
                 raise HTTPException(status_code=401, detail="API key required")
         else:
             api_key = None
@@ -501,18 +525,45 @@ class RequestHandler:
             # Record analytics for token usage
             try:
                 analytics = get_analytics()
+                latency_ms = (time.time() - request_start_time) * 1000
+                
                 if response and isinstance(response, dict):
                     usage = response.get('usage', {})
                     total_tokens = usage.get('total_tokens', 0)
-                    if total_tokens > 0:
-                        latency_ms = (time.time() - request_start_time) * 1000
-                        analytics.record_request(
-                            provider_id=provider_id,
-                            model_name=model_name,
-                            tokens_used=total_tokens,
-                            latency_ms=latency_ms,
-                            success=True
-                        )
+                    
+                    # If no token usage provided, estimate it
+                    if total_tokens == 0:
+                        try:
+                            messages = request_data.get('messages', [])
+                            estimated_prompt_tokens = count_messages_tokens(messages, model_name)
+                            
+                            # More realistic completion estimate based on max_tokens or typical response
+                            max_tokens = request_data.get('max_tokens', 0)
+                            if max_tokens > 0:
+                                # Use max_tokens as upper bound for completion
+                                estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
+                            else:
+                                # No max_tokens specified, assume completion is similar to prompt
+                                # but at least 50 tokens for typical responses
+                                estimated_completion = max(estimated_prompt_tokens, 50)
+                            
+                            total_tokens = estimated_prompt_tokens + estimated_completion
+                            logger.debug(f"Estimated token usage: {total_tokens} (prompt: {estimated_prompt_tokens}, completion: {estimated_completion})")
+                        except Exception as est_error:
+                            logger.debug(f"Token estimation failed: {est_error}")
+                            # Use a more realistic default if estimation fails
+                            total_tokens = 150
+                    
+                    # Always record analytics, even with estimated tokens
+                    analytics.record_request(
+                        provider_id=provider_id,
+                        model_name=model_name,
+                        tokens_used=total_tokens,
+                        latency_ms=latency_ms,
+                        success=True,
+                        user_id=getattr(request.state, 'user_id', None),
+                        token_id=getattr(request.state, 'token_id', None)
+                    )
             except Exception as analytics_error:
                 logger.warning(f"Analytics recording failed: {analytics_error}")
             
@@ -520,6 +571,33 @@ class RequestHandler:
             return response
         except Exception as e:
             handler.record_failure()
+            
+            # Record failed request analytics
+            try:
+                analytics = get_analytics()
+                latency_ms = (time.time() - request_start_time) * 1000
+                
+                # Estimate tokens for failed request
+                try:
+                    messages = request_data.get('messages', [])
+                    estimated_tokens = count_messages_tokens(messages, model_name)
+                    total_tokens = estimated_tokens
+                except Exception:
+                    total_tokens = 50  # Minimal estimate for failed requests
+                
+                analytics.record_request(
+                    provider_id=provider_id,
+                    model_name=model_name,
+                    tokens_used=total_tokens,
+                    latency_ms=latency_ms,
+                    success=False,
+                    error_type=type(e).__name__,
+                    user_id=getattr(request.state, 'user_id', None),
+                    token_id=getattr(request.state, 'token_id', None)
+                )
+            except Exception as analytics_error:
+                logger.warning(f"Analytics recording for failed request failed: {analytics_error}")
+            
             raise HTTPException(status_code=500, detail=str(e))
 
     async def handle_streaming_chat_completion(self, request: Request, provider_id: str, request_data: Dict):
@@ -1118,8 +1196,56 @@ class RequestHandler:
                                 # Skip this chunk and continue with the next one
                                 continue
                 handler.record_success()
+                
+                # Record analytics for streaming request
+                try:
+                    analytics = get_analytics()
+                    # Calculate total tokens from accumulated response
+                    if accumulated_response_text:
+                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], request_data['model'])
+                    else:
+                        completion_tokens = 0
+                    total_tokens = effective_context + completion_tokens
+                    
+                    analytics.record_request(
+                        provider_id=provider_id,
+                        model_name=request_data['model'],
+                        tokens_used=total_tokens,
+                        latency_ms=0,
+                        success=True,
+                        user_id=getattr(request.state, 'user_id', None),
+                        token_id=getattr(request.state, 'token_id', None)
+                    )
+                except Exception as analytics_error:
+                    logger.warning(f"Analytics recording for streaming request failed: {analytics_error}")
+                
             except Exception as e:
                 handler.record_failure()
+                
+                # Record analytics for failed streaming request
+                try:
+                    analytics = get_analytics()
+                    # Estimate tokens for failed request
+                    try:
+                        messages = request_data.get('messages', [])
+                        estimated_tokens = count_messages_tokens(messages, request_data['model'])
+                        total_tokens = estimated_tokens
+                    except Exception:
+                        total_tokens = 50  # Minimal estimate for failed requests
+                    
+                    analytics.record_request(
+                        provider_id=provider_id,
+                        model_name=request_data['model'],
+                        tokens_used=total_tokens,
+                        latency_ms=0,
+                        success=False,
+                        error_type=type(e).__name__,
+                        user_id=getattr(request.state, 'user_id', None),
+                        token_id=getattr(request.state, 'token_id', None)
+                    )
+                except Exception as analytics_error:
+                    logger.warning(f"Analytics recording for failed streaming request failed: {analytics_error}")
+                
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
 
@@ -2096,7 +2222,7 @@ class RotationHandler:
         logger.info(f"No API key found for {provider_id}")
         return None
 
-    async def handle_rotation_request(self, rotation_id: str, request_data: Dict):
+    async def handle_rotation_request(self, rotation_id: str, request_data: Dict, user_id: Optional[int] = None, token_id: Optional[int] = None):
         """
         Handle a rotation request.
 
@@ -2721,15 +2847,37 @@ class RotationHandler:
                         if response and isinstance(response, dict):
                             usage = response.get('usage', {})
                             total_tokens = usage.get('total_tokens', 0)
-                            if total_tokens > 0:
-                                analytics.record_request(
-                                    provider_id=provider_id,
-                                    model_name=model_name,
-                                    tokens_used=total_tokens,
-                                    latency_ms=0,  # Latency tracking would require more extensive changes
-                                    success=True,
-                                    rotation_id=rotation_id
-                                )
+                            
+                            # If no token usage provided, estimate it
+                            if total_tokens == 0:
+                                try:
+                                    messages = request_data.get('messages', [])
+                                    estimated_prompt_tokens = count_messages_tokens(messages, model_name)
+                                    
+                                    # More realistic completion estimate
+                                    max_tokens = request_data.get('max_tokens', 0)
+                                    if max_tokens > 0:
+                                        estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
+                                    else:
+                                        estimated_completion = max(estimated_prompt_tokens, 50)
+                                    
+                                    total_tokens = estimated_prompt_tokens + estimated_completion
+                                    logger.debug(f"Estimated token usage for rotation: {total_tokens}")
+                                except Exception as est_error:
+                                    logger.debug(f"Token estimation failed: {est_error}")
+                                    total_tokens = 150
+                            
+                            # Always record analytics
+                            analytics.record_request(
+                                provider_id=provider_id,
+                                model_name=model_name,
+                                tokens_used=total_tokens,
+                                latency_ms=0,  # Latency tracking would require more extensive changes
+                                success=True,
+                                rotation_id=rotation_id,
+                                user_id=user_id,
+                                token_id=token_id
+                            )
                     except Exception as analytics_error:
                         logger.warning(f"Analytics recording failed: {analytics_error}")
                     
@@ -2760,6 +2908,31 @@ class RotationHandler:
         logger.error(f"Attempted {len(tried_models)} different model(s): {[m['name'] for m in tried_models]}")
         logger.error(f"Last error: {last_error}")
         logger.error(f"Max retries ({max_retries}) reached without success")
+        
+        # Record analytics for failed rotation request
+        try:
+            analytics = get_analytics()
+            # Estimate tokens for failed request
+            try:
+                messages = request_data.get('messages', [])
+                estimated_tokens = count_messages_tokens(messages, rotation_id)
+                total_tokens = estimated_tokens
+            except Exception:
+                total_tokens = 50  # Minimal estimate for failed requests
+            
+            analytics.record_request(
+                provider_id='rotation',
+                model_name=rotation_id,
+                tokens_used=total_tokens,
+                latency_ms=0,
+                success=False,
+                error_type='RotationFailure',
+                rotation_id=rotation_id,
+                user_id=user_id,
+                token_id=token_id
+            )
+        except Exception as analytics_error:
+            logger.warning(f"Analytics recording for failed rotation failed: {analytics_error}")
         
         # Build detailed error message
         error_details = []
@@ -3936,7 +4109,7 @@ class AutoselectHandler:
             # If selection fails, we'll handle it in the main handler
             return None
 
-    async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict) -> Dict:
+    async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict, user_id: Optional[int] = None, token_id: Optional[int] = None) -> Dict:
         """Handle an autoselect request"""
         import logging
         logger = logging.getLogger(__name__)
@@ -4051,7 +4224,38 @@ class AutoselectHandler:
         # Now proxy the actual request to the selected rotation
         logger.info(f"Proxying request to rotation: {selected_model_id}")
         rotation_handler = RotationHandler()
-        response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
+        
+        try:
+            response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, user_id, token_id)
+        except Exception as e:
+            # Record analytics for failed autoselect request
+            logger.error(f"Autoselect request failed: {str(e)}")
+            try:
+                analytics = get_analytics()
+                # Estimate tokens for failed request
+                try:
+                    messages = request_data.get('messages', [])
+                    estimated_tokens = count_messages_tokens(messages, autoselect_id)
+                    total_tokens = estimated_tokens
+                except Exception:
+                    total_tokens = 50  # Minimal estimate for failed requests
+                
+                analytics.record_request(
+                    provider_id='autoselect',
+                    model_name=autoselect_id,
+                    tokens_used=total_tokens,
+                    latency_ms=0,
+                    success=False,
+                    error_type=type(e).__name__,
+                    autoselect_id=autoselect_id,
+                    user_id=user_id,
+                    token_id=token_id
+                )
+            except Exception as analytics_error:
+                logger.warning(f"Analytics recording for failed autoselect failed: {analytics_error}")
+            
+            # Re-raise the exception
+            raise
         
         # Cache the response for non-streaming requests
         if not stream:
@@ -4072,17 +4276,40 @@ class AutoselectHandler:
             if response and isinstance(response, dict):
                 usage = response.get('usage', {})
                 total_tokens = usage.get('total_tokens', 0)
-                if total_tokens > 0:
-                    # The actual provider/model info is in the response model field
-                    model_name = response.get('model', 'unknown')
-                    analytics.record_request(
-                        provider_id='autoselect',
-                        model_name=model_name,
-                        tokens_used=total_tokens,
-                        latency_ms=0,
-                        success=True,
-                        autoselect_id=autoselect_id
-                    )
+                
+                # If no token usage provided, estimate it
+                if total_tokens == 0:
+                    try:
+                        messages = request_data.get('messages', [])
+                        model_name = response.get('model', 'unknown')
+                        estimated_prompt_tokens = count_messages_tokens(messages, model_name)
+                        
+                        # More realistic completion estimate
+                        max_tokens = request_data.get('max_tokens', 0)
+                        if max_tokens > 0:
+                            estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
+                        else:
+                            estimated_completion = max(estimated_prompt_tokens, 50)
+                        
+                        total_tokens = estimated_prompt_tokens + estimated_completion
+                        logger.debug(f"Estimated token usage for autoselect: {total_tokens}")
+                    except Exception as est_error:
+                        logger.debug(f"Token estimation failed: {est_error}")
+                        total_tokens = 150
+                
+                # Always record analytics
+                # The actual provider/model info is in the response model field
+                model_name = response.get('model', 'unknown')
+                analytics.record_request(
+                    provider_id='autoselect',
+                    model_name=model_name,
+                    tokens_used=total_tokens,
+                    latency_ms=0,
+                    success=True,
+                    autoselect_id=autoselect_id,
+                    user_id=user_id,
+                    token_id=token_id
+                )
         except Exception as analytics_error:
             logger.warning(f"Analytics recording failed: {analytics_error}")
         
