@@ -6076,6 +6076,41 @@ async def dashboard_tor_status(request: Request):
     
     return JSONResponse(status)
 
+@app.get("/dashboard/response-cache")
+async def dashboard_response_cache(request: Request):
+    """Response cache management page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    from aisbf.cache import get_response_cache
+    
+    try:
+        cache = get_response_cache()
+        stats = cache.get_stats()
+    except Exception as e:
+        logger.error(f"Error getting response cache stats: {e}")
+        stats = {
+            'enabled': False,
+            'hits': 0,
+            'misses': 0,
+            'hit_rate': 0.0,
+            'size': 0,
+            'evictions': 0,
+            'backend': 'unknown',
+            'error': str(e)
+        }
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/response_cache.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "stats": stats
+        }
+    )
+
 @app.get("/dashboard/response-cache/stats")
 async def dashboard_response_cache_stats(request: Request):
     """Get response cache statistics"""

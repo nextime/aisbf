@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+
+{% block title %}Response Cache - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 30px;">Response Cache Management</h2>
+
+<!-- Quick Links Navigation -->
+<div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
+            📊 Analytics
+        </a>
+        <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn" style="text-decoration: none;">
+            💾 Response Cache
+        </a>
+        <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn btn-secondary" style="text-decoration: none;">
+            ⏱️ Rate Limits
+        </a>
+    </div>
+</div>
+
+<!-- Cache Statistics -->
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+    <h3 style="margin-bottom: 20px;">Cache Statistics</h3>
+    
+    <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Status</div>
+            <div style="font-size: 24px; font-weight: bold; color: {% if stats.enabled %}#4ade80{% else %}#ef4444{% endif %};">
+                {% if stats.enabled %}Enabled{% else %}Disabled{% endif %}
+            </div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Backend</div>
+            <div style="font-size: 24px; font-weight: bold;">{{ stats.backend|upper }}</div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Hits</div>
+            <div style="font-size: 24px; font-weight: bold; color: #4ade80;">{{ stats.hits }}</div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Misses</div>
+            <div style="font-size: 24px; font-weight: bold; color: #ef4444;">{{ stats.misses }}</div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Hit Rate</div>
+            <div style="font-size: 24px; font-weight: bold; color: #60a5fa;">{{ "%.1f"|format(stats.hit_rate * 100) }}%</div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Size</div>
+            <div style="font-size: 24px; font-weight: bold;">{{ stats.size }}</div>
+        </div>
+        
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Evictions</div>
+            <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">{{ stats.evictions }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Cache Actions -->
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+    <h3 style="margin-bottom: 20px;">Cache Actions</h3>
+    
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <button onclick="refreshStats()" class="btn" style="padding: 10px 20px;">
+            🔄 Refresh Stats
+        </button>
+        
+        <button onclick="clearCache()" class="btn btn-danger" style="padding: 10px 20px;">
+            🗑️ Clear Cache
+        </button>
+    </div>
+</div>
+
+<!-- Error Display -->
+{% if stats.error %}
+<div style="background: #7f1d1d; padding: 15px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid #ef4444;">
+    <strong style="color: #fca5a5;">Error:</strong>
+    <span style="color: #e0e0e0;">{{ stats.error }}</span>
+</div>
+{% endif %}
+
+<!-- Cache Information -->
+<div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+    <h3 style="margin-bottom: 15px;">About Response Cache</h3>
+    <p style="color: #a0a0a0; line-height: 1.6;">
+        The response cache stores API responses to reduce redundant requests and improve performance. 
+        When enabled, identical requests will be served from cache instead of making new API calls.
+    </p>
+    <ul style="color: #a0a0a0; line-height: 1.8; margin-top: 15px;">
+        <li><strong>Hit Rate:</strong> Percentage of requests served from cache</li>
+        <li><strong>Cache Size:</strong> Number of cached responses currently stored</li>
+        <li><strong>Evictions:</strong> Number of entries removed due to cache size limits</li>
+    </ul>
+</div>
+
+<script>
+function refreshStats() {
+    location.reload();
+}
+
+function clearCache() {
+    if (!confirm('Are you sure you want to clear the entire response cache? This action cannot be undone.')) {
+        return;
+    }
+    
+    fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json'
+        }
+    })
+    .then(response => response.json())
+    .then(data => {
+        if (data.success) {
+            alert('Cache cleared successfully!');
+            location.reload();
+        } else {
+            alert('Error clearing cache: ' + (data.error || 'Unknown error'));
+        }
+    })
+    .catch(error => {
+        alert('Error clearing cache: ' + error);
+    });
+}
+</script>
+
+{% endblock %}

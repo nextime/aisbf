@@ -21,6 +21,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block content %}
 <h2 style="margin-bottom: 30px;">Adaptive Rate Limits</h2>
 
+<!-- Quick Links Navigation -->
+<div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
+            📊 Analytics
+        </a>
+        <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn btn-secondary" style="text-decoration: none;">
+            💾 Response Cache
+        </a>
+        <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn" style="text-decoration: none;">
+            ⏱️ Rate Limits
+        </a>
+    </div>
+</div>
+
 <div style="margin-bottom: 20px;">
     <button onclick="loadRateLimits()" class="btn">Refresh</button>
     <button onclick="clearAllRateLimiters()" class="btn btn-secondary">Reset All Rate Limiters</button>
