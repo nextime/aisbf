@@ -87,15 +87,70 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
+<style>
+.provider-item {
+    animation: fadeIn 0.3s;
+}
+
+.provider-header:hover {
+    background: #0f3460;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="number"],
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    font-size: 14px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+
+.form-group input[type="checkbox"] {
+    margin-right: 5px;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
 <script>
 let providersData = {{ providers_json | safe }};
 let expandedProviders = new Set();
 
 function renderProvidersList() {
+    console.log('=== renderProvidersList START ===');
     const container = document.getElementById('providers-list');
+    console.log('Container element:', container);
+    
+    if (!container) {
+        console.error('ERROR: providers-list container not found!');
+        return;
+    }
+    
     container.innerHTML = '';
+    console.log('Cleared container, processing', Object.keys(providersData).length, 'providers');
     
     Object.entries(providersData).forEach(([key, provider]) => {
+        console.log('Processing provider:', key);
         const providerItem = document.createElement('div');
         providerItem.className = 'provider-item';
         providerItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
@@ -823,48 +878,12 @@ function togglePricingFields(key) {
     }
 }
 
+// Initialize providers list immediately (DOM is already loaded since script is at end of body)
+console.log('Initializing providers list...');
+console.log('providersData:', Object.keys(providersData));
+console.log('Number of providers:', Object.keys(providersData).length);
+renderProvidersList();
+console.log('renderProvidersList() completed');
+
 </script>
-
-<style>
-.provider-item {
-    animation: fadeIn 0.3s;
-}
-
-.provider-header:hover {
-    background: #0f3460;
-}
-
-@keyframes fadeIn {
-    from { opacity: 0; transform: translateY(-10px); }
-    to { opacity: 1; transform: translateY(0); }
-}
-
-.form-group {
-    margin-bottom: 15px;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 5px;
-    font-weight: 500;
-    color: #e0e0e0;
-}
-
-.form-group input[type="text"],
-.form-group input[type="password"],
-.form-group input[type="number"],
-.form-group select {
-    width: 100%;
-    padding: 8px;
-    border: 1px solid #0f3460;
-    border-radius: 3px;
-    font-size: 14px;
-    background: #1a1a2e;
-    color: #e0e0e0;
-}
-
-.form-group input[type="checkbox"] {
-    margin-right: 5px;
-}
-</style>
 {% endblock %}
