@@ -81,6 +81,11 @@
 - **Solution**: Added provider_type field from config (shows Kilo, Claude, Qwen, Codex, etc.)
 - **Files Modified**: `aisbf/analytics.py`, `templates/dashboard/analytics.html`
 
+### 14. OAuth2 Signup Blocked by API Authentication
+- **Problem**: When API authentication is enabled, OAuth2 signup/login endpoints returned 401 error
+- **Solution**: Added `/auth/` path exclusion to authentication middleware
+- **Files Modified**: `main.py`
+
 ## New Features
 
 ### Enhanced Debug Logging
@@ -140,3 +145,4 @@ Updated version to `0.99.33` in:
 11. Test model performance displays on fresh installations with empty context_dimensions table
 12. Verify no deprecation warnings in logs
 13. Confirm model performance Type column shows correct provider types
+14. Test OAuth2 signup/login works with API authentication enabled
