@@ -140,8 +140,13 @@ let expandedProviders = new Set();
 const CHUNK_SIZE = 5 * 1024 * 1024;
 
 // Generic chunked upload handler for all providers
-async function uploadFileChunked(providerKey, fileType, file, configKey, configObject) {
+async function uploadFileChunked(providerKey, fileType, file, configObject) {
     if (!file) return;
+    
+    // Ensure provider is expanded so status element exists
+    if (!expandedProviders.has(providerKey)) {
+        toggleProvider(providerKey);
+    }
     
     const statusEl = document.getElementById(`${configObject}-upload-status-${providerKey}`);
     statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: 0%</div>`;
