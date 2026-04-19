@@ -665,7 +665,9 @@ class Analytics:
         model_filter: Optional[str] = None,
         rotation_filter: Optional[str] = None,
         autoselect_filter: Optional[str] = None,
-        user_filter: Optional[int] = None
+        user_filter: Optional[int] = None,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None
     ) -> List[Dict[str, Any]]:
         """
         Get model performance comparison with optional filters.
@@ -676,6 +678,8 @@ class Analytics:
             rotation_filter: Optional rotation ID to filter by
             autoselect_filter: Optional autoselect ID to filter by
             user_filter: Optional user ID to filter by
+            from_datetime: Optional start datetime for filtering
+            to_datetime: Optional end datetime for filtering
             
         Returns:
             List of model performance data
@@ -714,11 +718,11 @@ class Analytics:
                 if not is_autoselect or (autoselect_id and autoselect_id != autoselect_filter):
                     continue
             
-            # Get token usage for this model
-            stats = self.db.get_token_usage_stats(provider_id, model_name)
+            # Get token usage for this model (no longer used, we'll get from provider_stats)
+            # stats = self.db.get_token_usage_stats(provider_id, model_name)
             
-            # Get provider request stats
-            provider_stats = self.get_provider_stats(provider_id)
+            # Get provider request stats with date range
+            provider_stats = self.get_provider_stats(provider_id, from_datetime, to_datetime, user_filter)
             
             results.append({
                 'provider_id': provider_id,
@@ -727,9 +731,9 @@ class Analytics:
                 'effective_context': dim.get('effective_context'),
                 'condense_context': dim.get('condense_context'),
                 'condense_method': dim.get('condense_method'),
-                'tokens_per_minute': stats['TPM'],
-                'tokens_per_hour': stats['TPH'],
-                'tokens_per_day': stats['TPD'],
+                'tokens_per_minute': provider_stats['tokens']['TPM'],
+                'tokens_per_hour': provider_stats['tokens']['TPH'],
+                'tokens_per_day': provider_stats['tokens']['TPD'],
                 'error_rate': provider_stats.get('error_rate', 0),
                 'avg_latency_ms': provider_stats.get('avg_latency_ms', 0),
                 'is_rotation': is_rotation,
@@ -925,17 +929,27 @@ class Analytics:
             }
         }
     
-    def get_optimization_recommendations(self, user_filter: Optional[int] = None) -> List[Dict[str, Any]]:
+    def get_optimization_recommendations(
+        self, 
+        user_filter: Optional[int] = None,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None
+    ) -> List[Dict[str, Any]]:
         """
         Generate optimization recommendations based on analytics.
+        
+        Args:
+            user_filter: Optional user ID to filter by
+            from_datetime: Optional start datetime for filtering
+            to_datetime: Optional end datetime for filtering
         
         Returns:
             List of recommendations
         """
         recommendations = []
         
-        # Analyze provider stats
-        providers = self.get_all_providers_stats()
+        # Analyze provider stats with date range
+        providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter)
         
         for provider in providers:
             provider_id = provider['provider_id']

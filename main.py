@@ -2056,14 +2056,19 @@ async def dashboard_analytics(
         model_filter=model_filter,
         rotation_filter=rotation_filter,
         autoselect_filter=autoselect_filter,
-        user_filter=user_filter_int
+        user_filter=user_filter_int,
+        from_datetime=from_datetime,
+        to_datetime=to_datetime
     )
     
     # Get cost overview
     cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
     
     # Get optimization recommendations
-    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter_int)
+    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter_int, from_datetime=from_datetime, to_datetime=to_datetime)
+    
+    # Get optimization savings (placeholder - this would need to be implemented in analytics)
+    optimization_savings = None  # TODO: Implement get_optimization_savings method
     
     # Get date range usage summary
     date_range_usage = None
@@ -2084,6 +2089,7 @@ async def dashboard_analytics(
         "model_performance": model_performance,
         "cost_overview": cost_overview,
         "recommendations": recommendations,
+        "optimization_savings": optimization_savings,
         "selected_time_range": time_range,
         "from_date": from_date,
         "to_date": to_date,
