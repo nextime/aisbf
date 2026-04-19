@@ -64,8 +64,15 @@ class KiloProviderHandler(BaseProviderHandler):
                 self.api_key = configured_api_key
         else:
             # No API key provided - use OAuth2 flow
+            import logging
+            logger = logging.getLogger(__name__)
+            logger.info(f"KiloProviderHandler.__init__: provider_id={provider_id}, user_id={user_id}")
+            logger.info(f"KiloProviderHandler.__init__: kilo_config type={type(kilo_config)}, value={kilo_config}")
+            
             if kilo_config and isinstance(kilo_config, dict):
-                credentials_path = kilo_config.get('credentials_file')
+                # Check both 'credentials_file' and 'creds_file' for backward compatibility
+                credentials_path = kilo_config.get('credentials_file') or kilo_config.get('creds_file')
+                logger.info(f"KiloProviderHandler.__init__: credentials_path={credentials_path}")
                 if credentials_path:
                     self._credentials_file = os.path.expanduser(credentials_path)
                 self._api_base = kilo_config.get('api_base')
@@ -74,14 +81,20 @@ class KiloProviderHandler(BaseProviderHandler):
                 self._credentials_file = os.path.expanduser("~/.kilo_credentials.json")
                 self._api_base = None
             
+            logger.info(f"KiloProviderHandler.__init__: self._credentials_file={self._credentials_file}")
+            
             # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
             # All other users (including database admins with user_id) use database credentials
             if user_id is not None:
+                logger.info(f"KiloProviderHandler.__init__: Loading from DB for user {user_id}")
                 self.oauth2 = self._load_oauth2_from_db(provider_id, self._credentials_file, self._api_base)
             else:
                 # Config admin (from aisbf.json): use file-based credentials
+                logger.info(f"KiloProviderHandler.__init__: Loading from file for config admin")
                 from ..auth.kilo import KiloOAuth2
                 self.oauth2 = KiloOAuth2(credentials_file=self._credentials_file, api_base=self._api_base)
+            
+            logger.info(f"KiloProviderHandler.__init__: self.oauth2 type={type(self.oauth2)}, value={self.oauth2}")
         
         configured_endpoint = getattr(self.provider_config, 'endpoint', None)
         if configured_endpoint:
@@ -162,6 +175,10 @@ class KiloProviderHandler(BaseProviderHandler):
         import logging
         logger = logging.getLogger(__name__)
         
+        # DEBUG: Check self.oauth2 before using it
+        logger.info(f"KiloProviderHandler._ensure_authenticated: self.oauth2 type={type(self.oauth2)}, value={self.oauth2}")
+        logger.info(f"KiloProviderHandler._ensure_authenticated: self._use_api_key_auth={self._use_api_key_auth}")
+        
         # If API key authentication is configured, use it directly - NO OAUTH EVER
         if self._use_api_key_auth:
             logger.info("KiloProviderHandler: Using configured API key authentication - skipping OAuth2 flow")
@@ -170,7 +187,8 @@ class KiloProviderHandler(BaseProviderHandler):
                 "token": self.api_key
             }
 
-        token = await self.oauth2.get_valid_token()
+        logger.info(f"KiloProviderHandler._ensure_authenticated: About to call self.oauth2.get_valid_token()")
+        token = self.oauth2.get_valid_token()  # NOT async - don't await
 
         if token:
             logger.info("KiloProviderHandler: Using existing OAuth2 token")
@@ -182,7 +200,7 @@ class KiloProviderHandler(BaseProviderHandler):
         # Try to reload credentials one more time - this handles the case where credentials
         # were saved by another process/handler instance after this handler was created
         self.oauth2._load_credentials()
-        token = await self.oauth2.get_valid_token()
+        token = self.oauth2.get_valid_token()  # NOT async - don't await
         
         if token:
             logger.info("KiloProviderHandler: Found OAuth2 token after reloading credentials")

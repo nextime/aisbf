@@ -196,11 +196,12 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             if (result.complete) {
                 statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
                 
-                // Update the config with the stored filename
+                // Update the config with the full file path (not just filename)
                 if (!providersData[providerKey][configObject]) {
                     providersData[providerKey][configObject] = {};
                 }
-                providersData[providerKey][configObject][fileType] = result.stored_filename;
+                // Use file_path from server response (tilde format: ~/.aisbf/...)
+                providersData[providerKey][configObject][fileType] = result.file_path || result.stored_filename;
                 renderProvidersList();
                 return;
             }

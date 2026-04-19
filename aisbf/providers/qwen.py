@@ -122,7 +122,7 @@ class QwenProviderHandler(BaseProviderHandler):
             base_url = self._get_region_endpoint(qwen_config)
         else:
             # Use OAuth2 authentication
-            access_token = await self.auth.get_valid_token()
+            access_token = await self.auth.get_valid_token_with_refresh()
 
             if not access_token:
                 logger.error("QwenProviderHandler: No OAuth2 access token available")

@@ -5545,6 +5545,77 @@ async def dashboard_provider_upload(
 
             logger.info(f"Config admin uploaded auth file: {file_path}")
 
+            # Update providers.json with full path to the uploaded file
+            try:
+                config_path = Path.home() / '.aisbf' / 'providers.json'
+                if not config_path.exists():
+                    config_path = Path(__file__).parent / 'config' / 'providers.json'
+                
+                with open(config_path) as f:
+                    full_config = json.load(f)
+                
+                # Navigate to the provider config
+                if 'providers' in full_config and isinstance(full_config['providers'], dict):
+                    providers = full_config['providers']
+                else:
+                    providers = full_config
+                
+                # Update the file path in provider config
+                if provider_name in providers:
+                    # Convert absolute path to ~/... format
+                    relative_path = str(file_path).replace(str(Path.home()), '~')
+                    
+                    # Update the correct location based on provider type
+                    provider_type = providers[provider_name].get('type', '')
+                    
+                    # For Kiro, update kiro_config.sqlite_db or kiro_config.creds_file
+                    if provider_type == 'kiro' and file_type in ['sqlite_db', 'creds_file']:
+                        if 'kiro_config' not in providers[provider_name]:
+                            providers[provider_name]['kiro_config'] = {}
+                        providers[provider_name]['kiro_config'][file_type] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.kiro_config.{file_type} = {relative_path}")
+                    
+                    # For Claude, update claude_config.credentials_file
+                    elif provider_type == 'claude' and file_type in ['credentials_file', 'claude_credentials']:
+                        if 'claude_config' not in providers[provider_name]:
+                            providers[provider_name]['claude_config'] = {}
+                        providers[provider_name]['claude_config']['credentials_file'] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.claude_config.credentials_file = {relative_path}")
+                    
+                    # For Kilo, update kilo_config.creds_file
+                    elif provider_type in ['kilo', 'kilocode'] and file_type in ['credentials_file', 'creds_file']:
+                        if 'kilo_config' not in providers[provider_name]:
+                            providers[provider_name]['kilo_config'] = {}
+                        providers[provider_name]['kilo_config']['creds_file'] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.kilo_config.creds_file = {relative_path}")
+                    
+                    # For Qwen, update qwen_config.credentials_file
+                    elif provider_type == 'qwen' and file_type in ['credentials_file']:
+                        if 'qwen_config' not in providers[provider_name]:
+                            providers[provider_name]['qwen_config'] = {}
+                        providers[provider_name]['qwen_config']['credentials_file'] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.qwen_config.credentials_file = {relative_path}")
+                    
+                    # For Codex, update codex_config.credentials_file
+                    elif provider_type == 'codex' and file_type in ['credentials_file', 'creds_file']:
+                        if 'codex_config' not in providers[provider_name]:
+                            providers[provider_name]['codex_config'] = {}
+                        providers[provider_name]['codex_config']['credentials_file'] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.codex_config.credentials_file = {relative_path}")
+                    
+                    # Fallback: update top-level field
+                    else:
+                        providers[provider_name][file_type] = relative_path
+                        logger.info(f"Updated providers.json: {provider_name}.{file_type} = {relative_path}")
+                    
+                    # Save updated config
+                    save_path = Path.home() / '.aisbf' / 'providers.json'
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
+                    with open(save_path, 'w') as f:
+                        json.dump(full_config, f, indent=2)
+            except Exception as e:
+                logger.error(f"Failed to update providers.json: {e}")
+
             return JSONResponse({
                 "success": True,
                 "message": "File uploaded successfully",
@@ -5775,6 +5846,77 @@ async def dashboard_provider_upload_chunk(
                     file_size=total_size,
                     mime_type=file.content_type
                 )
+            else:
+                # Config admin: update providers.json with full path
+                try:
+                    config_path = Path.home() / '.aisbf' / 'providers.json'
+                    if not config_path.exists():
+                        config_path = Path(__file__).parent / 'config' / 'providers.json'
+                    
+                    with open(config_path) as f:
+                        full_config = json.load(f)
+                    
+                    # Navigate to the provider config
+                    if 'providers' in full_config and isinstance(full_config['providers'], dict):
+                        providers = full_config['providers']
+                    else:
+                        providers = full_config
+                    
+                    # Update the file path in provider config
+                    if provider_key in providers:
+                        # Convert absolute path to ~/... format
+                        relative_path = str(file_path).replace(str(Path.home()), '~')
+                        
+                        # Update the correct location based on provider type
+                        provider_type = providers[provider_key].get('type', '')
+                        
+                        # For Kiro, update kiro_config.sqlite_db or kiro_config.creds_file
+                        if provider_type == 'kiro' and file_type in ['sqlite_db', 'creds_file']:
+                            if 'kiro_config' not in providers[provider_key]:
+                                providers[provider_key]['kiro_config'] = {}
+                            providers[provider_key]['kiro_config'][file_type] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.kiro_config.{file_type} = {relative_path}")
+                        
+                        # For Claude, update claude_config.credentials_file
+                        elif provider_type == 'claude' and file_type in ['credentials_file', 'claude_credentials']:
+                            if 'claude_config' not in providers[provider_key]:
+                                providers[provider_key]['claude_config'] = {}
+                            providers[provider_key]['claude_config']['credentials_file'] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.claude_config.credentials_file = {relative_path}")
+                        
+                        # For Kilo, update kilo_config.creds_file
+                        elif provider_type in ['kilo', 'kilocode'] and file_type in ['credentials_file', 'creds_file']:
+                            if 'kilo_config' not in providers[provider_key]:
+                                providers[provider_key]['kilo_config'] = {}
+                            providers[provider_key]['kilo_config']['creds_file'] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.kilo_config.creds_file = {relative_path}")
+                        
+                        # For Qwen, update qwen_config.credentials_file
+                        elif provider_type == 'qwen' and file_type in ['credentials_file']:
+                            if 'qwen_config' not in providers[provider_key]:
+                                providers[provider_key]['qwen_config'] = {}
+                            providers[provider_key]['qwen_config']['credentials_file'] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.qwen_config.credentials_file = {relative_path}")
+                        
+                        # For Codex, update codex_config.credentials_file
+                        elif provider_type == 'codex' and file_type in ['credentials_file', 'creds_file']:
+                            if 'codex_config' not in providers[provider_key]:
+                                providers[provider_key]['codex_config'] = {}
+                            providers[provider_key]['codex_config']['credentials_file'] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.codex_config.credentials_file = {relative_path}")
+                        
+                        # Fallback: update top-level field
+                        else:
+                            providers[provider_key][file_type] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.{file_type} = {relative_path}")
+                        
+                        # Save updated config
+                        save_path = Path.home() / '.aisbf' / 'providers.json'
+                        save_path.parent.mkdir(parents=True, exist_ok=True)
+                        with open(save_path, 'w') as f:
+                            json.dump(full_config, f, indent=2)
+                except Exception as e:
+                    logger.error(f"Failed to update providers.json: {e}")
 
             logger.info(f"Upload complete: {file_path} ({total_size} bytes, {total_chunks} chunks)")
 
