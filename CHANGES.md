@@ -49,6 +49,15 @@
   - Fixed graph title to dynamically show selected time range
 - **Files Modified**: `templates/dashboard/analytics.html`, `main.py`, `aisbf/analytics.py`
 
+### 9. Analytics Filters Not Applied to All Sections
+- **Problem**: Cost overview, model performance, and recommendations ignored time range filters
+- **Solution**: 
+  - Added `from_datetime` and `to_datetime` parameters to `get_model_performance()`
+  - Added `from_datetime` and `to_datetime` parameters to `get_optimization_recommendations()`
+  - Model performance now uses date-filtered provider stats
+  - All analytics sections now respect the selected time range
+- **Files Modified**: `aisbf/analytics.py`, `main.py`
+
 ## New Features
 
 ### Enhanced Debug Logging
@@ -70,7 +79,7 @@ Analytics page now supports:
 - Last 90 Days
 - Custom Range (with date/time pickers)
 
-Graph title dynamically updates to show selected range.
+Graph title and all analytics sections dynamically update based on selected range.
 
 ## Backwards Compatibility
 
@@ -96,3 +105,6 @@ Updated version to `0.99.33` in:
 5. Verify database migrations work on live MySQL instances
 6. Test all existing providers (kiro-cli, claude, qwen, codex, kilo)
 7. Verify graph title updates correctly for each time range selection
+8. Confirm model performance shows data for selected time range
+9. Verify cost overview reflects selected time period
+10. Check that recommendations are based on filtered time range data
