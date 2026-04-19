@@ -617,8 +617,8 @@ class RequestHandler:
                     
                     # Record context dimensions for model performance tracking
                     try:
-                        from aisbf.database import get_database
-                        db = get_database()
+                        from aisbf.database import DatabaseRegistry
+                        db = DatabaseRegistry.get_config_database()
                         context_config = context_config or {}
                         db.record_context_dimension(
                             provider_id=provider_id,
