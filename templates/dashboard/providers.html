@@ -136,8 +136,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 let providersData = {{ providers_json | safe }};
 let expandedProviders = new Set();
 
-// Chunk size: 5MB chunks for large files
-const CHUNK_SIZE = 5 * 1024 * 1024;
+// Chunk size: 1MB chunks for maximum compatibility with all proxies
+const CHUNK_SIZE = 1 * 1024 * 1024;
 
 // Generic chunked upload handler for all providers
 async function uploadFileChunked(providerKey, fileType, file, configObject) {
