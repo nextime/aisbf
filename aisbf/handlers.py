@@ -534,15 +534,41 @@ class RequestHandler:
                 latency_ms = (time.time() - request_start_time) * 1000
                 logger.info(f"Analytics: latency_ms={latency_ms:.2f}, request_start_time={request_start_time}, current_time={time.time()}")
                 
-                if response and isinstance(response, dict):
-                    usage = response.get('usage', {})
-                    total_tokens = usage.get('total_tokens', 0)
-                    prompt_tokens = usage.get('prompt_tokens', 0)
-                    completion_tokens = usage.get('completion_tokens', 0)
+                if response:
+                    # Handle both dict responses and OpenAI objects
+                    usage = None
+                    if isinstance(response, dict):
+                        # Dict response (traditional API format)
+                        usage = response.get('usage', {})
+                        total_tokens = usage.get('total_tokens', 0)
+                        prompt_tokens = usage.get('prompt_tokens', 0)
+                        completion_tokens = usage.get('completion_tokens', 0)
+                    elif hasattr(response, 'usage') and response.usage:
+                        # OpenAI/Pydantic object with usage attribute
+                        usage = response.usage
+                        total_tokens = getattr(usage, 'total_tokens', 0)
+                        prompt_tokens = getattr(usage, 'prompt_tokens', 0)
+                        completion_tokens = getattr(usage, 'completion_tokens', 0)
+                        logger.debug(f"Extracted usage from OpenAI object: total={total_tokens}, prompt={prompt_tokens}, completion={completion_tokens}")
                     
-                    # Try to extract actual cost from provider response
-                    from ..cost_extractor import extract_cost_from_response
-                    actual_cost = extract_cost_from_response(response, provider_id)
+                     # Try to extract actual cost from provider response
+                    try:
+                        from .cost_extractor import extract_cost_from_response
+                        actual_cost = extract_cost_from_response(response, provider_id)
+                    except ImportError:
+                        actual_cost = None
+                    
+                    # Calculate estimated cost and log breakdown
+                    try:
+                        estimated_cost = analytics.estimate_cost(provider_id, total_tokens, prompt_tokens, completion_tokens)
+                        logger.info(f"💰 Cost calculation breakdown for {provider_id}:")
+                        logger.info(f"  Tokens: total={total_tokens}, prompt={prompt_tokens}, completion={completion_tokens}")
+                        logger.info(f"  Estimated cost: ${estimated_cost:.8f} USD")
+                        if actual_cost is not None:
+                            logger.info(f"  Actual cost: ${actual_cost:.8f} USD")
+                    except Exception as cost_error:
+                        logger.debug(f"Cost calculation failed: {cost_error}")
+                        estimated_cost = 0.0
                     
                     # If no token usage provided, estimate it with improved accuracy
                     if total_tokens == 0:

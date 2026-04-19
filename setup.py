@@ -49,7 +49,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.99.32",
+    version="0.99.33",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -110,6 +110,7 @@ setup(
             'aisbf/batching.py',
             'aisbf/cache.py',
             'aisbf/classifier.py',
+            'aisbf/cost_extractor.py',
             'aisbf/streaming_optimization.py',
             'aisbf/analytics.py',
             'aisbf/email_utils.py',

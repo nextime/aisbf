@@ -1277,9 +1277,10 @@ async def shutdown_event():
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config and server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint, dashboard routes, favicon, and browser metadata
+        # Skip auth for root endpoint, dashboard routes, admin API routes, favicon, and browser metadata
         if (request.url.path == "/" or
             request.url.path.startswith("/dashboard") or
+            request.url.path.startswith("/api/admin") or
             request.url.path == "/favicon.ico" or
             request.url.path.startswith("/.well-known/")):
             response = await call_next(request)
@@ -1982,8 +1983,20 @@ async def dashboard_analytics(
         except ValueError:
             pass
     
+    # Handle preset time ranges
+    if time_range == 'yesterday':
+        # Yesterday: from 00:00:00 to 23:59:59 of previous day
+        today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+        from_datetime = today - timedelta(days=1)
+        to_datetime = today - timedelta(microseconds=1)
+    elif time_range == 'custom':
+        # If custom date range is provided, use it
+        if not from_datetime or not to_datetime:
+            # Default to last 24h if custom selected but no dates provided
+            time_range = '24h'
+    
     # If custom date range is provided, use custom mode
-    if from_datetime and to_datetime:
+    if from_datetime and to_datetime and time_range not in ['yesterday']:
         time_range = 'custom'
     
     # Check user role and apply user restriction
@@ -3530,8 +3543,48 @@ def require_dashboard_auth(request: Request):
     
     return None
 
+def require_api_auth(request: Request):
+    """Check if user is logged in to dashboard (API version - returns JSON)"""
+    if not request.session.get('logged_in'):
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required"}
+        )
+
+    # Check if session has expired
+    expires_at = request.session.get('expires_at')
+    if expires_at and int(time.time()) > expires_at:
+        # Session expired
+        request.session.clear()
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Session expired"}
+        )
+
+    # Extend session expiry for remember me users on each request (sliding expiration)
+    if request.session.get('remember_me'):
+        # Refresh expiry to 30 days from now for remember me
+        request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
+    elif expires_at:
+        # For non-remember-me sessions, refresh to 2 weeks from now (sliding expiration)
+        request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+    return None
+
+def require_api_admin(request: Request):
+    """Check if user is admin (API version - returns JSON)"""
+    auth_check = require_api_auth(request)
+    if auth_check:
+        return auth_check
+    if request.session.get('role') != 'admin':
+        return JSONResponse(
+            status_code=403,
+            content={"error": "Admin access required"}
+        )
+    return None
+
 def require_admin(request: Request):
-    """Check if user is admin"""
+    """Check if user is admin (dashboard version - returns redirects)"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -6246,7 +6299,7 @@ async def dashboard_admin_tiers(request: Request):
 @app.get("/api/admin/tiers")
 async def api_list_tiers(request: Request):
     """List all tiers - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6257,9 +6310,9 @@ async def api_list_tiers(request: Request):
     return JSONResponse(tiers)
 
 @app.get("/api/admin/tiers/{tier_id}")
-async def api_get_tier(request: Request, tier_id: int):
-    """Get a specific tier by ID - API endpoint"""
-    auth_check = require_admin(request)
+async def api_get_tier(tier_id: int, request: Request):
+    """Get specific tier - API endpoint"""
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6275,7 +6328,7 @@ async def api_get_tier(request: Request, tier_id: int):
 @app.post("/api/admin/tiers")
 async def api_create_tier(request: Request):
     """Create a new tier - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6309,7 +6362,7 @@ async def api_create_tier(request: Request):
 @app.put("/api/admin/tiers/{tier_id}")
 async def api_update_tier(request: Request, tier_id: int):
     """Update an existing tier - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6361,7 +6414,7 @@ async def api_update_tier(request: Request, tier_id: int):
 @app.delete("/api/admin/tiers/{tier_id}")
 async def api_delete_tier(request: Request, tier_id: int):
     """Delete a tier - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6467,7 +6520,7 @@ async def dashboard_admin_tier_save(request: Request):
 @app.get("/api/admin/settings/currency")
 async def api_get_currency_settings(request: Request):
     """Get currency settings - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6482,7 +6535,7 @@ async def api_get_currency_settings(request: Request):
 @app.post("/api/admin/settings/currency")
 async def api_save_currency_settings(request: Request):
     """Save currency settings - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6504,7 +6557,7 @@ async def api_save_currency_settings(request: Request):
 @app.get("/api/admin/settings/payment-gateways")
 async def api_get_payment_gateways(request: Request):
     """Get payment gateway settings - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6519,7 +6572,7 @@ async def api_get_payment_gateways(request: Request):
 @app.post("/api/admin/settings/payment-gateways")
 async def api_save_payment_gateways(request: Request):
     """Save payment gateway settings - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6540,7 +6593,7 @@ async def api_save_payment_gateways(request: Request):
 @app.get("/api/admin/settings/encryption-key")
 async def api_get_encryption_key_status(request: Request):
     """Get encryption key status - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6572,7 +6625,7 @@ async def api_get_encryption_key_status(request: Request):
 @app.get("/api/admin/crypto/prices")
 async def api_get_crypto_prices(request: Request):
     """Get crypto prices (BTC, ETH, USDT, USDC) from all enabled sources - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6685,7 +6738,7 @@ async def api_get_crypto_prices(request: Request):
 @app.get("/api/admin/crypto/btc-prices")
 async def api_get_btc_prices(request: Request):
     """Get BTC prices from all enabled sources - API endpoint (legacy, redirects to /prices)"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6705,7 +6758,7 @@ async def api_get_btc_prices(request: Request):
 @app.post("/api/admin/settings/encryption-key")
 async def api_save_encryption_key(request: Request):
     """Save encryption key - API endpoint"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6736,7 +6789,7 @@ async def api_save_encryption_key(request: Request):
 @app.get("/api/admin/config/price-sources")
 async def get_price_sources(request: Request):
     """Get crypto price source configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6767,7 +6820,7 @@ async def get_price_sources(request: Request):
 @app.put("/api/admin/payment-system/config/price-sources")
 async def update_payment_price_sources(request: Request):
     """Update crypto price source configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6811,7 +6864,7 @@ async def update_price_sources(request: Request):
 @app.get("/api/admin/config/consolidation")
 async def get_consolidation_config(request: Request):
     """Get wallet consolidation configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6841,7 +6894,7 @@ async def get_consolidation_config(request: Request):
 @app.put("/api/admin/payment-system/config/consolidation")
 async def update_payment_consolidation_config(request: Request):
     """Update wallet consolidation configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6923,7 +6976,7 @@ async def update_consolidation_config(request: Request):
 @app.get("/api/admin/config/email")
 async def get_email_config(request: Request):
     """Get email notification configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -6975,7 +7028,7 @@ async def get_email_config(request: Request):
 @app.put("/api/admin/payment-system/config/email")
 async def update_payment_email_config(request: Request):
     """Update email notification configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -7059,7 +7112,7 @@ async def update_email_config(request: Request):
 @app.put("/api/admin/payment-system/config/blockchain")
 async def update_payment_blockchain_config(request: Request):
     """Update blockchain monitoring configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -7098,7 +7151,7 @@ async def update_payment_blockchain_config(request: Request):
 @app.get("/api/admin/scheduler/status")
 async def get_scheduler_status(request: Request):
     """Get payment scheduler status"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -7121,7 +7174,7 @@ async def get_scheduler_status(request: Request):
 @app.post("/api/admin/scheduler/run-job")
 async def run_scheduler_job(request: Request):
     """Manually trigger a scheduler job"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -7150,7 +7203,7 @@ async def run_scheduler_job(request: Request):
 @app.get("/api/admin/payment-system/status")
 async def get_payment_system_status(request: Request):
     """Get payment system status including master keys, balances, and payment counts"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     
@@ -7212,7 +7265,7 @@ async def get_payment_system_status(request: Request):
 @app.get("/api/admin/payment-system/config")
 async def get_payment_system_config(request: Request):
     """Get all payment system configuration"""
-    auth_check = require_admin(request)
+    auth_check = require_api_admin(request)
     if auth_check:
         return auth_check
     

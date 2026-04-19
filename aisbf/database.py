@@ -306,19 +306,79 @@ class DatabaseManager:
             completion_tokens: Optional number of output/completion tokens
             actual_cost: Optional actual cost returned by provider (in USD)
         """
-        with self._get_connection() as conn:
-            cursor = conn.cursor()
-            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+        logger.info(f"💾 DB.record_token_usage ENTERED: provider={provider_id}, tokens={tokens_used}, user_id={user_id}")
+        try:
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if self.db_type == 'sqlite' else '%s'
             # Convert latency to int for storage
             latency_int = int(latency_ms) if latency_ms else 0
-            logger.info(f"DB.record_token_usage: provider={provider_id}, latency_ms={latency_ms} -> latency_int={latency_int}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
-            cursor.execute(f'''
-                INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, timestamp)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-            ''', (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id))
+            logger.info(f"🔍 DB.record_token_usage FULL PARAMETERS:")
+            logger.info(f"  provider_id: {provider_id}")
+            logger.info(f"  model_name: {model_name}")
+            logger.info(f"  tokens_used: {tokens_used}")
+            logger.info(f"  user_id: {user_id}")
+            logger.info(f"  success: {success}")
+            logger.info(f"  latency_ms: {latency_ms} → latency_int: {latency_int}")
+            logger.info(f"  error_type: {error_type}")
+            logger.info(f"  token_id: {token_id}")
+            logger.info(f"  prompt_tokens: {prompt_tokens}")
+            logger.info(f"  completion_tokens: {completion_tokens}")
+            logger.info(f"  actual_cost: {actual_cost}")
+            logger.info(f"  db_type: {self.db_type}")
+            logger.info(f"  placeholder: {placeholder}")
+            logger.info(f"DB.record_token_usage: About to execute SQL - provider={provider_id}, tokens={tokens_used}, success={success}")
+
+            # Build dynamic INSERT based on available columns (for backward compatibility)
+            base_columns = ['user_id', 'provider_id', 'model_name', 'tokens_used', 'timestamp']
+            base_params = [user_id, provider_id, model_name, tokens_used]
+
+            # Check for additional columns and add them if they exist
+            try:
+                # Try to insert with all columns
+                sql = f'''
+                    INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, timestamp)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                '''
+                params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id)
+                logger.info(f"🔍 Trying full INSERT with {len(params)} parameters")
+                logger.debug(f"🔍 SQL: {sql}")
+                logger.debug(f"🔍 Params: {params}")
+                cursor.execute(sql, params)
+                logger.info(f"✅ Inserted with full column set, rows affected: {cursor.rowcount}")
+            except Exception as full_insert_error:
+                logger.warning(f"⚠️ Full column insert failed: {full_insert_error}")
+                logger.warning(f"⚠️ Full insert error type: {type(full_insert_error).__name__}")
+                import traceback
+                logger.warning(f"⚠️ Full insert traceback: {traceback.format_exc()}")
+                logger.info(f"🔍 Falling back to basic insert")
+                # Fallback to basic columns only
+                sql = f'''
+                    INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, timestamp)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                '''
+                params = (user_id, provider_id, model_name, tokens_used)
+                logger.info(f"🔍 Trying basic INSERT with {len(params)} parameters")
+                logger.debug(f"🔍 SQL: {sql}")
+                logger.debug(f"🔍 Params: {params}")
+                cursor.execute(sql, params)
+                logger.info(f"✅ Inserted with basic column set, rows affected: {cursor.rowcount}")
 
             conn.commit()
-            logger.debug(f"Recorded token usage for {provider_id}/{model_name}: {tokens_used} (prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}, user_id={user_id}, success={success}, latency={latency_int}ms)")
+            logger.info(f"✅ Successfully recorded token usage for {provider_id}/{model_name}: {tokens_used} tokens (user_id={user_id})")
+        except Exception as e:
+            logger.error(f"❌ Failed to record token usage for {provider_id}/{model_name}: {e}")
+            logger.error(f"Error details - user_id={user_id}, tokens={tokens_used}, success={success}")
+            # Try a simple test insert to see if database works
+            try:
+                with self._get_connection() as test_conn:
+                    test_cursor = test_conn.cursor()
+                    test_cursor.execute("INSERT INTO token_usage (provider_id, model_name, tokens_used, success) VALUES (?, 'test', 1, 1)" if self.db_type == 'sqlite' else "INSERT INTO token_usage (provider_id, model_name, tokens_used, success) VALUES (%s, 'test', 1, 1)", (f"test-{provider_id}",))
+                    test_conn.commit()
+                    logger.info("✅ Test database insert succeeded")
+            except Exception as test_e:
+                logger.error(f"❌ Even test database insert failed: {test_e}")
+            raise
     
     def get_token_usage(
         self,
@@ -3087,10 +3147,110 @@ def DatabaseManager__initialize_database(self):
                     prompt_tokens INTEGER,
                     completion_tokens INTEGER,
                     actual_cost DECIMAL(10,6),
+                    success BOOLEAN DEFAULT 1,
+                    latency_ms INTEGER,
+                    error_type VARCHAR(255),
+                    token_id INTEGER,
                     timestamp TIMESTAMP DEFAULT {timestamp_default}
                 )
             ''')
-# 
+
+            # Migration: Add missing columns to token_usage table
+            try:
+                if self.db_type == 'sqlite':
+                    cursor.execute("PRAGMA table_info(token_usage)")
+                    columns = [row[1] for row in cursor.fetchall()]
+                    if 'prompt_tokens' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
+                        logger.info("✅ Migration: Added prompt_tokens column to token_usage")
+                    if 'completion_tokens' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
+                        logger.info("✅ Migration: Added completion_tokens column to token_usage")
+                    if 'actual_cost' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
+                        logger.info("✅ Migration: Added actual_cost column to token_usage")
+                    if 'success' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN success BOOLEAN DEFAULT 1')
+                        logger.info("✅ Migration: Added success column to token_usage")
+                    if 'latency_ms' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN latency_ms INTEGER')
+                        logger.info("✅ Migration: Added latency_ms column to token_usage")
+                    if 'error_type' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN error_type VARCHAR(255)')
+                        logger.info("✅ Migration: Added error_type column to token_usage")
+                    if 'token_id' not in columns:
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN token_id INTEGER')
+                        logger.info("✅ Migration: Added token_id column to token_usage")
+                else:  # mysql
+                    # Check for prompt_tokens column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'prompt_tokens'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
+                        logger.info("✅ Migration: Added prompt_tokens column to token_usage")
+
+                    # Check for completion_tokens column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'completion_tokens'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
+                        logger.info("✅ Migration: Added completion_tokens column to token_usage")
+
+                    # Check for actual_cost column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'actual_cost'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
+                        logger.info("✅ Migration: Added actual_cost column to token_usage")
+
+                    # Check for success column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'success'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN success BOOLEAN DEFAULT 1')
+                        logger.info("✅ Migration: Added success column to token_usage")
+
+                    # Check for latency_ms column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'latency_ms'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN latency_ms INTEGER')
+                        logger.info("✅ Migration: Added latency_ms column to token_usage")
+
+                    # Check for error_type column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'error_type'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN error_type VARCHAR(255)')
+                        logger.info("✅ Migration: Added error_type column to token_usage")
+
+                    # Check for token_id column
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'token_id'
+                    """)
+                    if not cursor.fetchone():
+                        cursor.execute('ALTER TABLE token_usage ADD COLUMN token_id INTEGER')
+                        logger.info("✅ Migration: Added token_id column to token_usage")
+            except Exception as e:
+                logger.warning(f"Migration check for token_usage columns: {e}")
+
+#
+
+
+#
 # 
 # 
             # Create indexes for better query performance
@@ -3590,6 +3750,7 @@ def DatabaseManager__initialize_database(self):
 
 def DatabaseManager__create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
     """Create all permanent configuration tables (CONFIG DB ONLY) - UNUSED METHOD"""
+    # Migration code moved to _initialize_database method
     pass  # Method disabled
 
 def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
@@ -3606,6 +3767,10 @@ def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp
             prompt_tokens INTEGER,
             completion_tokens INTEGER,
             actual_cost DECIMAL(10,6),
+            success BOOLEAN DEFAULT 1,
+            latency_ms INTEGER,
+            error_type VARCHAR(255),
+            token_id INTEGER,
             timestamp TIMESTAMP DEFAULT {timestamp_default}
         )
     ''')
@@ -3833,46 +3998,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
         except Exception as e:
             logger.warning(f"Migration check for {table_name} table: {e}")
 
-    # Migration: Add prompt_tokens and completion_tokens columns to token_usage table
-    try:
-        if self.db_type == 'sqlite':
-            cursor.execute("PRAGMA table_info(token_usage)")
-            columns = [row[1] for row in cursor.fetchall()]
-            if 'prompt_tokens' not in columns:
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
-                logger.info("✅ Migration: Added prompt_tokens column to token_usage")
-            if 'completion_tokens' not in columns:
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
-                logger.info("✅ Migration: Added completion_tokens column to token_usage")
-            if 'actual_cost' not in columns:
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
-                logger.info("✅ Migration: Added actual_cost column to token_usage")
-        else:
-            cursor.execute("""
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'prompt_tokens'
-            """)
-            if not cursor.fetchone():
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
-                logger.info("✅ Migration: Added prompt_tokens column to token_usage")
-            
-            cursor.execute("""
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'completion_tokens'
-            """)
-            if not cursor.fetchone():
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
-                logger.info("✅ Migration: Added completion_tokens column to token_usage")
-            
-            cursor.execute("""
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'actual_cost'
-            """)
-            if not cursor.fetchone():
-                cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
-                logger.info("✅ Migration: Added actual_cost column to token_usage")
-    except Exception as e:
-        logger.warning(f"Migration check for token_usage columns: {e}")
+# Migration code moved to _initialize_database method
 
     conn.commit()
     logger.info("✅ All database migrations completed")

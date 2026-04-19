@@ -53,6 +53,7 @@ class Analytics:
         'google': {'prompt': 1.25, 'completion': 5.0},  # $1.25/M prompt, $5/M completion
         'kiro': {'prompt': 0.5, 'completion': 1.5},  # $0.5/M prompt, $1.5/M completion
         'openrouter': {'prompt': 5.0, 'completion': 15.0},  # Average pricing
+        'kilo': {'prompt': 0.0, 'completion': 0.0},  # Kilo providers are free/subscription
     }
     
     def __init__(self, db_manager, pricing: Optional[Dict] = None):
@@ -70,6 +71,15 @@ class Analytics:
         self._request_counts = {}  # {provider_id: {total: int, success: int, error: int}}
         self._latencies = {}  # {provider_id: {count: int, total_ms: float, min_ms: float, max_ms: float}}
         self._error_types = {}  # {provider_id: {error_type: count}}
+
+    def _format_timestamp(self, dt: datetime) -> str:
+        """
+        Format datetime for database queries.
+        Converts to UTC and formats as 'YYYY-MM-DD HH:MM:SS' for compatibility with SQLite and MySQL.
+        """
+        from datetime import timezone
+        utc_dt = dt.astimezone(timezone.utc)
+        return utc_dt.strftime('%Y-%m-%d %H:%M:%S')
     
     def _get_provider_pricing(self, provider_id: str) -> Dict[str, float]:
         """
@@ -144,6 +154,8 @@ class Analytics:
             completion_tokens: Optional number of output/completion tokens
             actual_cost: Optional actual cost returned by provider (in USD)
         """
+        logger.info(f"🎯 Analytics.record_request ENTERED: provider={provider_id}, model={model_name}, tokens={tokens_used}, user_id={user_id}, success={success}")
+
         # Initialize provider tracking if needed
         if provider_id not in self._request_counts:
             self._request_counts[provider_id] = {'total': 0, 'success': 0, 'error': 0}
@@ -168,7 +180,13 @@ class Analytics:
         # Persist to database
         if tokens_used > 0:
             logger.info(f"Analytics.record_request: Recording to DB - provider={provider_id}, latency_ms={latency_ms}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
-            self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost)
+            try:
+                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost)
+                logger.info(f"✅ Analytics recording completed successfully for {provider_id}")
+            except Exception as e:
+                logger.error(f"❌ Analytics recording FAILED for {provider_id}: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
 
             # Also record user token usage if this was an API token request
             if user_id is not None and token_id is not None:
@@ -243,13 +261,13 @@ class Analytics:
             # user_filter = <id> means "only requests from that user"
             if user_filter == -1:
                 user_condition = " AND user_id IS NULL"
-                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
+                params = [provider_id, self._format_timestamp(from_datetime), self._format_timestamp(to_datetime)]
             elif user_filter is not None:
                 user_condition = f" AND user_id = {placeholder}"
-                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat(), user_filter]
+                params = [provider_id, self._format_timestamp(from_datetime), self._format_timestamp(to_datetime), user_filter]
             else:
                 user_condition = ""
-                params = [provider_id, from_datetime.isoformat(), to_datetime.isoformat()]
+                params = [provider_id, self._format_timestamp(from_datetime), self._format_timestamp(to_datetime)]
             
             # Get token usage and actual time range of requests
             cursor.execute(f'''
@@ -359,12 +377,15 @@ class Analytics:
             cursor = conn.cursor()
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             
+            formatted_start = self._format_timestamp(start)
+            formatted_end = self._format_timestamp(end)
+            
             if provider_id:
                 cursor.execute(f'''
                     SELECT SUM(tokens_used) as total_tokens
                     FROM token_usage
                     WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                ''', (provider_id, start.isoformat(), end.isoformat()))
+                ''', (provider_id, formatted_start, formatted_end))
                 row = cursor.fetchone()
                 total_tokens = row[0] if row and row[0] else 0
             else:
@@ -373,7 +394,7 @@ class Analytics:
                     FROM token_usage
                     WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
                     GROUP BY provider_id
-                ''', (start.isoformat(), end.isoformat()))
+                ''', (formatted_start, formatted_end))
                 
                 provider_tokens = {}
                 total_tokens = 0
@@ -414,8 +435,12 @@ class Analytics:
             List of provider statistics dictionaries
         """
         # Get all unique providers from database
-        start = from_datetime or (datetime.now() - timedelta(days=1))
-        end = to_datetime or datetime.now()
+        # Ensure datetimes are in UTC for database queries (timestamps are stored in UTC)
+        from datetime import timezone
+        utc = timezone.utc
+        now_utc = datetime.now(utc)
+        start = (from_datetime.astimezone(utc) if from_datetime else (now_utc - timedelta(days=1)))
+        end = (to_datetime.astimezone(utc) if to_datetime else now_utc)
         
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
@@ -424,13 +449,13 @@ class Analytics:
             # Build query with optional user filter
             if user_filter == -1:
                 user_condition = " AND user_id IS NULL"
-                params = [start.isoformat(), end.isoformat()]
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
             elif user_filter is not None:
                 user_condition = f" AND user_id = {placeholder}"
-                params = [start.isoformat(), end.isoformat(), user_filter]
+                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
             else:
                 user_condition = ""
-                params = [start.isoformat(), end.isoformat()]
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
             
             cursor.execute(f'''
                 SELECT DISTINCT provider_id
@@ -511,6 +536,12 @@ class Analytics:
             cutoff = datetime.now() - timedelta(hours=24)
             end_time = datetime.now()
             bucket_minutes = 30
+        elif time_range == 'yesterday':
+            # Yesterday: from 00:00:00 to 23:59:59 of previous day
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            cutoff = today - timedelta(days=1)
+            end_time = today - timedelta(microseconds=1)
+            bucket_minutes = 30
         elif time_range == '7d':
             cutoff = datetime.now() - timedelta(days=7)
             end_time = datetime.now()
@@ -541,6 +572,9 @@ class Analytics:
                 date_format = "%Y-%m-%d %H:%i"
                 time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
             
+            formatted_cutoff = self._format_timestamp(cutoff)
+            formatted_end_time = self._format_timestamp(end_time)
+            
             if provider_id:
                 if user_filter == -1:
                     # Global requests only
@@ -552,7 +586,7 @@ class Analytics:
                         WHERE provider_id = {placeholder} AND user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket
                         ORDER BY time_bucket
-                    ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
+                    ''', (provider_id, formatted_cutoff, formatted_end_time))
                 elif user_filter:
                     cursor.execute(f'''
                         SELECT 
@@ -562,7 +596,7 @@ class Analytics:
                         WHERE provider_id = {placeholder} AND user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket
                         ORDER BY time_bucket
-                    ''', (provider_id, user_filter, cutoff.isoformat(), end_time.isoformat()))
+                    ''', (provider_id, user_filter, formatted_cutoff, formatted_end_time))
                 else:
                     cursor.execute(f'''
                         SELECT 
@@ -572,7 +606,7 @@ class Analytics:
                         WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket
                         ORDER BY time_bucket
-                    ''', (provider_id, cutoff.isoformat(), end_time.isoformat()))
+                    ''', (provider_id, formatted_cutoff, formatted_end_time))
             else:
                 if user_filter == -1:
                     # Global requests only
@@ -585,7 +619,7 @@ class Analytics:
                         WHERE user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket, provider_id
                         ORDER BY time_bucket
-                    ''', (cutoff.isoformat(), end_time.isoformat()))
+                    ''', (formatted_cutoff, formatted_end_time))
                 elif user_filter:
                     cursor.execute(f'''
                         SELECT 
@@ -596,7 +630,7 @@ class Analytics:
                         WHERE user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket, provider_id
                         ORDER BY time_bucket
-                    ''', (user_filter, cutoff.isoformat(), end_time.isoformat()))
+                    ''', (user_filter, formatted_cutoff, formatted_end_time))
                 else:
                     cursor.execute(f'''
                         SELECT 
@@ -607,7 +641,7 @@ class Analytics:
                         WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
                         GROUP BY time_bucket, provider_id
                         ORDER BY time_bucket
-                    ''', (cutoff.isoformat(), end_time.isoformat()))
+                    ''', (formatted_cutoff, formatted_end_time))
             
             results = []
             for row in cursor.fetchall():
@@ -783,27 +817,43 @@ class Analytics:
         Returns:
             Estimated cost in USD
         """
+        # Handle special case for 'all' providers (aggregate stats)
+        if provider_id == 'all':
+            # For aggregate stats across all providers, skip cost estimation
+            # as it would require complex per-provider calculation
+            return 0.0
+
         # Get provider-specific pricing (checks subscription status and custom pricing)
         provider_pricing = self._get_provider_pricing(provider_id)
+
+        logger.info(f"💰 Cost calculation for {provider_id}:")
+        logger.info(f"  tokens_used: {tokens_used}, prompt: {prompt_tokens}, completion: {completion_tokens}")
+        logger.info(f"  Pricing: prompt=${provider_pricing.get('prompt', 0)}/M, completion=${provider_pricing.get('completion', 0)}/M")
         
         # Calculate cost with actual token breakdown if available
         if prompt_tokens is not None and completion_tokens is not None:
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens / 1_000_000) * provider_pricing.get('completion', 0)
-            return prompt_cost + completion_cost
+            total_cost = prompt_cost + completion_cost
+            logger.info(f"  Calculated: ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
+            return total_cost
         elif prompt_tokens is not None:
             # Only prompt tokens provided, calculate completion from total
             completion_tokens_calc = tokens_used - prompt_tokens
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens_calc / 1_000_000) * provider_pricing.get('completion', 0)
-            return prompt_cost + completion_cost
+            total_cost = prompt_cost + completion_cost
+            logger.info(f"  Calculated (estimated completion): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
+            return total_cost
         else:
             # No breakdown available - use estimation (25% prompt, 75% completion is common for chat)
             prompt_tokens_est = tokens_used * 0.25
             completion_tokens_est = tokens_used * 0.75
             prompt_cost = (prompt_tokens_est / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens_est / 1_000_000) * provider_pricing.get('completion', 0)
-            return prompt_cost + completion_cost
+            total_cost = prompt_cost + completion_cost
+            logger.info(f"  Calculated (estimated breakdown 25/75): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
+            return total_cost
     
     def get_cost_overview(
         self,
@@ -1110,6 +1160,11 @@ class Analytics:
         elif time_range == '24h':
             cutoff = datetime.now() - timedelta(hours=24)
             end_time = datetime.now()
+        elif time_range == 'yesterday':
+            # Yesterday: from 00:00:00 to 23:59:59 of previous day
+            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
+            cutoff = today - timedelta(days=1)
+            end_time = today - timedelta(microseconds=1)
         elif time_range == '7d':
             cutoff = datetime.now() - timedelta(days=7)
             end_time = datetime.now()
@@ -1134,6 +1189,9 @@ class Analytics:
                 date_format = "%Y-%m-%d %H:%i"
                 time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
             
+            formatted_cutoff = self._format_timestamp(cutoff)
+            formatted_end_time = self._format_timestamp(end_time)
+            
             cursor.execute(f'''
                 SELECT 
                     {time_bucket_expr} as time_bucket,
@@ -1143,7 +1201,7 @@ class Analytics:
                 WHERE user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
                 GROUP BY time_bucket, provider_id
                 ORDER BY time_bucket
-            ''', (user_id, cutoff.isoformat(), end_time.isoformat()))
+            ''', (user_id, formatted_cutoff, formatted_end_time))
             
             results = []
             for row in cursor.fetchall():

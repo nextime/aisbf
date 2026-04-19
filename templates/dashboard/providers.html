@@ -1485,6 +1485,243 @@ async function pollKiloAuth(providerKey, deviceCode) {
     // This function is no longer needed as polling is handled in authenticateKilo
 }
 
+function removeProvider(key) {
+    if (confirm(`Remove provider "${key}"?`)) {
+        delete providersData[key];
+        expandedProviders.delete(key);
+        renderProvidersList();
+    }
+}
+
+function updateProvider(key, field, value) {
+    providersData[key][field] = value;
+}
+
+function updateKiroConfig(key, field, value) {
+    if (!providersData[key].kiro_config) {
+        providersData[key].kiro_config = {};
+    }
+    providersData[key].kiro_config[field] = value;
+}
+
+function updateClaudeConfig(key, field, value) {
+    if (!providersData[key].claude_config) {
+        providersData[key].claude_config = {};
+    }
+    providersData[key].claude_config[field] = value;
+}
+
+function updateKiloConfig(key, field, value) {
+    if (!providersData[key].kilo_config) {
+        providersData[key].kilo_config = {};
+    }
+    providersData[key].kilo_config[field] = value;
+}
+
+function updateQwenConfig(key, field, value) {
+    if (!providersData[key].qwen_config) {
+        providersData[key].qwen_config = {};
+    }
+    providersData[key].qwen_config[field] = value;
+}
+
+function updateCodexConfig(key, field, value) {
+    if (!providersData[key].codex_config) {
+        providersData[key].codex_config = {};
+    }
+    providersData[key].codex_config[field] = value;
+}
+
+function updateProviderType(key, value) {
+    providersData[key].type = value;
+    // Re-render to update the configuration fields
+    renderProvidersList();
+}
+
+function updateProviderCondenseMethod(key, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        providersData[key].default_condense_method = null;
+        return;
+    }
+
+    // Check if it's a comma-separated list
+    if (trimmed.includes(',')) {
+        providersData[key].default_condense_method = trimmed.split(',').map(s => s.trim()).filter(s => s);
+    } else {
+        providersData[key].default_condense_method = trimmed;
+    }
+}
+
+function addModel(key) {
+    if (!providersData[key].models) {
+        providersData[key].models = [];
+    }
+
+    providersData[key].models.push({
+        name: '',
+        rate_limit: 0
+    });
+
+    renderModels(key);
+}
+
+function removeModel(providerKey, index) {
+    if (confirm('Remove this model?')) {
+        providersData[providerKey].models.splice(index, 1);
+        renderModels(providerKey);
+    }
+}
+
+async function confirmAddProvider() {
+    const key = document.getElementById('new-provider-key').value.trim();
+    const type = document.getElementById('new-provider-type').value;
+
+    if (!key) {
+        alert('Please enter a provider key');
+        return;
+    }
+
+    if (providersData[key]) {
+        alert('Provider key already exists');
+        return;
+    }
+
+    // Create new provider with defaults
+    providersData[key] = {
+        id: key,
+        name: key.charAt(0).toUpperCase() + key.slice(1),
+        endpoint: getDefaultEndpoint(type),
+        type: type,
+        api_key_required: type !== 'ollama' && type !== 'kiro' && type !== 'claude' && type !== 'kilocode' && type !== 'qwen' && type !== 'codex',
+        rate_limit: 0,
+        models: []
+    };
+
+    // Add type-specific config
+    if (type === 'kiro') {
+        providersData[key].kiro_config = {
+            region: 'us-east-1',
+            creds_file: '',
+            sqlite_db: '',
+            refresh_token: '',
+            profile_arn: '',
+            client_id: '',
+            client_secret: ''
+        };
+    } else if (type === 'claude') {
+        providersData[key].claude_config = {
+            credentials_file: '~/.claude_credentials.json'
+        };
+    } else if (type === 'kilocode') {
+        providersData[key].kilo_config = {
+            credentials_file: '~/.kilo_credentials.json',
+            api_base: 'https://api.kilo.ai/api/gateway'
+        };
+    } else if (type === 'qwen') {
+        providersData[key].qwen_config = {
+            credentials_file: '~/.aisbf/qwen_credentials.json',
+            api_key: '',
+            region: 'china-beijing',
+            workspace_id: 'Default Workspace'
+        };
+    } else if (type === 'codex') {
+        providersData[key].codex_config = {
+            credentials_file: '~/.aisbf/codex_credentials.json',
+            issuer: 'https://auth.openai.com'
+        };
+    }
+
+    cancelAddProvider();
+    renderProvidersList();
+}
+
+function getDefaultEndpoint(type) {
+    const defaults = {
+        'openai': 'https://api.openai.com/v1',
+        'google': 'https://generativelanguage.googleapis.com/v1beta',
+        'anthropic': 'https://api.anthropic.com/v1',
+        'ollama': 'http://localhost:11434/api',
+        'kiro': 'https://q.us-east-1.amazonaws.com',
+        'claude': 'https://api.anthropic.com/v1',
+        'kilocode': 'https://api.kilo.ai/api/gateway',
+        'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'codex': 'https://api.openai.com/v1'
+    };
+    return defaults[type] || '';
+}
+
+async function getModelsFromProvider(key) {
+    const statusDiv = document.getElementById(`get-models-status-${key}`);
+    if (!statusDiv) return;
+
+    statusDiv.innerHTML = 'Fetching models...';
+
+    try {
+        const response = await fetch('/dashboard/providers/get-models', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                provider: providersData[key]
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.models) {
+            providersData[key].models = result.models;
+            renderModels(key);
+            statusDiv.innerHTML = `✅ Found ${result.models.length} models`;
+        } else {
+            statusDiv.innerHTML = `❌ Error: ${result.error || 'Failed to fetch models'}`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `❌ Error: ${error.message}`;
+    }
+}
+
+function updateModel(providerKey, index, field, value) {
+    providersData[providerKey].models[index][field] = value;
+}
+
+function updateModelCondenseMethod(providerKey, index, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        providersData[providerKey].models[index].condense_method = null;
+        return;
+    }
+
+    // Check if it's a comma-separated list
+    if (trimmed.includes(',')) {
+        providersData[providerKey].models[index].condense_method = trimmed.split(',').map(s => s.trim()).filter(s => s);
+    } else {
+        providersData[providerKey].models[index].condense_method = trimmed;
+    }
+}
+
+async function saveProviders() {
+    try {
+        const response = await fetch('/dashboard/providers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'config=' + encodeURIComponent(JSON.stringify(providersData, null, 2))
+        });
+
+        if (response.ok) {
+            window.location.href = '/dashboard/providers?success=1';
+        } else {
+            alert('Error saving configuration');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
 // Initialize providers list immediately (DOM is already loaded since script is at end of body)
 console.log('Initializing providers list...');
 console.log('providersData:', Object.keys(providersData));

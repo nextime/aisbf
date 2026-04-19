@@ -1316,11 +1316,11 @@ class ResponseCache:
 
         return cache_key
 
-    def _serialize_response(self, response: Dict) -> bytes:
+    def _serialize_response(self, response: Any) -> bytes:
         """Serialize response for storage"""
         return json.dumps(response, ensure_ascii=False).encode('utf-8')
 
-    def _deserialize_response(self, data: bytes) -> Dict:
+    def _deserialize_response(self, data: bytes) -> Any:
         """Deserialize response from storage"""
         return json.loads(data.decode('utf-8'))
 
@@ -1346,7 +1346,7 @@ class ResponseCache:
             self._memory_cache.pop(lru_key, None)
             self._memory_timestamps.pop(lru_key, None)
 
-    def get(self, request_data: Dict) -> Optional[Dict]:
+    def get(self, request_data: Dict) -> Optional[Any]:
         """
         Get cached response for a request.
 
@@ -1420,13 +1420,13 @@ class ResponseCache:
             logger.warning(f"Cache get error: {e}")
             return None
 
-    def set(self, request_data: Dict, response: Dict, ttl: Optional[int] = None) -> None:
+    def set(self, request_data: Dict, response: Any, ttl: Optional[int] = None) -> None:
         """
         Cache a response.
 
         Args:
             request_data: The request data dict
-            response: The response dict to cache
+            response: The response to cache (dict or object)
             ttl: TTL in seconds (uses default if None)
         """
         if not self.enabled:
@@ -1436,7 +1436,7 @@ class ResponseCache:
         if request_data.get('stream', False):
             return
 
-        # Don't cache error responses
+        # Don't cache error responses (only for dict responses)
         if isinstance(response, dict) and 'error' in response:
             return
 
@@ -1444,18 +1444,29 @@ class ResponseCache:
             cache_key = self._generate_cache_key(request_data)
             ttl_value = ttl or self.default_ttl
 
+            # Convert response to dict if it's an object (like ChatCompletion)
+            cacheable_response = response
+            if hasattr(response, '__dict__') and not isinstance(response, dict):
+                # Convert Pydantic/OpenAI objects to dict for caching
+                try:
+                    cacheable_response = response.model_dump() if hasattr(response, 'model_dump') else response.dict()
+                    logger.debug(f"Converted {type(response).__name__} to dict for caching")
+                except Exception as conv_error:
+                    logger.debug(f"Could not convert {type(response).__name__} to dict: {conv_error}")
+                    return  # Skip caching if conversion fails
+
             if self.backend == 'redis' and self.redis_client:
-                data = self._serialize_response(response)
+                data = self._serialize_response(cacheable_response)
                 self.redis_client.setex(cache_key, ttl_value, data)
                 logger.debug(f"Cached response (Redis): {cache_key} (TTL: {ttl_value}s)")
             elif self.backend == 'sqlite' and self.sqlite_backend:
-                self.sqlite_backend.set(cache_key, response, ttl_value)
+                self.sqlite_backend.set(cache_key, cacheable_response, ttl_value)
                 logger.debug(f"Cached response (SQLite): {cache_key} (TTL: {ttl_value}s)")
             elif self.backend == 'mysql' and self.mysql_backend:
-                self.mysql_backend.set(cache_key, response, ttl_value)
+                self.mysql_backend.set(cache_key, cacheable_response, ttl_value)
                 logger.debug(f"Cached response (MySQL): {cache_key} (TTL: {ttl_value}s)")
             elif self.backend == 'memory':
-                self._memory_cache[cache_key] = response
+                self._memory_cache[cache_key] = cacheable_response
                 self._memory_timestamps[cache_key] = time.time() + ttl_value
                 self._memory_access_order.append(cache_key)
                 self._memory_cache_cleanup()

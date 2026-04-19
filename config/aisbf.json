@@ -21,8 +21,8 @@
   "auth": {
     "enabled": false,
     "tokens": [
-      "your-secret-token-1",
-      "your-secret-token-2"
+      "api-token-1",
+      "api-token-2"
     ]
   },
   "mcp": {
@@ -133,22 +133,27 @@
     "from_email": "noreply@example.com",
     "from_name": "AISBF"
   },
-
   "oauth2": {
     "google": {
       "enabled": false,
       "client_id": "",
       "client_secret": "",
-      "scopes": ["openid", "email", "profile"]
+      "scopes": [
+        "openid",
+        "email",
+        "profile"
+      ]
     },
     "github": {
       "enabled": false,
       "client_id": "",
       "client_secret": "",
-      "scopes": ["user:email", "read:user"]
+      "scopes": [
+        "user:email",
+        "read:user"
+      ]
     }
   },
-  
   "billing": {
     "currency": "USD",
     "currency_symbol": "$",

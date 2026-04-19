@@ -6,5 +6,18 @@
     "max_context": 8000
   },
   "providers": {
+    "kilo": {
+      "id": "kilo",
+      "name": "Kilocode (OAuth2)",
+      "endpoint": "https://api.kilo.ai",
+      "type": "kilo",
+      "api_key_required": false,
+      "is_subscription": true,
+      "rate_limit": 0,
+      "kilo_config": {
+        "credentials_file": "~/.kilo_credentials.json"
+      },
+      "models": []
+    }
   }
 }

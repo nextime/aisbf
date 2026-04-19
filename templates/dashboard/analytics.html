@@ -60,7 +60,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <select name="time_range" id="timeRangeSelect" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
                 <option value="1h" {% if selected_time_range == '1h' %}selected{% endif %}>Last 1 Hour</option>
                 <option value="6h" {% if selected_time_range == '6h' %}selected{% endif %}>Last 6 Hours</option>
-                <option value="24h" {% if selected_time_range == '24h' %}selected{% endif %}>Last 24 Hours</option>
+                <option value="24h" {% if selected_time_range == '24h' %}selected{% endif %}>Last 24 Hours (Default)</option>
+                <option value="yesterday" {% if selected_time_range == 'yesterday' %}selected{% endif %}>Yesterday</option>
                 <option value="7d" {% if selected_time_range == '7d' %}selected{% endif %}>Last 7 Days</option>
                 <option value="30d" {% if selected_time_range == '30d' %}selected{% endif %}>Last 30 Days</option>
                 <option value="90d" {% if selected_time_range == '90d' %}selected{% endif %}>Last 90 Days</option>
