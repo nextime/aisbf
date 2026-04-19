@@ -5513,8 +5513,8 @@ async def dashboard_provider_upload(
         return auth_check
 
     # Check if current user is config admin (from aisbf.json)
-    current_user_id = getattr(request.state, 'user_id', request.session.get('user_id'))
-    is_config_admin = current_user_id is None
+    is_config_admin = request.session.get('user_id') is None
+    logger.info(f"🔍 UPLOAD HANDLER DEBUG: session.user_id = {request.session.get('user_id')}, is_config_admin = {is_config_admin}")
 
     try:
         # Validate file type
@@ -5527,6 +5527,7 @@ async def dashboard_provider_upload(
 
         # Read file content
         content = await file.read()
+        logger.info(f"🔍 UPLOAD HANDLER: Received file {file.filename}, size: {len(content)} bytes")
 
         if is_config_admin:
             # Config admin: save to files

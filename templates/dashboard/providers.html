@@ -136,179 +136,88 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 let providersData = {{ providers_json | safe }};
 let expandedProviders = new Set();
 
-// Upload handler for Kiro credential files
-async function uploadKiroFile(providerKey, fileType, file) {
+// Chunk size: 5MB chunks for large files
+const CHUNK_SIZE = 5 * 1024 * 1024;
+
+// Generic chunked upload handler for all providers
+async function uploadFileChunked(providerKey, fileType, file, configKey, configObject) {
     if (!file) return;
     
-    const statusEl = document.getElementById(`kiro-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    const statusEl = document.getElementById(`${configObject}-upload-status-${providerKey}`);
+    statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: 0%</div>`;
     
     try {
-        const formData = new FormData();
-        formData.append('file_type', fileType);
-        formData.append('file', file);
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         
-        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-            // Update the config with the stored filename
-            if (!providersData[providerKey].kiro_config) {
-                providersData[providerKey].kiro_config = {};
+        for (let chunkNumber = 1; chunkNumber <= totalChunks; chunkNumber++) {
+            const start = (chunkNumber - 1) * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: ${progress}%</div>`;
+            
+            const formData = new FormData();
+            formData.append('provider_key', providerKey);
+            formData.append('file_type', fileType);
+            formData.append('file_name', file.name);
+            formData.append('total_size', file.size);
+            formData.append('chunk_number', chunkNumber);
+            formData.append('total_chunks', totalChunks);
+            formData.append('file', chunk);
+            
+            const response = await fetch('/dashboard/providers/upload-auth-file/chunk', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Upload failed');
             }
-            providersData[providerKey].kiro_config[fileType] = result.stored_filename;
-            renderProvidersList();
-        } else {
-            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+            
+            // When upload is complete
+            if (result.complete) {
+                statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+                
+                // Update the config with the stored filename
+                if (!providersData[providerKey][configObject]) {
+                    providersData[providerKey][configObject] = {};
+                }
+                providersData[providerKey][configObject][fileType] = result.stored_filename;
+                renderProvidersList();
+                return;
+            }
         }
     } catch (e) {
         statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
     }
+}
+
+// Upload handler for Kiro credential files
+async function uploadKiroFile(providerKey, fileType, file) {
+    await uploadFileChunked(providerKey, fileType, file, 'kiro_config');
 }
 
 // Upload handler for Kilo credential files
 async function uploadKiloFile(providerKey, file) {
-    if (!file) return;
-    
-    const statusEl = document.getElementById(`kilo-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
-    
-    try {
-        const formData = new FormData();
-        formData.append('file_type', 'credentials_file');
-        formData.append('file', file);
-        
-        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-            // Update the config with the stored filename
-            if (!providersData[providerKey].kilo_config) {
-                providersData[providerKey].kilo_config = {};
-            }
-            providersData[providerKey].kilo_config.credentials_file = result.stored_filename;
-            renderProvidersList();
-        } else {
-            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
-        }
-    } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'kilo_config');
 }
 
 // Upload handler for Claude credential files
 async function uploadClaudeFile(providerKey, file) {
-    if (!file) return;
-    
-    const statusEl = document.getElementById(`claude-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
-    
-    try {
-        const formData = new FormData();
-        formData.append('file_type', 'credentials_file');
-        formData.append('file', file);
-        
-        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-            // Update the config with the stored filename
-            if (!providersData[providerKey].claude_config) {
-                providersData[providerKey].claude_config = {};
-            }
-            providersData[providerKey].claude_config.credentials_file = result.stored_filename;
-            renderProvidersList();
-        } else {
-            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
-        }
-    } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'claude_config');
 }
 
 // Upload handler for Qwen credential files
 async function uploadQwenFile(providerKey, file) {
-    if (!file) return;
-    
-    const statusEl = document.getElementById(`qwen-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
-    
-    try {
-        const formData = new FormData();
-        formData.append('file_type', 'credentials_file');
-        formData.append('file', file);
-        
-        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-            // Update the config with the stored filename
-            if (!providersData[providerKey].qwen_config) {
-                providersData[providerKey].qwen_config = {};
-            }
-            providersData[providerKey].qwen_config.credentials_file = result.stored_filename;
-            renderProvidersList();
-        } else {
-            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
-        }
-    } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'qwen_config');
 }
 
 // Upload handler for Codex credential files
 async function uploadCodexFile(providerKey, file) {
-    if (!file) return;
-    
-    const statusEl = document.getElementById(`codex-upload-status-${providerKey}`);
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
-    
-    try {
-        const formData = new FormData();
-        formData.append('file_type', 'credentials_file');
-        formData.append('file', file);
-        
-        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const result = await response.json();
-        
-        if (result.success) {
-            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-            // Update the config with the stored filename
-            if (!providersData[providerKey].codex_config) {
-                providersData[providerKey].codex_config = {};
-            }
-            providersData[providerKey].codex_config.credentials_file = result.stored_filename;
-            renderProvidersList();
-        } else {
-            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
-        }
-    } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
-    }
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'codex_config');
 }
 
 function renderProvidersList() {
