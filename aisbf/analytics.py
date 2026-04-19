@@ -684,7 +684,55 @@ class Analytics:
         Returns:
             List of model performance data
         """
+        # Try to get from context_dimensions first
         context_dims = self.db.get_all_context_dimensions(user_filter=user_filter)
+        
+        # If context_dimensions is empty, get unique provider/model combinations from token_usage
+        if not context_dims:
+            logger.info("No context_dimensions found, querying token_usage for provider/model combinations")
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+                
+                # Build query with optional date range and user filter
+                query = '''
+                    SELECT DISTINCT provider_id, model_name
+                    FROM token_usage
+                    WHERE 1=1
+                '''
+                params = []
+                
+                if from_datetime:
+                    query += f' AND timestamp >= {placeholder}'
+                    params.append(self._format_timestamp(from_datetime))
+                if to_datetime:
+                    query += f' AND timestamp <= {placeholder}'
+                    params.append(self._format_timestamp(to_datetime))
+                if user_filter == -1:
+                    query += ' AND user_id IS NULL'
+                elif user_filter is not None:
+                    query += f' AND user_id = {placeholder}'
+                    params.append(user_filter)
+                
+                query += ' ORDER BY provider_id, model_name'
+                
+                cursor.execute(query, params)
+                
+                # Build context_dims from query results
+                context_dims = []
+                for row in cursor.fetchall():
+                    context_dims.append({
+                        'provider_id': row[0],
+                        'model_name': row[1],
+                        'context_size': None,
+                        'condense_context': None,
+                        'condense_method': None,
+                        'effective_context': None,
+                        'is_rotation': False,
+                        'is_autoselect': False,
+                        'rotation_id': None,
+                        'autoselect_id': None
+                    })
         
         results = []
         for dim in context_dims:
@@ -718,11 +766,12 @@ class Analytics:
                 if not is_autoselect or (autoselect_id and autoselect_id != autoselect_filter):
                     continue
             
-            # Get token usage for this model (no longer used, we'll get from provider_stats)
-            # stats = self.db.get_token_usage_stats(provider_id, model_name)
-            
             # Get provider request stats with date range
             provider_stats = self.get_provider_stats(provider_id, from_datetime, to_datetime, user_filter)
+            
+            # Skip if no data for this provider in the selected time range
+            if provider_stats['requests']['total'] == 0:
+                continue
             
             results.append({
                 'provider_id': provider_id,

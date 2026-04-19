@@ -614,6 +614,21 @@ class RequestHandler:
                         completion_tokens=completion_tokens if completion_tokens > 0 else None,
                         actual_cost=actual_cost
                     )
+                    
+                    # Record context dimensions for model performance tracking
+                    try:
+                        from aisbf.database import get_database
+                        db = get_database()
+                        context_config = context_config or {}
+                        db.record_context_dimension(
+                            provider_id=provider_id,
+                            model_name=model_name,
+                            context_size=context_config.get('context_size'),
+                            condense_context=context_config.get('condense_context'),
+                            condense_method=context_config.get('condense_method')
+                        )
+                    except Exception as context_error:
+                        logger.debug(f"Context dimension recording failed: {context_error}")
             except Exception as analytics_error:
                 logger.warning(f"Analytics recording failed: {analytics_error}")
             
