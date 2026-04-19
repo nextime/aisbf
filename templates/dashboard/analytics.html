@@ -638,7 +638,7 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
             {% elif model.is_autoselect %}
             <span style="color: #9b59b6;">Autoselect: {{ model.autoselect_id }}</span>
             {% else %}
-            <span style="color: #3498db;">Provider Model</span>
+            <span style="color: #3498db;">{{ model.provider_type|title }}</span>
             {% endif %}
         </td>
         <td>{{ model.context_size|default('N/A') }}</td>

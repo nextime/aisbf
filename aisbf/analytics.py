@@ -773,9 +773,20 @@ class Analytics:
             if provider_stats['requests']['total'] == 0:
                 continue
             
+            # Get provider type from config
+            provider_type = 'unknown'
+            try:
+                from .config import config
+                provider_config = config.get_provider(provider_id)
+                if provider_config:
+                    provider_type = provider_config.type
+            except Exception:
+                pass
+            
             results.append({
                 'provider_id': provider_id,
                 'model_name': model_name,
+                'provider_type': provider_type,
                 'context_size': dim.get('context_size'),
                 'effective_context': dim.get('effective_context'),
                 'condense_context': dim.get('condense_context'),
