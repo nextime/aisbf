@@ -5724,8 +5724,13 @@ async def dashboard_provider_upload_chunk(
         upload_id = hashlib.sha256(f"{current_user_id}:{provider_key}:{file_name}:{total_size}".encode()).hexdigest()[:16]
         file_ext = Path(file_name).suffix if file_name else '.bin'
 
-        # Create temporary upload directory
-        temp_dir = Path('/tmp/aisbf_uploads')
+        # Create temporary upload directory in user's home
+        if is_config_admin:
+            # Config admin: use their home directory
+            temp_dir = Path.home() / '.aisbf' / 'temp_uploads'
+        else:
+            # Database user: use their auth files directory
+            temp_dir = get_user_auth_files_dir(current_user_id) / 'temp_uploads'
         temp_dir.mkdir(parents=True, exist_ok=True)
 
         # Save chunk
