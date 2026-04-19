@@ -494,6 +494,10 @@ app = FastAPI(
 # Initialize Jinja2 templates with custom globals for proxy-aware URLs
 templates = Jinja2Templates(directory="templates")
 
+# Add MD5 filter for Gravatar
+import hashlib
+templates.env.filters['md5'] = lambda s: hashlib.md5(s.lower().encode('utf-8')).hexdigest() if s else ''
+
 # Add custom template globals for proxy-aware URL generation
 def setup_template_globals():
     """Setup Jinja2 template globals for proxy-aware URLs"""
@@ -3235,6 +3239,14 @@ async def oauth2_google_initiate(request: Request):
             'state': oauth._state,
             'code_verifier': oauth._code_verifier
         }
+
+        # Detect if this is a popup request (from Referer header or popup parameter)
+        referer = request.headers.get('Referer', '')
+        is_popup = 'popup=1' in referer or request.query_params.get('popup') == '1'
+        if is_popup:
+            request.session['oauth2_popup'] = True
+            # Also store a more persistent flag
+            request.session['oauth2_popup_mode'] = True
         
         return RedirectResponse(url=auth_url, status_code=303)
     except Exception as e:
@@ -3362,8 +3374,30 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
         
         # Cleanup session data
         request.session.pop('oauth2_google', None)
+
+        # Check if this is a popup window request
+        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
+        if is_popup:
+            # Return HTML with postMessage to opener
+            return HTMLResponse(content=f'''
+                <!DOCTYPE html>
+                <html>
+                <head><title>Authentication Complete</title></head>
+                <body>
+                    <script>
+                        if (window.opener) {{
+                            window.opener.postMessage({{
+                                type: 'oauth2_complete',
+                                redirect_url: '{url_for(request, "/dashboard")}'
+                            }}, '*');
+                        }}
+                        window.close();
+                    </script>
+                </body>
+                </html>
+            ''')
         
-        # Redirect to dashboard
+        # Redirect to dashboard for regular requests
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
         
     except Exception as e:
@@ -3399,6 +3433,14 @@ async def oauth2_github_initiate(request: Request):
         request.session['oauth2_github'] = {
             'state': oauth._state
         }
+
+        # Detect if this is a popup request (from Referer header or popup parameter)
+        referer = request.headers.get('Referer', '')
+        is_popup = 'popup=1' in referer or request.query_params.get('popup') == '1'
+        if is_popup:
+            request.session['oauth2_popup'] = True
+            # Also store a more persistent flag
+            request.session['oauth2_popup_mode'] = True
         
         return RedirectResponse(url=auth_url, status_code=303)
     except Exception as e:
@@ -3516,8 +3558,30 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
 
         # Cleanup session data
         request.session.pop('oauth2_github', None)
+
+        # Check if this is a popup window request
+        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
+        if is_popup:
+            # Return HTML with postMessage to opener
+            return HTMLResponse(content=f'''
+                <!DOCTYPE html>
+                <html>
+                <head><title>Authentication Complete</title></head>
+                <body>
+                    <script>
+                        if (window.opener) {{
+                            window.opener.postMessage({{
+                                type: 'oauth2_complete',
+                                redirect_url: '{url_for(request, "/dashboard")}'
+                            }}, '*');
+                        }}
+                        window.close();
+                    </script>
+                </body>
+                </html>
+            ''')
         
-        # Redirect to dashboard
+        # Redirect to dashboard for regular requests
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
         
     except Exception as e:
