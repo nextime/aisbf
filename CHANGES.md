@@ -71,6 +71,16 @@
   - Model performance now displays data even on fresh installations
 - **Files Modified**: `aisbf/analytics.py`, `aisbf/handlers.py`
 
+### 12. Deprecated Database Function
+- **Problem**: Using deprecated `get_database()` function causing warnings
+- **Solution**: Replaced with `DatabaseRegistry.get_config_database()`
+- **Files Modified**: `aisbf/handlers.py`
+
+### 13. Model Performance Type Column Generic
+- **Problem**: Type column showed generic "Provider Model" instead of actual provider type
+- **Solution**: Added provider_type field from config (shows Kilo, Claude, Qwen, Codex, etc.)
+- **Files Modified**: `aisbf/analytics.py`, `templates/dashboard/analytics.html`
+
 ## New Features
 
 ### Enhanced Debug Logging
@@ -98,6 +108,7 @@ Graph title and all analytics sections dynamically update based on selected rang
 - Automatically records context dimensions on each request
 - Falls back to token_usage data when context_dimensions is empty
 - Shows performance metrics for all providers with activity in selected time range
+- Displays actual provider type (Kilo, Claude, Qwen, etc.) in Type column
 
 ## Backwards Compatibility
 
@@ -127,3 +138,5 @@ Updated version to `0.99.33` in:
 9. Verify cost overview reflects selected time period
 10. Check that recommendations are based on filtered time range data
 11. Test model performance displays on fresh installations with empty context_dimensions table
+12. Verify no deprecation warnings in logs
+13. Confirm model performance Type column shows correct provider types
