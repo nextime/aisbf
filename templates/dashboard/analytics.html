@@ -658,7 +658,28 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
 <p style="color: #a0a0a0;">No model performance data available yet.</p>
 {% endif %}
 
-<h3 style="margin-top: 30px; margin-bottom: 15px;">Token Usage Over Time {% if from_date or to_date %}(Custom Range){% else %}(24h){% endif %}</h3>
+<h3 style="margin-top: 30px; margin-bottom: 15px;">
+    Token Usage Over Time 
+    {% if from_date or to_date %}
+        (Custom Range)
+    {% elif selected_time_range == '1h' %}
+        (Last 1 Hour)
+    {% elif selected_time_range == '6h' %}
+        (Last 6 Hours)
+    {% elif selected_time_range == '24h' %}
+        (Last 24 Hours)
+    {% elif selected_time_range == 'yesterday' %}
+        (Yesterday)
+    {% elif selected_time_range == '7d' %}
+        (Last 7 Days)
+    {% elif selected_time_range == '30d' %}
+        (Last 30 Days)
+    {% elif selected_time_range == '90d' %}
+        (Last 90 Days)
+    {% else %}
+        (Last 24 Hours)
+    {% endif %}
+</h3>
 {% if token_over_time != '[]' %}
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
     <canvas id="tokenChart" style="width: 100%; height: 300px;"></canvas>
