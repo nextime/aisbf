@@ -1277,9 +1277,10 @@ async def shutdown_event():
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config and server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint, dashboard routes, admin API routes, favicon, and browser metadata
+        # Skip auth for root endpoint, dashboard routes, auth routes, admin API routes, favicon, and browser metadata
         if (request.url.path == "/" or
             request.url.path.startswith("/dashboard") or
+            request.url.path.startswith("/auth/") or
             request.url.path.startswith("/api/admin") or
             request.url.path == "/favicon.ico" or
             request.url.path.startswith("/.well-known/")):
