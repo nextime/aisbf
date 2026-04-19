@@ -46,6 +46,7 @@
   - Added "Yesterday" preset option
   - Improved time range handling in both frontend and backend
   - Fixed custom date range logic
+  - Fixed graph title to dynamically show selected time range
 - **Files Modified**: `templates/dashboard/analytics.html`, `main.py`, `aisbf/analytics.py`
 
 ## New Features
@@ -68,6 +69,8 @@ Analytics page now supports:
 - Last 30 Days
 - Last 90 Days
 - Custom Range (with date/time pickers)
+
+Graph title dynamically updates to show selected range.
 
 ## Backwards Compatibility
 
@@ -92,3 +95,4 @@ Updated version to `0.99.33` in:
 4. Test "Yesterday" time range filter
 5. Verify database migrations work on live MySQL instances
 6. Test all existing providers (kiro-cli, claude, qwen, codex, kilo)
+7. Verify graph title updates correctly for each time range selection
