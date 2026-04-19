@@ -3763,7 +3763,7 @@ async def dashboard_providers(request: Request):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     if is_config_admin:
         # Config admin: load from JSON files
@@ -3946,7 +3946,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     try:
         # Validate JSON
@@ -4126,7 +4126,7 @@ async def dashboard_rotations(request: Request):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     if is_config_admin:
         # Config admin: load from JSON files
@@ -4174,7 +4174,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     try:
         rotations_data = json.loads(config)
@@ -4227,7 +4227,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if is_config_admin:
             config_path = Path.home() / '.aisbf' / 'rotations.json'
@@ -4266,7 +4266,7 @@ async def dashboard_autoselect(request: Request):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     if is_config_admin:
         # Config admin: load from JSON files
@@ -4346,7 +4346,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
     
     try:
         autoselect_data = json.loads(config)
@@ -4387,7 +4387,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if is_config_admin:
             config_path = Path.home() / '.aisbf' / 'autoselect.json'
@@ -5513,8 +5513,8 @@ async def dashboard_provider_upload(
         return auth_check
 
     # Check if current user is config admin (from aisbf.json)
-    current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    current_user_id = getattr(request.state, 'user_id', request.session.get('user_id'))
+    is_config_admin = current_user_id is None
 
     try:
         # Validate file type
@@ -5608,7 +5608,7 @@ async def dashboard_provider_upload_form(
 
     # Check if current user is config admin (from aisbf.json)
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
 
     try:
         # Validate file type
@@ -5705,7 +5705,7 @@ async def dashboard_provider_upload_chunk(
         return auth_check
 
     current_user_id = request.session.get('user_id')
-    is_config_admin = request.session.get("role") == "admin"
+    is_config_admin = current_user_id is None
 
     try:
         # Validate file type
@@ -11946,7 +11946,7 @@ async def dashboard_claude_auth_complete(request: Request):
             # Only the ONE config admin (user_id=None from aisbf.json) saves to file
             # All other users (including database admins) save to database
             current_user_id = request.session.get('user_id')
-            is_config_admin = request.session.get("role") == "admin"
+            is_config_admin = current_user_id is None
             
             if not is_config_admin:
                 # Non-config-admin user: save credentials to database
@@ -12062,7 +12062,7 @@ async def dashboard_claude_auth_status(request: Request):
         
         # Check if current user is config admin
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
@@ -12231,7 +12231,7 @@ async def dashboard_kilo_auth_poll(request: Request):
             # Only the ONE config admin (user_id=None from aisbf.json) saves to file
             # All other users (including database admins) save to database
             current_user_id = request.session.get('user_id')
-            is_config_admin = request.session.get("role") == "admin"
+            is_config_admin = current_user_id is None
             
             if token:
                 credentials = {
@@ -12349,7 +12349,7 @@ async def dashboard_kilo_auth_status(request: Request):
         
         # Check if current user is config admin
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
@@ -12553,7 +12553,7 @@ async def dashboard_codex_auth_poll(request: Request):
             # Only the ONE config admin (user_id=None from aisbf.json) saves to file
             # All other users (including database admins) save to database
             current_user_id = request.session.get('user_id')
-            is_config_admin = request.session.get("role") == "admin"
+            is_config_admin = current_user_id is None
             
             if not is_config_admin:
                 # Non-admin user: save credentials to database instead of file
@@ -12666,7 +12666,7 @@ async def dashboard_codex_auth_status(request: Request):
         
         # Check if current user is config admin
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
@@ -12916,7 +12916,7 @@ async def dashboard_qwen_auth_poll(request: Request):
             # Only the ONE config admin (user_id=None from aisbf.json) saves to file
             # All other users (including database admins) save to database
             current_user_id = request.session.get('user_id')
-            is_config_admin = request.session.get("role") == "admin"
+            is_config_admin = current_user_id is None
             
             # First save to file (for config admin), then copy to DB if needed
             _save_qwen_credentials(credentials_file, result)
@@ -13032,7 +13032,7 @@ async def dashboard_qwen_auth_status(request: Request):
         
         # Check if current user is config admin
         current_user_id = request.session.get('user_id')
-        is_config_admin = request.session.get("role") == "admin"
+        is_config_admin = current_user_id is None
         
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
