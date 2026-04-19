@@ -136,6 +136,181 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 let providersData = {{ providers_json | safe }};
 let expandedProviders = new Set();
 
+// Upload handler for Kiro credential files
+async function uploadKiroFile(providerKey, fileType, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`kiro-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_type', fileType);
+        formData.append('file', file);
+        
+        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+            // Update the config with the stored filename
+            if (!providersData[providerKey].kiro_config) {
+                providersData[providerKey].kiro_config = {};
+            }
+            providersData[providerKey].kiro_config[fileType] = result.stored_filename;
+            renderProvidersList();
+        } else {
+            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
+// Upload handler for Kilo credential files
+async function uploadKiloFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`kilo-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_type', 'credentials_file');
+        formData.append('file', file);
+        
+        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+            // Update the config with the stored filename
+            if (!providersData[providerKey].kilo_config) {
+                providersData[providerKey].kilo_config = {};
+            }
+            providersData[providerKey].kilo_config.credentials_file = result.stored_filename;
+            renderProvidersList();
+        } else {
+            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
+// Upload handler for Claude credential files
+async function uploadClaudeFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`claude-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_type', 'credentials_file');
+        formData.append('file', file);
+        
+        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+            // Update the config with the stored filename
+            if (!providersData[providerKey].claude_config) {
+                providersData[providerKey].claude_config = {};
+            }
+            providersData[providerKey].claude_config.credentials_file = result.stored_filename;
+            renderProvidersList();
+        } else {
+            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
+// Upload handler for Qwen credential files
+async function uploadQwenFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`qwen-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_type', 'credentials_file');
+        formData.append('file', file);
+        
+        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+            // Update the config with the stored filename
+            if (!providersData[providerKey].qwen_config) {
+                providersData[providerKey].qwen_config = {};
+            }
+            providersData[providerKey].qwen_config.credentials_file = result.stored_filename;
+            renderProvidersList();
+        } else {
+            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
+// Upload handler for Codex credential files
+async function uploadCodexFile(providerKey, file) {
+    if (!file) return;
+    
+    const statusEl = document.getElementById(`codex-upload-status-${providerKey}`);
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading file...</div>';
+    
+    try {
+        const formData = new FormData();
+        formData.append('file_type', 'credentials_file');
+        formData.append('file', file);
+        
+        const response = await fetch(`/dashboard/providers/${providerKey}/upload`, {
+            method: 'POST',
+            body: formData
+        });
+        
+        const result = await response.json();
+        
+        if (result.success) {
+            statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+            // Update the config with the stored filename
+            if (!providersData[providerKey].codex_config) {
+                providersData[providerKey].codex_config = {};
+            }
+            providersData[providerKey].codex_config.credentials_file = result.stored_filename;
+            renderProvidersList();
+        } else {
+            statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${result.error}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
 function renderProvidersList() {
     console.log('=== renderProvidersList START ===');
     const container = document.getElementById('providers-list');
