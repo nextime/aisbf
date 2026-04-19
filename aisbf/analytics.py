@@ -890,18 +890,13 @@ class Analytics:
         
         for provider in providers:
             provider_id = provider['provider_id']
+            tokens = provider['tokens']
             
             # Get token usage for this provider in the date range
-            if from_datetime or to_datetime:
-                provider_usage = self.get_token_usage_by_date_range(provider_id, start, end)
-                total_tokens = provider_usage['total_tokens']
-            else:
-                tokens = provider['tokens']
-                total_tokens = tokens['TPD']  # Use daily tokens for cost estimation
-            
-            # Get actual prompt/completion tokens from provider stats
-            prompt_tokens = tokens.get('prompt', 0) if not (from_datetime or to_datetime) else None
-            completion_tokens = tokens.get('completion', 0) if not (from_datetime or to_datetime) else None
+            # Always use the tokens from provider stats which already respect the date range
+            total_tokens = tokens['total']
+            prompt_tokens = tokens.get('prompt', 0)
+            completion_tokens = tokens.get('completion', 0)
             
             # Use actual cost if available, otherwise estimate
             actual_cost = provider.get('actual_cost', 0)
