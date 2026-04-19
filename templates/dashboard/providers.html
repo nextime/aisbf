@@ -148,7 +148,17 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
         toggleProvider(providerKey);
     }
     
-    const statusEl = document.getElementById(`${configObject}-upload-status-${providerKey}`);
+    // Map config object names to status element prefixes
+    const statusPrefixMap = {
+        'kiro_config': 'kiro',
+        'kilo_config': 'kilo',
+        'claude_config': 'claude',
+        'qwen_config': 'qwen',
+        'codex_config': 'codex'
+    };
+    
+    const statusPrefix = statusPrefixMap[configObject] || configObject.replace('_config', '');
+    const statusEl = document.getElementById(`${statusPrefix}-upload-status-${providerKey}`);
     statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: 0%</div>`;
     
     try {
