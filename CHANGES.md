@@ -58,6 +58,19 @@
   - All analytics sections now respect the selected time range
 - **Files Modified**: `aisbf/analytics.py`, `main.py`
 
+### 10. Cost Overview Hardcoded to 24 Hours
+- **Problem**: Cost overview always showed last 24 hours regardless of selected time range
+- **Solution**: Simplified logic to use tokens from provider stats which already respect date range
+- **Files Modified**: `aisbf/analytics.py`
+
+### 11. Model Performance Shows No Data
+- **Problem**: `context_dimensions` table remained empty because `record_context_dimension` was never called
+- **Solution**: 
+  - Added fallback logic to query `token_usage` table when `context_dimensions` is empty
+  - Added context dimension recording in request success path
+  - Model performance now displays data even on fresh installations
+- **Files Modified**: `aisbf/analytics.py`, `aisbf/handlers.py`
+
 ## New Features
 
 ### Enhanced Debug Logging
@@ -80,6 +93,11 @@ Analytics page now supports:
 - Custom Range (with date/time pickers)
 
 Graph title and all analytics sections dynamically update based on selected range.
+
+### Model Performance Tracking
+- Automatically records context dimensions on each request
+- Falls back to token_usage data when context_dimensions is empty
+- Shows performance metrics for all providers with activity in selected time range
 
 ## Backwards Compatibility
 
@@ -108,3 +126,4 @@ Updated version to `0.99.33` in:
 8. Confirm model performance shows data for selected time range
 9. Verify cost overview reflects selected time period
 10. Check that recommendations are based on filtered time range data
+11. Test model performance displays on fresh installations with empty context_dimensions table
