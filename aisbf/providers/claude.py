@@ -102,12 +102,21 @@ class ClaudeProviderHandler(BaseProviderHandler):
     
     def _load_auth_from_db(self, provider_id: str, credentials_file: str):
         """
-        Load OAuth2 credentials from database for non-admin users.
-        Falls back to file-based credentials if not found in database.
+        Load OAuth2 credentials:
+        - Admin users (user_id=None): ONLY load from file
+        - Regular users: ONLY load from database, NO file fallback
         """
+        from ..auth.claude import ClaudeAuth
+        import logging
+        
+        if self.user_id is None:
+            # Admin user: ONLY use file-based credentials
+            logging.getLogger(__name__).info(f"ClaudeProviderHandler: Admin user, loading credentials from file: {credentials_file}")
+            return ClaudeAuth(credentials_file=credentials_file)
+        
+        # Regular user: ONLY use database credentials, NO file fallback
         try:
             from ..database import get_database
-            from ..auth.claude import ClaudeAuth
             db = get_database()
             if db:
                 db_creds = db.get_user_oauth2_credentials(
@@ -116,22 +125,24 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     auth_type='claude_oauth2'
                 )
                 if db_creds and db_creds.get('credentials'):
-                    # Create auth instance with database credentials
-                    auth = ClaudeAuth(credentials_file=credentials_file)
-                    # Override the loaded credentials with database credentials
+                    # Create auth instance with skip_initial_load=True to avoid file read
+                    # Pass save callback to save credentials back to database
+                    auth = ClaudeAuth(
+                        credentials_file=credentials_file, 
+                        skip_initial_load=True,
+                        save_callback=lambda creds: self._save_auth_to_db(creds)
+                    )
+                    # Set tokens directly from database
                     auth.tokens = db_creds['credentials'].get('tokens', {})
                     import logging
                     logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
                     return auth
         except Exception as e:
-            import logging
             logging.getLogger(__name__).warning(f"ClaudeProviderHandler: Failed to load credentials from database: {e}")
         
-        # Fall back to file-based credentials
-        from ..auth.claude import ClaudeAuth
-        import logging
-        logging.getLogger(__name__).info(f"ClaudeProviderHandler: Falling back to file-based credentials for user {self.user_id}")
-        return ClaudeAuth(credentials_file=credentials_file)
+        # For regular users, NO file fallback - return empty auth instance
+        logging.getLogger(__name__).info(f"ClaudeProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
+        return ClaudeAuth(credentials_file=credentials_file, skip_initial_load=True)
     
     def _init_session_identifiers(self):
         """Initialize persistent session identifiers (device_id, account_uuid, session_id)."""

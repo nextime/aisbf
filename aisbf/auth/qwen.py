@@ -96,15 +96,17 @@ class QwenOAuth2:
     Supports authentication with Qwen's OAuth2 endpoints and automatic token refresh.
     """
     
-    def __init__(self, credentials_file: Optional[str] = None):
+    def __init__(self, credentials_file: Optional[str] = None, skip_initial_load: bool = False, save_callback: Optional[callable] = None):
         """
         Initialize Qwen OAuth2 client.
-        
+
         ⚠️  WARNING: OAuth2 authentication for Qwen has been discontinued.
         This client will not work with DashScope API. Use API key authentication instead.
-        
+
         Args:
             credentials_file: Path to credentials JSON file (default: ~/.aisbf/qwen_credentials.json)
+            skip_initial_load: If True, do not load credentials from file on initialization
+            save_callback: Optional callback to save credentials instead of writing to file
         """
         logger.warning(
             "⚠️  Qwen OAuth2 service has been discontinued by Qwen. "
@@ -116,7 +118,9 @@ class QwenOAuth2:
         self.credentials = None
         self._file_mod_time = 0
         self._last_check = 0
-        self._load_credentials()
+        self._save_callback = save_callback
+        if not skip_initial_load:
+            self._load_credentials()
     
     def _load_credentials(self) -> None:
         """Load credentials from file if it exists."""
@@ -136,11 +140,27 @@ class QwenOAuth2:
     
     def _save_credentials(self, credentials: Dict[str, Any]) -> None:
         """
-        Save credentials to file with secure permissions and file locking.
-        
+        Save credentials:
+        - If save_callback is provided, use it (database save for user providers)
+        - Otherwise, save to file with secure permissions and file locking (admin/global providers)
+
         Args:
             credentials: Credentials dict to save
         """
+        self.credentials = credentials
+        
+        if self._save_callback:
+            # User provider: ONLY use callback, NO file fallback EVER
+            try:
+                self._save_callback(credentials)
+                logger.info(f"QwenOAuth2: Saved credentials via callback")
+                return
+            except Exception as e:
+                logger.error(f"QwenOAuth2: Failed to save credentials to database: {e}")
+                # DO NOT FALLBACK TO FILE SAVE FOR REGULAR USERS
+                raise
+        
+        # Admin/global provider ONLY: save to file
         try:
             # Ensure directory exists
             os.makedirs(os.path.dirname(self.credentials_file), exist_ok=True)

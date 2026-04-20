@@ -112,9 +112,22 @@ class CodexProviderHandler(BaseProviderHandler):
     
     def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, issuer: str) -> CodexOAuth2:
         """
-        Load OAuth2 credentials from database for non-admin users.
-        Falls back to file-based credentials if not found in database.
+        Load OAuth2 credentials:
+        - Admin users (user_id=None): ONLY load from file
+        - Regular users: ONLY load from database, NO file fallback
         """
+        from ..auth.codex import CodexOAuth2
+        import logging
+        
+        if self.user_id is None:
+            # Admin user: ONLY use file-based credentials
+            logging.getLogger(__name__).info(f"CodexProviderHandler: Admin user, loading credentials from file: {credentials_file}")
+            return CodexOAuth2(
+                credentials_file=credentials_file,
+                issuer=issuer,
+            )
+        
+        # Regular user: ONLY use database credentials, NO file fallback
         try:
             from ..database import get_database
             db = get_database()
@@ -125,23 +138,28 @@ class CodexProviderHandler(BaseProviderHandler):
                     auth_type='codex_oauth2'
                 )
                 if db_creds and db_creds.get('credentials'):
-                    # Create OAuth2 instance with database credentials
+                    # Create OAuth2 instance with skip_initial_load=True to avoid file read
+                    # Pass save callback to save credentials back to database
                     oauth2 = CodexOAuth2(
                         credentials_file=credentials_file,
                         issuer=issuer,
+                        skip_initial_load=True,
+                        save_callback=lambda creds: self._save_oauth2_to_db(creds)
                     )
-                    # Override the loaded credentials with database credentials
+                    # Set credentials directly from database
                     oauth2.credentials = db_creds['credentials']
-                    logger.info(f"CodexProviderHandler: Loaded credentials from database for user {self.user_id}")
+                    logging.getLogger(__name__).info(f"CodexProviderHandler: Loaded credentials from database for user {self.user_id}")
                     return oauth2
         except Exception as e:
-            logger.warning(f"CodexProviderHandler: Failed to load credentials from database: {e}")
+            logging.getLogger(__name__).warning(f"CodexProviderHandler: Failed to load credentials from database: {e}")
         
-        # Fall back to file-based credentials
-        logger.info(f"CodexProviderHandler: Falling back to file-based credentials for user {self.user_id}")
+        # For regular users, NO file fallback - return empty auth instance
+        logging.getLogger(__name__).info(f"CodexProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
         return CodexOAuth2(
             credentials_file=credentials_file,
             issuer=issuer,
+            skip_initial_load=True,
+            save_callback=lambda creds: self._save_oauth2_to_db(creds)
         )
     
     async def _get_valid_api_key(self) -> str:

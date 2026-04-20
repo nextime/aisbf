@@ -98,12 +98,21 @@ class QwenProviderHandler(BaseProviderHandler):
     
     def _load_auth_from_db(self, provider_id: str, credentials_file: str):
         """
-        Load OAuth2 credentials from database for non-admin users.
-        Falls back to file-based credentials if not found in database.
+        Load OAuth2 credentials:
+        - Admin users (user_id=None): ONLY load from file
+        - Regular users: ONLY load from database, NO file fallback
         """
+        from ..auth.qwen import QwenOAuth2
+        import logging
+        
+        if self.user_id is None:
+            # Admin user: ONLY use file-based credentials
+            logging.getLogger(__name__).info(f"QwenProviderHandler: Admin user, loading credentials from file: {credentials_file}")
+            return QwenOAuth2(credentials_file=credentials_file)
+        
+        # Regular user: ONLY use database credentials, NO file fallback
         try:
             from ..database import get_database
-            from ..auth.qwen import QwenOAuth2
             db = get_database()
             if db:
                 db_creds = db.get_user_oauth2_credentials(
@@ -112,22 +121,52 @@ class QwenProviderHandler(BaseProviderHandler):
                     auth_type='qwen_oauth2'
                 )
                 if db_creds and db_creds.get('credentials'):
-                    # Create auth instance with database credentials
-                    auth = QwenOAuth2(credentials_file=credentials_file)
-                    # Override the loaded credentials with database credentials
+                    # Create auth instance with skip_initial_load=True to avoid file read
+                    # Pass save callback to save credentials back to database
+                    auth = QwenOAuth2(
+                        credentials_file=credentials_file, 
+                        skip_initial_load=True,
+                        save_callback=lambda creds: self._save_auth_to_db(creds)
+                    )
+                    # Set credentials directly from database
                     auth.credentials = db_creds['credentials']
-                    import logging
                     logging.getLogger(__name__).info(f"QwenProviderHandler: Loaded credentials from database for user {self.user_id}")
                     return auth
         except Exception as e:
-            import logging
             logging.getLogger(__name__).warning(f"QwenProviderHandler: Failed to load credentials from database: {e}")
         
-        # Fall back to file-based credentials
-        from ..auth.qwen import QwenOAuth2
-        import logging
-        logging.getLogger(__name__).info(f"QwenProviderHandler: Falling back to file-based credentials for user {self.user_id}")
-        return QwenOAuth2(credentials_file=credentials_file)
+        # For regular users, NO file fallback - return empty auth instance
+        logging.getLogger(__name__).info(f"QwenProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
+        return QwenOAuth2(
+            credentials_file=credentials_file, 
+            skip_initial_load=True,
+            save_callback=lambda creds: self._save_auth_to_db(creds)
+        )
+    
+    def _save_auth_to_db(self, credentials: Dict) -> None:
+        """
+        Save OAuth2 credentials to database for non-admin users.
+        This is called after successful device flow authentication.
+        """
+        if self.user_id is None:
+            # Admin user uses file-based credentials, nothing to save to DB
+            return
+        
+        try:
+            from ..database import get_database
+            db = get_database()
+            if db:
+                db.save_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=self.provider_id,
+                    auth_type='qwen_oauth2',
+                    credentials=credentials
+                )
+                import logging
+                logging.getLogger(__name__).info(f"QwenProviderHandler: Saved credentials to database for user {self.user_id}")
+        except Exception as e:
+            import logging
+            logging.getLogger(__name__).warning(f"QwenProviderHandler: Failed to save credentials to database: {e}")
     
     async def _get_sdk_client(self):
         """Get or create an OpenAI SDK client configured with authentication (OAuth2 or API key)."""

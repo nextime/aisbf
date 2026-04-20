@@ -110,12 +110,21 @@ class KiloProviderHandler(BaseProviderHandler):
     
     def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, api_base: str):
         """
-        Load OAuth2 credentials from database for non-admin users.
-        Falls back to file-based credentials if not found in database.
+        Load OAuth2 credentials:
+        - Admin users (user_id=None): ONLY load from file
+        - Regular users: ONLY load from database, NO file fallback
         """
+        from ..auth.kilo import KiloOAuth2
+        import logging
+        
+        if self.user_id is None:
+            # Admin user: ONLY use file-based credentials
+            logging.getLogger(__name__).info(f"KiloProviderHandler: Admin user, loading credentials from file: {credentials_file}")
+            return KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+        
+        # Regular user: ONLY use database credentials, NO file fallback
         try:
             from ..database import get_database
-            from ..auth.kilo import KiloOAuth2
             db = get_database()
             if db:
                 db_creds = db.get_user_oauth2_credentials(
@@ -124,22 +133,29 @@ class KiloProviderHandler(BaseProviderHandler):
                     auth_type='kilo_oauth2'
                 )
                 if db_creds and db_creds.get('credentials'):
-                    # Create OAuth2 instance with database credentials
-                    oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
-                    # Override the loaded credentials with database credentials
+                    # Create OAuth2 instance with skip_initial_load=True to avoid file read
+                    # Pass save callback to save credentials back to database
+                    oauth2 = KiloOAuth2(
+                        credentials_file=credentials_file, 
+                        api_base=api_base, 
+                        skip_initial_load=True,
+                        save_callback=lambda creds: self._save_oauth2_to_db(creds)
+                    )
+                    # Set credentials directly from database
                     oauth2.credentials = db_creds['credentials']
-                    import logging
                     logging.getLogger(__name__).info(f"KiloProviderHandler: Loaded credentials from database for user {self.user_id}")
                     return oauth2
         except Exception as e:
-            import logging
             logging.getLogger(__name__).warning(f"KiloProviderHandler: Failed to load credentials from database: {e}")
         
-        # Fall back to file-based credentials
-        from ..auth.kilo import KiloOAuth2
-        import logging
-        logging.getLogger(__name__).info(f"KiloProviderHandler: Falling back to file-based credentials for user {self.user_id}")
-        return KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+        # For regular users, NO file fallback - return empty auth instance
+        logging.getLogger(__name__).info(f"KiloProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
+        return KiloOAuth2(
+            credentials_file=credentials_file, 
+            api_base=api_base, 
+            skip_initial_load=True,
+            save_callback=lambda creds: self._save_oauth2_to_db(creds)
+        )
     
     def _save_oauth2_to_db(self, credentials: Dict) -> None:
         """

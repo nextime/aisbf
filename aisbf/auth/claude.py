@@ -101,26 +101,31 @@ class ClaudeAuth:
     REDIRECT_URI = DEFAULT_REDIRECT_URI
     CLI_USER_AGENT = CLI_USER_AGENT
     
-    def __init__(self, credentials_file: Optional[str] = None, redirect_uri: Optional[str] = None):
+    def __init__(self, credentials_file: Optional[str] = None, redirect_uri: Optional[str] = None, skip_initial_load: bool = False, save_callback: Optional[callable] = None):
         """
         Initialize Claude authentication.
-        
+
         Args:
             credentials_file: Path to credentials file (default: ~/.aisbf/claude_credentials.json)
+            skip_initial_load: If True, do not load credentials from file on initialization
+            save_callback: Optional callback to save credentials instead of writing to file
         """
         if credentials_file:
             self.credentials_file = Path(credentials_file).expanduser()
         else:
             # Store credentials in ~/.aisbf/ directory (AISBF config directory)
             self.credentials_file = Path.home() / ".aisbf" / "claude_credentials.json"
-        
+
         # Allow overriding redirect URI for reverse proxy deployments
         self.redirect_uri = redirect_uri if redirect_uri is not None else DEFAULT_REDIRECT_URI
-        
-        self.tokens = self._load_credentials()
+
+        self.tokens = None
+        self._save_callback = save_callback
+        if not skip_initial_load:
+            self.tokens = self._load_credentials()
         self._oauth_state = None  # Store state for OAuth flow
         self._code_verifier = None  # Store verifier for OAuth flow
-        
+
         # Log TLS fingerprinting capability
         if HAS_CURL_CFFI:
             logger.info(f"ClaudeAuth initialized with TLS fingerprinting (curl_cffi) - credentials: {self.credentials_file}")
@@ -142,7 +147,25 @@ class ClaudeAuth:
         return None
     
     def _save_credentials(self, data: Dict):
-        """Save credentials to file with file locking to prevent race conditions."""
+        """
+        Save credentials:
+        - If save_callback is provided, use it (database save for user providers)
+        - Otherwise, save to file with file locking to prevent race conditions
+        """
+        self.tokens = data
+        
+        if self._save_callback:
+            # User provider: ONLY use callback, NO file fallback EVER
+            try:
+                self._save_callback({'tokens': data})
+                logger.info("ClaudeAuth: Saved credentials via callback")
+                return
+            except Exception as e:
+                logger.error(f"ClaudeAuth: Failed to save credentials to database: {e}")
+                # DO NOT FALLBACK TO FILE SAVE FOR REGULAR USERS
+                raise
+        
+        # Admin/global provider ONLY: save to file
         try:
             self.tokens = data
             # Store id_token if received (contains account info)

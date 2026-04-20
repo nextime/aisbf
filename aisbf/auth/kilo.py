@@ -40,18 +40,21 @@ class KiloOAuth2:
     Supports authentication with Kilo Gateway at https://api.kilo.ai.
     """
     
-    def __init__(self, credentials_file: Optional[str] = None, api_base: Optional[str] = None):
+    def __init__(self, credentials_file: Optional[str] = None, api_base: Optional[str] = None, skip_initial_load: bool = False, save_callback: Optional[callable] = None):
         """
         Initialize Kilo OAuth2 client.
         
         Args:
             credentials_file: Path to credentials JSON file (default: ~/.kilo_credentials.json)
             api_base: Base URL for Kilo API (default: https://api.kilo.ai)
+            skip_initial_load: If True, do not load credentials from file on initialization
         """
         self.credentials_file = os.path.expanduser(credentials_file) if credentials_file else os.path.expanduser("~/.kilo_credentials.json")
         self.api_base = api_base or os.environ.get("KILO_API_URL", "https://api.kilo.ai")
         self.credentials = None
-        self._load_credentials()
+        self._save_callback = save_callback
+        if not skip_initial_load:
+            self._load_credentials()
     
     def _load_credentials(self) -> None:
         """Load credentials from file if it exists."""
@@ -66,17 +69,33 @@ class KiloOAuth2:
     
     def _save_credentials(self, credentials: Dict[str, Any]) -> None:
         """
-        Save credentials to file with secure permissions.
-        
+        Save credentials:
+        - If save_callback is provided, use it (database save for user providers)
+        - Otherwise, save to file with secure permissions (admin/global providers)
+
         Args:
             credentials: Credentials dict to save
         """
+        self.credentials = credentials
+        
+        if self._save_callback:
+            # User provider: ONLY use callback, NO file fallback EVER
+            try:
+                self._save_callback(credentials)
+                logger.info(f"KiloOAuth2: Saved credentials via callback")
+                return
+            except Exception as e:
+                logger.error(f"KiloOAuth2: Failed to save credentials to database: {e}")
+                # DO NOT FALLBACK TO FILE SAVE FOR REGULAR USERS
+                raise
+        
+        # Admin/global provider ONLY: save to file
         try:
             # Ensure directory exists
             cred_dir = os.path.dirname(self.credentials_file)
             if cred_dir:  # Only create if there's a directory component
                 os.makedirs(cred_dir, exist_ok=True)
-            
+
             # Write credentials
             with open(self.credentials_file, 'w') as f:
                 json.dump(credentials, f, indent=2)

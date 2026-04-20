@@ -3786,10 +3786,8 @@ async def dashboard_providers(request: Request):
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         
-        # Convert to the format expected by the frontend
-        providers_data = {}
-        for provider in user_providers:
-            providers_data[provider['provider_id']] = provider['config']
+        # Always pass raw user providers format to the template (array)
+        providers_data = user_providers
     
     # Check for success parameter
     success = request.query_params.get('success')
@@ -4020,9 +4018,6 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             )
         else:
             success_msg = "Configuration saved successfully!"
-            from aisbf.database import get_database
-            db = DatabaseRegistry.get_config_database()
-            user_providers = db.get_user_providers(current_user_id)
             
             return templates.TemplateResponse(
                 request=request,
@@ -4031,7 +4026,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "user_providers_json": json.dumps(user_providers),
+                    "user_providers_json": json.dumps(providers_data),
                     "user_id": current_user_id,
                     "success": success_msg
                 }
@@ -4101,20 +4096,19 @@ async def dashboard_providers_get_models(request: Request):
                 "error": "provider_key is required"
             }, status_code=400)
         
-        # Check if provider exists in config
-        if not config or provider_key not in config.providers:
-            return JSONResponse({
-                "success": False,
-                "error": f"Provider '{provider_key}' not found in configuration"
-            }, status_code=404)
+        # Get user ID from session
+        current_user_id = request.session.get('user_id')
         
-        # Get provider handler
+        # Get provider handler - pass user_id to automatically handle user-specific providers
         from aisbf.providers import get_provider_handler
         
-        provider_config = config.providers[provider_key]
-        api_key = provider_config.api_key if hasattr(provider_config, 'api_key') else None
-        
-        handler = get_provider_handler(provider_key, api_key)
+        try:
+            handler = get_provider_handler(provider_key, user_id=current_user_id)
+        except ValueError as e:
+            return JSONResponse({
+                "success": False,
+                "error": str(e)
+            }, status_code=404)
         
         # Fetch models from provider
         models_result = await handler.get_models()
@@ -6131,14 +6125,28 @@ async def dashboard_provider_file_delete(
 @app.get("/dashboard/providers/{provider_name}/auth/check")
 async def dashboard_provider_auth_check(request: Request, provider_name: str):
     """Check OAuth authentication status for a provider"""
-    auth_check = require_admin(request)
+    auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
 
     try:
-        # Load current provider configuration
-        config = Config()
-        provider_config = config.providers.get(provider_name)
+        # Get user ID from session
+        current_user_id = request.session.get('user_id')
+        
+        # Load provider configuration
+        provider_config = None
+        
+        if current_user_id is None:
+            # Admin: check global config
+            global_config = Config()
+            provider_config = global_config.providers.get(provider_name)
+        else:
+            # Regular user: get from user providers
+            from aisbf.database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+            user_provider = db.get_user_provider(current_user_id, provider_name)
+            if user_provider:
+                provider_config = user_provider['config']
 
         if not provider_config:
             return JSONResponse(
@@ -6146,11 +6154,19 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 content={"authenticated": False, "error": f"Provider '{provider_name}' not found"}
             )
 
-        provider_type = provider_config.type
+        # Handle both dict (user providers) and object (global providers)
+        if isinstance(provider_config, dict):
+            provider_type = provider_config.get('type')
+        else:
+            provider_type = provider_config.type
 
         if provider_type == 'claude':
             from aisbf.auth.claude import ClaudeAuth
-            claude_config = provider_config.claude_config or {}
+            # Handle dict vs object
+            if isinstance(provider_config, dict):
+                claude_config = provider_config.get('claude_config', {})
+            else:
+                claude_config = provider_config.claude_config or {}
             auth = ClaudeAuth(credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'))
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
@@ -6160,7 +6176,11 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
 
         elif provider_type == 'kilocode':
             from aisbf.auth.kilo import KiloOAuth2
-            kilo_config = provider_config.kilo_config or {}
+            # Handle dict vs object
+            if isinstance(provider_config, dict):
+                kilo_config = provider_config.get('kilo_config', {})
+            else:
+                kilo_config = provider_config.kilo_config or {}
             auth = KiloOAuth2(credentials_file=kilo_config.get('credentials_file', '~/.kilo_credentials.json'))
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
@@ -6172,7 +6192,11 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
 
         elif provider_type == 'qwen':
             from aisbf.auth.qwen import QwenOAuth2
-            qwen_config = provider_config.qwen_config or {}
+            # Handle dict vs object
+            if isinstance(provider_config, dict):
+                qwen_config = provider_config.get('qwen_config', {})
+            else:
+                qwen_config = provider_config.qwen_config or {}
             auth = QwenOAuth2(credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'))
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
@@ -6185,7 +6209,11 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
 
         elif provider_type == 'codex':
             from aisbf.auth.codex import CodexOAuth2
-            codex_config = provider_config.codex_config or {}
+            # Handle dict vs object
+            if isinstance(provider_config, dict):
+                codex_config = provider_config.get('codex_config', {})
+            else:
+                codex_config = provider_config.codex_config or {}
             auth = CodexOAuth2(credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'))
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
@@ -6388,8 +6416,9 @@ async def dashboard_user_tokens_delete(request: Request, token_id: int):
 
     try:
         db.delete_user_api_token(user_id, token_id)
-        }
-    )
+        return JSONResponse(content={"success": True})
+    except Exception as e:
+        return JSONResponse(status_code=500, content={"error": str(e)})
 
 @app.get("/dashboard/response-cache/stats")
 async def dashboard_response_cache_stats(request: Request):
@@ -12047,9 +12076,7 @@ async def dashboard_claude_auth_start(request: Request):
         from aisbf.auth.claude import ClaudeAuth
         
         # Create auth instance
-        auth = ClaudeAuth()
-        # Override credentials file if specified
-        auth.credentials_file = Path(credentials_file).expanduser()
+        auth = ClaudeAuth(credentials_file=credentials_file, skip_initial_load=True)
         
         # Generate PKCE challenge
         verifier, challenge = auth._generate_pkce()
@@ -12366,7 +12393,7 @@ async def dashboard_kilo_auth_start(request: Request):
         from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
-        auth = KiloOAuth2(credentials_file=credentials_file)
+        auth = KiloOAuth2(credentials_file=credentials_file, skip_initial_load=True)
         
         # Initiate device authorization (async method)
         device_auth = await auth.initiate_device_auth()
@@ -12437,7 +12464,7 @@ async def dashboard_kilo_auth_poll(request: Request):
         from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
-        auth = KiloOAuth2(credentials_file=credentials_file)
+        auth = KiloOAuth2(credentials_file=credentials_file, skip_initial_load=True)
         
         # Poll device authorization status (async method)
         result = await auth.poll_device_auth(device_code)
@@ -12645,7 +12672,7 @@ async def dashboard_kilo_auth_logout(request: Request):
         from aisbf.auth.kilo import KiloOAuth2
         
         # Create auth instance
-        auth = KiloOAuth2(credentials_file=credentials_file)
+        auth = KiloOAuth2(credentials_file=credentials_file, skip_initial_load=True)
         
         # Logout (clear credentials)
         auth.logout()
@@ -12687,8 +12714,8 @@ async def dashboard_codex_auth_start(request: Request):
         from aisbf.auth.codex import CodexOAuth2
         
         # Create auth instance
-        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
-        
+        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer, skip_initial_load=True)
+
         # Request device code (returns immediately)
         device_info = await auth.request_device_code_flow()
         
@@ -12759,7 +12786,7 @@ async def dashboard_codex_auth_poll(request: Request):
         from aisbf.auth.codex import CodexOAuth2
         
         # Create auth instance
-        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer)
+        auth = CodexOAuth2(credentials_file=credentials_file, issuer=issuer, skip_initial_load=True)
         
         # Set device auth info on the instance (required for poll_device_code_completion)
         auth._device_auth_id = device_auth_id
@@ -13046,10 +13073,10 @@ async def dashboard_qwen_auth_start(request: Request):
         
         # Import QwenOAuth2
         from aisbf.auth.qwen import QwenOAuth2
-        
+
         # Create auth instance
-        auth = QwenOAuth2(credentials_file=credentials_file)
-        
+        auth = QwenOAuth2(credentials_file=credentials_file, skip_initial_load=True)
+
         logger.info(f"QwenOAuth2: Requesting device code for provider: {provider_key}")
         
         # Request device code
@@ -13125,7 +13152,7 @@ async def dashboard_qwen_auth_poll(request: Request):
         from aisbf.auth.qwen import QwenOAuth2
         
         # Create auth instance
-        auth = QwenOAuth2(credentials_file=credentials_file)
+        auth = QwenOAuth2(credentials_file=credentials_file, skip_initial_load=True)
         
         # Poll for token - returns token dict if approved, None if still pending
         result = await auth.poll_device_token(device_code, code_verifier)

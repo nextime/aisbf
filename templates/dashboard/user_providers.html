@@ -134,14 +134,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block extra_js %}
 <script>
 let providersData = {};
+let expandedProviders = new Set();
 let rawProviders = {{ user_providers_json | safe }};
 
 // Convert user providers format to the format expected by the UI
 rawProviders.forEach(provider => {
     providersData[provider.provider_id] = provider.config;
 });
-
-let expandedProviders = new Set();
 
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
 const CHUNK_SIZE = 512 * 1024;
