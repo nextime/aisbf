@@ -1,360 +1,451 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
 {% extends "base.html" %}
 
 {% block title %}My Autoselects - AISBF{% endblock %}
 
 {% block content %}
-<div class="container">
-    <h1>My Autoselects</h1>
-    <p>Manage your personal autoselect configurations</p>
+<h2 style="margin-bottom: 30px;">My Autoselect Configuration</h2>
 
-    {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
-    {% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
 
-    {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endif %}
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
 
-    <div class="card">
-        <h2>Autoselect Configurations</h2>
-        <div id="autoselects-list">
-            <!-- Autoselects will be loaded here -->
-        </div>
-        <button class="btn btn-primary" onclick="showAddAutoselectModal()">Add New Autoselect</button>
-        <button class="btn btn-success" onclick="applyChanges()" style="margin-left: 10px;">✓ Apply Changes</button>
-    </div>
+<div id="autoselect-list" style="margin-bottom: 20px;">
+    <!-- Autoselect list will be rendered here -->
 </div>
 
-<!-- Modal for adding/editing autoselects -->
-<div id="autoselect-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="modal-title">Add Autoselect</h3>
-            <button class="close-btn" onclick="closeModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-            <form id="autoselect-form">
-                <div class="form-group">
-                    <label for="autoselect-name">Autoselect Name:</label>
-                    <input type="text" id="autoselect-name" required>
-                </div>
-                <div class="form-group">
-                    <label for="autoselect-config">Autoselect Configuration (JSON):</label>
-                    <textarea id="autoselect-config" rows="20" placeholder='{"model_name": "autoselect-name", "description": "My autoselect config", "fallback": "provider/model"}'></textarea>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
+<button type="button" class="btn" onclick="addAutoselect()" style="margin-top: 20px;">Add Autoselect</button>
+<div style="display: flex; gap: 10px; margin-top: 20px;">
+    <button type="button" class="btn" onclick="saveAutoselect()">Save Configuration</button>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
 <script>
-let autoselects = {{ user_autoselects_json | safe }};
-let currentEditingIndex = -1;
+const autoselectData = {
+    config: {{ autoselect_json | safe }},
+    rotations: {{ available_rotations | safe }},
+    models: {{ available_models | safe }},
+    saveUrl: "{{ url_for(request, '/dashboard/autoselect') }}",
+    successUrl: "{{ url_for(request, '/dashboard/autoselect?success=1') }}"
+};
+let autoselectConfig = autoselectData.config;
+let availableRotations = autoselectData.rotations;
+let availableModels = autoselectData.models;
+let expandedAutoselects = new Set();
 
-function renderAutoselects() {
-    const container = document.getElementById('autoselects-list');
+function renderAutoselectList() {
+    const container = document.getElementById('autoselect-list');
     container.innerHTML = '';
-
-    if (autoselects.length === 0) {
-        container.innerHTML = '<p class="empty-state">No autoselects configured yet. Click "Add New Autoselect" to get started.</p>';
+    
+    if (!autoselectConfig || Object.keys(autoselectConfig).length === 0) {
+        container.innerHTML = '<p style="color: #a0a0a0;">No autoselect configurations defined</p>';
         return;
     }
-
-    autoselects.forEach((autoselect, index) => {
-        const div = document.createElement('div');
-        div.className = 'autoselect-item';
-        div.innerHTML = `
-            <div class="autoselect-header">
-                <h3>${autoselect.autoselect_id}</h3>
-                <div class="autoselect-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="editAutoselect(${index})">Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteAutoselect('${autoselect.autoselect_id}')">Delete</button>
+    
+    Object.entries(autoselectConfig).forEach(([key, autoselect]) => {
+        const autoselectItem = document.createElement('div');
+        autoselectItem.className = 'autoselect-item';
+        autoselectItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+        
+        const isExpanded = expandedAutoselects.has(key);
+        const modelCount = autoselect.available_models ? autoselect.available_models.length : 0;
+        
+        autoselectItem.innerHTML = `
+            <div class="autoselect-header" onclick="toggleAutoselect('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
+                    <strong style="font-size: 16px;">${autoselect.model_name || key}</strong>
+                    <span style="color: #a0a0a0; font-size: 14px;">(${modelCount} available model${modelCount !== 1 ? 's' : ''})</span>
                 </div>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
             </div>
-            <div class="autoselect-details">
-                <p><strong>Created:</strong> ${new Date(autoselect.created_at).toLocaleString()}</p>
-                <p><strong>Last Updated:</strong> ${new Date(autoselect.updated_at).toLocaleString()}</p>
-                <details>
-                    <summary>Configuration (JSON)</summary>
-                    <pre>${JSON.stringify(autoselect.config, null, 2)}</pre>
-                </details>
+            <div id="autoselect-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+                <!-- Details will be rendered here -->
             </div>
         `;
-        container.appendChild(div);
-    });
-}
-
-function showAddAutoselectModal() {
-    currentEditingIndex = -1;
-    document.getElementById('modal-title').textContent = 'Add Autoselect';
-    document.getElementById('autoselect-name').value = '';
-    document.getElementById('autoselect-config').value = '{"model_name": "my-autoselect", "description": "My autoselect configuration", "fallback": "provider/model"}';
-    document.getElementById('autoselect-modal').style.display = 'block';
-}
-
-function editAutoselect(index) {
-    currentEditingIndex = index;
-    const autoselect = autoselects[index];
-    document.getElementById('modal-title').textContent = 'Edit Autoselect';
-    document.getElementById('autoselect-name').value = autoselect.autoselect_id;
-    document.getElementById('autoselect-name').readOnly = true;
-    document.getElementById('autoselect-config').value = JSON.stringify(autoselect.config, null, 2);
-    document.getElementById('autoselect-modal').style.display = 'block';
-}
-
-function closeModal() {
-    document.getElementById('autoselect-modal').style.display = 'none';
-    document.getElementById('autoselect-name').readOnly = false;
-    currentEditingIndex = -1;
-}
-
-function deleteAutoselect(autoselectName) {
-    if (!confirm(`Are you sure you want to delete the autoselect "${autoselectName}"? This action cannot be undone.`)) return;
-
-    fetch('{{ url_for(request, "/dashboard/user/autoselects") }}/' + encodeURIComponent(autoselectName), {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    }).then(response => {
-        if (response.ok) {
-            location.reload();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Failed to delete autoselect');
-            });
-        }
-    }).catch(error => {
-        alert('Error: ' + error.message);
-    });
-}
-
-// Handle form submission
-document.getElementById('autoselect-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    const autoselectName = document.getElementById('autoselect-name').value.trim();
-    const configText = document.getElementById('autoselect-config').value.trim();
-
-    if (!autoselectName) {
-        alert('Autoselect name is required');
-        return;
-    }
-
-    if (!configText) {
-        alert('Autoselect configuration is required');
-        return;
-    }
-
-    let configObj;
-    try {
-        configObj = JSON.parse(configText);
-    } catch (e) {
-        alert('Invalid JSON configuration: ' + e.message);
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('autoselect_name', autoselectName);
-    formData.append('autoselect_config', JSON.stringify(configObj));
-
-    const url = '{{ url_for(request, "/dashboard/user/autoselects") }}';
-    const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
-
-    fetch(url, {
-        method: method,
-        body: formData
-    }).then(response => {
-        if (response.ok) {
-            closeModal();
-            location.reload();
-        } else {
-            return response.text().then(text => {
-                throw new Error(text || 'Failed to save autoselect');
-            });
-        }
-    }).catch(error => {
-        alert('Error: ' + error.message);
-    });
-});
-
-async function applyChanges() {
-    const button = event.target;
-    const originalText = button.innerHTML;
-    
-    try {
-        button.innerHTML = '🔄 Reloading...';
-        button.disabled = true;
         
-        const response = await fetch('{{ url_for(request, "/dashboard/user/reload-config") }}', {
+        container.appendChild(autoselectItem);
+        
+        if (isExpanded) {
+            renderAutoselectDetails(key);
+        }
+    });
+}
+
+function toggleAutoselect(key) {
+    if (expandedAutoselects.has(key)) {
+        expandedAutoselects.delete(key);
+    } else {
+        expandedAutoselects.add(key);
+    }
+    renderAutoselectList();
+}
+
+function renderAutoselectDetails(autoselectKey) {
+    const container = document.getElementById(`autoselect-details-${autoselectKey}`);
+    const autoselect = autoselectConfig[autoselectKey];
+    
+    // Default to "internal" if selection_model is not set
+    const selectionValue = autoselect.selection_model || 'internal';
+    
+    // Build selection model options: internal + rotations + provider models
+    let selectionOptions = `<option value="internal" ${selectionValue === 'internal' ? 'selected' : ''}>internal (Use configured internal model)</option>`;
+    selectionOptions += '<optgroup label="Rotations">';
+    selectionOptions += availableRotations.map(r =>
+        `<option value="${r}" ${selectionValue === r ? 'selected' : ''}>${r}</option>`
+    ).join('');
+    selectionOptions += '</optgroup>';
+    selectionOptions += '<optgroup label="Provider Models">';
+    selectionOptions += availableModels.map(m =>
+        `<option value="${m.id}" ${selectionValue === m.id ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+    selectionOptions += '</optgroup>';
+    
+    // Build fallback options: rotations + provider models
+    let fallbackOptions = '<optgroup label="Rotations">';
+    fallbackOptions += availableRotations.map(r =>
+        `<option value="${r}" ${autoselect.fallback === r ? 'selected' : ''}>${r}</option>`
+    ).join('');
+    fallbackOptions += '</optgroup>';
+    fallbackOptions += '<optgroup label="Provider Models">';
+    fallbackOptions += availableModels.map(m =>
+        `<option value="${m.id}" ${autoselect.fallback === m.id ? 'selected' : ''}>${m.name}</option>`
+    ).join('');
+    fallbackOptions += '</optgroup>';
+    
+    container.innerHTML = `
+        <div class="form-group">
+            <label>Model Name</label>
+            <input type="text" value="${autoselect.model_name}" onchange="updateAutoselect('${autoselectKey}', 'model_name', this.value)" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Capabilities (comma-separated)</label>
+            <input type="text" value="${autoselect.capabilities ? autoselect.capabilities.join(', ') : ''}" onchange="updateAutoselectCapabilities('${autoselectKey}', this.value)" placeholder="e.g., t2t, reasoning, multimodal">
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'nsfw', this.checked)">
+                NSFW
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'privacy', this.checked)">
+                Privacy
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_nsfw', this.checked)">
+                Classify NSFW
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_nsfw setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_privacy', this.checked)">
+                Classify Privacy
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_privacy setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${autoselect.classify_semantic ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_semantic', this.checked)">
+                Classify Semantic
+            </label>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_semantic setting for this autoselection</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Description</label>
+            <textarea onchange="updateAutoselect('${autoselectKey}', 'description', this.value)" style="min-height: 60px;">${autoselect.description || ''}</textarea>
+        </div>
+        
+        <div class="form-group">
+            <label>Selection Model (Model to use for analysis)</label>
+            <select onchange="updateAutoselect('${autoselectKey}', 'selection_model', this.value)" required>
+                <option value="">Select model...</option>
+                ${selectionOptions}
+            </select>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose "internal" to use the configured internal model, or select a rotation/provider model</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Fallback Model (Default if selection fails)</label>
+            <select onchange="updateAutoselect('${autoselectKey}', 'fallback', this.value)" required>
+                <option value="">Select model...</option>
+                ${fallbackOptions}
+            </select>
+            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
+        </div>
+        
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Default Settings</h4>
+        <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Default values for models in this autoselect (optional - auto-derived from first model if not set)</p>
+        
+        <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
+            <div class="form-group">
+                <label>Default Rate Limit (seconds)</label>
+                <input type="number" value="${autoselect.default_rate_limit || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Max Request Tokens</label>
+                <input type="number" value="${autoselect.default_max_request_tokens || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Context Size</label>
+                <input type="number" value="${autoselect.default_context_size || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPM</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPM || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per minute limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPH</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPH || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per hour limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Rate Limit TPD</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPD || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per day limit</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Default Condense Context</label>
+                <input type="number" value="${autoselect.default_condense_context || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Trigger context condensation at this token count</small>
+            </div>
+        </div>
+        
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Available Models</h4>
+        <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Define which models can be selected and their descriptions for AI analysis</p>
+        <div id="models-${autoselectKey}"></div>
+        <button type="button" class="btn btn-secondary" onclick="addAutoselectModel('${autoselectKey}')" style="margin-top: 10px;">Add Model</button>
+    `;
+    
+    renderAutoselectModels(autoselectKey);
+}
+
+function renderAutoselectModels(autoselectKey) {
+    const container = document.getElementById(`models-${autoselectKey}`);
+    const autoselect = autoselectConfig[autoselectKey];
+    
+    if (!autoselect.available_models || autoselect.available_models.length === 0) {
+        container.innerHTML = '<p style="color: #a0a0a0;">No models configured</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    autoselect.available_models.forEach((model, index) => {
+        const modelDiv = document.createElement('div');
+        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        
+        const modelOptions = availableModels.map(m =>
+            `<option value="${m.id}" ${model.model_id === m.id ? 'selected' : ''}>${m.name}</option>`
+        ).join('');
+        
+        modelDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong>Model ${index + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${autoselectKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Model ID (Rotation or Provider Model)</label>
+                <select onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'model_id', this.value)" required>
+                    <option value="">Select model...</option>
+                    ${modelOptions}
+                </select>
+                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
+            </div>
+            
+            <div class="form-group">
+                <label>Description (Used by AI to select appropriate model)</label>
+                <textarea onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'description', this.value)" style="min-height: 80px;" required>${model.description || ''}</textarea>
+                <small style="color: #666; font-size: 12px;">Be specific about when this model should be used (e.g., "Best for programming, code generation, debugging")</small>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'nsfw', this.checked)">
+                    NSFW
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'privacy', this.checked)">
+                    Privacy
+                </label>
+            </div>
+        `;
+        
+        container.appendChild(modelDiv);
+    });
+}
+
+function addAutoselect() {
+    const key = prompt('Enter autoselect key (e.g., "autoselect", "smart-select"):');
+    if (!key) {
+        return;
+    }
+    
+    if (autoselectConfig[key]) {
+        alert('Autoselect key already exists');
+        return;
+    }
+    
+    autoselectConfig[key] = {
+        model_name: key,
+        description: '',
+        selection_model: '',
+        fallback: '',
+        available_models: []
+    };
+    
+    expandedAutoselects.add(key);
+    renderAutoselectList();
+}
+
+function removeAutoselect(key) {
+    if (confirm(`Remove autoselect "${key}"?`)) {
+        delete autoselectConfig[key];
+        expandedAutoselects.delete(key);
+        renderAutoselectList();
+    }
+}
+
+function updateAutoselect(key, field, value) {
+    autoselectConfig[key][field] = value;
+}
+
+function updateAutoselectCapabilities(autoselectKey, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        autoselectConfig[autoselectKey].capabilities = null;
+        return;
+    }
+    
+    // Split by comma and clean up
+    autoselectConfig[autoselectKey].capabilities = 
+        trimmed.split(',').map(s => s.trim()).filter(s => s);
+}
+
+function addAutoselectModel(autoselectKey) {
+    if (!autoselectConfig[autoselectKey].available_models) {
+        autoselectConfig[autoselectKey].available_models = [];
+    }
+    
+    autoselectConfig[autoselectKey].available_models.push({
+        model_id: '',
+        description: ''
+    });
+    
+    renderAutoselectModels(autoselectKey);
+}
+
+function removeAutoselectModel(autoselectKey, index) {
+    if (confirm('Remove this model?')) {
+        autoselectConfig[autoselectKey].available_models.splice(index, 1);
+        renderAutoselectModels(autoselectKey);
+    }
+}
+
+function updateAutoselectModel(autoselectKey, index, field, value) {
+    autoselectConfig[autoselectKey].available_models[index][field] = value;
+}
+
+async function saveAutoselect() {
+    try {
+        const response = await fetch(autoselectData.saveUrl, {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
-            }
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'config=' + encodeURIComponent(JSON.stringify(autoselectConfig, null, 2))
         });
         
         if (response.ok) {
-            button.innerHTML = '✓ Applied Successfully!';
-            button.style.background = '#10b981';
-            
-            setTimeout(() => {
-                button.innerHTML = originalText;
-                button.style.background = '';
-                button.disabled = false;
-            }, 2000);
+            window.location.href = autoselectData.successUrl;
         } else {
-            const data = await response.json();
-            throw new Error(data.error || 'Failed to apply changes');
+            alert('Error saving configuration');
         }
     } catch (error) {
-        button.innerHTML = '✗ Error';
-        button.style.background = '#ef4444';
-        
-        setTimeout(() => {
-            button.innerHTML = originalText;
-            button.style.background = '';
-            button.disabled = false;
-        }, 2000);
-        
-        alert('Error applying changes: ' + error.message);
+        alert('Error: ' + error.message);
     }
 }
 
-renderAutoselects();
+// Initial render
+renderAutoselectList();
 </script>
 
 <style>
 .autoselect-item {
-    background: #1a1a2e;
-    padding: 1rem;
-    margin: 1rem 0;
-    border-radius: 8px;
+    animation: fadeIn 0.3s;
 }
 
-.autoselect-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1rem;
-}
-
-.autoselect-header h3 {
-    margin: 0;
-}
-
-.autoselect-actions {
-    display: flex;
-    gap: 0.5rem;
-}
-
-.autoselect-details p {
-    margin: 0.5rem 0;
-}
-
-.autoselect-details pre {
+.autoselect-header:hover {
     background: #0f3460;
-    padding: 1rem;
-    border-radius: 4px;
-    overflow-x: auto;
-    white-space: pre-wrap;
-    word-wrap: break-word;
 }
 
-.empty-state {
-    text-align: center;
-    color: #a0a0a0;
-    padding: 2rem;
-}
-
-.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-.modal-content {
-    background: #1a1a2e;
-    border-radius: 8px;
-    width: 90%;
-    max-width: 600px;
-    max-height: 80vh;
-    overflow-y: auto;
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    border-bottom: 1px solid #0f3460;
-}
-
-.modal-header h3 {
-    margin: 0;
-}
-
-.close-btn {
-    background: none;
-    border: none;
-    color: #e0e0e0;
-    font-size: 1.5rem;
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-body {
-    padding: 1rem;
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
 }
 
 .form-group {
-    margin-bottom: 1rem;
+    margin-bottom: 15px;
 }
 
 .form-group label {
     display: block;
-    margin-bottom: 0.5rem;
+    margin-bottom: 5px;
     font-weight: 500;
-    color: #e0e0e0;
 }
 
 .form-group input[type="text"],
-.form-group textarea {
+.form-group textarea,
+.form-group select {
     width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    background: #16213e;
-    color: #e0e0e0;
-    font-family: monospace;
+    padding: 8px;
+    border: 1px solid #ddd;
+    border-radius: 3px;
     font-size: 14px;
 }
 
-.form-group textarea {
-    resize: vertical;
-    min-height: 300px;
-}
-
-.form-actions {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
-    margin-top: 1rem;
+.form-group input[type="checkbox"] {
+    margin-right: 5px;
 }
 </style>
 {% endblock %}

@@ -1,8 +1,8 @@
 #!/bin/bash
-# Release Verification Script for AISBF v0.99.26
+# Release Verification Script for AISBF v0.99.37
 
 echo "================================================================================"
-echo "                    AISBF v0.99.26 Release Verification"
+echo "                    AISBF v0.99.37 Release Verification"
 echo "================================================================================"
 echo
 
@@ -26,7 +26,7 @@ check() {
 
 # 1. Check version numbers
 echo "1. Checking version numbers..."
-VERSION="0.99.26"
+VERSION="0.99.37"
 
 grep -q "version=\"$VERSION\"" setup.py
 check "setup.py version is $VERSION"

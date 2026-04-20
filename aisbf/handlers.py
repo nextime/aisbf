@@ -1971,10 +1971,15 @@ class RotationHandler:
         # Load user-specific configs if user_id is provided
         if user_id:
             self._load_user_configs()
+            # Override config to only use user-specific configs with NO global fallback
+            self.rotations = {}
+            for rotation in self.user_rotations:
+                self.rotations[rotation['rotation_id']] = rotation['config']
         else:
             self.user_providers = {}
             self.user_rotations = {}
             self.user_autoselects = {}
+            self.rotations = self.config.rotations if hasattr(self.config, 'rotations') else {}
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
@@ -1988,16 +1993,10 @@ class RotationHandler:
         """Reload user-specific configurations from database"""
         if self.user_id:
             self._load_user_configs()
-
-    def reload_user_configs(self):
-        """Reload user-specific configurations from database"""
-        if self.user_id:
-            self._load_user_configs()
-
-    def reload_user_configs(self):
-        """Reload user-specific configurations from database"""
-        if self.user_id:
-            self._load_user_configs()
+            # Refresh rotations dict after reload
+            self.rotations = {}
+            for rotation in self.user_rotations:
+                self.rotations[rotation['rotation_id']] = rotation['config']
 
     def _get_provider_type(self, provider_id: str) -> str:
         """Get the provider type from configuration"""
@@ -2101,7 +2100,9 @@ class RotationHandler:
         model_id = model_config.get('model_id') or model_config.get('name') or model_config.get('id', '')
         
         # Try to get defaults from the referenced rotation (first model in the rotation)
-        if model_id in self.config.rotations:
+        if self.user_id and model_id in self.rotations:
+            rotation_config = self.rotations[model_id]
+        elif model_id in self.config.rotations:
             rotation_config = self.config.rotations[model_id]
             
             # Check each default field
@@ -2332,10 +2333,16 @@ class RotationHandler:
         logger.info(f"User ID: {self.user_id}")
 
         # Check for user-specific rotation config first
-        if self.user_id and rotation_id in self.user_rotations:
-            rotation_config = self.user_rotations[rotation_id]
-            logger.info(f"Using user-specific rotation config for {rotation_id}")
+        if self.user_id:
+            # Database user: ONLY use user-specific configs - NO global fallback
+            rotation_config = next((rot['config'] for rot in self.user_rotations if rot['rotation_id'] == rotation_id), None)
+            if rotation_config:
+                logger.info(f"Using user-specific rotation config for {rotation_id}")
+            else:
+                logger.error(f"User rotation {rotation_id} not found - NO global fallback")
+                raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found for this user")
         else:
+            # Admin user: use global config
             rotation_config = self.config.get_rotation(rotation_id)
             logger.info(f"Using global rotation config for {rotation_id}")
 
@@ -3857,10 +3864,15 @@ class AutoselectHandler:
         # Load user-specific configs if user_id is provided
         if user_id:
             self._load_user_configs()
+            # Override config to only use user-specific configs with NO global fallback
+            self.autoselects = {}
+            for autoselect in self.user_autoselects:
+                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
         else:
             self.user_providers = {}
             self.user_rotations = {}
             self.user_autoselects = {}
+            self.autoselects = self.config.autoselect if hasattr(self.config, 'autoselect') else {}
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
@@ -3869,6 +3881,15 @@ class AutoselectHandler:
         self.user_providers = db.get_user_providers(self.user_id)
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
+        
+    def reload_user_configs(self):
+        """Reload user-specific configurations from database"""
+        if self.user_id:
+            self._load_user_configs()
+            # Refresh autoselects dict after reload
+            self.autoselects = {}
+            for autoselect in self.user_autoselects:
+                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
 
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""
@@ -4158,9 +4179,9 @@ class AutoselectHandler:
                 
                 return model_id
             # Check if it's a rotation
-            elif selection_model in self.config.rotations:
+            elif (self.user_id and selection_model in self.rotations) or selection_model in self.config.rotations:
                 logger.info(f"Selection model '{selection_model}' is a rotation")
-                rotation_handler = RotationHandler()
+                rotation_handler = RotationHandler(user_id=self.user_id)
                 response = await rotation_handler.handle_rotation_request(selection_model, selection_request)
             # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
             elif '/' in selection_model:
@@ -4255,10 +4276,16 @@ class AutoselectHandler:
                 logger.warning(f"Response cache check failed: {cache_error}")
 
         # Check for user-specific autoselect config first
-        if self.user_id and autoselect_id in self.user_autoselects:
-            autoselect_config = self.user_autoselects[autoselect_id]
-            logger.info(f"Using user-specific autoselect config for {autoselect_id}")
+        if self.user_id:
+            # Database user: ONLY use user-specific configs - NO global fallback
+            autoselect_config = next((aut['config'] for aut in self.user_autoselects if aut['autoselect_id'] == autoselect_id), None)
+            if autoselect_config:
+                logger.info(f"Using user-specific autoselect config for {autoselect_id}")
+            else:
+                logger.error(f"User autoselect {autoselect_id} not found - NO global fallback")
+                raise HTTPException(status_code=400, detail=f"Autoselect {autoselect_id} not found for this user")
         else:
+            # Admin user: use global config
             autoselect_config = self.config.get_autoselect(autoselect_id)
             logger.info(f"Using global autoselect config for {autoselect_id}")
 
@@ -4560,9 +4587,9 @@ class AutoselectHandler:
             request_data['stream'] = True
             
             # Check if it's a rotation first
-            if selected_model_id in self.config.rotations:
+            if (self.user_id and selected_model_id in self.rotations) or selected_model_id in self.config.rotations:
                 logger.info(f"Proxying streaming request to rotation: {selected_model_id}")
-                rotation_handler = RotationHandler()
+                rotation_handler = RotationHandler(user_id=self.user_id)
                 response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
             # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
             elif '/' in selected_model_id:

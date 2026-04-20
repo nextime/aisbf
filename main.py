@@ -4198,8 +4198,16 @@ async def dashboard_rotations(request: Request):
         for rotation in user_rotations:
             rotations_data["rotations"][rotation['rotation_id']] = rotation['config']
     
-    # Get available providers
-    available_providers = list(config.providers.keys()) if config else []
+    # Get available providers - user-specific for database users
+    if is_config_admin:
+        # Admin: use global providers
+        available_providers = list(config.providers.keys()) if config else []
+    else:
+        # Database user: use ONLY their own providers
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        user_providers = db.get_user_providers(current_user_id)
+        available_providers = [p['provider_id'] for p in user_providers]
     
     # Check for success parameter
     success = request.query_params.get('success')
@@ -4218,7 +4226,7 @@ async def dashboard_rotations(request: Request):
         }
         )
     else:
-        # Database user: use user template with proper context
+        # Database user: use user template
         return templates.TemplateResponse(
             request=request,
             name="dashboard/user_rotations.html",
@@ -4226,9 +4234,8 @@ async def dashboard_rotations(request: Request):
             "request": request,
             "session": request.session,
             "__version__": __version__,
-            "user_rotations_json": json.dumps(rotations_data),
+            "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
-            "user_id": current_user_id,
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -4399,44 +4406,42 @@ async def dashboard_autoselect(request: Request):
         for autoselect in user_autoselects:
             autoselect_data[autoselect['autoselect_id']] = autoselect['config']
     
-    # Get available rotations
-    available_rotations = list(config.rotations.keys()) if config else []
-    
-    # Get available provider models
-    available_models = []
-    
-    # Add rotation IDs
-    for rotation_id in available_rotations:
-        available_models.append({
-            'id': rotation_id,
-            'name': f'{rotation_id} (rotation)',
-            'type': 'rotation'
-        })
-    
-    # Add provider models
-    providers_path = Path.home() / '.aisbf' / 'providers.json'
-    if not providers_path.exists():
-        providers_path = Path(__file__).parent / 'config' / 'providers.json'
-    
-    if providers_path.exists():
-        with open(providers_path) as f:
-            providers_config = json.load(f)
-            providers_data = providers_config.get('providers', {})
-            
-            for provider_id, provider in providers_data.items():
-                if 'models' in provider and isinstance(provider['models'], list):
-                    for model in provider['models']:
-                        model_id = f"{provider_id}/{model['name']}"
-                        available_models.append({
-                            'id': model_id,
-                            'name': f"{model_id} (provider model)",
-                            'type': 'provider'
-                        })
-    
     # Check for success parameter
     success = request.query_params.get('success')
     
     if is_config_admin:
+        # Admin: use global rotations and providers
+        available_rotations = list(config.rotations.keys()) if config else []
+        available_models = []
+        
+        # Add global rotation IDs
+        for rotation_id in available_rotations:
+            available_models.append({
+                'id': rotation_id,
+                'name': f'{rotation_id} (rotation)',
+                'type': 'rotation'
+            })
+        
+        # Add global provider models
+        providers_path = Path.home() / '.aisbf' / 'providers.json'
+        if not providers_path.exists():
+            providers_path = Path(__file__).parent / 'config' / 'providers.json'
+        
+        if providers_path.exists():
+            with open(providers_path) as f:
+                providers_config = json.load(f)
+                providers_data = providers_config.get('providers', {})
+                
+                for provider_id, provider in providers_data.items():
+                    if 'models' in provider and isinstance(provider['models'], list):
+                        for model in provider['models']:
+                            model_id = f"{provider_id}/{model['name']}"
+                            available_models.append({
+                                'id': model_id,
+                                'name': f"{model_id} (provider model)",
+                                'type': 'provider'
+                            })
+        
         # Config admin: use admin template
         return templates.TemplateResponse(
             request=request,
@@ -4451,16 +4456,16 @@ async def dashboard_autoselect(request: Request):
         }
         )
     else:
-        # Database user: use user template with proper context
+        # Database user: use ONLY their own rotations and providers
         from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
         
-        # For database users, get available user rotations
+        # Get only user's own rotations
         user_rotations = db.get_user_rotations(current_user_id)
         available_rotations = [rot['rotation_id'] for rot in user_rotations]
         
-        # For database users, get available user providers
+        # Get only user's own providers
         user_providers = db.get_user_providers(current_user_id)
         available_models = []
         
@@ -4483,21 +4488,22 @@ async def dashboard_autoselect(request: Request):
                         'name': f"{model_id} (provider model)",
                         'type': 'provider'
                     })
-        
-            return templates.TemplateResponse(
-                request=request,
-                name="dashboard/user_autoselects.html",
-                context={
-                "request": request,
-                "session": request.session,
-                "__version__": __version__,
-                "user_autoselects_json": json.dumps(autoselect_data),
-                "available_rotations": json.dumps(available_rotations),
-                "available_models": json.dumps(available_models),
-                "user_id": current_user_id,
-                "success": "Configuration saved successfully!" if success else None
-            }
-            )
+    
+        # Database user: use user template
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/user_autoselects.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "autoselect_json": json.dumps(autoselect_data),
+            "available_rotations": json.dumps(available_rotations),
+            "available_models": json.dumps(available_models),
+            "user_id": current_user_id,
+            "success": "Configuration saved successfully!" if success else None
+        }
+        )
 
 @app.post("/dashboard/autoselect")
 async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
