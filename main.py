@@ -12335,46 +12335,48 @@ async def dashboard_claude_auth_complete(request: Request):
         # Import ClaudeAuth
         from aisbf.auth.claude import ClaudeAuth
         
-        # Create auth instance
-        auth = ClaudeAuth()
-        auth.credentials_file = Path(credentials_file).expanduser()
+        # Only the ONE config admin (user_id=None from aisbf.json) saves to file
+        # All other users (including database admins) save to database
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
         
-        # Use the new exchange_code_for_tokens method with retry logic
-        # Pass state as the second parameter (required), verifier as third (optional)
-        success = auth.exchange_code_for_tokens(code, state, verifier)
-        
-        if success:
-            # Only the ONE config admin (user_id=None from aisbf.json) saves to file
-            # All other users (including database admins) save to database
-            current_user_id = request.session.get('user_id')
-            is_config_admin = current_user_id is None
+        save_callback = None
+        if not is_config_admin:
+            # For non-admin users, set up save_callback to save directly to database
+            provider_key = request.session.get('oauth2_provider')
             
-            if not is_config_admin:
-                # Non-config-admin user: save credentials to database
+            def save_callback(creds):
                 try:
                     from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
-                    provider_key = request.session.get('oauth2_provider')
                     if db and current_user_id and provider_key:
-                        # Read the credentials that were just saved to file
-                        credentials_path = Path(credentials_file).expanduser()
-                        if credentials_path.exists():
-                            with open(credentials_path, 'r') as f:
-                                db_credentials = json.load(f)
-                            
-                            # Save to database
-                            db.save_user_oauth2_credentials(
-                                user_id=current_user_id,
-                                provider_id=provider_key,
-                                auth_type='claude_oauth2',
-                                credentials=db_credentials
-                            )
-                            logger.info(f"ClaudeOAuth2: Saved credentials to database for user {current_user_id}")
-                            
-                            # Remove the file since we're using database storage for non-admin
-                            credentials_path.unlink(missing_ok=True)
+                        db.save_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_key,
+                            auth_type='claude_oauth2',
+                            credentials=creds
+                        )
+                        logger.info(f"ClaudeOAuth2: Saved credentials to database for user {current_user_id}")
                 except Exception as e:
                     logger.error(f"ClaudeOAuth2: Failed to save credentials to database: {e}")
+                    raise
+        
+        # Create auth instance with proper save_callback
+        auth = ClaudeAuth(
+            credentials_file=credentials_file,
+            skip_initial_load=True,
+            save_callback=save_callback
+        )
+        
+        # Use the new exchange_code_for_tokens method with retry logic
+        # Pass state as the second parameter (required), verifier as third (optional)
+        success = await auth.exchange_code_for_tokens(code, state, verifier)
+        
+        if success:
+            # Clear temporary file for non-admin users (it was never written when using save_callback)
+            if not is_config_admin:
+                credentials_path = Path(credentials_file).expanduser()
+                credentials_path.unlink(missing_ok=True)
             
             # Clear session data
             request.session.pop('oauth2_code', None)
