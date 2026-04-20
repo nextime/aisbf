@@ -13644,5 +13644,36 @@ Message:
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
 
+@app.get("/dashboard/tor/status")
+async def dashboard_tor_status(request: Request):
+    """Get Tor hidden service status"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    # Only admin can access Tor status
+    if request.session.get('role') != 'admin':
+        return JSONResponse({'success': False, 'error': 'Admin access required'}, status_code=403)
+    
+    try:
+        from aisbf.config import get_config
+        config = get_config()
+        
+        tor_enabled = config and hasattr(config, 'tor') and config.tor and config.tor.enabled
+        tor_running = tor_service is not None and tor_service.is_connected() if tor_service else False
+        
+        response = {
+            'enabled': tor_enabled,
+            'running': tor_running,
+            'onion_address': tor_service.onion_address if tor_service and tor_service.onion_address else None
+        }
+        
+        return JSONResponse(response)
+        
+    except Exception as e:
+        logger.error(f"Tor status error: {e}")
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+
 if __name__ == "__main__":
     main()
