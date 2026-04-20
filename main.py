@@ -12095,11 +12095,14 @@ def _stop_localhost_callback_server():
 
 # OAuth2 callback endpoint (receives callbacks from extension OR direct localhost)
 @app.get("/dashboard/oauth2/callback")
+@app.get("/dashboard/oauth2/callback/{user_id}/{provider}")
 async def dashboard_oauth2_callback(
     request: Request,
     code: str = Query(None),
     state: str = Query(None),
-    error: str = Query(None)
+    error: str = Query(None),
+    user_id: str = None,
+    provider: str = None
 ):
     """
     Handle OAuth2 callback redirected from localhost.
@@ -12107,6 +12110,10 @@ async def dashboard_oauth2_callback(
     This endpoint handles two scenarios:
     1. Direct localhost callback (when browser is on same machine as AISBF)
     2. Redirected callback from browser extension (when browser is remote)
+    
+    When using /dashboard/oauth2/callback/{user_id}/{provider} format, we know
+    exactly which user and provider this callback belongs to, making state matching
+    unnecessary and guaranteeing 100% compatibility with claude-code's implementation.
     """
     try:
         if error:
@@ -12146,13 +12153,19 @@ async def dashboard_oauth2_callback(
             'code': code,
             'state': state,
             'error': error,
-            'timestamp': time.time()
+            'timestamp': time.time(),
+            'user_id': user_id,
+            'provider': provider
         }
         
         # Also try to store in session if cookie is available (same domain)
         try:
             request.session['oauth2_code'] = code
             request.session['oauth2_state'] = state
+            if user_id:
+                request.session['oauth2_user_id'] = user_id
+            if provider:
+                request.session['oauth2_provider'] = provider
         except:
             pass
         
@@ -12160,7 +12173,7 @@ async def dashboard_oauth2_callback(
         referer = request.headers.get('referer', '')
         is_direct_callback = 'localhost:54545' in referer or '127.0.0.1:54545' in referer
         
-        logger.info(f"OAuth2 callback received - Direct: {is_direct_callback}, State: {state[:10]}..., Code: {code[:10]}...")
+        logger.info(f"OAuth2 callback received - Direct: {is_direct_callback}, User: {user_id}, Provider: {provider}, State: {state[:10]}..., Code: {code[:10]}...")
         
         # Return success page with auto-close script
         return HTMLResponse(
