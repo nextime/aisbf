@@ -1748,6 +1748,9 @@ async function confirmAddProvider() {
         };
     }
 
+    // Add to expanded providers so it automatically expands
+    expandedProviders.add(key);
+    
     cancelAddProvider();
     renderProvidersList();
 }
