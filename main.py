@@ -1699,7 +1699,7 @@ app.add_middleware(ProxyHeadersMiddleware)
 # Dashboard context middleware - adds is_aisbf_cloud and welcome_shown to all template contexts
 @app.middleware("http")
 async def dashboard_context_middleware(request: Request, call_next):
-    if request.url.path.startswith("/dashboard") and request.session.get('logged_in'):
+    if request.url.path.startswith("/dashboard") and 'session' in request.scope and request.session.get('logged_in'):
         # Set these values in request.state so they're available to all template renders
         is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
         is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
