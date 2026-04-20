@@ -35,7 +35,7 @@ class ContextManager:
     Manages context size and performs condensation when needed.
     """
     
-    def __init__(self, model_config: Dict, provider_handler=None, condensation_config=None):
+    def __init__(self, model_config: Dict, provider_handler=None, condensation_config=None, user_id=None):
         """
         Initialize the context manager.
         
@@ -43,12 +43,14 @@ class ContextManager:
             model_config: Model configuration dictionary containing context_size, condense_context, condense_method
             provider_handler: Optional provider handler for making summarization requests (fallback)
             condensation_config: Optional condensation configuration for dedicated provider/model/rotation
+            user_id: Optional user ID for user-specific prompt overrides
         """
         self.context_size = model_config.get('context_size')
         self.condense_context = model_config.get('condense_context', 0)
         self.condense_method = model_config.get('condense_method')
         self.provider_handler = provider_handler
         self.condensation_config = condensation_config or config.get_condensation()
+        self.user_id = user_id
         
         # Initialize condensation provider handler if configured
         self.condensation_handler = None
@@ -458,6 +460,15 @@ class ContextManager:
     def _load_system_prompt(self, method: str) -> str:
         """Load system prompt from markdown file"""
         from pathlib import Path
+        from .database import get_database
+        
+        # Check for user-specific prompt first if user_id is present
+        if self.user_id is not None:
+            db = get_database()
+            prompt_key = f'condensation_{method}'
+            user_prompt = db.get_user_prompt(self.user_id, prompt_key)
+            if user_prompt is not None:
+                return user_prompt
         
         # Try installed locations first
         installed_dirs = [

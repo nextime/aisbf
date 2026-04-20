@@ -436,7 +436,7 @@ class RequestHandler:
             
             # Apply context condensation if needed
             if context_config.get('condense_context', 0) > 0:
-                context_manager = ContextManager(context_config, handler, self.config.get_condensation())
+                context_manager = ContextManager(context_config, handler, self.config.get_condensation(), self.user_id)
                 if context_manager.should_condense(messages, model):
                     logger.info("Context condensation triggered")
                     messages = await context_manager.condense_context(messages, model)
@@ -2798,7 +2798,7 @@ class RotationHandler:
                 
                 # Apply context condensation if needed
                 if context_config.get('condense_context', 0) > 0:
-                    context_manager = ContextManager(context_config, handler, self.config.get_condensation())
+                    context_manager = ContextManager(context_config, handler, self.config.get_condensation(), self.user_id)
                     if context_manager.should_condense(messages, model_name):
                         logger.info("Context condensation triggered")
                         messages = await context_manager.condense_context(messages, model_name)
@@ -3894,6 +3894,15 @@ class AutoselectHandler:
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""
         if self._skill_file_content is None:
+            # Check for user-specific prompt first if user_id is present
+            if self.user_id is not None:
+                from .database import get_database
+                db = get_database()
+                user_prompt = db.get_user_prompt(self.user_id, 'autoselect')
+                if user_prompt is not None:
+                    self._skill_file_content = user_prompt
+                    return self._skill_file_content
+
             # Try installed locations first
             installed_dirs = [
                 Path('/usr/share/aisbf'),
