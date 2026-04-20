@@ -1,259 +1,1241 @@
+<!--
+Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
+
+This program is free software: you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation, either version 3 of the License, or
+(at your option) any later version.
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+-->
 {% extends "base.html" %}
 
-{% block title %}My Providers - AISBF{% endblock %}
+{% block title %}My Providers - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<div class="container">
-    <h1>My Providers</h1>
-    <p>Manage your personal provider configurations</p>
+<h2 style="margin-bottom: 30px;">My Providers</h2>
 
-    {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
-    {% endif %}
+{% if success %}
+<div class="alert alert-success">{{ success }}</div>
+{% endif %}
 
-    {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endif %}
+{% if error %}
+<div class="alert alert-error">{{ error }}</div>
+{% endif %}
 
-    <div class="card">
-        <h2>Provider Configurations</h2>
-        <div id="providers-list">
-            <!-- Providers will be loaded here -->
-        </div>
-        <button class="btn btn-primary" onclick="showAddProviderModal()">Add New Provider</button>
-        <button class="btn btn-success" onclick="applyChanges()" style="margin-left: 10px;">✓ Apply Changes</button>
+<!-- New Provider Form (hidden by default) -->
+<div id="new-provider-form" style="display: none; background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: #4a9eff;">Add New Provider</h3>
+    
+    <div class="form-group">
+        <label>Provider Key (unique identifier, e.g., "gemini", "openai", "kiro")</label>
+        <input type="text" id="new-provider-key" placeholder="Enter provider key" style="width: 100%;">
+        <small style="color: #a0a0a0; display: block; margin-top: 5px;">This will be used as the provider ID in the configuration and API endpoints</small>
+    </div>
+    
+    <div class="form-group">
+        <label>Provider Type</label>
+        <select id="new-provider-type" onchange="updateNewProviderDefaults()">
+            <option value="openai">OpenAI</option>
+            <option value="google">Google</option>
+            <option value="anthropic">Anthropic</option>
+            <option value="ollama">Ollama</option>
+            <option value="kiro">Kiro (Amazon Q Developer)</option>
+            <option value="claude">Claude (OAuth2)</option>
+            <option value="kilocode">Kilocode (OAuth2)</option>
+            <option value="qwen">Qwen (OAuth2)</option>
+            <option value="codex">Codex (OpenAI OAuth2)</option>
+        </select>
+        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
+    </div>
+    
+    <div id="new-provider-type-info" style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+        <p style="margin: 0; color: #a0a0a0;" id="new-provider-type-description">
+            OpenAI-compatible provider. Uses standard API key authentication.
+        </p>
+    </div>
+
+    <div id="new-provider-claude-warning" style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px; display: none;">
+        <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice for Claude Provider</h4>
+        <p style="margin: 0; color: #2d3436;">
+            Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+            <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
+            <br>• You use this software at your own risk and responsibility
+            <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+        </p>
+    </div>
+    
+    <div style="display: flex; gap: 10px;">
+        <button type="button" class="btn" onclick="confirmAddProvider()">Create Provider</button>
+        <button type="button" class="btn btn-secondary" onclick="cancelAddProvider()">Cancel</button>
     </div>
 </div>
 
-<!-- Modal for adding/editing providers -->
-<div id="provider-modal" class="modal" style="display: none;">
-    <div class="modal-content">
-        <div class="modal-header">
-            <h3 id="modal-title">Add Provider</h3>
-            <button class="close-btn" onclick="closeModal()">&times;</button>
-        </div>
-        <div class="modal-body">
-            <form id="provider-form">
-                <div class="form-group">
-                    <label for="provider-name">Provider Name:</label>
-                    <input type="text" id="provider-name" required>
-                </div>
-                <div class="form-group">
-                    <label for="provider-config">Provider Configuration (JSON):</label>
-                    <textarea id="provider-config" rows="20" placeholder='{"endpoint": "https://api.example.com", "api_key": "your-api-key", "models": []}'></textarea>
-                </div>
-                <div class="form-actions">
-                    <button type="submit" class="btn btn-primary">Save</button>
-                    <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                </div>
-            </form>
-        </div>
-    </div>
+<div id="providers-list" style="margin-bottom: 20px;">
+    <!-- Provider list will be rendered here -->
 </div>
 
+<button type="button" class="btn" id="add-provider-btn" onclick="showAddProviderForm()" style="margin-top: 20px;">Add Provider</button>
+<div style="display: flex; gap: 10px; margin-top: 20px;">
+    <button type="button" class="btn" onclick="saveProviders()">Save Configuration</button>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
+</div>
+
+<style>
+.provider-item {
+    animation: fadeIn 0.3s;
+}
+
+.provider-header:hover {
+    background: #0f3460;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.form-group {
+    margin-bottom: 15px;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 5px;
+    font-weight: 500;
+    color: #e0e0e0;
+}
+
+.form-group input[type="text"],
+.form-group input[type="password"],
+.form-group input[type="number"],
+.form-group select {
+    width: 100%;
+    padding: 8px;
+    border: 1px solid #0f3460;
+    border-radius: 3px;
+    font-size: 14px;
+    background: #1a1a2e;
+    color: #e0e0e0;
+}
+
+.form-group input[type="checkbox"] {
+    margin-right: 5px;
+}
+</style>
+{% endblock %}
+
+{% block extra_js %}
 <script>
-let providers = {{ user_providers_json | safe }};
-let currentEditingIndex = -1;
+let providersData = {};
+let rawProviders = {{ user_providers_json | safe }};
 
-function renderProviders() {
-    const container = document.getElementById('providers-list');
-    container.innerHTML = '';
-
-    if (providers.length === 0) {
-        container.innerHTML = '<p class="empty-state">No providers configured yet. Click "Add New Provider" to get started.</p>';
-        return;
-    }
-
-    providers.forEach((provider, index) => {
-        const div = document.createElement('div');
-        div.className = 'provider-item';
-        div.innerHTML = `
-            <div class="provider-header">
-                <h3>${provider.provider_id}</h3>
-                <div class="provider-actions">
-                    <button class="btn btn-secondary btn-sm" onclick="editProvider(${index})">Edit</button>
-                    <button class="btn btn-danger btn-sm" onclick="deleteProvider('${provider.provider_id}')">Delete</button>
-                </div>
-            </div>
-            <div class="provider-details">
-                <p><strong>Created:</strong> ${new Date(provider.created_at).toLocaleString()}</p>
-                <p><strong>Last Updated:</strong> ${new Date(provider.updated_at).toLocaleString()}</p>
-                ${provider.config.type === 'claude' ? `
-                <div class="claude-auth-section">
-                    <h4>Claude Authentication</h4>
-                    <div id="claude-auth-status-${provider.provider_id}" style="display: none; margin: 10px 0; padding: 10px; border-radius: 4px;"></div>
-                    <button class="btn btn-secondary" onclick="authenticateClaudeUser('${provider.provider_id}')">
-                        Authenticate with Claude
-                    </button>
-                    <button class="btn btn-secondary" onclick="checkClaudeAuthUser('${provider.provider_id}')" style="margin-left: 10px;">
-                        Check Status
-                    </button>
-                    <div class="auth-files-section" style="margin-top: 15px;">
-                        <h5>Authentication Files</h5>
-                        <div id="auth-files-${provider.provider_id}"></div>
-                        <div class="upload-form" style="margin-top: 10px;">
-                            <select id="file-type-${provider.provider_id}" style="margin-right: 10px; padding: 5px;">
-                                <option value="claude_credentials">Claude Credentials</option>
-                                <option value="config">Configuration</option>
-                            </select>
-                            <input type="file" id="file-input-${provider.provider_id}" style="margin-right: 10px;">
-                            <button class="btn btn-secondary btn-sm" onclick="uploadAuthFile('${provider.provider_id}')">Upload</button>
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-                ${provider.config.type === 'kiro' ? `
-                <div class="kiro-auth-section">
-                    <h4>Kiro Authentication</h4>
-                    <div class="auth-files-section" style="margin-top: 15px;">
-                        <h5>Authentication Files</h5>
-                        <div id="auth-files-${provider.provider_id}"></div>
-                        <div class="upload-form" style="margin-top: 10px;">
-                            <select id="file-type-${provider.provider_id}" style="margin-right: 10px; padding: 5px;">
-                                <option value="kiro_credentials">Kiro Credentials</option>
-                                <option value="database">SQLite Database</option>
-                                <option value="config">Configuration</option>
-                            </select>
-                            <input type="file" id="file-input-${provider.provider_id}" style="margin-right: 10px;">
-                            <button class="btn btn-secondary btn-sm" onclick="uploadAuthFile('${provider.provider_id}')">Upload</button>
-                        </div>
-                    </div>
-                </div>
-                ` : ''}
-                <details>
-                    <summary>Configuration (JSON)</summary>
-                    <pre>${JSON.stringify(provider.config, null, 2)}</pre>
-                </details>
-            </div>
-        `;
-        container.appendChild(div);
-    });
-}
-
-function showAddProviderModal() {
-    currentEditingIndex = -1;
-    document.getElementById('modal-title').textContent = 'Add Provider';
-    document.getElementById('provider-name').value = '';
-    document.getElementById('provider-config').value = '{"endpoint": "https://api.example.com", "api_key": "your-api-key", "models": []}';
-    document.getElementById('provider-modal').style.display = 'block';
-}
-
-function editProvider(index) {
-    currentEditingIndex = index;
-    const provider = providers[index];
-    document.getElementById('modal-title').textContent = 'Edit Provider';
-    document.getElementById('provider-name').value = provider.provider_id;
-    document.getElementById('provider-name').readOnly = true;
-    document.getElementById('provider-config').value = JSON.stringify(provider.config, null, 2);
-    document.getElementById('provider-modal').style.display = 'block';
-}
-
-function closeModal() {
-    document.getElementById('provider-modal').style.display = 'none';
-    document.getElementById('provider-name').readOnly = false;
-    currentEditingIndex = -1;
-}
-
-function deleteProvider(providerName) {
-    if (!confirm(`Are you sure you want to delete the provider "${providerName}"? This action cannot be undone.`)) return;
-
-    fetch('{{ url_for(request, "/dashboard/user/providers") }}/' + encodeURIComponent(providerName), {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    }).then(response => {
-        if (response.ok) {
-            location.reload();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Failed to delete provider');
-            });
-        }
-    }).catch(error => {
-        alert('Error: ' + error.message);
-    });
-}
-
-// Handle form submission
-document.getElementById('provider-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    const providerName = document.getElementById('provider-name').value.trim();
-    const configText = document.getElementById('provider-config').value.trim();
-
-    if (!providerName) {
-        alert('Provider name is required');
-        return;
-    }
-
-    if (!configText) {
-        alert('Provider configuration is required');
-        return;
-    }
-
-    let configObj;
-    try {
-        configObj = JSON.parse(configText);
-    } catch (e) {
-        alert('Invalid JSON configuration: ' + e.message);
-        return;
-    }
-
-    const formData = new FormData();
-    formData.append('provider_name', providerName);
-    formData.append('provider_config', JSON.stringify(configObj));
-
-    const url = '{{ url_for(request, "/dashboard/user/providers") }}';
-    const method = currentEditingIndex >= 0 ? 'PUT' : 'POST';
-
-    fetch(url, {
-        method: method,
-        body: formData
-    }).then(response => {
-        if (response.ok) {
-            closeModal();
-            location.reload();
-        } else {
-            return response.text().then(text => {
-                throw new Error(text || 'Failed to save provider');
-            });
-        }
-    }).catch(error => {
-        alert('Error: ' + error.message);
-    });
+// Convert user providers format to the format expected by the UI
+rawProviders.forEach(provider => {
+    providersData[provider.provider_id] = provider.config;
 });
 
-async function authenticateClaudeUser(providerId) {
-    const statusEl = document.getElementById(`claude-auth-status-${providerId}`);
+let expandedProviders = new Set();
+
+// Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
+const CHUNK_SIZE = 512 * 1024;
+
+// Generic chunked upload handler for all providers
+async function uploadFileChunked(providerKey, fileType, file, configObject) {
+    if (!file) return;
+    
+    // Ensure provider is expanded so status element exists
+    if (!expandedProviders.has(providerKey)) {
+        toggleProvider(providerKey);
+    }
+    
+    // Map config object names to status element prefixes
+    const statusPrefixMap = {
+        'kiro_config': 'kiro',
+        'kilo_config': 'kilo',
+        'claude_config': 'claude',
+        'qwen_config': 'qwen',
+        'codex_config': 'codex'
+    };
+    
+    const statusPrefix = statusPrefixMap[configObject] || configObject.replace('_config', '');
+    const statusEl = document.getElementById(`${statusPrefix}-upload-status-${providerKey}`);
+    statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: 0%</div>`;
+    
+    try {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        
+        for (let chunkNumber = 1; chunkNumber <= totalChunks; chunkNumber++) {
+            const start = (chunkNumber - 1) * CHUNK_SIZE;
+            const end = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk = file.slice(start, end);
+            
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: ${progress}%</div>`;
+            
+            const formData = new FormData();
+            formData.append('provider_key', providerKey);
+            formData.append('file_type', fileType);
+            formData.append('file_name', file.name);
+            formData.append('total_size', file.size);
+            formData.append('chunk_number', chunkNumber);
+            formData.append('total_chunks', totalChunks);
+            formData.append('file', chunk);
+            
+            const response = await fetch('/dashboard/providers/upload-auth-file/chunk', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (!result.success) {
+                throw new Error(result.error || 'Upload failed');
+            }
+            
+            // When upload is complete
+            if (result.complete) {
+                statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
+                
+                // Update the config with the full file path (not just filename)
+                if (!providersData[providerKey][configObject]) {
+                    providersData[providerKey][configObject] = {};
+                }
+                // Use file_path from server response (tilde format: ~/.aisbf/...)
+                providersData[providerKey][configObject][fileType] = result.file_path || result.stored_filename;
+                renderProvidersList();
+                return;
+            }
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
+}
+
+// Upload handler for Kiro credential files
+async function uploadKiroFile(providerKey, fileType, file) {
+    await uploadFileChunked(providerKey, fileType, file, 'kiro_config');
+}
+
+// Upload handler for Kilo credential files
+async function uploadKiloFile(providerKey, file) {
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'kilo_config');
+}
+
+// Upload handler for Claude credential files
+async function uploadClaudeFile(providerKey, file) {
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'claude_config');
+}
+
+// Upload handler for Qwen credential files
+async function uploadQwenFile(providerKey, file) {
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'qwen_config');
+}
+
+// Upload handler for Codex credential files
+async function uploadCodexFile(providerKey, file) {
+    await uploadFileChunked(providerKey, 'credentials_file', file, 'codex_config');
+}
+
+function renderProvidersList() {
+    console.log('=== renderProvidersList START ===');
+    const container = document.getElementById('providers-list');
+    console.log('Container element:', container);
+    
+    if (!container) {
+        console.error('ERROR: providers-list container not found!');
+        return;
+    }
+    
+    container.innerHTML = '';
+    console.log('Cleared container, processing', Object.keys(providersData).length, 'providers');
+    
+    Object.entries(providersData).forEach(([key, provider]) => {
+        console.log('Processing provider:', key);
+        const providerItem = document.createElement('div');
+        providerItem.className = 'provider-item';
+        providerItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+        
+        const isExpanded = expandedProviders.has(key);
+        
+        providerItem.innerHTML = `
+            <div class="provider-header" onclick="toggleProvider('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
+                    <strong style="font-size: 16px;">${key}</strong>
+                    <span style="color: #a0a0a0; font-size: 14px;">(${provider.name || key})</span>
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+            </div>
+            <div id="provider-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+                <!-- Details will be rendered here -->
+            </div>
+        `;
+        
+        container.appendChild(providerItem);
+        
+        if (isExpanded) {
+            renderProviderDetails(key);
+        }
+    });
+}
+
+function toggleProvider(key) {
+    if (expandedProviders.has(key)) {
+        expandedProviders.delete(key);
+    } else {
+        expandedProviders.add(key);
+    }
+    renderProvidersList();
+}
+
+function renderProviderDetails(key) {
+    const container = document.getElementById(`provider-details-${key}`);
+    const provider = providersData[key];
+    const isKiroProvider = provider.type === 'kiro';
+    const isClaudeProvider = provider.type === 'claude';
+    const isKiloProvider = provider.type === 'kilocode';
+    const isQwenProvider = provider.type === 'qwen';
+    const isCodexProvider = provider.type === 'codex';
+    
+    // Initialize kiro_config if this is a kiro provider and doesn't have it
+    if (isKiroProvider && !provider.kiro_config) {
+        provider.kiro_config = {
+            region: 'us-east-1',
+            refresh_token: '',
+            profile_arn: '',
+            client_id: '',
+            client_secret: ''
+        };
+    }
+    
+    // Initialize claude_config if this is a claude provider and doesn't have it
+    if (isClaudeProvider && !provider.claude_config) {
+        provider.claude_config = {};
+    }
+    
+    // Initialize kilo_config if this is a kilocode provider and doesn't have it
+    if (isKiloProvider && !provider.kilo_config) {
+        provider.kilo_config = {
+            api_base: 'https://api.kilo.ai/api/gateway'
+        };
+    }
+    
+    // Initialize qwen_config if this is a qwen provider and doesn't have it
+    if (isQwenProvider && !provider.qwen_config) {
+        provider.qwen_config = {
+            api_key: '',
+            region: 'china-beijing',
+            workspace_id: 'Default Workspace'
+        };
+    }
+    
+    // Initialize codex_config if this is a codex provider and doesn't have it
+    if (isCodexProvider && !provider.codex_config) {
+        provider.codex_config = {
+            issuer: 'https://auth.openai.com'
+        };
+    }
+    
+    const kiroConfig = provider.kiro_config || {};
+    const claudeConfig = provider.claude_config || {};
+    const kiloConfig = provider.kilo_config || {};
+    const qwenConfig = provider.qwen_config || {};
+    const codexConfig = provider.codex_config || {};
+    
+    // Build authentication fields based on provider type
+    let authFieldsHtml = '';
+    if (isKiroProvider) {
+        // Kiro-specific authentication fields
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kiro Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Choose one authentication method: Kiro IDE credentials (creds_file), kiro-cli database (sqlite_db), or direct credentials (refresh_token + client_id/secret).
+                </small>
+                
+                <div class="form-group">
+                    <label>AWS Region</label>
+                    <input type="text" value="${kiroConfig.region || 'us-east-1'}" onchange="updateKiroConfig('${key}', 'region', this.value)" placeholder="us-east-1">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">AWS region for Kiro API (default: us-east-1)</small>
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Direct Credentials</h5>
+                <div class="form-group">
+                    <label>Refresh Token</label>
+                    <input type="password" value="${kiroConfig.refresh_token || ''}" onchange="updateKiroConfig('${key}', 'refresh_token', this.value)" placeholder="Enter refresh token">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Kiro refresh token for direct authentication</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Profile ARN</label>
+                    <input type="text" value="${kiroConfig.profile_arn || ''}" onchange="updateKiroConfig('${key}', 'profile_arn', this.value)" placeholder="arn:aws:codewhisperer:us-east-1:...">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">AWS CodeWhisperer profile ARN (optional)</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Client ID (for AWS SSO OIDC)</label>
+                    <input type="text" value="${kiroConfig.client_id || ''}" onchange="updateKiroConfig('${key}', 'client_id', this.value)" placeholder="OAuth client ID">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth client ID for AWS SSO OIDC authentication</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Client Secret (for AWS SSO OIDC)</label>
+                    <input type="password" value="${kiroConfig.client_secret || ''}" onchange="updateKiroConfig('${key}', 'client_secret', this.value)" placeholder="OAuth client secret">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth client secret for AWS SSO OIDC authentication</small>
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 4: Upload Files</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="kiro-creds-file-${key}" accept=".json" onchange="uploadKiroFile('${key}', 'creds_file', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Kiro IDE credentials JSON file</small>
+                </div>
+                <div class="form-group">
+                    <label>Upload SQLite Database</label>
+                    <input type="file" id="kiro-db-file-${key}" accept=".sqlite3,.db,.sqlite" onchange="uploadKiroFile('${key}', 'sqlite_db', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload kiro-cli SQLite database file</small>
+                </div>
+                <div id="kiro-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
+    } else if (isKiloProvider) {
+        // Kilocode authentication fields - supports both API key and OAuth2
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kilocode Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
+                </small>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key / Auth Token</h5>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter your Kilocode API key">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication</h5>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    If no API key is provided, OAuth2 will be used automatically.
+                </small>
+                
+                <div class="form-group">
+                    <label>API Base URL</label>
+                    <input type="text" value="${kiloConfig.api_base || 'https://api.kilo.ai/api/gateway'}" readonly style="background: #0f2840; cursor: not-allowed;" placeholder="https://api.kilo.ai/api/gateway">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Kilocode API base URL (fixed)</small>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateKilo('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Kilocode OAuth2
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkKiloAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+                
+                <div id="kilo-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload OAuth2 Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="kilo-creds-file-${key}" accept=".json" onchange="uploadKiloFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Kilocode OAuth2 credentials JSON file</small>
+                </div>
+                <div id="kilo-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
+    } else if (isClaudeProvider) {
+        // Claude OAuth2 authentication fields
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Claude OAuth2 Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Claude uses OAuth2 authentication. Click "Authenticate" to start the OAuth2 flow in your browser.
+                </small>
+
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateClaude('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Claude
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkClaudeAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+
+                <div id="claude-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="claude-creds-file-${key}" accept=".json" onchange="uploadClaudeFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Claude OAuth2 credentials JSON file</small>
+                </div>
+                <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+
+            <div style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice</h4>
+                <p style="margin: 0; color: #2d3436;">
+                    Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+                    <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
+                    <br>• You use this software at your own risk and responsibility
+                    <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+                </p>
+            </div>
+        `;
+    } else if (isQwenProvider) {
+        // Qwen authentication fields - supports both API key and OAuth2
+        authFieldsHtml = `
+            <div style="background: #ff6b35; border: 2px solid #d63031; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #fff;">⚠️ Qwen OAuth2 Service Discontinued</h4>
+                <p style="margin: 0; color: #fff;">
+                    As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+                    OAuth2 tokens are no longer accepted by the DashScope API.
+                    <br><br><strong>Please use API Key authentication instead.</strong>
+                    <br><br>OAuth2 support is maintained in the code for potential future re-enablement, but it is currently non-functional.
+                </p>
+            </div>
+            
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Qwen Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
+                </small>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key (Recommended)</h5>
+                <div class="form-group">
+                    <label>API Key</label>
+                    <input type="password" value="${qwenConfig.api_key || ''}" onchange="updateQwenConfig('${key}', 'api_key', this.value)" placeholder="Enter your Qwen API key">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                </div>
+
+                <div id="qwen-region-config-${key}" style="display: ${qwenConfig.api_key ? 'block' : 'none'}; margin-top: 15px;">
+                    <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Region Configuration (API Key Mode)</h5>
+                    <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                        Select your preferred region for API key authentication. Different regions have different endpoints.
+                    </small>
+
+                    <div class="form-group">
+                        <label>Region</label>
+                        <select onchange="updateQwenConfig('${key}', 'region', this.value)">
+                            <option value="china-beijing" ${qwenConfig.region === 'china-beijing' || !qwenConfig.region ? 'selected' : ''}>China (Beijing) - dashscope.aliyuncs.com</option>
+                            <option value="singapore" ${qwenConfig.region === 'singapore' ? 'selected' : ''}>Singapore - dashscope-intl.aliyuncs.com</option>
+                            <option value="us-virginia" ${qwenConfig.region === 'us-virginia' ? 'selected' : ''}>US (Virginia) - dashscope-us.aliyuncs.com</option>
+                            <option value="china-hongkong" ${qwenConfig.region === 'china-hongkong' ? 'selected' : ''}>China (Hong Kong) - cn-hongkong.dashscope.aliyuncs.com</option>
+                            <option value="germany-frankfurt" ${qwenConfig.region === 'germany-frankfurt' ? 'selected' : ''}>Germany (Frankfurt) - Requires Workspace ID</option>
+                        </select>
+                        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the region for your Qwen API endpoint</small>
+                    </div>
+
+                    <div id="qwen-workspace-config-${key}" style="display: ${qwenConfig.region === 'germany-frankfurt' ? 'block' : 'none'};">
+                        <div class="form-group">
+                            <label>Workspace ID</label>
+                            <input type="text" value="${qwenConfig.workspace_id || 'Default Workspace'}" onchange="updateQwenConfig('${key}', 'workspace_id', this.value)" placeholder="Default Workspace">
+                            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Workspace ID for Germany region (default: "Default Workspace")</small>
+                        </div>
+                    </div>
+                </div>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication (DISCONTINUED - NOT WORKING)</h5>
+                <small style="color: #ff6b35; display: block; margin-bottom: 15px;">
+                    ⚠️ OAuth2 authentication is no longer functional. Qwen has discontinued this service. Use API Key instead.
+                </small>
+
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateQwen('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Qwen OAuth2
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkQwenAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+
+                <div id="qwen-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload OAuth2 Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="qwen-creds-file-${key}" accept=".json" onchange="uploadQwenFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Qwen OAuth2 credentials JSON file</small>
+                </div>
+                <div id="qwen-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
+    } else if (isCodexProvider) {
+        // Codex OAuth2 authentication fields
+        authFieldsHtml = `
+            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Codex OAuth2 Authentication</h4>
+                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    Codex uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Click "Authenticate" to start the OAuth2 flow.
+                </small>
+                
+                <div class="form-group">
+                    <label>API Key (optional - if provided, used instead of OAuth2)</label>
+                    <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter OpenAI API key (optional)">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                </div>
+                
+                <div class="form-group">
+                    <label>OAuth2 Issuer URL</label>
+                    <input type="text" value="${codexConfig.issuer || 'https://auth.openai.com'}" onchange="updateCodexConfig('${key}', 'issuer', this.value)" placeholder="https://auth.openai.com">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth2 issuer URL (default: https://auth.openai.com)</small>
+                </div>
+                
+                <div style="margin-top: 15px;">
+                    <button type="button" class="btn" onclick="authenticateCodex('${key}')" style="background: #4a9eff;">
+                        🔐 Authenticate with Codex (Device Code)
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="checkCodexAuth('${key}')" style="margin-left: 10px;">
+                        Check Status
+                    </button>
+                </div>
+                
+                <div id="codex-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
+                    <!-- Auth status will be displayed here -->
+                </div>
+                
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <div class="form-group">
+                    <label>Upload Credentials File</label>
+                    <input type="file" id="codex-creds-file-${key}" accept=".json" onchange="uploadCodexFile('${key}', this.files[0])">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Codex OAuth2 credentials JSON file</small>
+                </div>
+                <div id="codex-upload-status-${key}" style="margin-top: 10px;"></div>
+            </div>
+        `;
+    } else {
+        // Standard API key authentication fields
+        authFieldsHtml = `
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${provider.api_key_required ? 'checked' : ''} onchange="updateProvider('${key}', 'api_key_required', this.checked)">
+                    API Key Required
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>API Key</label>
+                <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter API key">
+            </div>
+        `;
+    }
+    
+    container.innerHTML = `
+        <div class="form-group">
+            <label>Provider ID</label>
+            <input type="text" value="${provider.id}" onchange="updateProvider('${key}', 'id', this.value)" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Name</label>
+            <input type="text" value="${provider.name}" onchange="updateProvider('${key}', 'name', this.value)" required>
+        </div>
+        
+        <div class="form-group">
+            <label>Endpoint</label>
+            <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${(provider.type === 'kilocode' || provider.type === 'qwen' || provider.type === 'claude' || provider.type === 'codex') ? 'readonly style="background: #0f2840; cursor: not-allowed;"' : ''} required>
+            ${isKiroProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
+            ${provider.type === 'kilocode' ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Kilocode OAuth2 provider</small>' : ''}
+            ${isQwenProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Qwen OAuth2 provider (https://dashscope.aliyuncs.com/compatible-mode/v1)</small>' : ''}
+            ${isClaudeProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Claude OAuth2 provider (https://api.anthropic.com/v1)</small>' : ''}
+            ${isCodexProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Codex OAuth2 provider (https://api.openai.com/v1)</small>' : ''}
+        </div>
+        
+        <div class="form-group">
+            <label>Type</label>
+            <select onchange="updateProviderType('${key}', this.value)" required>
+                <option value="google" ${provider.type === 'google' ? 'selected' : ''}>Google</option>
+                <option value="openai" ${provider.type === 'openai' ? 'selected' : ''}>OpenAI</option>
+                <option value="anthropic" ${provider.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
+                <option value="ollama" ${provider.type === 'ollama' ? 'selected' : ''}>Ollama</option>
+                <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
+                <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
+                <option value="kilocode" ${provider.type === 'kilocode' ? 'selected' : ''}>Kilocode (OAuth2)</option>
+                <option value="qwen" ${provider.type === 'qwen' ? 'selected' : ''}>Qwen (OAuth2)</option>
+                <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
+            </select>
+        </div>
+        
+        ${authFieldsHtml}
+        
+        <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
+            <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Pricing Configuration</h4>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${provider.is_subscription ? 'checked' : ''} onchange="updateProvider('${key}', 'is_subscription', this.checked); togglePricingFields('${key}')">
+                    Subscription-Based Provider (Free)
+                </label>
+                <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                    If checked, this provider is subscription-based and costs will be calculated as $0. Usage is still tracked for analytics.
+                </small>
+            </div>
+            
+            <div id="pricing-fields-${key}" style="display: ${provider.is_subscription ? 'none' : 'block'};">
+                <div class="form-group">
+                    <label>Price per Million Prompt Tokens (USD)</label>
+                    <input type="number" step="0.01" min="0" value="${provider.price_per_million_prompt || ''}" onchange="updateProvider('${key}', 'price_per_million_prompt', parseFloat(this.value) || null)" placeholder="e.g., 15.00">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                        Leave empty to use default pricing. Examples: OpenAI GPT-4: $10, Anthropic Claude: $15, Google Gemini: $1.25
+                    </small>
+                </div>
+                
+                <div class="form-group">
+                    <label>Price per Million Completion Tokens (USD)</label>
+                    <input type="number" step="0.01" min="0" value="${provider.price_per_million_completion || ''}" onchange="updateProvider('${key}', 'price_per_million_completion', parseFloat(this.value) || null)" placeholder="e.g., 75.00">
+                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                        Leave empty to use default pricing. Examples: OpenAI GPT-4: $30, Anthropic Claude: $75, Google Gemini: $5.00
+                    </small>
+                </div>
+            </div>
+        </div>
+
+        <div class="form-group">
+            <label>Rate Limit (seconds)</label>
+            <input type="number" value="${provider.rate_limit || 0}" onchange="updateProvider('${key}', 'rate_limit', parseFloat(this.value))" step="0.1">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Time delay between requests to this provider</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Default Rate Limit TPM (Tokens Per Minute)</label>
+            <input type="number" value="${provider.default_rate_limit_TPM || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per minute for models in this provider</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Default Rate Limit TPH (Tokens Per Hour)</label>
+            <input type="number" value="${provider.default_rate_limit_TPH || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per hour for models in this provider</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Default Rate Limit TPD (Tokens Per Day)</label>
+            <input type="number" value="${provider.default_rate_limit_TPD || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per day for models in this provider</small>
+        </div>
+        
+        <div class="form-group">
+            <label>Default Max Request Tokens</label>
+            <input type="number" value="${provider.default_max_request_tokens || ''}" onchange="updateProvider('${key}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+        </div>
+        
+        <div class="form-group">
+            <label>Default Context Size</label>
+            <input type="number" value="${provider.default_context_size || ''}" onchange="updateProvider('${key}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+        </div>
+        
+        <div class="form-group">
+            <label>Default Condense Context (%)</label>
+            <input type="number" value="${provider.default_condense_context || ''}" onchange="updateProvider('${key}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 80)">
+        </div>
+        
+        <div class="form-group">
+            <label>Default Condense Method (conversational, semantic, hierarchical, algorithmic)</label>
+            <input type="text" value="${Array.isArray(provider.default_condense_method) ? provider.default_condense_method.join(', ') : (provider.default_condense_method || '')}" onchange="updateProviderCondenseMethod('${key}', this.value)" placeholder="e.g., semantic, conversational">
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.nsfw ? 'checked' : ''} onchange="updateProvider('${key}', 'nsfw', this.checked)">
+                NSFW
+            </label>
+        </div>
+        
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.privacy ? 'checked' : ''} onchange="updateProvider('${key}', 'privacy', this.checked)">
+                Privacy
+            </label>
+        </div>
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Native Caching</h4>
+        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+            Provider-native caching features (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs) for cost reduction.
+        </small>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${provider.enable_native_caching ? 'checked' : ''} onchange="updateProvider('${key}', 'enable_native_caching', this.checked)">
+                Enable Native Caching
+            </label>
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Enable provider-native caching for cost reduction (50-70% savings for supported providers)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Cache TTL (seconds)</label>
+            <input type="number" value="${provider.cache_ttl || ''}" onchange="updateProvider('${key}', 'cache_ttl', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 3600)">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Cache time-to-live in seconds (Google Context Caching only)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Min Cacheable Tokens</label>
+            <input type="number" value="${provider.min_cacheable_tokens || 1000}" onchange="updateProvider('${key}', 'min_cacheable_tokens', this.value ? parseInt(this.value) : 1000)" placeholder="1000">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Prompt Cache Key (OpenAI/Kilo)</label>
+            <input type="text" value="${provider.prompt_cache_key || ''}" onchange="updateProvider('${key}', 'prompt_cache_key', this.value)" placeholder="Optional cache key for load balancer optimization">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
+        </div>
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>
+        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+            Configure specific models for this provider, or leave empty to automatically fetch all available models from the provider's API.
+        </small>
+
+        <div class="form-group" style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <label>Model Filter (for auto-fetched models)</label>
+            <input type="text" value="${provider.model_filter || ''}" onchange="updateProvider('${key}', 'model_filter', this.value)" placeholder="e.g., free, pro, flash">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                When no models are manually configured, only expose models whose ID contains this filter word (case-insensitive wildcard matching).
+                <br>Example: "free" will match models like "model-name-free", "free-model", "gpt-4-free-tier", etc.
+            </small>
+        </div>
+
+        <div id="models-${key}"></div>
+        <div style="display: flex; gap: 10px; margin-top: 10px;">
+            <button type="button" class="btn" onclick="getModelsFromProvider('${key}')" style="background: #4a9eff;">
+                🔄 Get Models from Provider
+            </button>
+            <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">Add Model Manually</button>
+        </div>
+        <div id="get-models-status-${key}" style="margin-top: 10px;"></div>
+    `;
+    
+    renderModels(key);
+}
+
+function renderModels(providerKey) {
+    const container = document.getElementById(`models-${providerKey}`);
+    const provider = providersData[providerKey];
+    
+    if (!provider.models || provider.models.length === 0) {
+        container.innerHTML = '<p style="color: #a0a0a0;">No models configured</p>';
+        return;
+    }
+    
+    container.innerHTML = '';
+    provider.models.forEach((model, index) => {
+        const modelDiv = document.createElement('div');
+        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        
+        modelDiv.innerHTML = `
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
+                <strong>Model ${index + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeModel('${providerKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+            </div>
+            
+            <div class="form-group">
+                <label>Model Name</label>
+                <input type="text" value="${model.name}" onchange="updateModel('${providerKey}', ${index}, 'name', this.value)" required>
+            </div>
+            
+            <div class="form-group">
+                <label>Rate Limit (seconds)</label>
+                <input type="number" value="${model.rate_limit || 0}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit', parseFloat(this.value))" step="0.1">
+            </div>
+            
+            <div class="form-group">
+                <label>Max Request Tokens</label>
+                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateModel('${providerKey}', ${index}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Context Size</label>
+                <input type="number" value="${model.context_size || ''}" onchange="updateModel('${providerKey}', ${index}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Rate Limit TPM (Tokens Per Minute)</label>
+                <input type="number" value="${model.rate_limit_TPM || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Rate Limit TPH (Tokens Per Hour)</label>
+                <input type="number" value="${model.rate_limit_TPH || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Rate Limit TPD (Tokens Per Day)</label>
+                <input type="number" value="${model.rate_limit_TPD || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            </div>
+            
+            <div class="form-group">
+                <label>Condense Context (%)</label>
+                <input type="number" value="${model.condense_context || ''}" onchange="updateModel('${providerKey}', ${index}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (default: 80)">
+            </div>
+            
+            <div class="form-group">
+                <label>Condense Method (conversational, semantic, hierarchical, algorithmic)</label>
+                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateModelCondenseMethod('${providerKey}', ${index}, this.value)" placeholder="e.g., semantic, conversational">
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'nsfw', this.checked)">
+                    NSFW
+                </label>
+            </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'privacy', this.checked)">
+                    Privacy
+                </label>
+            </div>
+        `;
+        
+        container.appendChild(modelDiv);
+    });
+}
+
+function showAddProviderForm() {
+    document.getElementById('new-provider-form').style.display = 'block';
+    document.getElementById('add-provider-btn').style.display = 'none';
+    document.getElementById('new-provider-key').value = '';
+    document.getElementById('new-provider-type').value = 'openai';
+    updateNewProviderDefaults();
+    document.getElementById('new-provider-key').focus();
+}
+
+function cancelAddProvider() {
+    document.getElementById('new-provider-form').style.display = 'none';
+    document.getElementById('add-provider-btn').style.display = 'inline-block';
+}
+
+function updateNewProviderDefaults() {
+    const providerType = document.getElementById('new-provider-type').value;
+    const descriptionEl = document.getElementById('new-provider-type-description');
+
+    const descriptions = {
+        'openai': 'OpenAI-compatible provider. Uses standard API key authentication. Endpoint: https://api.openai.com/v1',
+        'google': 'Google AI provider (Gemini). Uses API key authentication. Endpoint: https://generativelanguage.googleapis.com/v1beta',
+        'anthropic': 'Anthropic provider (Claude). Uses API key authentication. Endpoint: https://api.anthropic.com/v1',
+        'ollama': 'Ollama local provider. No API key required by default. Endpoint: http://localhost:11434/api',
+        'kiro': 'Kiro (Amazon Q Developer) provider. Uses Kiro credentials (IDE, CLI, or direct tokens). Endpoint: https://q.us-east-1.amazonaws.com',
+        'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1',
+        'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
+        'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
+    };
+
+    descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
+
+    // Show/hide Claude warning
+    const claudeWarningEl = document.getElementById('new-provider-claude-warning');
+    if (providerType === 'claude') {
+        claudeWarningEl.style.display = 'block';
+    } else {
+        claudeWarningEl.style.display = 'none';
+    }
+}
+
+function togglePricingFields(key) {
+    const provider = providersData[key];
+    const pricingFields = document.getElementById(`pricing-fields-${key}`);
+    if (pricingFields) {
+        pricingFields.style.display = provider.is_subscription ? 'none' : 'block';
+    }
+}
+
+// Helper function to format expiration time
+function formatExpirationTime(expiresAt) {
+    if (!expiresAt) return 'Unknown';
+    
+    const now = Math.floor(Date.now() / 1000);
+    const secondsRemaining = expiresAt - now;
+    
+    if (secondsRemaining <= 0) {
+        return 'Expired';
+    }
+    
+    const days = Math.floor(secondsRemaining / 86400);
+    const hours = Math.floor((secondsRemaining % 86400) / 3600);
+    const minutes = Math.floor((secondsRemaining % 3600) / 60);
+    const seconds = secondsRemaining % 60;
+    
+    if (days > 0) {
+        return `${days} day${days > 1 ? 's' : ''} ${hours} hour${hours !== 1 ? 's' : ''}`;
+    } else if (hours > 0) {
+        return `${hours} hour${hours > 1 ? 's' : ''} ${minutes} minute${minutes !== 1 ? 's' : ''}`;
+    } else if (minutes > 0) {
+        return `${minutes} minute${minutes > 1 ? 's' : ''} ${seconds} second${seconds !== 1 ? 's' : ''}`;
+    } else {
+        return `${seconds} second${seconds > 1 ? 's' : ''}`;
+    }
+}
+
+// OAuth authentication check functions
+async function checkClaudeAuth(providerKey) {
+    const statusDiv = document.getElementById(`claude-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Claude authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Claude authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Claude authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Claude auth: ${error.message}`;
+    }
+}
+
+async function checkQwenAuth(providerKey) {
+    const statusDiv = document.getElementById(`qwen-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Qwen authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Qwen authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Qwen authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Qwen auth: ${error.message}`;
+    }
+}
+
+async function checkCodexAuth(providerKey) {
+    const statusDiv = document.getElementById(`codex-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Codex authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Codex authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Codex authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Codex auth: ${error.message}`;
+    }
+}
+
+async function checkKiloAuth(providerKey) {
+    const statusDiv = document.getElementById(`kilo-auth-status-${providerKey}`);
+    if (!statusDiv) return;
+
+    statusDiv.style.display = 'block';
+    statusDiv.style.background = '#f0f0f0';
+    statusDiv.style.color = '#333';
+    statusDiv.innerHTML = 'Checking Kilocode authentication status...';
+
+    try {
+        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+            method: 'GET',
+            headers: {
+                'Content-Type': 'application/json',
+            }
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.authenticated) {
+            const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
+            statusDiv.style.background = '#d4edda';
+            statusDiv.style.color = '#155724';
+            statusDiv.innerHTML = `✅ Kilocode authentication is valid. Expires in: ${expirationText}`;
+        } else {
+            statusDiv.style.background = '#f8d7da';
+            statusDiv.style.color = '#721c24';
+            statusDiv.innerHTML = `❌ Kilocode authentication failed: ${result.error || 'Not authenticated'}`;
+        }
+    } catch (error) {
+        statusDiv.style.background = '#f8d7da';
+        statusDiv.style.color = '#721c24';
+        statusDiv.innerHTML = `❌ Error checking Kilocode auth: ${error.message}`;
+    }
+}
+
+// OAuth authentication functions
+async function authenticateClaude(key) {
+    const statusEl = document.getElementById(`claude-auth-status-${key}`);
     statusEl.style.display = 'block';
     statusEl.style.background = '#0f2840';
     statusEl.style.border = '1px solid #4a9eff';
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
     
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/start") }}', {
+        const response = await fetch('/dashboard/claude/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                provider_key: providerId,
-                credentials_file: '~/.claude_credentials.json'
+                provider_key: key
             })
         });
         
         const data = await response.json();
         
-        if (data.success) {
-            statusEl.style.background = '#0f4020';
-            statusEl.style.border = '1px solid #4eff9e';
-            statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
-        } else {
+        if (!data.success || !data.auth_url) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication failed: ${data.error || 'Unknown error'}</p>`;
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
         }
+        
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Opening authentication window...</p>';
+        
+        // Open OAuth2 URL in popup window
+        const authWindow = window.open(data.auth_url, 'claude-auth', 'width=600,height=700');
+        
+        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Please complete authentication in the popup window...</p>';
+        
+        // Poll for completion
+        let pollCount = 0;
+        const maxPolls = 60;
+        let isCompleting = false;
+        
+        await new Promise(resolve => setTimeout(resolve, 8000));
+        
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const statusResponse = await fetch('/dashboard/claude/auth/callback-status');
+                const statusData = await statusResponse.json();
+                
+                if (statusData.received) {
+                    clearInterval(pollInterval);
+                    
+                    if (authWindow && !authWindow.closed) {
+                        authWindow.close();
+                    }
+                    
+                    if (statusData.error) {
+                        statusEl.style.background = '#402010';
+                        statusEl.style.border = '1px solid #ff4a4a';
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ OAuth2 error: ${statusData.error}</p>`;
+                        return;
+                    }
+                    
+                    if (isCompleting) return;
+                    isCompleting = true;
+                    
+                    await new Promise(resolve => setTimeout(resolve, 1000));
+                    
+                    try {
+                        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication...</p>';
+                        
+                        const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                            method: 'POST',
+                            headers: {
+                                'Content-Type': 'application/json',
+                            }
+                        });
+                        
+                        const completeData = await completeResponse.json();
+                        
+                        if (completeData.success) {
+                            statusEl.style.background = '#0f4020';
+                            statusEl.style.border = '1px solid #4eff9e';
+                            statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Authentication successful! Credentials saved.</p>';
+                        } else {
+                            statusEl.style.background = '#402010';
+                            statusEl.style.border = '1px solid #ff4a4a';
+                            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Authentication incomplete. ${completeData.error || 'Please try again.'}</p>`;
+                        }
+                    } catch (error) {
+                        statusEl.style.background = '#402010';
+                        statusEl.style.border = '1px solid #ff4a4a';
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error completing authentication: ${error.message}</p>`;
+                    }
+                }
+            } catch (error) {
+                console.error('Error checking callback status:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                if (authWindow && !authWindow.closed) {
+                    authWindow.close();
+                }
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, 2000);
+        
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
@@ -261,37 +1243,100 @@ async function authenticateClaudeUser(providerId) {
     }
 }
 
-async function checkClaudeAuthUser(providerId) {
-    const statusEl = document.getElementById(`claude-auth-status-${providerId}`);
+async function authenticateQwen(key) {
+    const statusEl = document.getElementById(`qwen-auth-status-${key}`);
     statusEl.style.display = 'block';
     statusEl.style.background = '#0f2840';
     statusEl.style.border = '1px solid #4a9eff';
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Checking authentication status...</p>';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('{{ url_for(request, "/dashboard/claude/auth/status") }}', {
+        const response = await fetch('/dashboard/qwen/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-                provider_key: providerId,
-                credentials_file: '~/.claude_credentials.json'
+                provider_key: key
             })
         });
         
         const data = await response.json();
         
-        if (data.authenticated) {
-            statusEl.style.background = '#0f4020';
-            statusEl.style.border = '1px solid #4eff9e';
-            const expiresIn = data.expires_in ? ` (expires in ${Math.floor(data.expires_in / 60)} minutes)` : '';
-            statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">✓ Authenticated${expiresIn}</p>`;
-        } else {
+        if (!data.success) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Not authenticated. Click "Authenticate with Claude" to log in.</p>';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
         }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Qwen Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'qwen-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/qwen/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Qwen authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Qwen auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
@@ -299,165 +1344,457 @@ async function checkClaudeAuthUser(providerId) {
     }
 }
 
-async function uploadAuthFile(providerId) {
-    const fileTypeSelect = document.getElementById(`file-type-${providerId}`);
-    const fileInput = document.getElementById(`file-input-${providerId}`);
-    
-    if (!fileInput.files || fileInput.files.length === 0) {
-        alert('Please select a file to upload');
-        return;
-    }
-    
-    const formData = new FormData();
-    formData.append('file_type', fileTypeSelect.value);
-    formData.append('file', fileInput.files[0]);
-    
-    try {
-        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/upload`, {
-            method: 'POST',
-            body: formData
-        });
-        
-        const data = await response.json();
-        
-        if (response.ok) {
-            alert('File uploaded successfully');
-            fileInput.value = '';
-            loadAuthFiles(providerId);
-        } else {
-            alert('Upload failed: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
+async function pollQwenAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateQwen
 }
 
-async function loadAuthFiles(providerId) {
-    try {
-        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/files`);
-        const data = await response.json();
-
-        const container = document.getElementById(`auth-files-${providerId}`);
-        if (!container) return;
-
-        if (data.files && data.files.length > 0) {
-            container.innerHTML = data.files.map(file => `
-                <div class="auth-file-item" style="background: #0f3460; padding: 8px; margin: 5px 0; border-radius: 4px; display: flex; justify-content: space-between; align-items: center;">
-                    <span>
-                        <strong>${file.file_type}</strong>: ${file.original_filename}
-                        <span style="color: #a0a0a0; font-size: 0.9em;"> (${formatFileSize(file.file_size)})</span>
-                    </span>
-                    <span>
-                        <a href="/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${file.file_type}/download" class="btn btn-secondary btn-sm" style="margin-right: 5px;">Download</a>
-                        <button class="btn btn-danger btn-sm" onclick="deleteAuthFile('${providerId}', '${file.file_type}')">Delete</button>
-                    </span>
-                </div>
-            `).join('');
-        } else {
-            container.innerHTML = '<p style="color: #a0a0a0; font-style: italic;">No authentication files uploaded</p>';
-        }
-    } catch (error) {
-        console.error('Error loading auth files:', error);
-    }
-}
-
-async function deleteAuthFile(providerId, fileType) {
-    if (!confirm(`Are you sure you want to delete this ${fileType} file?`)) return;
+async function authenticateCodex(key) {
+    const statusEl = document.getElementById(`codex-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch(`/dashboard/user/providers/${encodeURIComponent(providerId)}/files/${fileType}`, {
-            method: 'DELETE'
-        });
-        
-        if (response.ok) {
-            loadAuthFiles(providerId);
-        } else {
-            const data = await response.json();
-            alert('Delete failed: ' + (data.error || 'Unknown error'));
-        }
-    } catch (error) {
-        alert('Error: ' + error.message);
-    }
-}
-
-function formatFileSize(bytes) {
-    if (!bytes) return '0 B';
-    const k = 1024;
-    const sizes = ['B', 'KB', 'MB', 'GB'];
-    const i = Math.floor(Math.log(bytes) / Math.log(k));
-    return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
-}
-
-// Load auth files for all providers on page load
-document.addEventListener('DOMContentLoaded', function() {
-    providers.forEach(provider => {
-        if (provider.config.type === 'claude' || provider.config.type === 'kiro') {
-            loadAuthFiles(provider.provider_id);
-        }
-    });
-});
-
-renderProviders();
-
-async function applyChanges() {
-    const button = event.target;
-    const originalText = button.innerHTML;
-    
-    try {
-        button.innerHTML = '🔄 Reloading...';
-        button.disabled = true;
-        
-        const response = await fetch('{{ url_for(request, "/dashboard/user/reload-config") }}', {
+        const response = await fetch('/dashboard/codex/auth/start', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json'
-            }
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                issuer: providersData[key].codex_config?.issuer || 'https://auth.openai.com'
+            })
         });
         
-        if (response.ok) {
-            button.innerHTML = '✓ Applied Successfully!';
-            button.style.background = '#10b981';
-            
-            setTimeout(() => {
-                button.innerHTML = originalText;
-                button.style.background = '';
-                button.disabled = false;
-            }, 2000);
-        } else {
-            const data = await response.json();
-            throw new Error(data.error || 'Failed to apply changes');
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
         }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Codex Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'codex-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/codex/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'approved') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Codex authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Codex auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
     } catch (error) {
-        button.innerHTML = '✗ Error';
-        button.style.background = '#ef4444';
-        
-        setTimeout(() => {
-            button.innerHTML = originalText;
-            button.style.background = '';
-            button.disabled = false;
-        }, 2000);
-        
-        alert('Error applying changes: ' + error.message);
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
     }
 }
+
+async function pollCodexAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateCodex
+}
+
+async function authenticateKilo(key) {
+    const statusEl = document.getElementById(`kilo-auth-status-${key}`);
+    statusEl.style.display = 'block';
+    statusEl.style.background = '#0f2840';
+    statusEl.style.border = '1px solid #4a9eff';
+    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Kilocode OAuth2 Device Authorization flow...</p>';
+    
+    try {
+        const response = await fetch('/dashboard/kilo/auth/start', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key
+            })
+        });
+        
+        const data = await response.json();
+        
+        if (!data.success) {
+            statusEl.style.background = '#402010';
+            statusEl.style.border = '1px solid #ff4a4a';
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            return;
+        }
+        
+        statusEl.style.background = '#0f2840';
+        statusEl.style.border = '1px solid #4a9eff';
+        statusEl.innerHTML = `
+            <div style="margin: 0;">
+                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Kilocode Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
+                </p>
+                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                    Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
+                </p>
+                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                    Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
+                </p>
+            </div>
+        `;
+        
+        try {
+            window.open(data.verification_uri, 'kilo-auth', 'width=600,height=700');
+        } catch (e) {
+            console.error('Could not open auth window:', e);
+        }
+        
+        let pollCount = 0;
+        const maxPolls = Math.floor(data.expires_in / data.interval);
+        const pollInterval = setInterval(async () => {
+            pollCount++;
+            
+            try {
+                const pollResponse = await fetch('/dashboard/kilo/auth/poll', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    }
+                });
+                
+                const pollData = await pollResponse.json();
+                
+                if (pollData.status === 'completed') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#0f4020';
+                    statusEl.style.border = '1px solid #4eff9e';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Kilocode authentication successful! Credentials saved.</p>';
+                } else if (pollData.status === 'denied') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                } else if (pollData.status === 'expired') {
+                    clearInterval(pollInterval);
+                    statusEl.style.background = '#402010';
+                    statusEl.style.border = '1px solid #ff4a4a';
+                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                }
+                
+            } catch (error) {
+                console.error('Error polling Kilo auth:', error);
+            }
+            
+            if (pollCount >= maxPolls) {
+                clearInterval(pollInterval);
+                statusEl.style.background = '#402010';
+                statusEl.style.border = '1px solid #ff4a4a';
+                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+            }
+        }, data.interval * 1000);
+        
+    } catch (error) {
+        statusEl.style.background = '#402010';
+        statusEl.style.border = '1px solid #ff4a4a';
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+    }
+}
+
+async function pollKiloAuth(providerKey, deviceCode) {
+    // This function is no longer needed as polling is handled in authenticateKilo
+}
+
+function removeProvider(key) {
+    if (confirm(`Remove provider "${key}"?`)) {
+        delete providersData[key];
+        expandedProviders.delete(key);
+        renderProvidersList();
+    }
+}
+
+function updateProvider(key, field, value) {
+    providersData[key][field] = value;
+}
+
+function updateKiroConfig(key, field, value) {
+    if (!providersData[key].kiro_config) {
+        providersData[key].kiro_config = {};
+    }
+    providersData[key].kiro_config[field] = value;
+}
+
+function updateClaudeConfig(key, field, value) {
+    if (!providersData[key].claude_config) {
+        providersData[key].claude_config = {};
+    }
+    providersData[key].claude_config[field] = value;
+}
+
+function updateKiloConfig(key, field, value) {
+    if (!providersData[key].kilo_config) {
+        providersData[key].kilo_config = {};
+    }
+    providersData[key].kilo_config[field] = value;
+}
+
+function updateQwenConfig(key, field, value) {
+    if (!providersData[key].qwen_config) {
+        providersData[key].qwen_config = {};
+    }
+    providersData[key].qwen_config[field] = value;
+}
+
+function updateCodexConfig(key, field, value) {
+    if (!providersData[key].codex_config) {
+        providersData[key].codex_config = {};
+    }
+    providersData[key].codex_config[field] = value;
+}
+
+function updateProviderType(key, value) {
+    providersData[key].type = value;
+    // Re-render to update the configuration fields
+    renderProvidersList();
+}
+
+function updateProviderCondenseMethod(key, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        providersData[key].default_condense_method = null;
+        return;
+    }
+
+    // Check if it's a comma-separated list
+    if (trimmed.includes(',')) {
+        providersData[key].default_condense_method = trimmed.split(',').map(s => s.trim()).filter(s => s);
+    } else {
+        providersData[key].default_condense_method = trimmed;
+    }
+}
+
+function addModel(key) {
+    if (!providersData[key].models) {
+        providersData[key].models = [];
+    }
+
+    providersData[key].models.push({
+        name: '',
+        rate_limit: 0
+    });
+
+    renderModels(key);
+}
+
+function removeModel(providerKey, index) {
+    if (confirm('Remove this model?')) {
+        providersData[providerKey].models.splice(index, 1);
+        renderModels(providerKey);
+    }
+}
+
+async function confirmAddProvider() {
+    const key = document.getElementById('new-provider-key').value.trim();
+    const type = document.getElementById('new-provider-type').value;
+
+    if (!key) {
+        alert('Please enter a provider key');
+        return;
+    }
+
+    if (providersData[key]) {
+        alert('Provider key already exists');
+        return;
+    }
+
+    // Create new provider with defaults
+    providersData[key] = {
+        id: key,
+        name: key.charAt(0).toUpperCase() + key.slice(1),
+        endpoint: getDefaultEndpoint(type),
+        type: type,
+        api_key_required: type !== 'ollama' && type !== 'kiro' && type !== 'claude' && type !== 'kilocode' && type !== 'qwen' && type !== 'codex',
+        rate_limit: 0,
+        models: []
+    };
+
+    // Add type-specific config
+    if (type === 'kiro') {
+        providersData[key].kiro_config = {
+            region: 'us-east-1',
+            refresh_token: '',
+            profile_arn: '',
+            client_id: '',
+            client_secret: ''
+        };
+    } else if (type === 'claude') {
+        providersData[key].claude_config = {};
+    } else if (type === 'kilocode') {
+        providersData[key].kilo_config = {
+            api_base: 'https://api.kilo.ai/api/gateway'
+        };
+    } else if (type === 'qwen') {
+        providersData[key].qwen_config = {
+            api_key: '',
+            region: 'china-beijing',
+            workspace_id: 'Default Workspace'
+        };
+    } else if (type === 'codex') {
+        providersData[key].codex_config = {
+            issuer: 'https://auth.openai.com'
+        };
+    }
+
+    cancelAddProvider();
+    renderProvidersList();
+}
+
+function getDefaultEndpoint(type) {
+    const defaults = {
+        'openai': 'https://api.openai.com/v1',
+        'google': 'https://generativelanguage.googleapis.com/v1beta',
+        'anthropic': 'https://api.anthropic.com/v1',
+        'ollama': 'http://localhost:11434/api',
+        'kiro': 'https://q.us-east-1.amazonaws.com',
+        'claude': 'https://api.anthropic.com/v1',
+        'kilocode': 'https://api.kilo.ai/api/gateway',
+        'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'codex': 'https://api.openai.com/v1'
+    };
+    return defaults[type] || '';
+}
+
+async function getModelsFromProvider(key) {
+    const statusDiv = document.getElementById(`get-models-status-${key}`);
+    if (!statusDiv) return;
+
+    statusDiv.innerHTML = 'Fetching models...';
+
+    try {
+        const response = await fetch('/dashboard/providers/get-models', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                provider_key: key,
+                provider: providersData[key]
+            })
+        });
+
+        const result = await response.json();
+
+        if (response.ok && result.models) {
+            providersData[key].models = result.models;
+            renderModels(key);
+            statusDiv.innerHTML = `✅ Found ${result.models.length} models`;
+        } else {
+            statusDiv.innerHTML = `❌ Error: ${result.error || 'Failed to fetch models'}`;
+        }
+    } catch (error) {
+        statusDiv.innerHTML = `❌ Error: ${error.message}`;
+    }
+}
+
+function updateModel(providerKey, index, field, value) {
+    providersData[providerKey].models[index][field] = value;
+}
+
+function updateModelCondenseMethod(providerKey, index, value) {
+    const trimmed = value.trim();
+    if (!trimmed) {
+        providersData[providerKey].models[index].condense_method = null;
+        return;
+    }
+
+    // Check if it's a comma-separated list
+    if (trimmed.includes(',')) {
+        providersData[providerKey].models[index].condense_method = trimmed.split(',').map(s => s.trim()).filter(s => s);
+    } else {
+        providersData[providerKey].models[index].condense_method = trimmed;
+    }
+}
+
+async function saveProviders() {
+    try {
+        const response = await fetch('/dashboard/providers', {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/x-www-form-urlencoded',
+            },
+            body: 'config=' + encodeURIComponent(JSON.stringify(providersData, null, 2))
+        });
+
+        if (response.ok) {
+            window.location.href = '/dashboard/providers?success=1';
+        } else {
+            alert('Error saving configuration');
+        }
+    } catch (error) {
+        alert('Error: ' + error.message);
+    }
+}
+
+// Initialize providers list immediately (DOM is already loaded since script is at end of body)
+console.log('Initializing providers list...');
+console.log('providersData:', Object.keys(providersData));
+console.log('Number of providers:', Object.keys(providersData).length);
+renderProvidersList();
+console.log('renderProvidersList() completed');
+
 </script>
-
-<style>
-.provider-item {
-    background: #1a1a2e;
-    padding: 1rem;
-    margin: 1rem 0;
-    border-radius: 8px;
-}
-
-.provider-item h3 {
-    margin-top: 0;
-}
-
-.provider-item code {
-    background: #0f3460;
-    padding: 0.2rem 0.5rem;
-    border-radius: 4px;
-}
-</style>
 {% endblock %}

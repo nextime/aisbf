@@ -5,6 +5,16 @@ AISBF - AI Service Broker Framework || AI Should Be Free
 
 Qwen OAuth2 provider handler.
 
+⚠️  WARNING: QWEN OAUTH2 SERVICE DISCONTINUED ⚠️
+
+As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+The OAuth2 tokens obtained from chat.qwen.ai are no longer valid for the DashScope API.
+
+This implementation is maintained in the hope that Qwen will re-enable OAuth2 support
+in the future. If the service remains discontinued, this code will eventually be removed.
+
+For now, please use API key authentication instead of OAuth2 for Qwen/DashScope services.
+
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
@@ -37,6 +47,14 @@ class QwenProviderHandler(BaseProviderHandler):
     """
     Handler for Qwen OAuth2 integration using OpenAI-compatible API.
     
+    ⚠️  WARNING: QWEN OAUTH2 SERVICE DISCONTINUED ⚠️
+    
+    As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+    OAuth2 tokens from chat.qwen.ai are no longer accepted by the DashScope API.
+    
+    This implementation is maintained for potential future re-enablement by Qwen.
+    Please use API key authentication instead.
+    
     This handler uses OAuth2 authentication to access Qwen models through
     the DashScope OpenAI-compatible endpoint. OAuth2 access tokens are passed
     as the api_key parameter to the OpenAI SDK.
@@ -46,8 +64,15 @@ class QwenProviderHandler(BaseProviderHandler):
     """
     
     def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
-        super().__init__(provider_id, api_key)
-        self.user_id = user_id
+        super().__init__(provider_id, api_key, user_id=user_id)
+        
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.warning(
+            "⚠️  Qwen OAuth2 service has been discontinued by Qwen. "
+            "OAuth2 tokens are no longer accepted by DashScope API. "
+            "Please use API key authentication instead."
+        )
         self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config

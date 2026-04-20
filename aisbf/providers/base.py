@@ -718,12 +718,34 @@ def get_all_adaptive_rate_limiters() -> Dict[str, AdaptiveRateLimiter]:
 
 
 class BaseProviderHandler:
-    def __init__(self, provider_id: str, api_key: Optional[str] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
         self.provider_id = provider_id
         self.api_key = api_key
-        self.error_tracking = config.error_tracking[provider_id]
+        self.user_id = user_id
+        
+        # Get error tracking config - use user-specific or default to global
+        if user_id is not None and provider_id in config.error_tracking:
+            self.error_tracking = config.error_tracking[provider_id]
+        elif user_id is not None:
+            # Default error tracking for user providers
+            self.error_tracking = {
+                "enabled": True,
+                "max_errors": 5,
+                "cooldown_seconds": 60
+            }
+        else:
+            self.error_tracking = config.error_tracking[provider_id]
+            
         self.last_request_time = 0
-        self.rate_limit = config.providers[provider_id].rate_limit
+        
+        # Get rate limit - use user-specific or default to global
+        if user_id is not None and provider_id in config.providers:
+            self.rate_limit = config.providers[provider_id].rate_limit
+        elif user_id is not None:
+            # Default rate limit for user providers
+            self.rate_limit = 60
+        else:
+            self.rate_limit = config.providers[provider_id].rate_limit
         # Add model-level rate limit tracking
         self.model_last_request_time = {}  # {model_name: timestamp}
         # Token usage tracking for rate limits

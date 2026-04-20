@@ -28,10 +28,11 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), Kiro-cli, Claude Code (OAuth2), Kilocode (OAuth2), Codex (OAuth2), and Qwen (OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Ollama, Kiro (Amazon Q Developer), Kiro-cli, Claude Code (OAuth2), Kilocode (OAuth2), Codex (OAuth2), and Qwen (API Key/OAuth2 - OAuth2 discontinued)
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh and Chrome extension for remote servers
 - **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
 - **Codex OAuth2 Authentication**: OAuth2 Device Authorization Grant for OpenAI Codex with automatic token refresh and API key exchange
+- **Qwen Authentication**: API key authentication (recommended) or OAuth2 (discontinued as of April 2026)
 - **Rotation Models**: Weighted load balancing across multiple providers with automatic failover
 - **Autoselect Models**: AI-powered model selection based on content analysis and request characteristics
 - **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
@@ -140,7 +141,7 @@ See [`PYPI.md`](PYPI.md) for detailed instructions on publishing to PyPI.
 - Kiro-cli (Amazon Q Developer CLI authentication)
 - Kilocode (OAuth2 Device Authorization Grant)
 - Codex (OAuth2 Device Authorization Grant - OpenAI protocol)
-- Qwen (OAuth2 Device Authorization Grant with PKCE - DashScope OpenAI-compatible)
+- Qwen (API Key or OAuth2 - OAuth2 discontinued April 2026)
 
 ### Kiro-cli Provider Support
 
@@ -271,11 +272,18 @@ AISBF supports OpenAI Codex as a provider using OAuth2 Device Authorization Gran
 
 ### Qwen OAuth2 Authentication
 
-AISBF supports Qwen (Alibaba Cloud) as a provider using OAuth2 Device Authorization Grant with PKCE:
+> **⚠️ IMPORTANT NOTICE: Qwen OAuth2 Service Discontinued (April 2026)**
+>
+> Qwen has completely disabled OAuth2 subscriptions for Qwen Code. OAuth2 tokens from `chat.qwen.ai` are no longer accepted by the DashScope API.
+>
+> **Please use API key authentication instead.** OAuth2 support is maintained in the code for potential future re-enablement, but it is currently non-functional.
+
+AISBF supports Qwen (Alibaba Cloud) as a provider using OAuth2 Device Authorization Grant with PKCE (currently discontinued) or API key authentication:
 
 #### Features
-- Full OAuth2 Device Authorization Grant flow with PKCE (S256)
-- Automatic token refresh with cross-process synchronization
+- **API Key Authentication (Recommended)**: Direct API key authentication with DashScope
+- Full OAuth2 Device Authorization Grant flow with PKCE (S256) - **DISCONTINUED**
+- Automatic token refresh with cross-process synchronization - **DISCONTINUED**
 - OpenAI-compatible DashScope API endpoint
 - Dashboard integration with authentication UI
 - No localhost callback port needed (device code flow)
@@ -284,10 +292,20 @@ AISBF supports Qwen (Alibaba Cloud) as a provider using OAuth2 Device Authorizat
 - File-based locking for multi-process token management
 
 #### Setup
+
+**Using API Key (Recommended):**
+1. Add qwen provider to configuration (via dashboard or `~/.aisbf/providers.json`)
+2. Enter your Qwen API key in the dashboard
+3. Select your region (China, Singapore, US, etc.)
+4. Use qwen models via API: `qwen/<model>`
+
+**Using OAuth2 (Discontinued - Not Working):**
 1. Add qwen provider to configuration (via dashboard or `~/.aisbf/providers.json`)
 2. Click "Authenticate with Qwen (Device Code)" in dashboard
 3. Complete device authorization flow at `https://chat.qwen.ai`
 4. Use qwen models via API: `qwen/<model>`
+
+**Note:** OAuth2 authentication will fail with 401 errors. Use API key authentication instead.
 
 #### Configuration Example
 ```json

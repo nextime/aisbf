@@ -120,16 +120,22 @@ function openOAuthPopup(url) {
     
     // Listen for popup messages
     const messageListener = function(event) {
-        if (event.data.type === 'oauth2_complete') {
+        console.log('Received OAuth message:', event.data, event.origin);
+        
+        if (event.data && event.data.type === 'oauth2_complete') {
+            console.log('OAuth complete, redirecting to:', event.data.redirect_url || '/dashboard');
+            
             // Close popup
             popup.close();
             
             // Remove listener
             window.removeEventListener('message', messageListener);
             
-            // Redirect to dashboard
-            window.location.href = event.data.redirect_url || '/dashboard';
-        } else if (event.data.type === 'oauth2_error') {
+            // Force redirect to dashboard - use relative path for reliability
+            window.location.replace('/dashboard');
+        } else if (event.data && event.data.type === 'oauth2_error') {
+            console.log('OAuth error:', event.data.error);
+            
             // Close popup
             popup.close();
             
@@ -148,6 +154,24 @@ function openOAuthPopup(url) {
         if (popup.closed) {
             clearInterval(popupCheck);
             window.removeEventListener('message', messageListener);
+            
+            // Check if authentication was successful by trying to load dashboard
+            // Use fetch with credentials: 'same-origin' to send cookies
+            fetch('/dashboard', { 
+                method: 'GET', 
+                credentials: 'same-origin',
+                redirect: 'follow'
+            }).then(response => {
+                // If we get a 200 OK (HTML) or redirect to dashboard, auth was successful
+                if (response.ok || response.redirected) {
+                    console.log('Auth detected on popup close, redirecting to dashboard');
+                    window.location.replace('/dashboard');
+                }
+            }).catch(error => {
+                console.log('Dashboard check failed:', error);
+                // Fallback: try direct redirect anyway for authenticated users
+                window.location.replace('/dashboard');
+            });
         }
     }, 500);
 }

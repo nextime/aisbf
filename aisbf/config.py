@@ -85,7 +85,7 @@ class ProviderConfig(BaseModel):
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
     # Provider-native caching configuration
-    enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching, OpenAI-compatible APIs)
+    enable_native_caching: bool = False  # Enable provider-native caching (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs)
     cache_ttl: Optional[int] = None  # Cache TTL in seconds for Google Context Caching API
     min_cacheable_tokens: Optional[int] = 1024  # Minimum token count for content to be cacheable (default matches OpenAI)
     prompt_cache_key: Optional[str] = None  # Optional cache key for OpenAI's load balancer routing optimization

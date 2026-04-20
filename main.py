@@ -3372,11 +3372,11 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
                 cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (user_id,))
                 conn.commit()
         
+        # Check if this is a popup window request BEFORE cleaning up session
+        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
+        
         # Cleanup session data
         request.session.pop('oauth2_google', None)
-
-        # Check if this is a popup window request
-        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
         if is_popup:
             # Return HTML with postMessage to opener
             return HTMLResponse(content=f'''
@@ -3556,11 +3556,11 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
                 cursor.execute(f'UPDATE users SET last_login = CURRENT_TIMESTAMP WHERE id = {placeholder}', (user_id,))
                 conn.commit()
 
+        # Check if this is a popup window request BEFORE cleaning up session
+        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
+        
         # Cleanup session data
         request.session.pop('oauth2_github', None)
-
-        # Check if this is a popup window request
-        is_popup = request.session.pop('oauth2_popup', False) or request.session.pop('oauth2_popup_mode', False)
         if is_popup:
             # Return HTML with postMessage to opener
             return HTMLResponse(content=f'''
@@ -3794,17 +3794,33 @@ async def dashboard_providers(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard/providers.html",
-        context={
-        "request": request,
-        "session": request.session,
-        "__version__": __version__,
-        "providers_json": json.dumps(providers_data),
-        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    }
-    )
+    if is_config_admin:
+        # Config admin: use admin template
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/providers.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "providers_json": json.dumps(providers_data),
+            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+        }
+        )
+    else:
+        # Database user: use user template with proper context
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/user_providers.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "user_providers_json": json.dumps(providers_data),
+            "user_id": current_user_id,
+            "success": "Configuration saved successfully!" if success else None
+        }
+        )
 
 async def _auto_detect_provider_models(provider_key: str, provider: dict) -> list:
     """
@@ -3989,42 +4005,83 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             
             logger.info(f"Saved {len(providers_data)} provider(s) to database for user {current_user_id}")
         
-        success_msg = "Configuration saved successfully! Restart server for changes to take effect."
-        
-        return templates.TemplateResponse(
-        request=request,
-        name="dashboard/providers.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "providers_json": json.dumps(providers_data),
-            "success": success_msg
-        }
-    )
+        if is_config_admin:
+            success_msg = "Configuration saved successfully! Restart server for changes to take effect."
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/providers.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "providers_json": json.dumps(providers_data),
+                    "success": success_msg
+                }
+            )
+        else:
+            success_msg = "Configuration saved successfully!"
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_providers.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_providers_json": json.dumps(user_providers),
+                    "user_id": current_user_id,
+                    "success": success_msg
+                }
+            )
     except json.JSONDecodeError as e:
         # Reload current config on error
-        config_path = Path.home() / '.aisbf' / 'providers.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / 'providers.json'
-        with open(config_path) as f:
-            full_config = json.load(f)
+        current_user_id = request.session.get('user_id')
+        is_config_admin = current_user_id is None
         
-        # Extract providers
-        if 'providers' in full_config and isinstance(full_config['providers'], dict):
-            providers_data = full_config['providers']
+        if is_config_admin:
+            config_path = Path.home() / '.aisbf' / 'providers.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'providers.json'
+            with open(config_path) as f:
+                full_config = json.load(f)
+            
+            # Extract providers
+            if 'providers' in full_config and isinstance(full_config['providers'], dict):
+                providers_data = full_config['providers']
+            else:
+                providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/providers.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "providers_json": json.dumps(providers_data),
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
         else:
-            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
-        
-        return templates.TemplateResponse(
-        request=request,
-        name="dashboard/providers.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "providers_json": json.dumps(providers_data),
-            "error": f"Invalid JSON: {str(e)}"
-        }
-    )
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_providers.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_providers_json": json.dumps(user_providers),
+                    "user_id": current_user_id,
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
 
 @app.post("/dashboard/providers/get-models")
 async def dashboard_providers_get_models(request: Request):
@@ -4153,17 +4210,34 @@ async def dashboard_rotations(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard/rotations.html",
-        context={
-        "request": request,
-        "session": request.session,
-        "rotations_json": json.dumps(rotations_data),
-        "available_providers": json.dumps(available_providers),
-        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    }
-    )
+    if is_config_admin:
+        # Config admin: use admin template
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/rotations.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "rotations_json": json.dumps(rotations_data),
+            "available_providers": json.dumps(available_providers),
+            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+        }
+        )
+    else:
+        # Database user: use user template with proper context
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/user_rotations.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "user_rotations_json": json.dumps(rotations_data),
+            "available_providers": json.dumps(available_providers),
+            "user_id": current_user_id,
+            "success": "Configuration saved successfully!" if success else None
+        }
+        )
 
 @app.post("/dashboard/rotations")
 async def dashboard_rotations_save(request: Request, config: str = Form(...)):
@@ -4208,22 +4282,45 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             
             logger.info(f"Saved {len(rotations)} rotation(s) to database for user {current_user_id}")
         
-        # Get global config safely
-        from aisbf.config import config as global_config
-        available_providers = list(global_config.providers.keys()) if global_config else []
-        
-        return templates.TemplateResponse(
-            request=request,
-            name="dashboard/rotations.html",
-            context={
-                "request": request,
-                "session": request.session,
-                "__version__": __version__,
-                "rotations_json": json.dumps(rotations_data),
-                "available_providers": json.dumps(available_providers),
-                "success": "Configuration saved successfully! Restart server for changes to take effect."
-            }
-        )
+        if is_config_admin:
+            # Get global config safely
+            from aisbf.config import config as global_config
+            available_providers = list(global_config.providers.keys()) if global_config else []
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/rotations.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "rotations_json": json.dumps(rotations_data),
+                    "available_providers": json.dumps(available_providers),
+                    "success": "Configuration saved successfully! Restart server for changes to take effect."
+                }
+            )
+        else:
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            user_rotations = db.get_user_rotations(current_user_id)
+            
+            # For database users, get their own providers
+            user_providers = db.get_user_providers(current_user_id)
+            available_providers = [p['provider_id'] for p in user_providers]
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_rotations.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_rotations_json": json.dumps(rotations_data),
+                    "available_providers": json.dumps(available_providers),
+                    "user_id": current_user_id,
+                    "success": "Configuration saved successfully!"
+                }
+            )
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
@@ -4243,19 +4340,40 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             for rotation in user_rotations:
                 rotations_data["rotations"][rotation['rotation_id']] = rotation['config']
         
-        available_providers = list(config.providers.keys()) if config else []
-        
-        return templates.TemplateResponse(
-        request=request,
-        name="dashboard/rotations.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "rotations_json": json.dumps(rotations_data),
-            "available_providers": json.dumps(available_providers),
-            "error": f"Invalid JSON: {str(e)}"
-        }
-    )
+        if is_config_admin:
+            available_providers = list(config.providers.keys()) if config else []
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/rotations.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "rotations_json": json.dumps(rotations_data),
+                    "available_providers": json.dumps(available_providers),
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
+        else:
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            available_providers = [p['provider_id'] for p in user_providers]
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_rotations.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_rotations_json": json.dumps(rotations_data),
+                    "available_providers": json.dumps(available_providers),
+                    "user_id": current_user_id,
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
 
 @app.get("/dashboard/autoselect", response_class=HTMLResponse)
 async def dashboard_autoselect(request: Request):
@@ -4324,18 +4442,68 @@ async def dashboard_autoselect(request: Request):
     # Check for success parameter
     success = request.query_params.get('success')
     
-    return templates.TemplateResponse(
-        request=request,
-        name="dashboard/autoselect.html",
-        context={
-        "request": request,
-        "session": request.session,
-        "autoselect_json": json.dumps(autoselect_data),
-        "available_rotations": json.dumps(available_rotations),
-        "available_models": json.dumps(available_models),
-        "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
-    }
-    )
+    if is_config_admin:
+        # Config admin: use admin template
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/autoselect.html",
+            context={
+            "request": request,
+            "session": request.session,
+            "autoselect_json": json.dumps(autoselect_data),
+            "available_rotations": json.dumps(available_rotations),
+            "available_models": json.dumps(available_models),
+            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+        }
+        )
+    else:
+        # Database user: use user template with proper context
+        from aisbf.database import get_database
+        db = DatabaseRegistry.get_config_database()
+        user_autoselects = db.get_user_autoselects(current_user_id)
+        
+        # For database users, get available user rotations
+        user_rotations = db.get_user_rotations(current_user_id)
+        available_rotations = [rot['rotation_id'] for rot in user_rotations]
+        
+        # For database users, get available user providers
+        user_providers = db.get_user_providers(current_user_id)
+        available_models = []
+        
+        # Add user rotation IDs
+        for rotation_id in available_rotations:
+            available_models.append({
+                'id': rotation_id,
+                'name': f'{rotation_id} (rotation)',
+                'type': 'rotation'
+            })
+        
+        # Add user provider models
+        for provider in user_providers:
+            provider_config = provider['config']
+            if 'models' in provider_config and isinstance(provider_config['models'], list):
+                for model in provider_config['models']:
+                    model_id = f"{provider['provider_id']}/{model['name']}"
+                    available_models.append({
+                        'id': model_id,
+                        'name': f"{model_id} (provider model)",
+                        'type': 'provider'
+                    })
+        
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_autoselects.html",
+                context={
+                "request": request,
+                "session": request.session,
+                "__version__": __version__,
+                "user_autoselects_json": json.dumps(autoselect_data),
+                "available_rotations": json.dumps(available_rotations),
+                "available_models": json.dumps(available_models),
+                "user_id": current_user_id,
+                "success": "Configuration saved successfully!" if success else None
+            }
+            )
 
 @app.post("/dashboard/autoselect")
 async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
@@ -4368,22 +4536,102 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             
             logger.info(f"Saved {len(autoselect_data)} autoselect(s) to database for user {current_user_id}")
         
-        # Get global config safely
-        from aisbf.config import config as global_config
-        available_rotations = list(global_config.rotations.keys()) if global_config else []
-        
-        return templates.TemplateResponse(
-            request=request,
-            name="dashboard/autoselect.html",
-            context={
-                "request": request,
-                "session": request.session,
-                "__version__": __version__,
-                "autoselect_json": json.dumps(autoselect_data),
-                "available_rotations": json.dumps(available_rotations),
-                "success": "Configuration saved successfully! Restart server for changes to take effect."
-            }
-        )
+        if is_config_admin:
+            # Get global config safely
+            from aisbf.config import config as global_config
+            available_rotations = list(global_config.rotations.keys()) if global_config else []
+            
+            # Get available provider models
+            available_models = []
+            
+            # Add rotation IDs
+            for rotation_id in available_rotations:
+                available_models.append({
+                    'id': rotation_id,
+                    'name': f'{rotation_id} (rotation)',
+                    'type': 'rotation'
+                })
+            
+            # Add provider models
+            providers_path = Path.home() / '.aisbf' / 'providers.json'
+            if not providers_path.exists():
+                providers_path = Path(__file__).parent / 'config' / 'providers.json'
+            
+            if providers_path.exists():
+                with open(providers_path) as f:
+                    providers_config = json.load(f)
+                    providers_data = providers_config.get('providers', {})
+                    
+                    for provider_id, provider in providers_data.items():
+                        if 'models' in provider and isinstance(provider['models'], list):
+                            for model in provider['models']:
+                                model_id = f"{provider_id}/{model['name']}"
+                                available_models.append({
+                                    'id': model_id,
+                                    'name': f"{model_id} (provider model)",
+                                    'type': 'provider'
+                                })
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/autoselect.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "autoselect_json": json.dumps(autoselect_data),
+                    "available_rotations": json.dumps(available_rotations),
+                    "available_models": json.dumps(available_models),
+                    "success": "Configuration saved successfully! Restart server for changes to take effect."
+                }
+            )
+        else:
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            user_autoselects = db.get_user_autoselects(current_user_id)
+            
+            # For database users, get available user rotations
+            user_rotations = db.get_user_rotations(current_user_id)
+            available_rotations = [rot['rotation_id'] for rot in user_rotations]
+            
+            # For database users, get available user providers
+            user_providers = db.get_user_providers(current_user_id)
+            available_models = []
+            
+            # Add user rotation IDs
+            for rotation_id in available_rotations:
+                available_models.append({
+                    'id': rotation_id,
+                    'name': f'{rotation_id} (rotation)',
+                    'type': 'rotation'
+                })
+            
+            # Add user provider models
+            for provider in user_providers:
+                provider_config = provider['config']
+                if 'models' in provider_config and isinstance(provider_config['models'], list):
+                    for model in provider_config['models']:
+                        model_id = f"{provider['provider_id']}/{model['name']}"
+                        available_models.append({
+                            'id': model_id,
+                            'name': f"{model_id} (provider model)",
+                            'type': 'provider'
+                        })
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_autoselects.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_autoselects_json": json.dumps(autoselect_data),
+                    "available_rotations": json.dumps(available_rotations),
+                    "available_models": json.dumps(available_models),
+                    "user_id": current_user_id,
+                    "success": "Configuration saved successfully!"
+                }
+            )
     except json.JSONDecodeError as e:
         # Reload current config on error
         current_user_id = request.session.get('user_id')
@@ -4403,19 +4651,99 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             for autoselect in user_autoselects:
                 autoselect_data[autoselect['autoselect_id']] = autoselect['config']
         
-        available_rotations = list(config.rotations.keys()) if config else []
-        
-        return templates.TemplateResponse(
-        request=request,
-        name="dashboard/autoselect.html",
-        context={
-            "request": request,
-            "session": request.session,
-            "autoselect_json": json.dumps(autoselect_data),
-            "available_rotations": json.dumps(available_rotations),
-            "error": f"Invalid JSON: {str(e)}"
-        }
-    )
+        if is_config_admin:
+            available_rotations = list(config.rotations.keys()) if config else []
+            
+            # Get available provider models
+            available_models = []
+            
+            # Add rotation IDs
+            for rotation_id in available_rotations:
+                available_models.append({
+                    'id': rotation_id,
+                    'name': f'{rotation_id} (rotation)',
+                    'type': 'rotation'
+                })
+            
+            # Add provider models
+            providers_path = Path.home() / '.aisbf' / 'providers.json'
+            if not providers_path.exists():
+                providers_path = Path(__file__).parent / 'config' / 'providers.json'
+            
+            if providers_path.exists():
+                with open(providers_path) as f:
+                    providers_config = json.load(f)
+                    providers_data = providers_config.get('providers', {})
+                    
+                    for provider_id, provider in providers_data.items():
+                        if 'models' in provider and isinstance(provider['models'], list):
+                            for model in provider['models']:
+                                model_id = f"{provider_id}/{model['name']}"
+                                available_models.append({
+                                    'id': model_id,
+                                    'name': f"{model_id} (provider model)",
+                                    'type': 'provider'
+                                })
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/autoselect.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "autoselect_json": json.dumps(autoselect_data),
+                    "available_rotations": json.dumps(available_rotations),
+                    "available_models": json.dumps(available_models),
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
+        else:
+            from aisbf.database import get_database
+            db = DatabaseRegistry.get_config_database()
+            
+            # For database users, get available user rotations
+            user_rotations = db.get_user_rotations(current_user_id)
+            available_rotations = [rot['rotation_id'] for rot in user_rotations]
+            
+            # For database users, get available user providers
+            user_providers = db.get_user_providers(current_user_id)
+            available_models = []
+            
+            # Add user rotation IDs
+            for rotation_id in available_rotations:
+                available_models.append({
+                    'id': rotation_id,
+                    'name': f'{rotation_id} (rotation)',
+                    'type': 'rotation'
+                })
+            
+            # Add user provider models
+            for provider in user_providers:
+                provider_config = provider['config']
+                if 'models' in provider_config and isinstance(provider_config['models'], list):
+                    for model in provider_config['models']:
+                        model_id = f"{provider['provider_id']}/{model['name']}"
+                        available_models.append({
+                            'id': model_id,
+                            'name': f"{model_id} (provider model)",
+                            'type': 'provider'
+                        })
+            
+            return templates.TemplateResponse(
+                request=request,
+                name="dashboard/user_autoselects.html",
+                context={
+                    "request": request,
+                    "session": request.session,
+                    "__version__": __version__,
+                    "user_autoselects_json": json.dumps(autoselect_data),
+                    "available_rotations": json.dumps(available_rotations),
+                    "available_models": json.dumps(available_models),
+                    "user_id": current_user_id,
+                    "error": f"Invalid JSON: {str(e)}"
+                }
+            )
 
 @app.get("/dashboard/prompts", response_class=HTMLResponse)
 async def dashboard_prompts(request: Request):
@@ -8473,8 +8801,8 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
         else:
             return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
     
-    # PATH 2: Check if it's a rotation (format: rotation/{name})
-    if provider_id == "rotation":
+    # PATH 2: Check if it's a rotation (format: rotation/{name} or rotations/{name})
+    if provider_id == "rotation" or provider_id == "rotations":
         if actual_model not in config.rotations:
             raise HTTPException(
                 status_code=400,
@@ -8486,6 +8814,23 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
         token_id = getattr(request.state, 'token_id', None)
         handler = get_user_handler('rotation', user_id)
         return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
+    
+    # PATH 2a: Check if it's an autoselect (format: autoselect/{name} or autoselections/{name})
+    if provider_id == "autoselect" or provider_id == "autoselections":
+        if actual_model not in config.autoselect:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Autoselect '{actual_model}' not found. Available: {list(config.autoselect.keys())}"
+            )
+        body_dict['model'] = actual_model
+        # Get user-specific handler
+        user_id = getattr(request.state, 'user_id', None)
+        token_id = getattr(request.state, 'token_id', None)
+        handler = get_user_handler('autoselect', user_id)
+        if body.stream:
+            return await handler.handle_autoselect_streaming_request(actual_model, body_dict)
+        else:
+            return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
     
     # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
@@ -9123,6 +9468,12 @@ async def list_autoselect_models():
             })
     logger.info(f"Total autoselect models available: {len(all_models)}")
     return {"data": all_models}
+
+
+@app.get("/api/autoselections/models")
+async def list_autoselection_models():
+    """List all models across all autoselect configurations (alias for /api/autoselect/models)"""
+    return await list_autoselect_models()
 
 @app.post("/api/{provider_id}/chat/completions")
 async def chat_completions(provider_id: str, request: Request, body: ChatCompletionRequest):
@@ -11180,10 +11531,41 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'"
+            detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'rotations/name', 'autoselections/name', 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'"
         )
     
     body_dict = body.model_dump()
+    
+    # Handle new formats: rotations/{rotation_name} and autoselections/{autoselection_name}
+    if provider_id == "rotations" or provider_id == "rotation":
+        # Normalize to user-rotation handler
+        rotation_name = actual_model
+        handler = get_user_handler('rotation', target_user_id)
+        if rotation_name not in handler.user_rotations:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User rotation '{rotation_name}' not found. Available: {list(handler.user_rotations.keys())}"
+            )
+        body_dict['model'] = rotation_name
+        token_id = getattr(request.state, 'token_id', None)
+        return await handler.handle_rotation_request(rotation_name, body_dict, authenticated_user_id, token_id)
+    
+    if provider_id == "autoselections" or provider_id == "autoselect":
+        # Normalize to user-autoselect handler
+        autoselect_name = actual_model
+        handler = get_user_handler('autoselect', target_user_id)
+        if autoselect_name not in handler.user_autoselects:
+            raise HTTPException(
+                status_code=400,
+                detail=f"User autoselect '{autoselect_name}' not found. Available: {list(handler.user_autoselects.keys())}"
+            )
+        body_dict['model'] = autoselect_name
+
+        if body.stream:
+            return await handler.handle_autoselect_streaming_request(autoselect_name, body_dict)
+        else:
+            token_id = getattr(request.state, 'token_id', None)
+            return await handler.handle_autoselect_request(autoselect_name, body_dict, authenticated_user_id, token_id)
     
     if provider_id == "user-autoselect":
         handler = get_user_handler('autoselect', target_user_id)
@@ -11211,28 +11593,31 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         token_id = getattr(request.state, 'token_id', None)
         return await handler.handle_rotation_request(actual_model, body_dict, authenticated_user_id, token_id)
     
-    if provider_id == "user-provider":
+    if provider_id == "user-provider" or provider_id in (p['provider_id'] for p in (get_user_handler('request', target_user_id).user_providers.values() if target_user_id else [])):
+        # Check if this is a user provider
         handler = get_user_handler('request', target_user_id)
-        if actual_model not in handler.user_providers:
+        provider_name = actual_model if provider_id == "user-provider" else provider_id
+        
+        if provider_name not in handler.user_providers:
             raise HTTPException(
                 status_code=400,
-                detail=f"User provider '{actual_model}' not found. Available: {list(handler.user_providers.keys())}"
+                detail=f"User provider '{provider_name}' not found. Available: {list(handler.user_providers.keys())}"
             )
         
-        provider_config = handler.user_providers[actual_model]
+        provider_config = handler.user_providers[provider_name]
         
-        if not validate_kiro_credentials(actual_model, provider_config):
+        if not validate_kiro_credentials(provider_name, provider_config):
             raise HTTPException(
                 status_code=403,
-                detail=f"Provider '{actual_model}' credentials not available."
+                detail=f"Provider '{provider_name}' credentials not available."
             )
         
-        body_dict['model'] = actual_model
+        body_dict['model'] = provider_name
         
         if body.stream:
-            return await handler.handle_streaming_chat_completion(request, actual_model, body_dict)
+            return await handler.handle_streaming_chat_completion(request, provider_name, body_dict)
         else:
-            return await handler.handle_chat_completion(request, actual_model, body_dict)
+            return await handler.handle_chat_completion(request, provider_name, body_dict)
     
     if is_global_token or is_admin:
         if provider_id == "autoselect":
@@ -11282,6 +11667,95 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         status_code=400,
         detail="Model must be in format 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'. Global configurations are only available to admin users."
     )
+
+
+@app.get("/api/u/{username}/rotations/models")
+async def user_list_rotation_models_by_username(request: Request, username: str):
+    """
+    List all models for user rotations.
+    """
+    return await user_list_config_models_by_username(request, username, "rotations")
+
+
+@app.get("/api/u/{username}/autoselections/models")
+async def user_list_autoselection_models_by_username(request: Request, username: str):
+    """
+    List all models for user autoselections.
+    """
+    return await user_list_config_models_by_username(request, username, "autoselects")
+
+
+@app.get("/api/u/{username}/{user_provider_id}/models")
+async def user_list_provider_models_by_username(request: Request, username: str, user_provider_id: str):
+    """
+    List models for a specific user provider.
+    """
+    from aisbf.database import get_database
+    db = DatabaseRegistry.get_config_database()
+    
+    target_user = db.get_user_by_username(username)
+    if not target_user:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User '{username}' not found"}
+        )
+    
+    target_user_id = target_user['id']
+    is_admin = getattr(request.state, 'is_admin', False)
+    is_global_token = getattr(request.state, 'is_global_token', False)
+    authenticated_user_id = getattr(request.state, 'user_id', None)
+    
+    if not (is_admin or is_global_token or authenticated_user_id == target_user_id):
+        return JSONResponse(
+            status_code=403,
+            content={"error": "You do not have permission to access this user's configurations"}
+        )
+    
+    if not target_user_id:
+        return JSONResponse(
+            status_code=401,
+            content={"error": "Authentication required. Use a valid API token."}
+        )
+    
+    handler = get_user_handler('request', target_user_id)
+    if user_provider_id not in handler.user_providers:
+        return JSONResponse(
+            status_code=404,
+            content={"error": f"User provider '{user_provider_id}' not found"}
+        )
+    
+    provider_config = handler.user_providers[user_provider_id]
+    all_models = []
+    
+    try:
+        if hasattr(provider_config, 'models') and provider_config.models:
+            for model in provider_config.models:
+                all_models.append({
+                    "id": f"{user_provider_id}/{model.name}",
+                    "name": model.name,
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": user_provider_id,
+                    "provider_id": user_provider_id,
+                    "type": "user_provider"
+                })
+        else:
+            # Try to fetch models from provider API
+            models = await fetch_provider_models(user_provider_id, user_id=target_user_id)
+            for model in models:
+                all_models.append({
+                    "id": f"{user_provider_id}/{model.get('id', model.get('name', ''))}",
+                    "name": model.get('name', ''),
+                    "object": "model",
+                    "created": int(time.time()),
+                    "owned_by": user_provider_id,
+                    "provider_id": user_provider_id,
+                    "type": "user_provider"
+                })
+    except Exception as e:
+        logger.warning(f"Error listing models for user provider {user_provider_id}: {e}")
+    
+    return {"data": all_models}
 
 
 @app.get("/api/u/{username}/{config_type}/models")

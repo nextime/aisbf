@@ -66,28 +66,70 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
     logger.info(f"API key provided: {bool(api_key)}")
     logger.info(f"User ID: {user_id}")
     
-    provider_config = config.get_provider(provider_id)
-    logger.info(f"Provider config: {provider_config}")
-    logger.info(f"Provider type: {provider_config.type}")
-    logger.info(f"Provider endpoint: {provider_config.endpoint}")
+    # First check for user-specific provider configuration if user_id is provided
+    provider_config = None
+    if user_id is not None:
+        try:
+            from ..database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+            user_provider = db.get_user_provider(user_id, provider_id)
+            if user_provider:
+                provider_config = user_provider['config']
+                logger.info(f"Using user-specific provider configuration for user {user_id}")
+        except Exception as e:
+            logger.debug(f"Failed to load user-specific provider config: {e}")
     
-    handler_class = PROVIDER_HANDLERS.get(provider_config.type)
+    # For authenticated users: NO fallback to global providers
+    if user_id is not None and not provider_config:
+        logger.error(f"User {user_id} attempted to access provider '{provider_id}' which does not exist in their configuration")
+        raise ValueError(f"Provider '{provider_id}' not found in user configuration")
+    
+    # Fallback to global config only if no user_id is provided
+    if not provider_config:
+        provider_config = config.get_provider(provider_id)
+        logger.info(f"Using global provider configuration")
+    
+    logger.info(f"Provider config: {provider_config}")
+    
+    # Handle both dict (user providers) and object (global providers)
+    if isinstance(provider_config, dict):
+        provider_type = provider_config.get('type')
+        api_key = provider_config.get('api_key')
+    else:
+        provider_type = provider_config.type
+        api_key = provider_config.api_key if hasattr(provider_config, 'api_key') else None
+    
+    logger.info(f"Provider type: {provider_type}")
+    
+    handler_class = PROVIDER_HANDLERS.get(provider_type)
     logger.info(f"Handler class: {handler_class.__name__ if handler_class else 'None'}")
     logger.info(f"Available handler types: {list(PROVIDER_HANDLERS.keys())}")
     
     if not handler_class:
-        logger.error(f"Unsupported provider type: {provider_config.type}")
-        raise ValueError(f"Unsupported provider type: {provider_config.type}")
+        logger.error(f"Unsupported provider type: {provider_type}")
+        raise ValueError(f"Unsupported provider type: {provider_type}")
     
-    # Check if handler supports user_id parameter (CodexProviderHandler does)
+    # Check if handler supports user_id parameter
     import inspect
     sig = inspect.signature(handler_class.__init__)
     if 'user_id' in sig.parameters:
-        logger.info(f"Creating handler with provider_id, optional api_key, and user_id")
+        logger.info(f"Creating handler with provider_id, api_key, and user_id")
         handler = handler_class(provider_id, api_key, user_id=user_id)
     else:
-        logger.info(f"Creating handler with provider_id and optional api_key")
+        # For older providers that don't accept user_id parameter
+        logger.info(f"Creating handler with provider_id and api_key (no user_id support)")
+        # Create a patched instance with user_id for base class initialization
         handler = handler_class(provider_id, api_key)
+        # Set user_id manually for base class compatibility
+        handler.user_id = user_id
+        # Fix error tracking and rate limit for user providers
+        if user_id is not None:
+            handler.error_tracking = {
+                "enabled": True,
+                "max_errors": 5,
+                "cooldown_seconds": 60
+            }
+            handler.rate_limit = 60
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
     logger.info(f"=== get_provider_handler END ===")

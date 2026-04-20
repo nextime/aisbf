@@ -136,6 +136,11 @@ else
     echo "  - htmlcov/ not found (skipping)"
 fi
 
+# Remove additional files:
+rm -f debug.log || true
+rm -f *.db || true
+rm -f *.sqlite3 || true
+
 echo ""
 echo "=========================================="
 echo "Clean completed successfully!"

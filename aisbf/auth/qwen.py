@@ -5,6 +5,16 @@ AISBF - AI Service Broker Framework || AI Should Be Free
 
 Qwen OAuth2 Device Authorization Grant implementation.
 
+⚠️  WARNING: QWEN OAUTH2 SERVICE DISCONTINUED ⚠️
+
+As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+The OAuth2 tokens obtained from chat.qwen.ai are no longer valid for the DashScope API.
+
+This implementation is maintained in the hope that Qwen will re-enable OAuth2 support
+in the future. If the service remains discontinued, this code will eventually be removed.
+
+For now, please use API key authentication instead of OAuth2 for Qwen/DashScope services.
+
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
 the Free Software Foundation, either version 3 of the License, or
@@ -74,6 +84,14 @@ class QwenOAuth2:
     """
     OAuth2 Device Authorization Grant implementation for Qwen.
     
+    ⚠️  WARNING: QWEN OAUTH2 SERVICE DISCONTINUED ⚠️
+    
+    As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+    OAuth2 tokens from chat.qwen.ai are no longer accepted by the DashScope API.
+    
+    This implementation is maintained for potential future re-enablement by Qwen.
+    Please use API key authentication instead.
+    
     Implements RFC 8628 device authorization flow with PKCE for CLI/desktop applications.
     Supports authentication with Qwen's OAuth2 endpoints and automatic token refresh.
     """
@@ -82,9 +100,17 @@ class QwenOAuth2:
         """
         Initialize Qwen OAuth2 client.
         
+        ⚠️  WARNING: OAuth2 authentication for Qwen has been discontinued.
+        This client will not work with DashScope API. Use API key authentication instead.
+        
         Args:
             credentials_file: Path to credentials JSON file (default: ~/.aisbf/qwen_credentials.json)
         """
+        logger.warning(
+            "⚠️  Qwen OAuth2 service has been discontinued by Qwen. "
+            "OAuth2 tokens are no longer accepted by DashScope API. "
+            "Please use API key authentication instead."
+        )
         self.credentials_file = os.path.expanduser(credentials_file) if credentials_file else os.path.expanduser("~/.aisbf/qwen_credentials.json")
         self.lock_file = os.path.expanduser("~/.aisbf/qwen_credentials.lock")
         self.credentials = None
@@ -419,11 +445,20 @@ class QwenOAuth2:
                     if expires_in_ms < 3600000:
                         expires_in_ms = 3600000
                     
+                    # WORKAROUND: OAuth2 server returns incorrect resource_url ("portal.qwen.ai")
+                    # Always use the correct DashScope API endpoint
+                    resource_url = token_data.get("resource_url")
+                    if resource_url and "portal.qwen.ai" in resource_url:
+                        logger.warning(f"QwenOAuth2: OAuth2 server returned incorrect resource_url '{resource_url}', using correct endpoint")
+                        resource_url = DEFAULT_DASHSCOPE_BASE_URL
+                    elif not resource_url:
+                        resource_url = DEFAULT_DASHSCOPE_BASE_URL
+                    
                     credentials = {
                         "access_token": token_data["access_token"],
                         "refresh_token": token_data.get("refresh_token"),
                         "token_type": token_data.get("token_type", "Bearer"),
-                        "resource_url": token_data.get("resource_url"),
+                        "resource_url": resource_url,
                         "expiry_date": int(time.time() * 1000) + expires_in_ms,
                         "last_refresh": datetime.utcnow().isoformat() + "Z",
                     }
@@ -495,12 +530,21 @@ class QwenOAuth2:
                 if response.status_code == 200:
                     result = response.json()
                     
+                    # WORKAROUND: OAuth2 server returns incorrect resource_url ("portal.qwen.ai")
+                    # Always use the correct DashScope API endpoint
+                    resource_url = result.get("resource_url", self.credentials.get("resource_url"))
+                    if resource_url and "portal.qwen.ai" in resource_url:
+                        logger.warning(f"QwenOAuth2: OAuth2 server returned incorrect resource_url '{resource_url}', using correct endpoint")
+                        resource_url = DEFAULT_DASHSCOPE_BASE_URL
+                    elif not resource_url:
+                        resource_url = DEFAULT_DASHSCOPE_BASE_URL
+                    
                     # Update credentials
                     credentials = {
                         "access_token": result["access_token"],
                         "token_type": result.get("token_type", "Bearer"),
                         "refresh_token": result.get("refresh_token", self.credentials["refresh_token"]),
-                        "resource_url": result.get("resource_url", self.credentials.get("resource_url")),
+                        "resource_url": resource_url,
                         # OAuth2: expires_in is in seconds, convert to ms with minimum 1 hour
                         "expiry_date": int(time.time() * 1000) + max(3600000, result.get("expires_in", 7200) * 1000),
                         "last_refresh": datetime.utcnow().isoformat() + "Z",

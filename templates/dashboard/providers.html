@@ -524,13 +524,23 @@ function renderProviderDetails(key) {
     } else if (isQwenProvider) {
         // Qwen authentication fields - supports both API key and OAuth2
         authFieldsHtml = `
+            <div style="background: #ff6b35; border: 2px solid #d63031; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: #fff;">⚠️ Qwen OAuth2 Service Discontinued</h4>
+                <p style="margin: 0; color: #fff;">
+                    As of April 2026, Qwen has completely disabled OAuth2 subscriptions for Qwen Code.
+                    OAuth2 tokens are no longer accepted by the DashScope API.
+                    <br><br><strong>Please use API Key authentication instead.</strong>
+                    <br><br>OAuth2 support is maintained in the code for potential future re-enablement, but it is currently non-functional.
+                </p>
+            </div>
+            
             <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Qwen Authentication</h4>
                 <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
                     Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
                 </small>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key</h5>
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key (Recommended)</h5>
                 <div class="form-group">
                     <label>API Key</label>
                     <input type="password" value="${qwenConfig.api_key || ''}" onchange="updateQwenConfig('${key}', 'api_key', this.value)" placeholder="Enter your Qwen API key">
@@ -564,9 +574,9 @@ function renderProviderDetails(key) {
                     </div>
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication</h5>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
-                    If no API key is provided, OAuth2 will be used automatically.
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication (DISCONTINUED - NOT WORKING)</h5>
+                <small style="color: #ff6b35; display: block; margin-bottom: 15px;">
+                    ⚠️ OAuth2 authentication is no longer functional. Qwen has discontinued this service. Use API Key instead.
                 </small>
 
                 <div class="form-group">
@@ -793,7 +803,7 @@ function renderProviderDetails(key) {
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Native Caching</h4>
         <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
-            Provider-native caching features (Anthropic cache_control, Google Context Caching) for cost reduction.
+            Provider-native caching features (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs) for cost reduction.
         </small>
 
         <div class="form-group">
@@ -814,6 +824,12 @@ function renderProviderDetails(key) {
             <label>Min Cacheable Tokens</label>
             <input type="number" value="${provider.min_cacheable_tokens || 1000}" onchange="updateProvider('${key}', 'min_cacheable_tokens', this.value ? parseInt(this.value) : 1000)" placeholder="1000">
             <small style="color: #a0a0a0; display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
+        </div>
+
+        <div class="form-group">
+            <label>Prompt Cache Key (OpenAI/Kilo)</label>
+            <input type="text" value="${provider.prompt_cache_key || ''}" onchange="updateProvider('${key}', 'prompt_cache_key', this.value)" placeholder="Optional cache key for load balancer optimization">
+            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
         </div>
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>

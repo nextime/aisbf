@@ -47,8 +47,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
     # NOTE: OAuth2 API uses its own model naming scheme that differs from standard Anthropic API
     
     def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
-        super().__init__(provider_id, api_key)
-        self.user_id = user_id
+        super().__init__(provider_id, api_key, user_id=user_id)
         self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config

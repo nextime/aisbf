@@ -27,6 +27,7 @@ from typing import Dict, List, Optional, Union
 from openai import OpenAI
 from ..models import Model
 from ..config import config
+from ..utils import count_messages_tokens
 from .base import BaseProviderHandler, AISBF_DEBUG
 
 
@@ -39,8 +40,7 @@ class KiloProviderHandler(BaseProviderHandler):
     """
     
     def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
-        super().__init__(provider_id, api_key)
-        self.user_id = user_id
+        super().__init__(provider_id, api_key, user_id=user_id)
         self.provider_config = config.get_provider(provider_id)
         
         # Unified auth config with backward compatibility
@@ -252,6 +252,16 @@ class KiloProviderHandler(BaseProviderHandler):
 
             await self.apply_rate_limit()
 
+            # Check if native caching is enabled for this provider
+            provider_config = config.providers.get(self.provider_id)
+            enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
+            min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1024)
+            prompt_cache_key = getattr(provider_config, 'prompt_cache_key', None)
+
+            logging.info(f"KiloProviderHandler: Native caching enabled: {enable_native_caching}")
+            if enable_native_caching:
+                logging.info(f"KiloProviderHandler: Min cacheable tokens: {min_cacheable_tokens}, prompt_cache_key: {prompt_cache_key}")
+
             request_params = {
                 "model": model,
                 "messages": [],
@@ -262,24 +272,65 @@ class KiloProviderHandler(BaseProviderHandler):
             if max_tokens is not None:
                 request_params["max_tokens"] = max_tokens
             
-            for msg in messages:
-                message = {"role": msg["role"]}
-                
-                if msg["role"] == "tool":
-                    if "tool_call_id" in msg and msg["tool_call_id"] is not None:
-                        message["tool_call_id"] = msg["tool_call_id"]
-                    else:
-                        logging.warning(f"Skipping tool message without tool_call_id: {msg}")
-                        continue
-                
-                if "content" in msg and msg["content"] is not None:
-                    message["content"] = msg["content"]
-                if "tool_calls" in msg and msg["tool_calls"] is not None:
-                    message["tool_calls"] = msg["tool_calls"]
-                if "name" in msg and msg["name"] is not None:
-                    message["name"] = msg["name"]
-                
-                request_params["messages"].append(message)
+            # Add prompt_cache_key if provided (for OpenAI-compatible load balancer routing optimization)
+            if enable_native_caching and prompt_cache_key:
+                request_params["prompt_cache_key"] = prompt_cache_key
+                logging.info(f"KiloProviderHandler: Added prompt_cache_key to request")
+            
+            # Build messages with all fields (including tool_calls, tool_call_id, and cache_control)
+            if enable_native_caching:
+                # Count cumulative tokens for cache decision
+                cumulative_tokens = 0
+                for i, msg in enumerate(messages):
+                    # Count tokens in this message
+                    message_tokens = count_messages_tokens([msg], model)
+                    cumulative_tokens += message_tokens
+
+                    message = {"role": msg["role"]}
+                    
+                    # For tool role, tool_call_id is required
+                    if msg["role"] == "tool":
+                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                            message["tool_call_id"] = msg["tool_call_id"]
+                        else:
+                            # Skip tool messages without tool_call_id
+                            logging.warning(f"Skipping tool message without tool_call_id: {msg}")
+                            continue
+                    
+                    if "content" in msg and msg["content"] is not None:
+                        message["content"] = msg["content"]
+                    if "tool_calls" in msg and msg["tool_calls"] is not None:
+                        message["tool_calls"] = msg["tool_calls"]
+                    if "name" in msg and msg["name"] is not None:
+                        message["name"] = msg["name"]
+                    
+                    # Apply cache_control based on position and token count
+                    if (msg["role"] == "system" or
+                        (i < len(messages) - 2 and cumulative_tokens >= min_cacheable_tokens)):
+                        message["cache_control"] = {"type": "ephemeral"}
+                        logging.info(f"KiloProviderHandler: Applied cache_control to message {i} ({message_tokens} tokens, cumulative: {cumulative_tokens})")
+                    
+                    request_params["messages"].append(message)
+            else:
+                # Native caching disabled - build messages without cache_control
+                for msg in messages:
+                    message = {"role": msg["role"]}
+                    
+                    if msg["role"] == "tool":
+                        if "tool_call_id" in msg and msg["tool_call_id"] is not None:
+                            message["tool_call_id"] = msg["tool_call_id"]
+                        else:
+                            logging.warning(f"Skipping tool message without tool_call_id: {msg}")
+                            continue
+                    
+                    if "content" in msg and msg["content"] is not None:
+                        message["content"] = msg["content"]
+                    if "tool_calls" in msg and msg["tool_calls"] is not None:
+                        message["tool_calls"] = msg["tool_calls"]
+                    if "name" in msg and msg["name"] is not None:
+                        message["name"] = msg["name"]
+                    
+                    request_params["messages"].append(message)
             
             if tools is not None:
                 request_params["tools"] = tools

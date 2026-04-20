@@ -59,8 +59,7 @@ class CodexProviderHandler(BaseProviderHandler):
     """
     
     def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
-        super().__init__(provider_id, api_key)
-        self.user_id = user_id
+        super().__init__(provider_id, api_key, user_id=user_id)
         
         # Get provider config
         provider_config = config.providers.get(provider_id)
