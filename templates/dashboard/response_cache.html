@@ -22,7 +22,12 @@
 
 <!-- Cache Statistics -->
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-    <h3 style="margin-bottom: 20px;">Cache Statistics</h3>
+    {% if is_admin %}
+    <h3 style="margin-bottom: 20px;">Global Cache Statistics</h3>
+    {% else %}
+    <h3 style="margin-bottom: 20px;">Your Personal Cache Impact</h3>
+    <p style="color: #a0a0a0; margin-bottom: 20px;">These statistics show how the response cache has benefited your requests personally.</p>
+    {% endif %}
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
@@ -32,26 +37,29 @@
             </div>
         </div>
         
+        {% if is_admin %}
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
             <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Backend</div>
             <div style="font-size: 24px; font-weight: bold;">{{ stats.backend|upper }}</div>
         </div>
+        {% endif %}
         
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Hits</div>
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Hits{% else %}Your Cache Hits{% endif %}</div>
             <div style="font-size: 24px; font-weight: bold; color: #4ade80;">{{ stats.hits }}</div>
         </div>
         
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Misses</div>
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Misses{% else %}Your Cache Misses{% endif %}</div>
             <div style="font-size: 24px; font-weight: bold; color: #ef4444;">{{ stats.misses }}</div>
         </div>
         
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Hit Rate</div>
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Hit Rate{% else %}Your Hit Rate{% endif %}</div>
             <div style="font-size: 24px; font-weight: bold; color: #60a5fa;">{{ "%.1f"|format(stats.hit_rate * 100) }}%</div>
         </div>
         
+        {% if is_admin %}
         <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
             <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Size</div>
             <div style="font-size: 24px; font-weight: bold;">{{ stats.size }}</div>
@@ -61,9 +69,16 @@
             <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Evictions</div>
             <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">{{ stats.evictions }}</div>
         </div>
+        {% else %}
+        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Total Requests</div>
+            <div style="font-size: 24px; font-weight: bold; color: #a78bfa;">{{ stats.total_requests }}</div>
+        </div>
+        {% endif %}
     </div>
 </div>
 
+{% if is_admin %}
 <!-- Cache Actions -->
 <div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 20px;">Cache Actions</h3>
@@ -78,6 +93,7 @@
         </button>
     </div>
 </div>
+{% endif %}
 
 <!-- Error Display -->
 {% if stats.error %}

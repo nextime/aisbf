@@ -345,7 +345,7 @@ class RequestHandler:
                 aisbf_config = self.config.get_aisbf_config()
                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                     response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                    cached_response = response_cache.get(request_data)
+                    cached_response = response_cache.get(request_data, user_id=self.user_id)
                     if cached_response:
                         logger.info(f"Cache hit for request to provider {provider_id}")
                         return cached_response
@@ -479,7 +479,7 @@ class RequestHandler:
                             aisbf_config = self.config.get_aisbf_config()
                             if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                                 response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                                response_cache.set(request_data, response)
+                                response_cache.set(request_data, response, user_id=self.user_id)
                                 logger.debug(f"Cached chunked response for request to provider {provider_id}")
                         except Exception as cache_error:
                             logger.warning(f"Response cache set failed for chunked request: {cache_error}")
@@ -521,7 +521,7 @@ class RequestHandler:
                     aisbf_config = self.config.get_aisbf_config()
                     if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                         response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                        response_cache.set(request_data, response)
+                        response_cache.set(request_data, response, user_id=self.user_id)
                         logger.debug(f"Cached response for request to provider {provider_id}")
                 except Exception as cache_error:
                     logger.warning(f"Response cache set failed: {cache_error}")
@@ -2353,7 +2353,7 @@ class RotationHandler:
                 aisbf_config = self.config.get_aisbf_config()
                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                     response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                    cached_response = response_cache.get(request_data)
+                    cached_response = response_cache.get(request_data, user_id=self.user_id)
                     if cached_response:
                         logger.info(f"Cache hit for rotation request {rotation_id}")
                         return cached_response
@@ -2863,7 +2863,7 @@ class RotationHandler:
                                 aisbf_config = self.config.get_aisbf_config()
                                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                                     response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                                    response_cache.set(request_data, response)
+                                    response_cache.set(request_data, response, user_id=self.user_id)
                                     logger.debug(f"Cached chunked response for rotation request {rotation_id}")
                             except Exception as cache_error:
                                 logger.warning(f"Response cache set failed for chunked request: {cache_error}")
@@ -2935,7 +2935,7 @@ class RotationHandler:
                         aisbf_config = self.config.get_aisbf_config()
                         if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                             response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                            response_cache.set(request_data, response)
+                            response_cache.set(request_data, response, user_id=self.user_id)
                             logger.debug(f"Cached response for rotation request {rotation_id}")
                     except Exception as cache_error:
                         logger.warning(f"Response cache set failed: {cache_error}")
@@ -4275,7 +4275,7 @@ class AutoselectHandler:
                 aisbf_config = self.config.get_aisbf_config()
                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                     response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                    cached_response = response_cache.get(request_data)
+                    cached_response = response_cache.get(request_data, user_id=self.user_id)
                     if cached_response:
                         logger.info(f"Cache hit for autoselect request {autoselect_id}")
                         return cached_response
@@ -4431,7 +4431,7 @@ class AutoselectHandler:
                 aisbf_config = self.config.get_aisbf_config()
                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
                     response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
-                    response_cache.set(request_data, response)
+                    response_cache.set(request_data, response, user_id=self.user_id)
                     logger.debug(f"Cached response for autoselect request {autoselect_id}")
             except Exception as cache_error:
                 logger.warning(f"Response cache set failed: {cache_error}")

@@ -366,6 +366,7 @@ class Analytics:
             provider_id: Optional provider filter
             from_datetime: Start datetime
             to_datetime: End datetime
+            user_filter: Optional user ID to filter by (-1 for global only)
             
         Returns:
             Dictionary with token counts and cost estimates
@@ -380,21 +381,36 @@ class Analytics:
             formatted_start = self._format_timestamp(start)
             formatted_end = self._format_timestamp(end)
             
+            # Build user condition
+            if user_filter == -1:
+                user_condition = " AND user_id IS NULL"
+                params_suffix = []
+            elif user_filter is not None:
+                user_condition = f" AND user_id = {placeholder}"
+                params_suffix = [user_filter]
+            else:
+                user_condition = ""
+                params_suffix = []
+            
             if provider_id:
+                params = [provider_id, formatted_start, formatted_end] + params_suffix
                 cursor.execute(f'''
                     SELECT SUM(tokens_used) as total_tokens
                     FROM token_usage
                     WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                ''', (provider_id, formatted_start, formatted_end))
+                      {user_condition}
+                ''', params)
                 row = cursor.fetchone()
                 total_tokens = row[0] if row and row[0] else 0
             else:
+                params = [formatted_start, formatted_end] + params_suffix
                 cursor.execute(f'''
                     SELECT provider_id, SUM(tokens_used) as total_tokens
                     FROM token_usage
                     WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
+                      {user_condition}
                     GROUP BY provider_id
-                ''', (formatted_start, formatted_end))
+                ''', params)
                 
                 provider_tokens = {}
                 total_tokens = 0
@@ -931,6 +947,7 @@ class Analytics:
         Args:
             from_datetime: Optional start datetime for filtering
             to_datetime: Optional end datetime for filtering
+            user_filter: Optional user ID to filter by (-1 for global only)
             
         Returns:
             Dictionary with cost estimates
@@ -940,10 +957,10 @@ class Analytics:
         end = to_datetime or datetime.now()
         
         # Get token usage by date range
-        range_usage = self.get_token_usage_by_date_range(None, start, end)
+        range_usage = self.get_token_usage_by_date_range(None, start, end, user_filter)
         
         # Get providers that have data
-        providers = self.get_all_providers_stats(from_datetime, to_datetime)
+        providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter)
         
         total_cost = 0.0
         provider_costs = []

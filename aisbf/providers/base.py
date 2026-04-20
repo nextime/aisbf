@@ -697,24 +697,47 @@ class AdaptiveRateLimiter:
         logger.info(f"[AdaptiveRateLimiter {self.provider_id}] Reset to initial state")
 
 
-# Global adaptive rate limiters registry
+# Global adaptive rate limiters registry - now supports user-specific limiters
+# Key format: "provider_id" (global) or "user:user_id:provider_id" (user-specific)
 _adaptive_rate_limiters: Dict[str, AdaptiveRateLimiter] = {}
 
 
-def get_adaptive_rate_limiter(provider_id: str, config: Dict = None) -> AdaptiveRateLimiter:
-    """Get or create an adaptive rate limiter for a provider."""
+def get_adaptive_rate_limiter(provider_id: str, config: Dict = None, user_id: Optional[int] = None) -> AdaptiveRateLimiter:
+    """Get or create an adaptive rate limiter for a provider, optionally user-specific."""
     global _adaptive_rate_limiters
     
-    if provider_id not in _adaptive_rate_limiters:
-        _adaptive_rate_limiters[provider_id] = AdaptiveRateLimiter(provider_id, config)
+    # Create key based on whether user_id is provided
+    if user_id is not None:
+        key = f"user:{user_id}:{provider_id}"
+    else:
+        key = provider_id
     
-    return _adaptive_rate_limiters[provider_id]
+    if key not in _adaptive_rate_limiters:
+        _adaptive_rate_limiters[key] = AdaptiveRateLimiter(key, config)
+    
+    return _adaptive_rate_limiters[key]
 
 
-def get_all_adaptive_rate_limiters() -> Dict[str, AdaptiveRateLimiter]:
-    """Get all adaptive rate limiters."""
+def get_all_adaptive_rate_limiters(user_id: Optional[int] = None) -> Dict[str, AdaptiveRateLimiter]:
+    """Get all adaptive rate limiters, optionally filtered by user."""
     global _adaptive_rate_limiters
-    return _adaptive_rate_limiters
+    
+    if user_id is None:
+        # Return all limiters (admin view)
+        return _adaptive_rate_limiters
+    else:
+        # Return only limiters for this user + global ones
+        user_prefix = f"user:{user_id}:"
+        filtered = {}
+        for key, limiter in _adaptive_rate_limiters.items():
+            if key.startswith(user_prefix) or not key.startswith("user:"):
+                # Strip the user prefix for display to user
+                if key.startswith(user_prefix):
+                    display_key = key[len(user_prefix):]
+                else:
+                    display_key = key
+                filtered[display_key] = limiter
+        return filtered
 
 
 class BaseProviderHandler:
@@ -756,7 +779,7 @@ class BaseProviderHandler:
         adaptive_config = None
         if config.aisbf and config.aisbf.adaptive_rate_limiting:
             adaptive_config = config.aisbf.adaptive_rate_limiting.dict()
-        self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config)
+        self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config, user_id)
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """

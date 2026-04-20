@@ -1171,6 +1171,9 @@ class ResponseCache:
         
         # Per-provider statistics
         self.provider_stats = {}
+        
+        # Per-user statistics
+        self.user_stats = {}
 
         # Initialize backends
         self.redis_client = None
@@ -1346,12 +1349,13 @@ class ResponseCache:
             self._memory_cache.pop(lru_key, None)
             self._memory_timestamps.pop(lru_key, None)
 
-    def get(self, request_data: Dict) -> Optional[Any]:
+    def get(self, request_data: Dict, user_id: Optional[int] = None) -> Optional[Any]:
         """
         Get cached response for a request.
 
         Args:
             request_data: The request data dict
+            user_id: Optional user ID for tracking statistics
 
         Returns:
             Cached response dict or None if not found
@@ -1369,6 +1373,7 @@ class ResponseCache:
                 if data:
                     self.stats['hits'] += 1
                     self._update_provider_stats(provider_id, 'hits')
+                    self._update_user_stats(user_id, 'hits')
                     logger.debug(f"Cache hit (Redis): {cache_key}")
                     return self._deserialize_response(data)
             elif self.backend == 'sqlite' and self.sqlite_backend:
@@ -1377,6 +1382,7 @@ class ResponseCache:
                 if data:
                     self.stats['hits'] += 1
                     self._update_provider_stats(provider_id, 'hits')
+                    self._update_user_stats(user_id, 'hits')
                     logger.debug(f"Cache hit (SQLite): {cache_key}")
                     return data
             elif self.backend == 'mysql' and self.mysql_backend:
@@ -1385,6 +1391,7 @@ class ResponseCache:
                 if data:
                     self.stats['hits'] += 1
                     self._update_provider_stats(provider_id, 'hits')
+                    self._update_user_stats(user_id, 'hits')
                     logger.debug(f"Cache hit (MySQL): {cache_key}")
                     return data
             elif self.backend == 'memory':
@@ -1407,11 +1414,13 @@ class ResponseCache:
 
                             self.stats['hits'] += 1
                             self._update_provider_stats(provider_id, 'hits')
+                            self._update_user_stats(user_id, 'hits')
                             logger.debug(f"Cache hit (Memory): {cache_key}")
                             return self._memory_cache[cache_key]
 
             self.stats['misses'] += 1
             self._update_provider_stats(provider_id, 'misses')
+            self._update_user_stats(user_id, 'misses')
             logger.debug(f"Cache miss: {cache_key}")
             return None
 
@@ -1420,7 +1429,7 @@ class ResponseCache:
             logger.warning(f"Cache get error: {e}")
             return None
 
-    def set(self, request_data: Dict, response: Any, ttl: Optional[int] = None) -> None:
+    def set(self, request_data: Dict, response: Any, ttl: Optional[int] = None, user_id: Optional[int] = None) -> None:
         """
         Cache a response.
 
@@ -1428,6 +1437,7 @@ class ResponseCache:
             request_data: The request data dict
             response: The response to cache (dict or object)
             ttl: TTL in seconds (uses default if None)
+            user_id: Optional user ID for tracking statistics
         """
         if not self.enabled:
             return
@@ -1473,6 +1483,7 @@ class ResponseCache:
                 logger.debug(f"Cached response (Memory): {cache_key} (TTL: {ttl_value}s)")
 
             self.stats['sets'] += 1
+            self._update_user_stats(user_id, 'sets')
 
         except Exception as e:
             self.stats['errors'] += 1
@@ -1509,6 +1520,55 @@ class ResponseCache:
         except Exception as e:
             self.stats['errors'] += 1
             logger.warning(f"Cache delete error: {e}")
+            
+    def _update_provider_stats(self, provider_id: str, stat_type: str) -> None:
+        """Update per-provider statistics"""
+        if provider_id not in self.provider_stats:
+            self.provider_stats[provider_id] = {
+                'hits': 0,
+                'misses': 0,
+                'sets': 0,
+                'deletes': 0,
+                'errors': 0
+            }
+        self.provider_stats[provider_id][stat_type] += 1
+        
+    def _update_user_stats(self, user_id: Optional[int], stat_type: str) -> None:
+        """Update per-user statistics"""
+        if user_id is None:
+            return
+            
+        user_key = f"user:{user_id}"
+        if user_key not in self.user_stats:
+            self.user_stats[user_key] = {
+                'hits': 0,
+                'misses': 0,
+                'sets': 0,
+                'deletes': 0,
+                'errors': 0
+            }
+        self.user_stats[user_key][stat_type] += 1
+        
+    def get_user_stats(self, user_id: int) -> Dict[str, Any]:
+        """Get cache statistics for a specific user"""
+        user_key = f"user:{user_id}"
+        if user_key not in self.user_stats:
+            return {
+                'enabled': self.enabled,
+                'hits': 0,
+                'misses': 0,
+                'hit_rate': 0.0,
+                'total_requests': 0,
+                'backend': self.backend
+            }
+            
+        stats = self.user_stats[user_key].copy()
+        total = stats['hits'] + stats['misses']
+        stats['hit_rate'] = stats['hits'] / total if total > 0 else 0.0
+        stats['total_requests'] = total
+        stats['enabled'] = self.enabled
+        stats['backend'] = self.backend
+        return stats
 
     def clear(self) -> None:
         """Clear all cached responses"""
