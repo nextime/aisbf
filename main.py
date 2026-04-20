@@ -494,6 +494,19 @@ app = FastAPI(
 # Initialize Jinja2 templates with custom globals for proxy-aware URLs
 templates = Jinja2Templates(directory="templates")
 
+# Monkey patch TemplateResponse to automatically add dashboard context variables
+original_template_response = templates.TemplateResponse
+def patched_template_response(*args, **kwargs):
+    if 'context' in kwargs and 'request' in kwargs['context']:
+        request = kwargs['context']['request']
+        if hasattr(request.state, 'is_aisbf_cloud'):
+            kwargs['context']['is_aisbf_cloud'] = request.state.is_aisbf_cloud
+        if hasattr(request.state, 'welcome_shown'):
+            kwargs['context']['welcome_shown'] = request.state.welcome_shown
+    return original_template_response(*args, **kwargs)
+
+templates.TemplateResponse = patched_template_response
+
 # Add MD5 filter for Gravatar
 import hashlib
 templates.env.filters['md5'] = lambda s: hashlib.md5(s.lower().encode('utf-8')).hexdigest() if s else ''
@@ -1682,6 +1695,23 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 2
 # Add proxy headers middleware LAST so it executes FIRST
 # This ensures proxy headers are processed before any other middleware (including auth_middleware)
 app.add_middleware(ProxyHeadersMiddleware)
+
+# Dashboard context middleware - adds is_aisbf_cloud and welcome_shown to all template contexts
+@app.middleware("http")
+async def dashboard_context_middleware(request: Request, call_next):
+    if request.url.path.startswith("/dashboard") and request.session.get('logged_in'):
+        # Set these values in request.state so they're available to all template renders
+        request.state.is_aisbf_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        
+        # Check if welcome modal has been shown this session
+        if not request.session.get('welcome_shown', False) and request.state.is_aisbf_cloud:
+            request.session['welcome_shown'] = True
+            request.state.welcome_shown = False
+        else:
+            request.state.welcome_shown = request.session.get('welcome_shown', False)
+    
+    response = await call_next(request)
+    return response
 
 # Helper function for API authentication
 async def get_current_user(request: Request) -> dict:
@@ -3672,10 +3702,18 @@ async def dashboard_index(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
+    
+    # Check if running on AISBF Cloud domain
+    is_aisbf_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+    
+    # Check if welcome modal has been shown this session
+    welcome_shown = request.session.get('welcome_shown', False)
+    if is_aisbf_cloud and not welcome_shown:
+        request.session['welcome_shown'] = True
 
     if request.session.get('role') == 'admin':
         # Admin dashboard
-        return templates.TemplateResponse(
+         return templates.TemplateResponse(
             request=request,
             name="dashboard/index.html",
             context={
@@ -3685,7 +3723,9 @@ async def dashboard_index(request: Request):
                 "providers_count": len(config.providers) if config else 0,
                 "rotations_count": len(config.rotations) if config else 0,
                 "autoselect_count": len(config.autoselect) if config else 0,
-                "server_config": server_config or {}
+                "server_config": server_config or {},
+                "is_aisbf_cloud": is_aisbf_cloud,
+                "welcome_shown": welcome_shown
             }
         )
     else:
@@ -3750,7 +3790,9 @@ async def dashboard_index(request: Request):
             "subscription": subscription,
             "current_tier": current_tier,
             "payment_methods": payment_methods,
-            "currency_symbol": currency_symbol
+            "currency_symbol": currency_symbol,
+            "is_aisbf_cloud": is_aisbf_cloud,
+            "welcome_shown": welcome_shown
         }
     )
 
@@ -6433,11 +6475,21 @@ async def dashboard_response_cache_stats(request: Request):
     if auth_check:
         return auth_check
     
+    is_admin = request.session.get('role') == 'admin'
+    current_user_id = request.session.get('user_id')
+    
     from aisbf.cache import get_response_cache
     
     try:
         cache = get_response_cache()
-        stats = cache.get_stats()
+        
+        if is_admin:
+            # Admin sees global stats
+            stats = cache.get_stats()
+        else:
+            # Regular users see their own personal cache impact
+            stats = cache.get_user_stats(current_user_id)
+            
         return JSONResponse(stats)
     except Exception as e:
         logger.error(f"Error getting response cache stats: {e}")
@@ -8091,6 +8143,52 @@ async def dashboard_add_payment_method_paypal_callback(request: Request):
             status_code=302
         )
 
+@app.get("/dashboard/response-cache")
+async def dashboard_response_cache(request: Request):
+    """Response cache dashboard page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    is_admin = request.session.get('role') == 'admin'
+    current_user_id = request.session.get('user_id')
+    
+    from aisbf.cache import get_response_cache
+    
+    try:
+        cache = get_response_cache()
+        
+        if is_admin:
+            # Admin sees global stats
+            stats = cache.get_stats()
+        else:
+            # Regular users see their own personal cache impact
+            stats = cache.get_user_stats(current_user_id)
+            
+    except Exception as e:
+        logger.error(f"Error getting response cache stats: {e}")
+        stats = {
+            'enabled': False,
+            'hits': 0,
+            'misses': 0,
+            'hit_rate': 0.0,
+            'size': 0,
+            'evictions': 0,
+            'backend': 'unknown',
+            'error': str(e)
+        }
+    
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/response_cache.html",
+        context={
+        "request": request,
+        "session": request.session,
+        "stats": stats,
+        "is_admin": is_admin
+    }
+    )
+
 @app.get("/dashboard/rate-limits")
 async def dashboard_rate_limits(request: Request):
     """Rate limits dashboard page"""
@@ -8115,9 +8213,30 @@ async def dashboard_rate_limits_data(request: Request):
         return auth_check
     
     from aisbf.providers import get_all_adaptive_rate_limiters
+    from aisbf.database import get_database
+    
+    is_admin = request.session.get('role') == 'admin'
+    current_user_id = request.session.get('user_id')
     
     try:
-        limiters = get_all_adaptive_rate_limiters()
+        if is_admin:
+            # Admin sees all limiters
+            limiters = get_all_adaptive_rate_limiters()
+        else:
+            # Regular user sees ONLY their own configured providers
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            user_provider_ids = [p['provider_id'] for p in user_providers]
+            
+            # Get all limiters for this user
+            all_limiters = get_all_adaptive_rate_limiters(current_user_id)
+            
+            # Filter to only show providers the user has actually configured
+            limiters = {}
+            for provider_id, limiter in all_limiters.items():
+                if provider_id in user_provider_ids:
+                    limiters[provider_id] = limiter
+            
         stats = {}
         for provider_id, limiter in limiters.items():
             stats[provider_id] = limiter.get_stats()
@@ -8136,15 +8255,38 @@ async def dashboard_rate_limits_reset(request: Request, provider_id: str):
     if auth_check:
         return auth_check
     
-    from aisbf.providers import get_all_adaptive_rate_limiters
+    is_admin = request.session.get('role') == 'admin'
+    current_user_id = request.session.get('user_id')
+    
+    from aisbf.providers import get_all_adaptive_rate_limiters, get_adaptive_rate_limiter
+    from aisbf.database import get_database
     
     try:
-        limiters = get_all_adaptive_rate_limiters()
-        if provider_id in limiters:
-            limiters[provider_id].reset()
-            return JSONResponse({'success': True, 'message': f'Rate limiter for {provider_id} reset successfully'})
+        if is_admin:
+            # Admin can reset any limiter
+            limiters = get_all_adaptive_rate_limiters()
+            if provider_id in limiters:
+                limiters[provider_id].reset()
+                return JSONResponse({'success': True, 'message': f'Rate limiter for {provider_id} reset successfully'})
+            else:
+                return JSONResponse({'success': False, 'error': f'Provider {provider_id} not found'}, status_code=404)
         else:
-            return JSONResponse({'success': False, 'error': f'Provider {provider_id} not found'}, status_code=404)
+            # Regular user can only reset limiters for providers THEY have configured
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            user_provider_ids = [p['provider_id'] for p in user_providers]
+            
+            if provider_id not in user_provider_ids:
+                return JSONResponse({'success': False, 'error': f'You do not have permission to reset rate limiters for {provider_id}'}, status_code=403)
+            
+            # Reset their user-specific limiter
+            user_limiter_key = f"user:{current_user_id}:{provider_id}"
+            limiters = get_all_adaptive_rate_limiters()
+            if user_limiter_key in limiters:
+                limiters[user_limiter_key].reset()
+                return JSONResponse({'success': True, 'message': f'Rate limiter for {provider_id} reset successfully'})
+            else:
+                return JSONResponse({'success': False, 'error': f'Rate limiter for {provider_id} not found'}, status_code=404)
     except Exception as e:
         logger.error(f"Error resetting rate limiter: {e}")
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
@@ -8155,6 +8297,11 @@ async def dashboard_response_cache_clear(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
+    
+    is_admin = request.session.get('role') == 'admin'
+    
+    if not is_admin:
+        return JSONResponse({'success': False, 'error': 'Clearing cache is only available to administrators'}, status_code=403)
     
     from aisbf.cache import get_response_cache
     
@@ -13392,6 +13539,107 @@ async def dashboard_qwen_auth_logout(request: Request):
             status_code=500,
             content={"success": False, "error": str(e)}
         )
+
+
+@app.post("/dashboard/contact")
+async def dashboard_contact(request: Request):
+    """Handle contact form submissions"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    try:
+        data = await request.json()
+        message_type = data.get('type')
+        title = data.get('title')
+        message = data.get('message')
+        
+        if not all([message_type, title, message]):
+            return JSONResponse({'success': False, 'error': 'All fields are required'}, status_code=400)
+        
+        # Get user info
+        user_id = request.session.get('user_id')
+        username = request.session.get('username', 'Unknown')
+        email = request.session.get('email', 'No email provided')
+        
+        # Get SMTP config
+        from aisbf.config import get_config
+        config = get_config()
+        smtp_config = config.aisbf.smtp if config and hasattr(config, 'aisbf') and config.aisbf and hasattr(config.aisbf, 'smtp') else None
+        
+        if not smtp_config or not smtp_config.enabled:
+            return JSONResponse({'success': False, 'error': 'Email service is not configured'}, status_code=500)
+        
+        # Import email utilities
+        import smtplib
+        from email.mime.text import MIMEText
+        from email.mime.multipart import MIMEMultipart
+        
+        # Create message
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = f"[AISBF Contact] {message_type.upper()}: {title}"
+        msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>"
+        msg['To'] = "stefy@aisbf.cloud"
+        
+        # Create email content
+        text = f"""
+Contact Form Submission:
+
+Type: {message_type}
+Title: {title}
+
+User ID: {user_id}
+Username: {username}
+Email: {email}
+
+Message:
+{message}
+        """
+        
+        html = f"""
+<html>
+  <body>
+    <h3>Contact Form Submission</h3>
+    <p><strong>Type:</strong> {message_type}</p>
+    <p><strong>Title:</strong> {title}</p>
+    <br>
+    <p><strong>User ID:</strong> {user_id}</p>
+    <p><strong>Username:</strong> {username}</p>
+    <p><strong>Email:</strong> {email}</p>
+    <br>
+    <p><strong>Message:</strong></p>
+    <pre>{message}</pre>
+  </body>
+</html>
+        """
+        
+        part1 = MIMEText(text, 'plain')
+        part2 = MIMEText(html, 'html')
+        msg.attach(part1)
+        msg.attach(part2)
+        
+        # Send email
+        if smtp_config.use_ssl:
+            with smtplib.SMTP_SSL(smtp_config.host, smtp_config.port) as server:
+                if smtp_config.username and smtp_config.password:
+                    server.ehlo()
+                    server.login(smtp_config.username, smtp_config.password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_config.host, smtp_config.port) as server:
+                server.ehlo()
+                if smtp_config.use_tls:
+                    server.starttls()
+                    server.ehlo()
+                if smtp_config.username and smtp_config.password:
+                    server.login(smtp_config.username, smtp_config.password)
+                server.send_message(msg)
+        
+        return JSONResponse({'success': True})
+        
+    except Exception as e:
+        logger.error(f"Contact form error: {e}")
+        return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
 
 
 if __name__ == "__main__":

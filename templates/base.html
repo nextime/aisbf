@@ -644,9 +644,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     <footer class="footer">
         <div class="container">
-            <button class="donate-btn" onclick="openDonateModal()">
-                <i class="fas fa-heart"></i> Support AISBF Development
-            </button>
+            <div style="display: flex; justify-content: center; gap: 15px; align-items: center; flex-wrap: wrap;">
+                <button class="donate-btn" onclick="openDonateModal()">
+                    <i class="fas fa-heart"></i> Support AISBF Development
+                </button>
+                
+                {% if is_aisbf_cloud %}
+                <a href="https://aisbf.cloud/privacy.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                    Privacy Policy
+                </a>
+                <a href="https://aisbf.cloud/tos.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                    Terms of Service
+                </a>
+                <button class="btn btn-secondary" onclick="openContactModal()" style="font-size: 13px; padding: 8px 16px;">
+                    <i class="fas fa-envelope"></i> Contact
+                </button>
+                {% endif %}
+            </div>
         </div>
     </footer>
     
@@ -681,6 +695,89 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
     
+    <!-- Welcome Modal (AISBF Cloud only) -->
+    {% if is_aisbf_cloud and not welcome_shown %}
+    <div class="donate-modal active" id="welcomeModal">
+        <div class="donate-modal-content">
+            <div class="donate-modal-header">
+                <h3>Welcome to AISBF!</h3>
+                <button class="close-modal" onclick="closeWelcomeModal()">&times;</button>
+            </div>
+            
+            <div style="margin: 20px 0;">
+                <p style="margin-bottom: 15px;">
+                    <strong>Thank you</strong> for being an early adopter! We're currently in heavy development phase.
+                </p>
+                <p style="margin-bottom: 15px;">
+                    You may encounter bugs, service interruptions, or changes during this period.
+                </p>
+                <p style="margin-bottom: 20px;">
+                    Your feedback helps us make AISBF better. Please don't hesitate to reach out!
+                </p>
+                
+                <div style="background: #0f3460; padding: 15px; border-radius: 6px; margin-bottom: 15px;">
+                    <p style="margin: 5px 0;"><i class="fab fa-telegram"></i> Telegram: <a href="https://t.me/StefySpora" target="_blank" style="color: #60a5fa;">@StefySpora</a></p>
+                    <p style="margin: 5px 0;"><i class="fab fa-reddit"></i> Reddit: <a href="https://reddit.com/u/sporastefy" target="_blank" style="color: #60a5fa;">u/sporastefy</a></p>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button class="btn" onclick="openContactModal()">
+                        <i class="fas fa-envelope"></i> Send Feedback
+                    </button>
+                    <button class="btn btn-secondary" onclick="closeWelcomeModal()">
+                        Got it!
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+    {% endif %}
+    
+    <!-- Contact Modal -->
+    <div class="donate-modal" id="contactModal">
+        <div class="donate-modal-content" style="max-width: 600px;">
+            <div class="donate-modal-header">
+                <h3>Contact Us</h3>
+                <button class="close-modal" onclick="closeContactModal()">&times;</button>
+            </div>
+            
+            <form id="contactForm" onsubmit="submitContactForm(event)">
+                <div class="form-group">
+                    <label>Type</label>
+                    <select id="contactType" required>
+                        <option value="">Select type...</option>
+                        <option value="bug">Bug Report</option>
+                        <option value="feature">Feature Request</option>
+                        <option value="feedback">Feedback</option>
+                        <option value="question">Question</option>
+                        <option value="help">Help</option>
+                    </select>
+                </div>
+                
+                <div class="form-group">
+                    <label>Title</label>
+                    <input type="text" id="contactTitle" required placeholder="Brief summary of your message">
+                </div>
+                
+                <div class="form-group">
+                    <label>Message</label>
+                    <textarea id="contactMessage" required rows="6" placeholder="Describe your issue, request, or feedback in detail..."></textarea>
+                </div>
+                
+                <div style="display: flex; gap: 10px; margin-top: 20px;">
+                    <button type="submit" class="btn" id="contactSubmitBtn">
+                        <i class="fas fa-paper-plane"></i> Send Message
+                    </button>
+                    <button type="button" class="btn btn-secondary" onclick="closeContactModal()">
+                        Cancel
+                    </button>
+                </div>
+                
+                <div id="contactStatus" style="margin-top: 15px;"></div>
+            </form>
+        </div>
+    </div>
+    
     <script>
         function openDonateModal() {
             document.getElementById('donateModal').classList.add('active');
@@ -688,6 +785,60 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         function closeDonateModal() {
             document.getElementById('donateModal').classList.remove('active');
+        }
+        
+        function closeWelcomeModal() {
+            document.getElementById('welcomeModal').classList.remove('active');
+        }
+        
+        function openContactModal() {
+            document.getElementById('contactModal').classList.add('active');
+            if (document.getElementById('welcomeModal')) {
+                closeWelcomeModal();
+            }
+        }
+        
+        function closeContactModal() {
+            document.getElementById('contactModal').classList.remove('active');
+            document.getElementById('contactForm').reset();
+            document.getElementById('contactStatus').textContent = '';
+        }
+        
+        function submitContactForm(event) {
+            event.preventDefault();
+            
+            const btn = document.getElementById('contactSubmitBtn');
+            const status = document.getElementById('contactStatus');
+            
+            btn.disabled = true;
+            btn.textContent = 'Sending...';
+            status.textContent = '';
+            
+            fetch('/dashboard/contact', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                body: JSON.stringify({
+                    type: document.getElementById('contactType').value,
+                    title: document.getElementById('contactTitle').value,
+                    message: document.getElementById('contactMessage').value
+                })
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    status.innerHTML = '<div class="alert alert-success">Message sent successfully! Thank you for your feedback.</div>';
+                    setTimeout(() => closeContactModal(), 2000);
+                } else {
+                    status.innerHTML = '<div class="alert alert-error">Error: ' + (data.error || 'Failed to send message') + '</div>';
+                }
+            })
+            .catch(err => {
+                status.innerHTML = '<div class="alert alert-error">Network error. Please try again later.</div>';
+            })
+            .finally(() => {
+                btn.disabled = false;
+                btn.innerHTML = '<i class="fas fa-paper-plane"></i> Send Message';
+            });
         }
         
         function copyToClipboard(element) {
@@ -720,10 +871,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             });
         }
         
-        // Close modal when clicking outside
+        // Close modals when clicking outside
         document.getElementById('donateModal').addEventListener('click', function(e) {
             if (e.target === this) {
                 closeDonateModal();
+            }
+        });
+        
+        document.getElementById('contactModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeContactModal();
             }
         });
     </script>
