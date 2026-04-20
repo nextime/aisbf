@@ -1701,7 +1701,9 @@ app.add_middleware(ProxyHeadersMiddleware)
 async def dashboard_context_middleware(request: Request, call_next):
     if request.url.path.startswith("/dashboard") and request.session.get('logged_in'):
         # Set these values in request.state so they're available to all template renders
-        request.state.is_aisbf_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
+        request.state.is_aisbf_cloud = is_cloud or is_onion
         
         # Check if welcome modal has been shown this session
         if not request.session.get('welcome_shown', False) and request.state.is_aisbf_cloud:
