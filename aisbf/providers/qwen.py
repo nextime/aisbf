@@ -25,6 +25,7 @@ import asyncio
 import time
 import json
 import platform
+import uuid
 from typing import Dict, List, Optional, Union
 from openai import AsyncOpenAI
 from ..models import Model
@@ -130,19 +131,35 @@ class QwenProviderHandler(BaseProviderHandler):
 
             logger.info("QwenProviderHandler: Using OAuth2 authentication")
             auth_key = access_token
-            # Use provider configured endpoint for OAuth2 (fixed endpoints)
-            base_url = self.provider_config.endpoint
+            # Get resource URL from auth and normalize it properly
+            base_url = self.auth.get_resource_url()
+            
+            # Normalize endpoint exactly as specified in documentation
+            if not base_url.startswith("http"):
+                base_url = f"https://{base_url}"
+            
+            if not base_url.endswith("/v1"):
+                base_url = f"{base_url}/v1"
+            
+            logger.info(f"QwenProviderHandler: Final endpoint: {base_url}")
 
-        # Normalize endpoint
-        if not base_url.startswith("http"):
-            base_url = f"https://{base_url}"
-        # DashScope endpoint already includes /v1 so do not append again
+        # Build required DashScope headers
+        import uuid
+        user_agent = f"QwenCode/1.0.0 ({platform.system().lower()}; {platform.machine()})"
+        default_headers = {
+            "Accept": "application/json",
+            "X-DashScope-CacheControl": "enable",
+            "X-DashScope-UserAgent": user_agent,
+            "X-DashScope-AuthType": "qwen-oauth",
+            "x-request-id": str(uuid.uuid4()),
+        }
 
         self._sdk_client = AsyncOpenAI(
             api_key=auth_key,
             base_url=base_url,
             max_retries=3,
             timeout=httpx.Timeout(300.0, connect=30.0),
+            default_headers=default_headers,
         )
 
         logger.info(f"QwenProviderHandler: Created SDK client (endpoint: {base_url})")
@@ -223,12 +240,22 @@ class QwenProviderHandler(BaseProviderHandler):
         # Get SDK client with current OAuth token
         client = await self._get_sdk_client()
         
+        # Generate session tracking IDs
+        session_id = str(uuid.uuid4())
+        prompt_id = str(uuid.uuid4())
+        
         # Build request parameters
         request_params = {
             "model": model,
             "messages": messages,
             "max_tokens": max_tokens or 4096,
             "stream": stream,
+            "extra_body": {
+                "metadata": {
+                    "sessionId": session_id,
+                    "promptId": prompt_id
+                }
+            }
         }
         
         if temperature is not None and temperature > 0:
@@ -239,6 +266,10 @@ class QwenProviderHandler(BaseProviderHandler):
         
         if tool_choice and tools:
             request_params["tool_choice"] = tool_choice
+        
+        # Add stream_options for streaming requests
+        if stream:
+            request_params["stream_options"] = {"include_usage": True}
         
         try:
             if stream:
@@ -440,16 +471,37 @@ class QwenProviderHandler(BaseProviderHandler):
         using_api_key = qwen_config and isinstance(qwen_config, dict) and qwen_config.get('api_key')
 
         if not using_api_key:
-            # OAuth2 authentication: return fixed model list
-            logger.info("QwenProviderHandler: Using OAuth2 authentication, returning fixed model list")
+            # OAuth2 authentication: return full model list
+            logger.info("QwenProviderHandler: Using OAuth2 authentication, returning full model list")
             return [
                 Model(
-                    id="coder-model",
-                    name="Coder Model",
+                    id="qwen-turbo",
+                    name="Qwen Turbo",
                     provider_id=self.provider_id,
-                    context_size=1000000,
-                    context_length=1000000,
-                )
+                    context_size=32000,
+                    context_length=32000,
+                ),
+                Model(
+                    id="qwen-plus",
+                    name="Qwen Plus",
+                    provider_id=self.provider_id,
+                    context_size=128000,
+                    context_length=128000,
+                ),
+                Model(
+                    id="qwen-max",
+                    name="Qwen Max",
+                    provider_id=self.provider_id,
+                    context_size=128000,
+                    context_length=128000,
+                ),
+                Model(
+                    id="qwen3-coder-plus",
+                    name="Qwen 3 Coder Plus",
+                    provider_id=self.provider_id,
+                    context_size=128000,
+                    context_length=128000,
+                ),
             ]
 
         # API token authentication: fetch from models endpoint
@@ -502,10 +554,10 @@ class QwenProviderHandler(BaseProviderHandler):
                 # Fallback to static model list
                 logger.warning("QwenProviderHandler: No models returned from API, using static list")
                 models = [
-                    Model(id="qwen-plus", name="Qwen Plus", provider_id=self.provider_id, context_size=32000),
-                    Model(id="qwen-turbo", name="Qwen Turbo", provider_id=self.provider_id, context_size=8000),
-                    Model(id="qwen-max", name="Qwen Max", provider_id=self.provider_id, context_size=8000),
-                    Model(id="coder-model", name="Qwen Coder", provider_id=self.provider_id, context_size=32000),
+                    Model(id="qwen-turbo", name="Qwen Turbo", provider_id=self.provider_id, context_size=32000),
+                    Model(id="qwen-plus", name="Qwen Plus", provider_id=self.provider_id, context_size=128000),
+                    Model(id="qwen-max", name="Qwen Max", provider_id=self.provider_id, context_size=128000),
+                    Model(id="qwen3-coder-plus", name="Qwen 3 Coder Plus", provider_id=self.provider_id, context_size=128000),
                 ]
 
             logger.info(f"QwenProviderHandler: Returning {len(models)} models")
@@ -517,8 +569,8 @@ class QwenProviderHandler(BaseProviderHandler):
             # Return static fallback list
             logger.info("QwenProviderHandler: Using static fallback model list")
             return [
-                Model(id="qwen-plus", name="Qwen Plus", provider_id=self.provider_id, context_size=32000),
-                Model(id="qwen-turbo", name="Qwen Turbo", provider_id=self.provider_id, context_size=8000),
-                Model(id="qwen-max", name="Qwen Max", provider_id=self.provider_id, context_size=8000),
-                Model(id="coder-model", name="Qwen Coder", provider_id=self.provider_id, context_size=32000),
+                Model(id="qwen-turbo", name="Qwen Turbo", provider_id=self.provider_id, context_size=32000),
+                Model(id="qwen-plus", name="Qwen Plus", provider_id=self.provider_id, context_size=128000),
+                Model(id="qwen-max", name="Qwen Max", provider_id=self.provider_id, context_size=128000),
+                Model(id="qwen3-coder-plus", name="Qwen 3 Coder Plus", provider_id=self.provider_id, context_size=128000),
             ]

@@ -25,7 +25,7 @@ import json
 import logging
 import time
 import uuid
-from typing import Dict, List, Optional, Union, AsyncIterator
+from typing import Dict, List, Optional, Union, AsyncIterator, Tuple
 
 from openai import OpenAI
 import httpx
@@ -49,8 +49,8 @@ class CodexProviderHandler(BaseProviderHandler):
     - Standard OpenAI protocol with Bearer token
     
     **OAuth2 Mode** (no api_key, OAuth2 credentials):
-    - Uses ChatGPT backend API: https://chatgpt.com/backend-api/codex
-    - Uses Responses API endpoint: /v1/responses
+    - Uses ChatGPT backend API: https://chatgpt.com/backend-api
+    - Uses Responses API endpoint: /codex/responses
     - ChatGPT-specific protocol with SSE streaming
     - Includes ChatGPT-Account-ID header
     
@@ -104,7 +104,7 @@ class CodexProviderHandler(BaseProviderHandler):
             # OAuth2 Mode: Check if OAuth2 is authenticated
             # If authenticated, use ChatGPT backend; otherwise use configured endpoint
             if self.oauth2.is_authenticated():
-                self.base_url = "https://chatgpt.com/backend-api/codex"
+                self.base_url = "https://chatgpt.com/backend-api"
                 logger.info(f"CodexProviderHandler: Initialized in OAuth2 mode with ChatGPT backend: {self.base_url}")
             else:
                 # Not yet authenticated, keep configured endpoint
@@ -160,8 +160,8 @@ class CodexProviderHandler(BaseProviderHandler):
                 self._account_id = self.oauth2.credentials['tokens'].get('account_id')
             
             # Switch to ChatGPT backend if OAuth2 is now authenticated
-            if not self._use_api_key_mode and self.base_url != "https://chatgpt.com/backend-api/codex":
-                self.base_url = "https://chatgpt.com/backend-api/codex"
+            if not self._use_api_key_mode and self.base_url != "https://chatgpt.com/backend-api":
+                self.base_url = "https://chatgpt.com/backend-api"
                 logger.info(f"CodexProviderHandler: Switched to ChatGPT backend after OAuth2 authentication: {self.base_url}")
                 
                 # Update the configuration with the new endpoint
@@ -257,18 +257,34 @@ class CodexProviderHandler(BaseProviderHandler):
     # OAuth2 Mode Methods (ChatGPT Responses API)
     # =========================================================================
     
-    def _convert_messages_to_responses_format(self, messages: List[Dict]) -> List[Dict]:
+    def _convert_messages_to_responses_format(self, messages: List[Dict]) -> Tuple[List[Dict], Optional[str]]:
         """
         Convert OpenAI Chat Completions messages to Responses API format.
         
         OpenAI format: {"role": "user", "content": "text"}
         Responses format: {"type": "message", "role": "user", "content": [{"type": "input_text", "text": "text"}]}
+        
+        Returns:
+            tuple: (converted_messages, system_instruction)
+                - converted_messages: List of messages in Responses API format
+                - system_instruction: Combined system message content (if any)
         """
         result = []
+        system_instructions = []
         
         for msg in messages:
             role = msg.get("role", "user")
             content = msg.get("content", "")
+            
+            # Handle system messages - extract for instructions field
+            if role == "system":
+                if isinstance(content, str):
+                    system_instructions.append(content)
+                elif isinstance(content, list):
+                    for item in content:
+                        if isinstance(item, dict) and item.get("type") == "text":
+                            system_instructions.append(item.get("text", ""))
+                continue
             
             # Handle tool messages
             if role == "tool":
@@ -299,17 +315,17 @@ class CodexProviderHandler(BaseProviderHandler):
                     })
                 continue
             
-            # Handle regular messages
+            # Handle regular messages (user, developer, assistant)
             content_items = []
             if isinstance(content, str):
-                content_type = "input_text" if role in ["user", "system", "developer"] else "output_text"
+                content_type = "input_text" if role in ["user", "developer"] else "output_text"
                 content_items.append({"type": content_type, "text": content})
             elif isinstance(content, list):
                 # Handle multimodal content
                 for item in content:
                     if isinstance(item, dict):
                         if item.get("type") == "text":
-                            content_type = "input_text" if role in ["user", "system", "developer"] else "output_text"
+                            content_type = "input_text" if role in ["user", "developer"] else "output_text"
                             content_items.append({"type": content_type, "text": item.get("text", "")})
                         elif item.get("type") == "image_url":
                             content_items.append({
@@ -324,7 +340,40 @@ class CodexProviderHandler(BaseProviderHandler):
                     "content": content_items
                 })
         
-        return result
+        # Combine system instructions
+        combined_system = " ".join(system_instructions) if system_instructions else None
+        
+        return result, combined_system
+    
+    def _convert_tools_to_codex_format(self, tools: Optional[List[Dict]]) -> List[Dict]:
+        """
+        Convert OpenAI tool format to Codex/ChatGPT format.
+        
+        OpenAI format: {"type": "function", "function": {"name": "...", "description": "...", "parameters": {...}}}
+        Codex format: {"type": "function", "name": "...", "description": "...", "parameters": {...}}
+        
+        Key difference: No nested "function" object in Codex format.
+        """
+        if not tools:
+            return []
+        
+        converted_tools = []
+        for tool in tools:
+            if tool.get("type") == "function" and "function" in tool:
+                # OpenAI format - flatten it
+                func = tool["function"]
+                converted_tool = {
+                    "type": "function",
+                    "name": func.get("name"),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {}),
+                }
+                converted_tools.append(converted_tool)
+            else:
+                # Already in Codex format or other type
+                converted_tools.append(tool)
+        
+        return converted_tools
     
     def _build_responses_request(
         self,
@@ -336,29 +385,32 @@ class CodexProviderHandler(BaseProviderHandler):
         tool_choice: Optional[Union[str, Dict]] = None,
     ) -> Dict:
         """Build a Responses API request payload."""
-        # Convert messages to Responses format
-        input_items = self._convert_messages_to_responses_format(messages)
+        # Convert messages to Responses format and extract system instructions
+        input_items, system_instruction = self._convert_messages_to_responses_format(messages)
+        
+        # Use system instruction from messages if available, otherwise use default
+        instructions = system_instruction if system_instruction else "You are Codex, a helpful AI assistant for coding tasks."
+        
+        # Convert tools to Codex format (flatten the structure)
+        codex_tools = self._convert_tools_to_codex_format(tools)
         
         # Build base request
         request = {
             "model": model,
-            "instructions": "You are Codex, a helpful AI assistant for coding tasks.",
+            "instructions": instructions,
             "input": input_items,
             "stream": True,
             "store": False,
+            "tools": codex_tools,
+            "tool_choice": "auto",
+            "parallel_tool_calls": True,
         }
         
         # Add optional parameters
-        if max_tokens is not None:
-            request["max_tokens"] = max_tokens
+        # Note: temperature and max_tokens are not supported by /codex/responses endpoint
+        # They are handled internally by the model
         
-        if temperature is not None:
-            request["temperature"] = temperature
-        
-        if tools:
-            # Convert OpenAI tool format to Responses API format
-            request["tools"] = tools
-        
+        # Override tool_choice if explicitly provided
         if tool_choice:
             request["tool_choice"] = tool_choice if isinstance(tool_choice, str) else "auto"
         
@@ -506,31 +558,39 @@ class CodexProviderHandler(BaseProviderHandler):
         headers = self._build_headers(api_key, conversation_id)
         
         # Make request to Responses API
-        url = f"{self.base_url}/v1/responses"
+        url = f"{self.base_url}/codex/responses"
         
         logger.info(f"CodexProviderHandler: Sending request to {url}")
+        if AISBF_DEBUG:
+            logger.info(f"CodexProviderHandler: Request payload: {json.dumps(request_payload, indent=2)}")
+            logger.info(f"CodexProviderHandler: Request headers: {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
         
         async with httpx.AsyncClient(timeout=300.0) as client:
-            response = await client.post(
+            async with client.stream(
+                "POST",
                 url,
                 headers=headers,
                 json=request_payload,
-            )
-            
-            response.raise_for_status()
-            
-            # Parse SSE stream
-            events = []
-            async for event in self._parse_sse_stream(response):
-                events.append(event)
+            ) as response:
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    logger.error(f"CodexProviderHandler: Error response status: {response.status_code}")
+                    logger.error(f"CodexProviderHandler: Error response body: {error_body.decode('utf-8')}")
                 
-                # For streaming, we would yield events here
-                # For now, accumulate all events
-            
-            # Convert to OpenAI format
-            openai_response = self._convert_sse_to_openai_format(events, model)
-            
-            return openai_response
+                response.raise_for_status()
+                
+                # Parse SSE stream
+                events = []
+                async for event in self._parse_sse_stream(response):
+                    events.append(event)
+                    
+                    # For streaming, we would yield events here
+                    # For now, accumulate all events
+                
+                # Convert to OpenAI format
+                openai_response = self._convert_sse_to_openai_format(events, model)
+                
+                return openai_response
     
     # =========================================================================
     # Main Request Handler (Routes to appropriate mode)

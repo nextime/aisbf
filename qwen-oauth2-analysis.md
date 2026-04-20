@@ -1,1986 +1,2751 @@
-# Qwen Code OAuth2 Flow Analysis
+# Qwen API Documentation
 
-> **Purpose**: This document provides a comprehensive analysis of the Qwen Code OAuth2 initialization flow, token management, and API request patterns. It includes Python reimplementation examples for building an independent OAuth2 client.
+Complete documentation for implementing Qwen API requests based on the Qwen Code codebase analysis.
 
----
+## 📚 Documentation Files
 
-## Table of Contents
+This repository contains comprehensive documentation for working with the Qwen API:
 
-1. [Overview](#overview)
-2. [OAuth2 Constants and Configuration](#oauth2-constants-and-configuration)
-3. [PKCE (Proof Key for Code Exchange)](#pkce-proof-key-for-code-exchange)
-4. [Device Authorization Flow](#device-authorization-flow)
-5. [Token Polling](#token-polling)
-6. [Token Refresh](#token-refresh)
-7. [Credential Storage](#credential-storage)
-8. [SharedTokenManager - Cross-Process Token Synchronization](#sharedtokenmanager---cross-process-token-synchronization)
-9. [Making API Requests with OAuth Tokens](#making-api-requests-with-oauth-tokens)
-10. [Complete Python Implementation](#complete-python-implementation)
-11. [Error Handling and Edge Cases](#error-handling-and-edge-cases)
+### 1. **QWEN_API_SUMMARY.md** - Quick Reference Guide
+- **Purpose**: Fast lookup for common patterns and configurations
+- **Best for**: Developers who need quick answers
+- **Contents**:
+  - API endpoints and base URLs
+  - Required headers
+  - Request payload format
+  - Message format examples
+  - Session management
+  - Token management
+  - Streaming response format
+  - Error handling patterns
+  - Minimal working examples
 
----
+### 2. **QWEN_API_IMPLEMENTATION_GUIDE.md** - Complete Implementation
+- **Purpose**: Full Python implementation with detailed explanations
+- **Best for**: Developers building from scratch
+- **Contents**:
+  - OAuth2 authentication flow
+  - Token storage and refresh logic
+  - Complete Python client class
+  - Request building and sending
+  - Response parsing
+  - Error handling with retry logic
+  - Streaming support
+  - Working code examples
+  - Testing instructions
 
-## Overview
+### 3. **QWEN_API_FLOW_DIAGRAM.md** - Visual Flow Charts
+- **Purpose**: Visual representation of request flows
+- **Best for**: Understanding the overall architecture
+- **Contents**:
+  - Complete request flow diagram
+  - Streaming request flow
+  - Message format conversion (none needed!)
+  - Cache control flow
+  - Error handling flow
+  - Token lifecycle diagram
+  - Session management diagram
 
-Qwen Code uses the **OAuth 2.0 Device Authorization Grant** flow ([RFC 8628](https://datatracker.ietf.org/doc/html/rfc8628)) combined with **PKCE** ([RFC 7636](https://datatracker.ietf.org/doc/html/rfc7636)) for secure authentication. This flow is designed for devices that cannot easily open a browser or handle redirects.
+### 4. **test_qwen_api.py** - Test Suite
+- **Purpose**: Executable test script to verify implementation
+- **Best for**: Testing your setup and understanding API behavior
+- **Features**:
+  - Credentials validation
+  - Token expiry checking
+  - Token refresh testing
+  - Simple completion test
+  - Streaming completion test
+  - Multi-turn conversation test
+  - Detailed logging
+  - Comprehensive error handling
 
-### Key Characteristics
+## 🚀 Quick Start
 
-- **Grant Type**: `urn:ietf:params:oauth:grant-type:device_code`
-- **PKCE Method**: S256 (SHA-256 code challenge)
-- **Token Endpoint**: `https://chat.qwen.ai/api/v1/oauth2/token`
-- **Device Code Endpoint**: `https://chat.qwen.ai/api/v1/oauth2/device/code`
-- **Client ID**: `f0304373b74a44d2b584a3fb70ca9e56`
-- **Scopes**: `openid profile email model.completion`
+### Prerequisites
 
-### Flow Summary
+1. **OAuth2 Credentials**: You need valid OAuth2 credentials stored in `~/.qwen/oauth_creds.json`
+2. **Python 3.7+**: Required for the test script
+3. **requests library**: Install with `pip install requests`
 
-1. Generate PKCE code verifier and challenge
-2. Request a device code from the authorization server
-3. Display the authorization URL to the user
-4. Poll the token endpoint until the user approves
-5. Store credentials to disk (`~/.qwen/oauth_creds.json`)
-6. Use the access token for API requests
-7. Refresh the token when it expires (30-second buffer before expiry)
+### Credentials File Format
 
----
-
-## OAuth2 Constants and Configuration
-
-These are the fixed constants used throughout the OAuth2 flow:
-
-```typescript
-// Source: packages/core/src/qwen/qwenOAuth2.ts
-const QWEN_OAUTH_BASE_URL = 'https://chat.qwen.ai';
-const QWEN_OAUTH_DEVICE_CODE_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/device/code`;
-const QWEN_OAUTH_TOKEN_ENDPOINT = `${QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token`;
-const QWEN_OAUTH_CLIENT_ID = 'f0304373b74a44d2b584a3fb70ca9e56';
-const QWEN_OAUTH_SCOPE = 'openid profile email model.completion';
-const QWEN_OAUTH_GRANT_TYPE = 'urn:ietf:params:oauth:grant-type:device_code';
+```json
+{
+  "access_token": "your_access_token_here",
+  "refresh_token": "your_refresh_token_here",
+  "expiry_date": 1234567890000,
+  "token_type": "Bearer",
+  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode"
+}
 ```
+
+### Running the Test Suite
+
+```bash
+# Make the script executable
+chmod +x test_qwen_api.py
+
+# Run all tests
+./test_qwen_api.py
+
+# Run with verbose output
+./test_qwen_api.py --verbose
+```
+
+### Minimal Example
+
+```python
+import requests
+import json
+import uuid
+
+# Load credentials
+with open("~/.qwen/oauth_creds.json") as f:
+    creds = json.load(f)
+
+# Build request
+headers = {
+    "Authorization": f"Bearer {creds['access_token']}",
+    "Content-Type": "application/json",
+    "User-Agent": "QwenCode/1.0.0",
+    "X-DashScope-CacheControl": "enable",
+    "X-DashScope-UserAgent": "QwenCode/1.0.0",
+    "X-DashScope-AuthType": "qwen-oauth",
+}
+
+payload = {
+    "model": "qwen-plus",
+    "messages": [
+        {"role": "user", "content": "Hello!"}
+    ],
+    "metadata": {
+        "sessionId": str(uuid.uuid4()),
+        "promptId": str(uuid.uuid4())
+    }
+}
+
+# Send request
+response = requests.post(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    headers=headers,
+    json=payload
+)
+
+# Parse response
+result = response.json()
+print(result["choices"][0]["message"]["content"])
+```
+
+## 📖 Key Concepts
+
+### 1. OpenAI Compatibility
+
+The Qwen API is **100% OpenAI-compatible**. This means:
+- No message format conversion needed
+- Standard OpenAI message structure works directly
+- Tool calling (function calling) uses OpenAI format
+- Streaming follows OpenAI SSE format
+
+### 2. OAuth2 Authentication
+
+Unlike OpenAI's static API keys, Qwen uses OAuth2:
+- Access tokens expire (typically 1 hour)
+- Refresh tokens allow getting new access tokens
+- Automatic refresh on 401/403 errors
+- Re-authentication needed when refresh token expires
+
+### 3. Session Management
+
+Two levels of tracking:
+- **Session ID**: Persistent across entire conversation
+- **Prompt ID**: Unique per request
+
+Both are UUIDs sent in the `metadata` field.
+
+### 4. Dynamic Endpoints
+
+The API endpoint is not fixed:
+- Provided in OAuth credentials as `resource_url`
+- Default: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+- Always use the endpoint from credentials
+
+### 5. DashScope Headers
+
+Additional headers for caching and tracking:
+- `X-DashScope-CacheControl`: Enable prompt caching
+- `X-DashScope-UserAgent`: Application identification
+- `X-DashScope-AuthType`: Authentication method
+
+## 🔍 Common Use Cases
+
+### Simple Chat Completion
+
+```python
+from qwen_api_client import QwenAPIClient
+
+client = QwenAPIClient()
+response = client.chat_completion(
+    messages=[
+        {"role": "user", "content": "What is the capital of France?"}
+    ],
+    model="qwen-plus"
+)
+print(response["choices"][0]["message"]["content"])
+```
+
+### Streaming Response
+
+```python
+for chunk in client.chat_completion(
+    messages=[
+        {"role": "user", "content": "Count from 1 to 10"}
+    ],
+    model="qwen-plus",
+    stream=True
+):
+    if "choices" in chunk:
+        delta = chunk["choices"][0].get("delta", {})
+        if "content" in delta:
+            print(delta["content"], end="", flush=True)
+```
+
+### Multi-Turn Conversation
+
+```python
+session_id = str(uuid.uuid4())
+messages = []
+
+# Turn 1
+messages.append({"role": "user", "content": "My name is Alice"})
+response = client.chat_completion(messages=messages, model="qwen-plus")
+messages.append({"role": "assistant", "content": response["choices"][0]["message"]["content"]})
+
+# Turn 2
+messages.append({"role": "user", "content": "What is my name?"})
+response = client.chat_completion(messages=messages, model="qwen-plus")
+print(response["choices"][0]["message"]["content"])  # Should mention "Alice"
+```
+
+### Function Calling
+
+```python
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get weather for a location",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "location": {
+                        "type": "string",
+                        "description": "City name"
+                    }
+                },
+                "required": ["location"]
+            }
+        }
+    }
+]
+
+response = client.chat_completion(
+    messages=[
+        {"role": "user", "content": "What's the weather in Paris?"}
+    ],
+    model="qwen-plus",
+    tools=tools
+)
+
+# Check for tool calls
+if response["choices"][0]["message"].get("tool_calls"):
+    tool_call = response["choices"][0]["message"]["tool_calls"][0]
+    print(f"Function: {tool_call['function']['name']}")
+    print(f"Arguments: {tool_call['function']['arguments']}")
+```
+
+## 🛠️ Troubleshooting
+
+### Issue: "No credentials found"
+
+**Solution**: Ensure `~/.qwen/oauth_creds.json` exists with valid credentials.
+
+### Issue: "Token expired" or 401/403 errors
+
+**Solution**: The client should automatically refresh. If refresh fails, re-authenticate.
+
+### Issue: "Refresh token expired"
+
+**Solution**: You need to re-authenticate using the OAuth2 device flow.
+
+### Issue: Streaming not working
+
+**Solution**: Ensure you set `stream: true` and `stream_options: {include_usage: true}`.
+
+### Issue: Session context not maintained
+
+**Solution**: Use the same `sessionId` for all requests in a conversation.
+
+## 📊 API Limits and Best Practices
+
+### Rate Limits
+
+- Implement exponential backoff for 429 errors
+- Default retry: 3 attempts with increasing delays
+
+### Token Management
+
+- Check token expiry before each request
+- Refresh proactively (60 second buffer)
+- Cache credentials in memory for performance
+
+### Session Management
+
+- Generate session ID once per conversation
+- Generate new prompt ID for each request
+- Include both in metadata for tracking
+
+### Error Handling
+
+- Always handle 401/403 with automatic refresh
+- Implement retry logic for network errors
+- Log errors with request IDs for debugging
+
+## 🔐 Security Considerations
+
+1. **Credential Storage**: Store credentials securely with appropriate file permissions
+2. **Token Exposure**: Never log or expose access tokens
+3. **HTTPS Only**: Always use HTTPS endpoints
+4. **Token Rotation**: Refresh tokens regularly, don't reuse expired tokens
+
+## 📝 Additional Resources
+
+### Source Code References
+
+From the Qwen Code codebase:
+- OAuth2 implementation: `packages/core/src/qwen/qwenOAuth2.ts`
+- Content generator: `packages/core/src/qwen/qwenContentGenerator.ts`
+- DashScope provider: `packages/core/src/core/openaiContentGenerator/provider/dashscope.ts`
+- Message converter: `packages/core/src/core/openaiContentGenerator/converter.ts`
+- Pipeline: `packages/core/src/core/openaiContentGenerator/pipeline.ts`
 
 ### API Endpoints
 
-| Endpoint | URL |
-|----------|-----|
-| Base URL | `https://chat.qwen.ai` |
-| Device Code | `https://chat.qwen.ai/api/v1/oauth2/device/code` |
-| Token | `https://chat.qwen.ai/api/v1/oauth2/token` |
+- OAuth Token: `https://chat.qwen.ai/api/v1/oauth2/token`
+- Chat Completions: `https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions`
 
-### Default Model
+### Models
 
-- **Model ID**: `coder-model` (maps to `qwen3.6-plus` internally)
-- **Default API Base URL**: `https://dashscope.aliyuncs.com/compatible-mode/v1`
+Common models:
+- `qwen-plus`: Balanced performance and speed
+- `qwen-max`: Maximum capability
+- `qwen-turbo`: Fastest response
+- `qwen3-coder-plus`: Code-specialized model
+
+## 🤝 Contributing
+
+If you find issues or have improvements:
+1. Test your changes with the test suite
+2. Update relevant documentation
+3. Ensure examples work correctly
+
+## 📄 License
+
+This documentation is based on the Qwen Code codebase analysis and is provided for educational purposes.
 
 ---
 
-## PKCE (Proof Key for Code Exchange)
+**Last Updated**: 2026-04-19
 
-PKCE adds an extra layer of security by generating a code verifier and its SHA-256 hash (code challenge).
+**Documentation Version**: 1.0.0
 
-### TypeScript Implementation
+**Based on**: Qwen Code codebase analysis
+# Qwen API Implementation Summary
 
-```typescript
-// Source: packages/core/src/qwen/qwenOAuth2.ts (lines 47-77)
+## Quick Reference
 
-import crypto from 'crypto';
+### 1. API Endpoint
 
-export function generateCodeVerifier(): string {
-  return crypto.randomBytes(32).toString('base64url');
-}
-
-export function generateCodeChallenge(codeVerifier: string): string {
-  const hash = crypto.createHash('sha256');
-  hash.update(codeVerifier);
-  return hash.digest('base64url');
-}
-
-export function generatePKCEPair(): {
-  code_verifier: string;
-  code_challenge: string;
-} {
-  const codeVerifier = generateCodeVerifier();
-  const codeChallenge = generateCodeChallenge(codeVerifier);
-  return { code_verifier: codeVerifier, code_challenge: codeChallenge };
-}
+```
+Base URL: https://dashscope.aliyuncs.com/compatible-mode/v1
+Endpoint: /chat/completions
+Full URL: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
 ```
 
-### Python Implementation
+**Note**: The base URL can be dynamic and is provided in the OAuth `resource_url` field.
+
+### 2. Authentication Headers
 
 ```python
-import base64
-import hashlib
-import secrets
-
-
-def generate_code_verifier() -> str:
-    """Generate a random code verifier for PKCE (43-128 characters)."""
-    # 32 random bytes = 256 bits, base64url encoded = 43 characters
-    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
-
-
-def generate_code_challenge(code_verifier: str) -> str:
-    """Generate a code challenge from a code verifier using SHA-256."""
-    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode("ascii")
-
-
-def generate_pkce_pair() -> tuple[str, str]:
-    """Generate PKCE code verifier and challenge pair.
-    
-    Returns:
-        Tuple of (code_verifier, code_challenge)
-    """
-    code_verifier = generate_code_verifier()
-    code_challenge = generate_code_challenge(code_verifier)
-    return code_verifier, code_challenge
+headers = {
+    "Authorization": f"Bearer {access_token}",
+    "Content-Type": "application/json",
+    "Accept": "application/json",
+    "User-Agent": "QwenCode/1.0.0 (Linux; x86_64)",
+    "X-DashScope-CacheControl": "enable",
+    "X-DashScope-UserAgent": "QwenCode/1.0.0 (Linux; x86_64)",
+    "X-DashScope-AuthType": "qwen-oauth",
+    "x-request-id": "unique-uuid-here"  # Optional
+}
 ```
 
----
+### 3. Request Payload Format
 
-## Device Authorization Flow
-
-The device authorization flow begins by requesting a device code from the server.
-
-### Request
-
-```http
-POST /api/v1/oauth2/device/code HTTP/1.1
-Host: chat.qwen.ai
-Content-Type: application/x-www-form-urlencoded
-Accept: application/json
-x-request-id: <UUID>
-
-client_id=f0304373b74a44d2b584a3fb70ca9e56&scope=openid+profile+email+model.completion&code_challenge=<CHALLENGE>&code_challenge_method=S256
+```python
+payload = {
+    "model": "qwen-plus",
+    "messages": [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"}
+    ],
+    "stream": False,  # or True for streaming
+    "stream_options": {"include_usage": True},  # Required for streaming
+    "temperature": 0.7,  # Optional
+    "max_tokens": 1000,  # Optional
+    "metadata": {  # Optional but recommended
+        "sessionId": "session-uuid",
+        "promptId": "prompt-uuid"
+    }
+}
 ```
 
-### Response (Success)
+### 4. Message Format (OpenAI-Compatible)
 
-```json
+**System Message:**
+
+```python
+{"role": "system", "content": "You are a helpful assistant."}
+```
+
+**User Message:**
+
+```python
+{"role": "user", "content": "What is the weather?"}
+```
+
+**Assistant Message:**
+
+```python
+{"role": "assistant", "content": "The weather is sunny."}
+```
+
+**Tool Call:**
+
+```python
 {
-  "device_code": "abc123...",
-  "user_code": "ABCD-1234",
-  "verification_uri": "https://chat.qwen.ai/api/v1/oauth2/device/verify",
-  "verification_uri_complete": "https://chat.qwen.ai/api/v1/oauth2/device/verify?user_code=ABCD-1234",
-  "expires_in": 600,
-  "interval": 5
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+        {
+            "id": "call_123",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "San Francisco"}'
+            }
+        }
+    ]
 }
 ```
 
-### TypeScript Implementation
+**Tool Response:**
 
-```typescript
-// Source: packages/core/src/qwen/qwenOAuth2.ts (lines 291-332)
-
-async requestDeviceAuthorization(options: {
-  scope: string;
-  code_challenge: string;
-  code_challenge_method: string;
-}): Promise<DeviceAuthorizationResponse> {
-  const bodyData = {
-    client_id: QWEN_OAUTH_CLIENT_ID,
-    scope: options.scope,
-    code_challenge: options.code_challenge,
-    code_challenge_method: options.code_challenge_method,
-  };
-
-  const response = await fetch(QWEN_OAUTH_DEVICE_CODE_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-      'x-request-id': randomUUID(),
-    },
-    body: objectToUrlEncoded(bodyData),
-  });
-
-  if (!response.ok) {
-    const errorData = await response.text();
-    throw new Error(
-      `Device authorization failed: ${response.status} ${response.statusText}. Response: ${errorData}`,
-    );
-  }
-
-  const result = (await response.json()) as DeviceAuthorizationResponse;
-  if (!isDeviceAuthorizationSuccess(result)) {
-    const errorData = result as ErrorData;
-    throw new Error(
-      `Device authorization failed: ${errorData?.error || 'Unknown error'} - ${errorData?.error_description || 'No details provided'}`,
-    );
-  }
-
-  return result;
+```python
+{
+    "role": "tool",
+    "tool_call_id": "call_123",
+    "content": '{"temperature": 72, "condition": "sunny"}'
 }
 ```
 
-### Python Implementation
+### 5. Session Management
+
+**Session ID:**
+
+- Purpose: Track entire conversation
+- Format: UUID (e.g., `"550e8400-e29b-41d4-a716-446655440000"`)
+- Persistence: Same for all requests in a conversation
+- Location: `payload["metadata"]["sessionId"]`
+
+**Prompt ID:**
+
+- Purpose: Track individual request
+- Format: UUID (unique per request)
+- Persistence: New for each API call
+- Location: `payload["metadata"]["promptId"]`
+
+**Example:**
 
 ```python
 import uuid
-import urllib.parse
-import urllib.request
-import json
-from dataclasses import dataclass
 
+# Create once per conversation
+session_id = str(uuid.uuid4())
 
-@dataclass
-class DeviceAuthorizationData:
-    device_code: str
-    user_code: str
-    verification_uri: str
-    verification_uri_complete: str
-    expires_in: int
-    interval: int = 5
+# Create for each request
+prompt_id = str(uuid.uuid4())
 
-
-@dataclass
-class ErrorData:
-    error: str
-    error_description: str
-
-
-def url_encode(data: dict[str, str]) -> str:
-    """Convert a dictionary to URL-encoded form data."""
-    return urllib.parse.urlencode(data)
-
-
-async def request_device_authorization(
-    code_challenge: str,
-    scope: str = "openid profile email model.completion",
-    client_id: str = "f0304373b74a44d2b584a3fb70ca9e56",
-    base_url: str = "https://chat.qwen.ai",
-) -> DeviceAuthorizationData:
-    """Request device authorization from the Qwen OAuth2 server.
-    
-    Args:
-        code_challenge: PKCE code challenge (S256).
-        scope: OAuth2 scopes to request.
-        client_id: OAuth2 client ID.
-        base_url: Base URL of the OAuth2 server.
-    
-    Returns:
-        DeviceAuthorizationData on success.
-    
-    Raises:
-        Exception: If the request fails.
-    """
-    endpoint = f"{base_url}/api/v1/oauth2/device/code"
-    body_data = {
-        "client_id": client_id,
-        "scope": scope,
-        "code_challenge": code_challenge,
-        "code_challenge_method": "S256",
+payload = {
+    "model": "qwen-plus",
+    "messages": [...],
+    "metadata": {
+        "sessionId": session_id,
+        "promptId": prompt_id
     }
-    
-    request = urllib.request.Request(
-        endpoint,
-        data=url_encode(body_data).encode("utf-8"),
-        headers={
-            "Content-Type": "application/x-www-form-urlencoded",
-            "Accept": "application/json",
-            "x-request-id": str(uuid.uuid4()),
-        },
-        method="POST",
-    )
-    
-    try:
-        with urllib.request.urlopen(request) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        raise Exception(
-            f"Device authorization failed: {e.code} {e.reason}. Response: {error_body}"
-        ) from e
-    
-    if "device_code" not in result:
-        error = result.get("error", "Unknown error")
-        description = result.get("error_description", "No details provided")
-        raise Exception(f"Device authorization failed: {error} - {description}")
-    
-    return DeviceAuthorizationData(
-        device_code=result["device_code"],
-        user_code=result["user_code"],
-        verification_uri=result["verification_uri"],
-        verification_uri_complete=result["verification_uri_complete"],
-        expires_in=result["expires_in"],
-        interval=result.get("interval", 5),
-    )
-```
-
----
-
-## Token Polling
-
-After obtaining the device code, the client polls the token endpoint until the user approves the authorization.
-
-### Request
-
-```http
-POST /api/v1/oauth2/token HTTP/1.1
-Host: chat.qwen.ai
-Content-Type: application/x-www-form-urlencoded
-Accept: application/json
-
-grant_type=urn:ietf:params:oauth:grant-type:device_code&client_id=f0304373b74a44d2b584a3fb70ca9e56&device_code=<DEVICE_CODE>&code_verifier=<CODE_VERIFIER>
-```
-
-### Response (Success)
-
-```json
-{
-  "access_token": "eyJ...",
-  "refresh_token": "eyJ...",
-  "token_type": "Bearer",
-  "expires_in": 7200,
-  "scope": "openid profile email model.completion",
-  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
 }
 ```
 
-### Response (Pending - User has not approved yet)
+### 6. Token Management
 
-```json
-{
-  "error": "authorization_pending",
-  "error_description": "The user has not yet approved the authorization request"
-}
+**Token Refresh Flow:**
+
+```
+1. Check if token expired (expiry_date < current_time)
+2. If expired, call refresh endpoint
+3. Update stored credentials
+4. Retry original request with new token
 ```
 
-### Response (Slow Down - Polling too frequently)
-
-```json
-{
-  "error": "slow_down",
-  "error_description": "The client is polling too quickly"
-}
-```
-
-### TypeScript Implementation
-
-```typescript
-// Source: packages/core/src/qwen/qwenOAuth2.ts (lines 334-399)
-
-async pollDeviceToken(options: {
-  device_code: string;
-  code_verifier: string;
-}): Promise<DeviceTokenResponse> {
-  const bodyData = {
-    grant_type: QWEN_OAUTH_GRANT_TYPE,
-    client_id: QWEN_OAUTH_CLIENT_ID,
-    device_code: options.device_code,
-    code_verifier: options.code_verifier,
-  };
-
-  const response = await fetch(QWEN_OAUTH_TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: objectToUrlEncoded(bodyData),
-  });
-
-  if (!response.ok) {
-    const responseText = await response.text();
-    let errorData: ErrorData | null = null;
-    try {
-      errorData = JSON.parse(responseText) as ErrorData;
-    } catch (_parseError) {
-      const error = new Error(
-        `Device token poll failed: ${response.status} ${response.statusText}. Response: ${responseText}`,
-      );
-      (error as Error & { status?: number }).status = response.status;
-      throw error;
-    }
-
-    // OAuth RFC 8628: authorization_pending means continue polling
-    if (response.status === 400 && errorData.error === 'authorization_pending') {
-      return { status: 'pending' } as DeviceTokenPendingData;
-    }
-
-    // OAuth RFC 8628: slow_down means increase polling interval
-    if (response.status === 429 && errorData.error === 'slow_down') {
-      return { status: 'pending', slowDown: true } as DeviceTokenPendingData;
-    }
-
-    // Other 400 errors are real errors
-    const error = new Error(
-      `Device token poll failed: ${errorData.error || 'Unknown error'} - ${errorData.error_description}`,
-    );
-    (error as Error & { status?: number }).status = response.status;
-    throw error;
-  }
-
-  return (await response.json()) as DeviceTokenResponse;
-}
-```
-
-### Python Implementation
+**Refresh Request:**
 
 ```python
-import time
-from dataclasses import dataclass, field
-from typing import Optional
+POST https://chat.qwen.ai/api/v1/oauth2/token
+Content-Type: application/x-www-form-urlencoded
 
+grant_type=refresh_token&
+refresh_token=YOUR_REFRESH_TOKEN&
+client_id=f0304373b74a44d2b584a3fb70ca9e56
+```
 
-@dataclass
-class DeviceTokenData:
-    access_token: str
-    refresh_token: Optional[str]
-    token_type: str
-    expires_in: int
-    scope: Optional[str] = None
-    resource_url: Optional[str] = None
+**Refresh Response:**
 
+```json
+{
+  "access_token": "new_access_token",
+  "token_type": "Bearer",
+  "expires_in": 3600,
+  "refresh_token": "new_refresh_token_or_same",
+  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode"
+}
+```
 
-@dataclass
-class DeviceTokenPendingData:
-    status: str = "pending"
-    slow_down: bool = False
+### 7. Streaming Response Format
 
+**SSE Format:**
 
-async def poll_device_token(
-    device_code: str,
-    code_verifier: str,
-    client_id: str = "f0304373b74a44d2b584a3fb70ca9e56",
-    base_url: str = "https://chat.qwen.ai",
-    max_attempts: int = 300,
-    initial_interval: float = 2.0,
-    max_interval: float = 10.0,
-) -> DeviceTokenData:
-    """Poll the token endpoint until the user approves the authorization.
-    
-    Args:
-        device_code: The device code from the authorization response.
-        code_verifier: The PKCE code verifier.
-        client_id: OAuth2 client ID.
-        base_url: Base URL of the OAuth2 server.
-        max_attempts: Maximum number of polling attempts.
-        initial_interval: Initial polling interval in seconds.
-        max_interval: Maximum polling interval in seconds.
-    
-    Returns:
-        DeviceTokenData on success.
-    
-    Raises:
-        Exception: If polling fails or times out.
-    """
-    endpoint = f"{base_url}/api/v1/oauth2/token"
-    poll_interval = initial_interval
-    
-    for attempt in range(max_attempts):
-        body_data = {
-            "grant_type": "urn:ietf:params:oauth:grant-type:device_code",
-            "client_id": client_id,
-            "device_code": device_code,
-            "code_verifier": code_verifier,
+```
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"qwen-plus","choices":[{"index":0,"delta":{"role":"assistant","content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"qwen-plus","choices":[{"index":0,"delta":{"content":" there"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","object":"chat.completion.chunk","created":1234567890,"model":"qwen-plus","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":5,"total_tokens":15}}
+
+data: [DONE]
+```
+
+**Parsing:**
+
+```python
+for line in response.iter_lines():
+    if line:
+        line = line.decode('utf-8')
+        if line.startswith('data: '):
+            data = line[6:]  # Remove 'data: ' prefix
+            if data == '[DONE]':
+                break
+            chunk = json.loads(data)
+            # Process chunk
+```
+
+### 8. Cache Control (Optional Enhancement)
+
+**Enable caching for system message:**
+
+```python
+{
+    "role": "system",
+    "content": [
+        {
+            "type": "text",
+            "text": "You are a helpful assistant.",
+            "cache_control": {"type": "ephemeral"}
         }
-        
-        request = urllib.request.Request(
-            endpoint,
-            data=url_encode(body_data).encode("utf-8"),
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json",
-            },
-            method="POST",
-        )
-        
-        try:
-            with urllib.request.urlopen(request) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            
-            # Try to parse as JSON for standard OAuth errors
-            try:
-                error_data = json.loads(error_body)
-            except json.JSONDecodeError:
-                raise Exception(
-                    f"Device token poll failed: {e.code} {e.reason}. Response: {error_body}"
-                ) from e
-            
-            # authorization_pending: continue polling
-            if e.code == 400 and error_data.get("error") == "authorization_pending":
-                print(f"Polling... (attempt {attempt + 1}/{max_attempts})")
-                time.sleep(poll_interval)
-                continue
-            
-            # slow_down: increase polling interval
-            if e.code == 429 and error_data.get("error") == "slow_down":
-                poll_interval = min(poll_interval * 1.5, max_interval)
-                print(f"Server requested slow down, increasing interval to {poll_interval:.1f}s")
-                time.sleep(poll_interval)
-                continue
-            
-            # Other errors
-            error = error_data.get("error", "Unknown error")
-            description = error_data.get("error_description", "No details provided")
-            raise Exception(f"Device token poll failed: {error} - {description}")
-        
-        # Success - check if we got a token
-        if "access_token" in result and result["access_token"]:
-            return DeviceTokenData(
-                access_token=result["access_token"],
-                refresh_token=result.get("refresh_token"),
-                token_type=result.get("token_type", "Bearer"),
-                expires_in=result.get("expires_in", 7200),
-                scope=result.get("scope"),
-                resource_url=result.get("resource_url"),
-            )
-        
-        # Unexpected response
-        raise Exception(f"Unexpected token response: {result}")
-    
-    raise Exception("Authorization timeout: user did not approve the request in time")
+    ]
+}
+```
+
+**Enable caching for last message (streaming):**
+
+```python
+{
+    "role": "user",
+    "content": [
+        {
+            "type": "text",
+            "text": "What is the weather?",
+            "cache_control": {"type": "ephemeral"}
+        }
+    ]
+}
+```
+
+**Enable caching for last tool:**
+
+```python
+tools = [
+    {"type": "function", "function": {...}},
+    {
+        "type": "function",
+        "function": {...},
+        "cache_control": {"type": "ephemeral"}
+    }
+]
+```
+
+### 9. Error Handling
+
+**401/403 Errors:**
+
+```python
+if response.status_code in (401, 403):
+    # Token expired - refresh and retry
+    refresh_access_token()
+    retry_request()
+```
+
+**400 on Refresh:**
+
+```python
+if response.status_code == 400:
+    # Refresh token expired - need full re-authentication
+    raise Exception("Please re-authenticate")
+```
+
+### 10. Complete Minimal Example
+
+```python
+import requests
+import json
+import uuid
+
+# Load credentials
+with open("~/.qwen/oauth_creds.json") as f:
+    creds = json.load(f)
+
+# Build request
+headers = {
+    "Authorization": f"Bearer {creds['access_token']}",
+    "Content-Type": "application/json",
+    "User-Agent": "QwenCode/1.0.0",
+    "X-DashScope-CacheControl": "enable",
+    "X-DashScope-UserAgent": "QwenCode/1.0.0",
+    "X-DashScope-AuthType": "qwen-oauth",
+}
+
+payload = {
+    "model": "qwen-plus",
+    "messages": [
+        {"role": "user", "content": "Hello!"}
+    ],
+    "metadata": {
+        "sessionId": str(uuid.uuid4()),
+        "promptId": str(uuid.uuid4())
+    }
+}
+
+# Send request
+response = requests.post(
+    "https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions",
+    headers=headers,
+    json=payload
+)
+
+# Handle response
+if response.status_code == 200:
+    result = response.json()
+    print(result["choices"][0]["message"]["content"])
+elif response.status_code in (401, 403):
+    # Refresh token and retry
+    pass
 ```
 
 ---
 
-## Token Refresh
+## Key Differences from Standard OpenAI API
 
-When the access token expires, the client uses the refresh token to obtain a new one.
+1. **Authentication**: OAuth2 with refresh tokens instead of static API keys
+2. **Base URL**: Dynamic based on `resource_url` from OAuth
+3. **Headers**: Additional `X-DashScope-*` headers
+4. **Metadata**: Session and prompt tracking via `metadata` field
+5. **Cache Control**: DashScope-specific caching mechanism
+6. **Token Refresh**: Automatic refresh flow on 401/403
 
-### Request
+---
 
-```http
-POST /api/v1/oauth2/token HTTP/1.1
-Host: chat.qwen.ai
-Content-Type: application/x-www-form-urlencoded
-Accept: application/json
+## Important Notes
 
-grant_type=refresh_token&refresh_token=<REFRESH_TOKEN>&client_id=f0304373b74a44d2b584a3fb70ca9e56
-```
+1. **No Initial System Prompt Required**: Unlike some APIs, there's no mandatory initial handshake or system prompt. You can start with any message.
 
-### Response (Success)
+2. **Session Persistence**: The `sessionId` should remain constant throughout a conversation to maintain context.
 
-```json
-{
-  "access_token": "eyJ...",
-  "token_type": "Bearer",
-  "expires_in": 7200,
-  "refresh_token": "eyJ...",
-  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-}
-```
+3. **Token Expiry**: Always check `expiry_date` before making requests and refresh proactively.
 
-### Response (Error - Refresh Token Expired)
+4. **Resource URL**: The API endpoint can change based on the `resource_url` in OAuth credentials. Always use the dynamic endpoint.
 
-```json
-{
-  "error": "invalid_grant",
-  "error_description": "The refresh token is invalid or expired"
-}
-```
+5. **OpenAI Compatibility**: The message format is 100% OpenAI-compatible. No conversion needed.
 
-### TypeScript Implementation
+6. **Streaming**: When streaming, always include `stream_options: {include_usage: true}` to get token usage in the final chunk.
 
-```typescript
-// Source: packages/core/src/qwen/qwenOAuth2.ts (lines 401-463)
+7. **Error Handling**: Implement automatic retry with token refresh for 401/403 errors.
 
-async refreshAccessToken(): Promise<TokenRefreshResponse> {
-  if (!this.credentials.refresh_token) {
-    throw new Error('No refresh token available');
-  }
+---
 
-  const bodyData = {
-    grant_type: 'refresh_token',
-    refresh_token: this.credentials.refresh_token,
-    client_id: QWEN_OAUTH_CLIENT_ID,
-  };
+## Testing Checklist
 
-  const response = await fetch(QWEN_OAUTH_TOKEN_ENDPOINT, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/x-www-form-urlencoded',
-      Accept: 'application/json',
-    },
-    body: objectToUrlEncoded(bodyData),
-  });
+- [ ] Load credentials from `~/.qwen/oauth_creds.json`
+- [ ] Check token expiry before request
+- [ ] Build headers with all required fields
+- [ ] Generate unique session_id and prompt_id
+- [ ] Send request to correct endpoint
+- [ ] Handle 401/403 with token refresh
+- [ ] Parse response correctly
+- [ ] Test streaming mode
+- [ ] Test with function calling
+- [ ] Verify session persistence across requests
 
-  if (!response.ok) {
-    const errorData = await response.text();
-    // Handle 400 errors which might indicate refresh token expiry
-    if (response.status === 400) {
-      await clearQwenCredentials();
-      throw new CredentialsClearRequiredError(
-        "Refresh token expired or invalid. Please use '/auth' to re-authenticate.",
-        { status: response.status, response: errorData },
-      );
-    }
-    throw new Error(
-      `Token refresh failed: ${response.status} ${response.statusText}. Response: ${errorData}`,
-    );
-  }
+---
 
-  const responseData = (await response.json()) as TokenRefreshResponse;
+## Additional Resources
 
-  if (isErrorResponse(responseData)) {
-    const errorData = responseData as ErrorData;
-    throw new Error(
-      `Token refresh failed: ${errorData?.error || 'Unknown error'} - ${errorData?.error_description || 'No details provided'}`,
-    );
-  }
+- Full implementation: See `QWEN_API_IMPLEMENTATION_GUIDE.md`
+- OAuth2 flow: See `packages/core/src/qwen/qwenOAuth2.ts`
+- Request building: See `packages/core/src/core/openaiContentGenerator/provider/dashscope.ts`
+- Message conversion: See `packages/core/src/core/openaiContentGenerator/converter.ts`
+# Qwen API Implementation Guide
 
-  const tokenData = responseData as TokenRefreshData;
-  const tokens: QwenCredentials = {
-    access_token: tokenData.access_token,
-    token_type: tokenData.token_type,
-    refresh_token: tokenData.refresh_token || this.credentials.refresh_token,
-    resource_url: tokenData.resource_url,
-    expiry_date: Date.now() + tokenData.expires_in * 1000,
-  };
+This document provides a complete guide for implementing Qwen API requests in Python, based on the exact implementation in the Qwen Code codebase.
 
-  this.setCredentials(tokens);
-  return responseData;
-}
-```
+## Table of Contents
 
-### Python Implementation
+1. [OAuth2 Authentication](#oauth2-authentication)
+2. [API Request Format](#api-request-format)
+3. [Session Management](#session-management)
+4. [Message Format Conversion](#message-format-conversion)
+5. [Complete Python Implementation](#complete-python-implementation)
+
+---
+
+## OAuth2 Authentication
+
+### OAuth2 Configuration
 
 ```python
-@dataclass
-class QwenCredentials:
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    id_token: Optional[str] = None
-    expiry_date: Optional[int] = None  # Unix timestamp in milliseconds
-    token_type: Optional[str] = None
-    resource_url: Optional[str] = None
+# OAuth Endpoints
+QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
+QWEN_OAUTH_DEVICE_CODE_ENDPOINT = f"{QWEN_OAUTH_BASE_URL}/api/v1/oauth2/device/code"
+QWEN_OAUTH_TOKEN_ENDPOINT = f"{QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token"
 
+# OAuth Client Configuration
+QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+QWEN_OAUTH_SCOPE = "openid profile email model.completion"
+QWEN_OAUTH_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
+```
 
-async def refresh_access_token(
-    refresh_token: str,
-    client_id: str = "f0304373b74a44d2b584a3fb70ca9e56",
-    base_url: str = "https://chat.qwen.ai",
-) -> QwenCredentials:
-    """Refresh an access token using a refresh token.
-    
-    Args:
-        refresh_token: The refresh token to use.
-        client_id: OAuth2 client ID.
-        base_url: Base URL of the OAuth2 server.
-    
-    Returns:
-        QwenCredentials with the refreshed tokens.
-    
-    Raises:
-        Exception: If the refresh fails.
-    """
-    endpoint = f"{base_url}/api/v1/oauth2/token"
+### Token Storage
+
+Tokens are stored in: `~/.qwen/oauth_creds.json`
+
+```json
+{
+  "access_token": "your_access_token",
+  "refresh_token": "your_refresh_token",
+  "id_token": "optional_id_token",
+  "expiry_date": 1234567890000,
+  "token_type": "Bearer",
+  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode"
+}
+```
+
+### Token Refresh
+
+When the access token expires (401/403 errors), refresh it:
+
+```python
+import requests
+
+def refresh_access_token(refresh_token: str) -> dict:
+    """Refresh the access token using the refresh token."""
     body_data = {
         "grant_type": "refresh_token",
         "refresh_token": refresh_token,
-        "client_id": client_id,
+        "client_id": QWEN_OAUTH_CLIENT_ID,
     }
-    
-    request = urllib.request.Request(
-        endpoint,
-        data=url_encode(body_data).encode("utf-8"),
+
+    response = requests.post(
+        QWEN_OAUTH_TOKEN_ENDPOINT,
         headers={
             "Content-Type": "application/x-www-form-urlencoded",
             "Accept": "application/json",
         },
-        method="POST",
+        data=body_data,
     )
-    
-    try:
-        with urllib.request.urlopen(request) as response:
-            result = json.loads(response.read().decode("utf-8"))
-    except urllib.error.HTTPError as e:
-        error_body = e.read().decode("utf-8")
-        
-        # 400 error typically means refresh token is expired/invalid
-        if e.code == 400:
-            raise Exception(
-                "Refresh token expired or invalid. Please re-authenticate."
-            ) from e
-        
-        raise Exception(
-            f"Token refresh failed: {e.code} {e.reason}. Response: {error_body}"
-        ) from e
-    
-    if "error" in result:
-        raise Exception(
-            f"Token refresh failed: {result['error']} - {result.get('error_description', 'No details provided')}"
-        )
-    
-    return QwenCredentials(
-        access_token=result["access_token"],
-        token_type=result.get("token_type", "Bearer"),
-        refresh_token=result.get("refresh_token", refresh_token),
-        resource_url=result.get("resource_url"),
-        expiry_date=int(time.time() * 1000) + result.get("expires_in", 7200) * 1000,
-    )
-```
 
----
+    if response.status_code == 400 or response.status_code == 401:
+        # Refresh token expired - need to re-authenticate
+        raise Exception("Refresh token expired. Please re-authenticate.")
 
-## Credential Storage
+    response.raise_for_status()
+    token_data = response.json()
 
-Credentials are stored in a JSON file at `~/.qwen/oauth_creds.json`.
-
-### File Format
-
-```json
-{
-  "access_token": "eyJhbGciOiJSUzI1NiIs...",
-  "refresh_token": "eyJhbGciOiJSUzI1NiIs...",
-  "token_type": "Bearer",
-  "expiry_date": 1712345678901,
-  "resource_url": "https://dashscope.aliyuncs.com/compatible-mode/v1"
-}
-```
-
-### Python Implementation
-
-```python
-import os
-import json
-from pathlib import Path
-
-
-CREDENTIAL_FILENAME = "oauth_creds.json"
-QWEN_DIR = ".qwen"
-
-
-def get_credential_path() -> Path:
-    """Get the path to the credentials file."""
-    return Path.home() / QWEN_DIR / CREDENTIAL_FILENAME
-
-
-def save_credentials(credentials: QwenCredentials) -> None:
-    """Save credentials to the credentials file.
-    
-    Args:
-        credentials: The credentials to save.
-    """
-    file_path = get_credential_path()
-    file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    
-    # Write to a temporary file first, then rename for atomicity
-    temp_path = file_path.with_suffix(".tmp")
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {
-                "access_token": credentials.access_token,
-                "refresh_token": credentials.refresh_token,
-                "token_type": credentials.token_type,
-                "expiry_date": credentials.expiry_date,
-                "resource_url": credentials.resource_url,
-            },
-            f,
-            indent=2,
-        )
-    
-    # Atomic rename
-    temp_path.rename(file_path)
-    # Set restrictive permissions
-    os.chmod(file_path, 0o600)
-
-
-def load_credentials() -> Optional[QwenCredentials]:
-    """Load credentials from the credentials file.
-    
-    Returns:
-        QwenCredentials if valid credentials exist, None otherwise.
-    """
-    file_path = get_credential_path()
-    if not file_path.exists():
-        return None
-    
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        # Validate required fields
-        required_fields = ["access_token", "refresh_token", "token_type", "expiry_date"]
-        for field in required_fields:
-            if field not in data or not data[field]:
-                return None
-        
-        return QwenCredentials(
-            access_token=data["access_token"],
-            refresh_token=data["refresh_token"],
-            token_type=data["token_type"],
-            expiry_date=data["expiry_date"],
-            resource_url=data.get("resource_url"),
-        )
-    except (json.JSONDecodeError, KeyError, TypeError):
-        return None
-
-
-def clear_credentials() -> None:
-    """Delete the credentials file if it exists."""
-    file_path = get_credential_path()
-    if file_path.exists():
-        file_path.unlink()
-```
-
----
-
-## SharedTokenManager - Cross-Process Token Synchronization
-
-The `SharedTokenManager` is a critical component that ensures OAuth tokens are synchronized across multiple processes. This prevents race conditions when multiple instances of Qwen Code are running simultaneously.
-
-### Key Features
-
-1. **Singleton Pattern**: Single instance per process
-2. **Memory Cache**: In-memory cache with file modification time tracking
-3. **File-Based Locking**: Distributed lock using `oauth_creds.lock` file
-4. **Automatic Reload**: Detects when another process has refreshed the token
-5. **Token Validation**: Checks expiry with a 30-second buffer
-6. **Atomic File Operations**: Uses temp file + rename for safe writes
-
-### Constants
-
-```typescript
-// Source: packages/core/src/qwen/sharedTokenManager.ts
-const TOKEN_REFRESH_BUFFER_MS = 30 * 1000;  // 30 seconds before expiry
-const LOCK_TIMEOUT_MS = 10000;               // 10 seconds lock timeout
-const CACHE_CHECK_INTERVAL_MS = 5000;        // 5 seconds between file checks
-```
-
-### Lock Acquisition
-
-The lock file is created atomically using the `wx` flag (exclusive write). If the lock is older than 10 seconds, it's considered stale and removed.
-
-### Python Implementation
-
-```python
-import fcntl
-import time
-import uuid
-from pathlib import Path
-from typing import Optional
-
-
-LOCK_FILENAME = "oauth_creds.lock"
-TOKEN_REFRESH_BUFFER_MS = 30_000  # 30 seconds
-LOCK_TIMEOUT_MS = 10_000          # 10 seconds
-CACHE_CHECK_INTERVAL_MS = 5_000   # 5 seconds
-
-
-class SharedTokenManager:
-    """Manages OAuth tokens across multiple processes using file-based caching and locking."""
-    
-    _instance: Optional["SharedTokenManager"] = None
-    
-    def __init__(self):
-        self._credentials: Optional[QwenCredentials] = None
-        self._file_mod_time: float = 0
-        self._last_check: float = 0
-        self._lock_path = Path.home() / QWEN_DIR / LOCK_FILENAME
-    
-    @classmethod
-    def get_instance(cls) -> "SharedTokenManager":
-        """Get the singleton instance."""
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    def _get_credential_path(self) -> Path:
-        return Path.home() / QWEN_DIR / CREDENTIAL_FILENAME
-    
-    def _is_token_valid(self, credentials: QwenCredentials) -> bool:
-        """Check if the token is valid and not expired (with buffer)."""
-        if not credentials.expiry_date or not credentials.access_token:
-            return False
-        now_ms = int(time.time() * 1000)
-        return now_ms < credentials.expiry_date - TOKEN_REFRESH_BUFFER_MS
-    
-    def _acquire_lock(self, max_attempts: int = 20, initial_interval: float = 0.1) -> bool:
-        """Acquire a file lock to prevent concurrent token refreshes.
-        
-        Returns:
-            True if lock acquired, False otherwise.
-        """
-        lock_id = str(uuid.uuid4())
-        current_interval = initial_interval
-        
-        for _ in range(max_attempts):
-            try:
-                # Try to create lock file atomically (exclusive mode)
-                with open(self._lock_path, "x") as f:
-                    f.write(lock_id)
-                return True
-            except FileExistsError:
-                # Lock file exists, check if stale
-                try:
-                    stat = self._lock_path.stat()
-                    lock_age = time.time() - stat.st_mtime
-                    
-                    if lock_age > LOCK_TIMEOUT_MS / 1000:
-                        # Remove stale lock
-                        self._lock_path.unlink()
-                        continue
-                except (OSError, FileNotFoundError):
-                    # Lock might have been removed by another process
-                    continue
-                
-                time.sleep(current_interval)
-                current_interval = min(current_interval * 1.5, 2.0)  # Exponential backoff
-        
-        return False
-    
-    def _release_lock(self) -> None:
-        """Release the file lock."""
-        try:
-            self._lock_path.unlink()
-        except FileNotFoundError:
-            pass  # Lock already removed
-    
-    def check_and_reload(self) -> None:
-        """Check if the credentials file was updated by another process and reload."""
-        now = time.time()
-        
-        # Limit check frequency
-        if now - self._last_check < CACHE_CHECK_INTERVAL_MS / 1000:
-            return
-        
-        self._last_check = now
-        file_path = self._get_credential_path()
-        
-        try:
-            stat = file_path.stat()
-            file_mod_time = stat.st_mtime
-            
-            if file_mod_time > self._file_mod_time:
-                # File has been modified, reload
-                creds = load_credentials()
-                if creds:
-                    self._credentials = creds
-                    self._file_mod_time = file_mod_time
-        except FileNotFoundError:
-            self._file_mod_time = 0
-    
-    def get_valid_credentials(
-        self,
-        refresh_func: Optional[callable] = None,
-        force_refresh: bool = False,
-    ) -> QwenCredentials:
-        """Get valid OAuth credentials, refreshing if necessary.
-        
-        Args:
-            refresh_func: Function to call for refreshing tokens.
-            force_refresh: If True, refresh even if token is still valid.
-        
-        Returns:
-            Valid QwenCredentials.
-        
-        Raises:
-            Exception: If unable to obtain valid credentials.
-        """
-        # Check if file was updated by another process
-        self.check_and_reload()
-        
-        # Return cached credentials if valid
-        if not force_refresh and self._credentials and self._is_token_valid(self._credentials):
-            return self._credentials
-        
-        # Check if we have a refresh token
-        if not self._credentials or not self._credentials.refresh_token:
-            raise Exception("No refresh token available")
-        
-        # Acquire lock for refresh
-        if not self._acquire_lock():
-            raise Exception("Failed to acquire lock for token refresh")
-        
-        try:
-            # Double-check after acquiring lock
-            self.check_and_reload()
-            if not force_refresh and self._credentials and self._is_token_valid(self._credentials):
-                return self._credentials
-            
-            # Perform refresh
-            if refresh_func:
-                new_creds = refresh_func(self._credentials.refresh_token)
-                self._credentials = new_creds
-                save_credentials(new_creds)
-                return new_creds
-            
-            raise Exception("No refresh function provided")
-        finally:
-            self._release_lock()
-    
-    def clear_cache(self) -> None:
-        """Clear all cached data."""
-        self._credentials = None
-        self._file_mod_time = 0
-        self._last_check = 0
-```
-
----
-
-## Making API Requests with OAuth Tokens
-
-The `QwenContentGenerator` class handles API requests with automatic credential management and retry logic.
-
-### Flow
-
-1. Get valid credentials from `SharedTokenManager`
-2. Set the access token as the `apiKey` on the OpenAI client
-3. Set the `resource_url` as the `baseURL` (default: `https://dashscope.aliyuncs.com/compatible-mode/v1`)
-4. Make the API request
-5. If a 401/403 error occurs, force-refresh the token and retry
-
-### TypeScript Implementation
-
-```typescript
-// Source: packages/core/src/qwen/qwenContentGenerator.ts (lines 87-150)
-
-private async getValidToken(): Promise<{ token: string; endpoint: string }> {
-  const credentials = await this.sharedManager.getValidCredentials(this.qwenClient);
-  
-  if (!credentials.access_token) {
-    throw new Error('No access token available');
-  }
-  
-  return {
-    token: credentials.access_token,
-    endpoint: this.getCurrentEndpoint(credentials.resource_url),
-  };
-}
-
-private async executeWithCredentialManagement<T>(
-  operation: () => Promise<T>,
-): Promise<T> {
-  const attemptOperation = async (): Promise<T> => {
-    const { token, endpoint } = await this.getValidToken();
-    
-    // Apply dynamic configuration
-    this.pipeline.client.apiKey = token;
-    this.pipeline.client.baseURL = endpoint;
-    
-    return await operation();
-  };
-  
-  try {
-    return await attemptOperation();
-  } catch (error) {
-    if (this.isAuthError(error)) {
-      // Force refresh and retry
-      await this.sharedManager.getValidCredentials(this.qwenClient, true);
-      return await attemptOperation();
+    # Update credentials
+    credentials = {
+        "access_token": token_data["access_token"],
+        "token_type": token_data["token_type"],
+        "refresh_token": token_data.get("refresh_token", refresh_token),  # Use new if provided
+        "resource_url": token_data.get("resource_url"),
+        "expiry_date": int(time.time() * 1000) + token_data["expires_in"] * 1000,
     }
-    throw error;
-  }
-}
 
-override async generateContent(
-  request: GenerateContentParameters,
-  userPromptId: string,
-): Promise<GenerateContentResponse> {
-  return this.executeWithCredentialManagement(() =>
-    super.generateContent(request, userPromptId),
-  );
-}
+    return credentials
 ```
 
-### DashScope Provider Headers
+---
 
-```typescript
-// Source: packages/core/src/core/openaiContentGenerator/provider/dashscope.ts (lines 40-54)
+## API Request Format
 
-override buildHeaders(): Record<string, string | undefined> {
-  const version = this.cliConfig.getCliVersion() || 'unknown';
-  const userAgent = `QwenCode/${version} (${process.platform}; ${process.arch})`;
-  const { authType, customHeaders } = this.contentGeneratorConfig;
-  
-  return {
-    'User-Agent': userAgent,
-    'X-DashScope-CacheControl': 'enable',
-    'X-DashScope-UserAgent': userAgent,
-    'X-DashScope-AuthType': authType,  // 'qwen-oauth'
-    ...customHeaders,
-  };
-}
-```
+### Base URL
 
-### Python Implementation
+The API endpoint is determined by the `resource_url` from OAuth credentials:
 
 ```python
-import urllib.request
-import json
-from typing import Optional
+def get_api_endpoint(resource_url: str = None) -> str:
+    """Get the API endpoint URL."""
+    base_endpoint = resource_url or "https://dashscope.aliyuncs.com/compatible-mode"
 
+    # Normalize URL: add protocol if missing, ensure /v1 suffix
+    if not base_endpoint.startswith("http"):
+        base_endpoint = f"https://{base_endpoint}"
 
-DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    if not base_endpoint.endswith("/v1"):
+        base_endpoint = f"{base_endpoint}/v1"
 
+    return base_endpoint
+```
 
-class QwenAPIClient:
-    """API client for making requests to the Qwen/DashScope API with OAuth tokens."""
-    
-    def __init__(
-        self,
-        token_manager: SharedTokenManager,
-        refresh_func: callable,
-        model: str = "coder-model",
-        base_url: str = DEFAULT_DASHSCOPE_BASE_URL,
-    ):
-        self._token_manager = token_manager
-        self._refresh_func = refresh_func
-        self._model = model
-        self._base_url = base_url
-        self._token: Optional[str] = None
-        self._endpoint: Optional[str] = None
-    
-    def _get_valid_token_and_endpoint(self) -> tuple[str, str]:
-        """Get a valid token and endpoint, refreshing if necessary."""
-        credentials = self._token_manager.get_valid_credentials(
-            refresh_func=self._refresh_func
-        )
-        
-        if not credentials.access_token:
-            raise Exception("No access token available")
-        
-        # Normalize endpoint
-        endpoint = credentials.resource_url or self._base_url
-        if not endpoint.startswith("http"):
-            endpoint = f"https://{endpoint}"
-        if not endpoint.endswith("/v1"):
-            endpoint = f"{endpoint}/v1"
-        
-        return credentials.access_token, endpoint
-    
-    def _is_auth_error(self, error: Exception) -> bool:
-        """Check if an error is related to authentication."""
-        error_msg = str(error).lower()
-        return any(
-            keyword in error_msg
-            for keyword in [
-                "401",
-                "403",
-                "unauthorized",
-                "forbidden",
-                "invalid api key",
-                "invalid access token",
-                "token expired",
-                "authentication",
-                "access denied",
-            ]
-        )
-    
-    def _make_request(
-        self,
-        endpoint: str,
-        token: str,
-        payload: dict,
-    ) -> dict:
-        """Make an API request with the given token."""
-        url = f"{endpoint}/chat/completions"
-        
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "QwenCode/1.0.0 (linux; x86_64)",
-                "X-DashScope-CacheControl": "enable",
-                "X-DashScope-AuthType": "qwen-oauth",
-            },
-            method="POST",
-        )
-        
-        try:
-            with urllib.request.urlopen(request) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            raise Exception(
-                f"API request failed: {e.code} {e.reason}. Response: {error_body}"
-            ) from e
-    
-    def generate_content(
-        self,
-        messages: list[dict],
-        max_retries: int = 1,
-    ) -> dict:
-        """Generate content using the Qwen API.
-        
-        Args:
-            messages: List of message objects in OpenAI format.
-            max_retries: Number of retries on auth errors.
-        
-        Returns:
-            API response as a dictionary.
-        """
-        payload = {
-            "model": self._model,
-            "messages": messages,
+### Required Headers
+
+```python
+def build_headers(access_token: str, auth_type: str = "qwen-oauth") -> dict:
+    """Build request headers for Qwen API."""
+    version = "1.0.0"  # Your application version
+    user_agent = f"QwenCode/{version} ({platform.system()}; {platform.machine()})"
+
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+        "Accept": "application/json",
+        "User-Agent": user_agent,
+        "X-DashScope-CacheControl": "enable",
+        "X-DashScope-UserAgent": user_agent,
+        "X-DashScope-AuthType": auth_type,
+        "x-request-id": str(uuid.uuid4()),  # Optional but recommended
+    }
+
+    return headers
+```
+
+### Request Metadata
+
+Qwen API supports metadata for session tracking:
+
+```python
+def build_metadata(session_id: str, prompt_id: str, channel: str = None) -> dict:
+    """Build metadata for request tracking."""
+    metadata = {
+        "sessionId": session_id,
+        "promptId": prompt_id,
+    }
+
+    if channel:
+        metadata["channel"] = channel
+
+    return {"metadata": metadata}
+```
+
+---
+
+## Session Management
+
+### Session ID
+
+- **Purpose**: Track conversation history across multiple requests
+- **Format**: UUID or any unique identifier
+- **Persistence**: Should remain constant for the entire conversation
+- **Generation**: Create once at conversation start
+
+```python
+import uuid
+
+session_id = str(uuid.uuid4())  # Generate once per conversation
+```
+
+### Prompt ID
+
+- **Purpose**: Track individual requests within a session
+- **Format**: UUID or unique identifier
+- **Persistence**: New for each request
+- **Generation**: Create for each API call
+
+```python
+prompt_id = str(uuid.uuid4())  # Generate for each request
+```
+
+---
+
+## Message Format Conversion
+
+### OpenAI to Qwen Format
+
+Qwen API uses OpenAI-compatible format. The conversion is straightforward:
+
+#### System Message
+
+```python
+# OpenAI format
+{
+    "role": "system",
+    "content": "You are a helpful assistant."
+}
+
+# Qwen format (same)
+{
+    "role": "system",
+    "content": "You are a helpful assistant."
+}
+```
+
+#### User Message
+
+```python
+# OpenAI format
+{
+    "role": "user",
+    "content": "Hello, how are you?"
+}
+
+# Qwen format (same)
+{
+    "role": "user",
+    "content": "Hello, how are you?"
+}
+```
+
+#### Assistant Message
+
+```python
+# OpenAI format
+{
+    "role": "assistant",
+    "content": "I'm doing well, thank you!"
+}
+
+# Qwen format (same)
+{
+    "role": "assistant",
+    "content": "I'm doing well, thank you!"
+}
+```
+
+#### Tool Calls (Function Calling)
+
+```python
+# OpenAI format
+{
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+        {
+            "id": "call_123",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "San Francisco"}'
+            }
         }
-        
-        for attempt in range(max_retries + 1):
-            try:
-                token, endpoint = self._get_valid_token_and_endpoint()
-                return self._make_request(endpoint, token, payload)
-            except Exception as e:
-                if self._is_auth_error(e) and attempt < max_retries:
-                    # Force refresh and retry
-                    self._token_manager.clear_cache()
-                    self._token_manager.get_valid_credentials(
-                        refresh_func=self._refresh_func,
-                        force_refresh=True,
-                    )
-                else:
-                    raise
-    
-    def generate_content_stream(
-        self,
-        messages: list[dict],
-    ):
-        """Generate content with streaming.
-        
-        Args:
-            messages: List of message objects in OpenAI format.
-        
-        Yields:
-            Streaming response chunks.
-        """
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "stream": True,
+    ]
+}
+
+# Qwen format (same)
+{
+    "role": "assistant",
+    "content": null,
+    "tool_calls": [
+        {
+            "id": "call_123",
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "arguments": '{"location": "San Francisco"}'
+            }
         }
-        
-        token, endpoint = self._get_valid_token_and_endpoint()
-        url = f"{endpoint}/chat/completions"
-        
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "QwenCode/1.0.0 (linux; x86_64)",
-                "X-DashScope-CacheControl": "enable",
-                "X-DashScope-AuthType": "qwen-oauth",
-            },
-            method="POST",
-        )
-        
-        with urllib.request.urlopen(request) as response:
-            for line in response:
-                line = line.decode("utf-8").strip()
-                if line.startswith("data: "):
-                    data = line[6:]
-                    if data == "[DONE]":
-                        break
-                    yield json.loads(data)
+    ]
+}
+```
+
+#### Tool Response
+
+```python
+# OpenAI format
+{
+    "role": "tool",
+    "tool_call_id": "call_123",
+    "content": '{"temperature": 72, "condition": "sunny"}'
+}
+
+# Qwen format (same)
+{
+    "role": "tool",
+    "tool_call_id": "call_123",
+    "content": '{"temperature": 72, "condition": "sunny"}'
+}
+```
+
+### Cache Control (DashScope-specific)
+
+For prompt caching, add `cache_control` to the last text part of specific messages:
+
+```python
+# System message with cache control
+{
+    "role": "system",
+    "content": [
+        {
+            "type": "text",
+            "text": "You are a helpful assistant.",
+            "cache_control": {"type": "ephemeral"}
+        }
+    ]
+}
+
+# Last history message with cache control (for streaming)
+{
+    "role": "user",
+    "content": [
+        {
+            "type": "text",
+            "text": "What is the weather?",
+            "cache_control": {"type": "ephemeral"}
+        }
+    ]
+}
+```
+
+For tools, add cache control to the last tool:
+
+```python
+tools = [
+    {
+        "type": "function",
+        "function": {
+            "name": "get_weather",
+            "description": "Get weather information",
+            "parameters": {...}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "search",
+            "description": "Search the web",
+            "parameters": {...}
+        },
+        "cache_control": {"type": "ephemeral"}  # Add to last tool
+    }
+]
 ```
 
 ---
 
 ## Complete Python Implementation
 
-Here is a complete, self-contained Python implementation of the Qwen OAuth2 flow:
+### Full Implementation Example
 
 ```python
-"""
-Qwen OAuth2 Client - Complete Implementation
-
-This module implements the full OAuth2 Device Authorization Grant flow
-for Qwen Code, including PKCE, token management, and API requests.
-
-Usage:
-    from qwen_oauth import QwenOAuthClient
-    
-    client = QwenOAuthClient()
-    client.authenticate()  # Interactive browser flow
-    
-    # Make API requests
-    response = client.generate_content([
-        {"role": "user", "content": "Hello, world!"}
-    ])
-    print(response)
-"""
-
-import base64
-import hashlib
 import json
-import os
-import secrets
 import time
-import urllib.parse
-import urllib.request
 import uuid
-from dataclasses import dataclass, field, asdict
+import platform
+import requests
+from typing import Dict, List, Optional, Generator
 from pathlib import Path
-from typing import Optional, Generator
 
+class QwenAPIClient:
+    """Complete Qwen API client implementation."""
 
-# ============================================================================
-# Constants
-# ============================================================================
+    # OAuth Configuration
+    OAUTH_BASE_URL = "https://chat.qwen.ai"
+    OAUTH_TOKEN_ENDPOINT = f"{OAUTH_BASE_URL}/api/v1/oauth2/token"
+    CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+    DEFAULT_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
 
-QWEN_OAUTH_BASE_URL = "https://chat.qwen.ai"
-QWEN_OAUTH_DEVICE_CODE_ENDPOINT = f"{QWEN_OAUTH_BASE_URL}/api/v1/oauth2/device/code"
-QWEN_OAUTH_TOKEN_ENDPOINT = f"{QWEN_OAUTH_BASE_URL}/api/v1/oauth2/token"
-QWEN_OAUTH_CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
-QWEN_OAUTH_SCOPE = "openid profile email model.completion"
-QWEN_OAUTH_GRANT_TYPE = "urn:ietf:params:oauth:grant-type:device_code"
+    # Credentials file
+    CREDS_FILE = Path.home() / ".qwen" / "oauth_creds.json"
 
-DEFAULT_DASHSCOPE_BASE_URL = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    def __init__(self, session_id: Optional[str] = None):
+        """Initialize the client."""
+        self.session_id = session_id or str(uuid.uuid4())
+        self.credentials = self._load_credentials()
+        self.api_base = self._get_api_endpoint()
 
-QWEN_DIR = ".qwen"
-CREDENTIAL_FILENAME = "oauth_creds.json"
-LOCK_FILENAME = "oauth_creds.lock"
+    def _load_credentials(self) -> Dict:
+        """Load credentials from file."""
+        if not self.CREDS_FILE.exists():
+            raise Exception("No credentials found. Please authenticate first.")
 
-TOKEN_REFRESH_BUFFER_MS = 30_000  # 30 seconds
-LOCK_TIMEOUT_MS = 10_000          # 10 seconds
-CACHE_CHECK_INTERVAL_MS = 5_000   # 5 seconds
+        with open(self.CREDS_FILE, 'r') as f:
+            return json.load(f)
 
+    def _save_credentials(self, credentials: Dict):
+        """Save credentials to file."""
+        self.CREDS_FILE.parent.mkdir(parents=True, exist_ok=True)
+        with open(self.CREDS_FILE, 'w') as f:
+            json.dump(credentials, f, indent=2)
+        self.credentials = credentials
 
-# ============================================================================
-# Data Classes
-# ============================================================================
+    def _get_api_endpoint(self) -> str:
+        """Get the API endpoint from credentials."""
+        resource_url = self.credentials.get("resource_url", self.DEFAULT_API_BASE)
 
-@dataclass
-class QwenCredentials:
-    access_token: Optional[str] = None
-    refresh_token: Optional[str] = None
-    id_token: Optional[str] = None
-    expiry_date: Optional[int] = None
-    token_type: Optional[str] = None
-    resource_url: Optional[str] = None
+        # Normalize URL
+        if not resource_url.startswith("http"):
+            resource_url = f"https://{resource_url}"
 
+        if not resource_url.endswith("/v1"):
+            resource_url = f"{resource_url}/v1"
 
-@dataclass
-class DeviceAuthorizationData:
-    device_code: str
-    user_code: str
-    verification_uri: str
-    verification_uri_complete: str
-    expires_in: int
-    interval: int = 5
+        return resource_url
 
+    def _is_token_expired(self) -> bool:
+        """Check if the access token is expired."""
+        expiry_date = self.credentials.get("expiry_date", 0)
+        # Add 60 second buffer
+        return time.time() * 1000 >= (expiry_date - 60000)
 
-@dataclass
-class DeviceTokenData:
-    access_token: str
-    refresh_token: Optional[str]
-    token_type: str
-    expires_in: int
-    scope: Optional[str] = None
-    resource_url: Optional[str] = None
-
-
-# ============================================================================
-# PKCE
-# ============================================================================
-
-def generate_code_verifier() -> str:
-    """Generate a random code verifier for PKCE."""
-    return base64.urlsafe_b64encode(secrets.token_bytes(32)).rstrip(b"=").decode("ascii")
-
-
-def generate_code_challenge(code_verifier: str) -> str:
-    """Generate a code challenge from a code verifier using SHA-256."""
-    sha256_hash = hashlib.sha256(code_verifier.encode("ascii")).digest()
-    return base64.urlsafe_b64encode(sha256_hash).rstrip(b"=").decode("ascii")
-
-
-# ============================================================================
-# Utility Functions
-# ============================================================================
-
-def url_encode(data: dict[str, str]) -> str:
-    """Convert a dictionary to URL-encoded form data."""
-    return urllib.parse.urlencode(data)
-
-
-def get_credential_path() -> Path:
-    """Get the path to the credentials file."""
-    return Path.home() / QWEN_DIR / CREDENTIAL_FILENAME
-
-
-def get_lock_path() -> Path:
-    """Get the path to the lock file."""
-    return Path.home() / QWEN_DIR / LOCK_FILENAME
-
-
-# ============================================================================
-# Credential Storage
-# ============================================================================
-
-def save_credentials(credentials: QwenCredentials) -> None:
-    """Save credentials to disk atomically."""
-    file_path = get_credential_path()
-    file_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-    
-    temp_path = file_path.with_suffix(".tmp")
-    with open(temp_path, "w", encoding="utf-8") as f:
-        json.dump(
-            {k: v for k, v in asdict(credentials).items() if v is not None},
-            f,
-            indent=2,
-        )
-    
-    temp_path.rename(file_path)
-    os.chmod(file_path, 0o600)
-
-
-def load_credentials() -> Optional[QwenCredentials]:
-    """Load credentials from disk."""
-    file_path = get_credential_path()
-    if not file_path.exists():
-        return None
-    
-    try:
-        with open(file_path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        
-        required = ["access_token", "refresh_token", "token_type", "expiry_date"]
-        if not all(data.get(field) for field in required):
-            return None
-        
-        return QwenCredentials(**{k: v for k, v in data.items() if k in QwenCredentials.__dataclass_fields__})
-    except (json.JSONDecodeError, TypeError):
-        return None
-
-
-def clear_credentials() -> None:
-    """Delete the credentials file."""
-    file_path = get_credential_path()
-    if file_path.exists():
-        file_path.unlink()
-
-
-# ============================================================================
-# SharedTokenManager
-# ============================================================================
-
-class SharedTokenManager:
-    """Manages OAuth tokens across processes using file-based caching and locking."""
-    
-    _instance: Optional["SharedTokenManager"] = None
-    
-    def __init__(self):
-        self._credentials: Optional[QwenCredentials] = None
-        self._file_mod_time: float = 0
-        self._last_check: float = 0
-    
-    @classmethod
-    def get_instance(cls) -> "SharedTokenManager":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-    
-    def _is_token_valid(self, creds: QwenCredentials) -> bool:
-        if not creds.expiry_date or not creds.access_token:
-            return False
-        return int(time.time() * 1000) < creds.expiry_date - TOKEN_REFRESH_BUFFER_MS
-    
-    def _acquire_lock(self, max_attempts: int = 20) -> bool:
-        lock_id = str(uuid.uuid4())
-        interval = 0.1
-        
-        for _ in range(max_attempts):
-            try:
-                with open(get_lock_path(), "x") as f:
-                    f.write(lock_id)
-                return True
-            except FileExistsError:
-                try:
-                    stat = get_lock_path().stat()
-                    if time.time() - stat.st_mtime > LOCK_TIMEOUT_MS / 1000:
-                        get_lock_path().unlink()
-                        continue
-                except (OSError, FileNotFoundError):
-                    continue
-                
-                time.sleep(interval)
-                interval = min(interval * 1.5, 2.0)
-        
-        return False
-    
-    def _release_lock(self) -> None:
-        try:
-            get_lock_path().unlink()
-        except FileNotFoundError:
-            pass
-    
-    def check_and_reload(self) -> None:
-        """Reload credentials if the file was modified by another process."""
-        now = time.time()
-        if now - self._last_check < CACHE_CHECK_INTERVAL_MS / 1000:
-            return
-        
-        self._last_check = now
-        file_path = get_credential_path()
-        
-        try:
-            stat = file_path.stat()
-            if stat.st_mtime > self._file_mod_time:
-                creds = load_credentials()
-                if creds:
-                    self._credentials = creds
-                    self._file_mod_time = stat.st_mtime
-        except FileNotFoundError:
-            self._file_mod_time = 0
-    
-    def get_valid_credentials(
-        self,
-        refresh_func: callable,
-        force_refresh: bool = False,
-    ) -> QwenCredentials:
-        """Get valid credentials, refreshing if necessary."""
-        self.check_and_reload()
-        
-        if not force_refresh and self._credentials and self._is_token_valid(self._credentials):
-            return self._credentials
-        
-        if not self._credentials or not self._credentials.refresh_token:
+    def _refresh_token(self):
+        """Refresh the access token."""
+        refresh_token = self.credentials.get("refresh_token")
+        if not refresh_token:
             raise Exception("No refresh token available")
-        
-        if not self._acquire_lock():
-            raise Exception("Failed to acquire lock for token refresh")
-        
-        try:
-            self.check_and_reload()
-            if not force_refresh and self._credentials and self._is_token_valid(self._credentials):
-                return self._credentials
-            
-            new_creds = refresh_func(self._credentials.refresh_token)
-            self._credentials = new_creds
-            save_credentials(new_creds)
-            return new_creds
-        finally:
-            self._release_lock()
-    
-    def clear_cache(self) -> None:
-        self._credentials = None
-        self._file_mod_time = 0
-        self._last_check = 0
 
-
-# ============================================================================
-# OAuth2 Client
-# ============================================================================
-
-class QwenOAuthClient:
-    """Complete Qwen OAuth2 client implementation."""
-    
-    def __init__(self):
-        self._token_manager = SharedTokenManager.get_instance()
-        self._credentials: Optional[QwenCredentials] = None
-    
-    def _refresh_token(self, refresh_token: str) -> QwenCredentials:
-        """Refresh an access token."""
         body_data = {
             "grant_type": "refresh_token",
             "refresh_token": refresh_token,
-            "client_id": QWEN_OAUTH_CLIENT_ID,
+            "client_id": self.CLIENT_ID,
         }
-        
-        request = urllib.request.Request(
-            QWEN_OAUTH_TOKEN_ENDPOINT,
-            data=url_encode(body_data).encode("utf-8"),
+
+        response = requests.post(
+            self.OAUTH_TOKEN_ENDPOINT,
             headers={
                 "Content-Type": "application/x-www-form-urlencoded",
                 "Accept": "application/json",
             },
-            method="POST",
+            data=body_data,
         )
-        
-        try:
-            with urllib.request.urlopen(request) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            if e.code == 400:
-                clear_credentials()
-                raise Exception("Refresh token expired. Please re-authenticate.") from e
-            raise Exception(f"Token refresh failed: {e.code} {e.reason}") from e
-        
-        if "error" in result:
-            raise Exception(f"Token refresh failed: {result['error']}")
-        
-        return QwenCredentials(
-            access_token=result["access_token"],
-            token_type=result.get("token_type", "Bearer"),
-            refresh_token=result.get("refresh_token", refresh_token),
-            resource_url=result.get("resource_url"),
-            expiry_date=int(time.time() * 1000) + result.get("expires_in", 7200) * 1000,
-        )
-    
-    def _request_device_authorization(self, code_challenge: str) -> DeviceAuthorizationData:
-        """Request device authorization."""
-        body_data = {
-            "client_id": QWEN_OAUTH_CLIENT_ID,
-            "scope": QWEN_OAUTH_SCOPE,
-            "code_challenge": code_challenge,
-            "code_challenge_method": "S256",
+
+        if response.status_code in (400, 401):
+            raise Exception("Refresh token expired. Please re-authenticate.")
+
+        response.raise_for_status()
+        token_data = response.json()
+
+        # Update credentials
+        new_credentials = {
+            "access_token": token_data["access_token"],
+            "token_type": token_data["token_type"],
+            "refresh_token": token_data.get("refresh_token", refresh_token),
+            "resource_url": token_data.get("resource_url", self.credentials.get("resource_url")),
+            "expiry_date": int(time.time() * 1000) + token_data["expires_in"] * 1000,
         }
-        
-        request = urllib.request.Request(
-            QWEN_OAUTH_DEVICE_CODE_ENDPOINT,
-            data=url_encode(body_data).encode("utf-8"),
-            headers={
-                "Content-Type": "application/x-www-form-urlencoded",
-                "Accept": "application/json",
-                "x-request-id": str(uuid.uuid4()),
-            },
-            method="POST",
-        )
-        
-        try:
-            with urllib.request.urlopen(request) as response:
-                result = json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            raise Exception(f"Device authorization failed: {e.code} {e.reason}") from e
-        
-        if "device_code" not in result:
-            raise Exception(f"Device authorization failed: {result.get('error', 'Unknown')}")
-        
-        return DeviceAuthorizationData(
-            device_code=result["device_code"],
-            user_code=result["user_code"],
-            verification_uri=result["verification_uri"],
-            verification_uri_complete=result["verification_uri_complete"],
-            expires_in=result["expires_in"],
-            interval=result.get("interval", 5),
-        )
-    
-    def _poll_device_token(self, device_code: str, code_verifier: str) -> DeviceTokenData:
-        """Poll for the device token until approved."""
-        poll_interval = 2.0
-        max_attempts = 300
-        
-        for attempt in range(max_attempts):
-            body_data = {
-                "grant_type": QWEN_OAUTH_GRANT_TYPE,
-                "client_id": QWEN_OAUTH_CLIENT_ID,
-                "device_code": device_code,
-                "code_verifier": code_verifier,
-            }
-            
-            request = urllib.request.Request(
-                QWEN_OAUTH_TOKEN_ENDPOINT,
-                data=url_encode(body_data).encode("utf-8"),
-                headers={
-                    "Content-Type": "application/x-www-form-urlencoded",
-                    "Accept": "application/json",
-                },
-                method="POST",
-            )
-            
-            try:
-                with urllib.request.urlopen(request) as response:
-                    result = json.loads(response.read().decode("utf-8"))
-            except urllib.error.HTTPError as e:
-                error_body = e.read().decode("utf-8")
-                try:
-                    error_data = json.loads(error_body)
-                except json.JSONDecodeError:
-                    raise Exception(f"Token poll failed: {e.code} {e.reason}") from e
-                
-                if e.code == 400 and error_data.get("error") == "authorization_pending":
-                    time.sleep(poll_interval)
-                    continue
-                
-                if e.code == 429 and error_data.get("error") == "slow_down":
-                    poll_interval = min(poll_interval * 1.5, 10.0)
-                    time.sleep(poll_interval)
-                    continue
-                
-                raise Exception(f"Token poll failed: {error_data.get('error', 'Unknown')}") from e
-            
-            if result.get("access_token"):
-                return DeviceTokenData(
-                    access_token=result["access_token"],
-                    refresh_token=result.get("refresh_token"),
-                    token_type=result.get("token_type", "Bearer"),
-                    expires_in=result.get("expires_in", 7200),
-                    resource_url=result.get("resource_url"),
-                )
-            
-            time.sleep(poll_interval)
-        
-        raise Exception("Authorization timeout")
-    
-    def authenticate(self) -> QwenCredentials:
-        """Perform the full OAuth2 device authorization flow."""
-        # Try loading cached credentials first
-        cached = load_credentials()
-        if cached:
-            self._credentials = cached
-            self._token_manager._credentials = cached
-            self._token_manager._file_mod_time = get_credential_path().stat().st_mtime if get_credential_path().exists() else 0
-            
-            if self._token_manager._is_token_valid(cached):
-                return cached
-        
-        # PKCE
-        code_verifier = generate_code_verifier()
-        code_challenge = generate_code_challenge(code_verifier)
-        
-        # Device authorization
-        device_auth = self._request_device_authorization(code_challenge)
-        
-        # Display authorization URL
-        print(f"\n{'=' * 60}")
-        print(f"Qwen OAuth Device Authorization")
-        print(f"{'=' * 60}")
-        print(f"Please visit the following URL in your browser:")
-        print(f"  {device_auth.verification_uri_complete}")
-        print(f"Waiting for authorization to complete...")
-        print(f"{'=' * 60}\n")
-        
-        # Try to open browser
-        try:
-            import webbrowser
-            webbrowser.open(device_auth.verification_uri_complete)
-        except Exception:
-            pass
-        
-        # Poll for token
-        token_data = self._poll_device_token(device_auth.device_code, code_verifier)
-        
-        # Store credentials
-        self._credentials = QwenCredentials(
-            access_token=token_data.access_token,
-            refresh_token=token_data.refresh_token,
-            token_type=token_data.token_type,
-            resource_url=token_data.resource_url,
-            expiry_date=int(time.time() * 1000) + token_data.expires_in * 1000,
-        )
-        
-        save_credentials(self._credentials)
-        self._token_manager.clear_cache()
-        
-        print("Authentication successful!")
-        return self._credentials
-    
-    def get_access_token(self) -> str:
+
+        self._save_credentials(new_credentials)
+        self.api_base = self._get_api_endpoint()
+
+    def _get_valid_token(self) -> str:
         """Get a valid access token, refreshing if necessary."""
-        creds = self._token_manager.get_valid_credentials(
-            refresh_func=self._refresh_token
-        )
-        return creds.access_token
+        if self._is_token_expired():
+            self._refresh_token()
 
+        return self.credentials["access_token"]
 
-# ============================================================================
-# API Client
-# ============================================================================
+    def _build_headers(self) -> Dict[str, str]:
+        """Build request headers."""
+        access_token = self._get_valid_token()
+        version = "1.0.0"
+        user_agent = f"QwenCode/{version} ({platform.system()}; {platform.machine()})"
 
-class QwenAPIClient:
-    """API client for making requests to the Qwen/DashScope API."""
-    
-    def __init__(
+        return {
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+            "Accept": "application/json",
+            "User-Agent": user_agent,
+            "X-DashScope-CacheControl": "enable",
+            "X-DashScope-UserAgent": user_agent,
+            "X-DashScope-AuthType": "qwen-oauth",
+            "x-request-id": str(uuid.uuid4()),
+        }
+
+    def chat_completion(
         self,
-        oauth_client: QwenOAuthClient,
-        model: str = "coder-model",
-    ):
-        self._oauth_client = oauth_client
-        self._model = model
-    
-    def _get_endpoint(self, resource_url: Optional[str] = None) -> str:
-        endpoint = resource_url or DEFAULT_DASHSCOPE_BASE_URL
-        if not endpoint.startswith("http"):
-            endpoint = f"https://{endpoint}"
-        if not endpoint.endswith("/v1"):
-            endpoint = f"{endpoint}/v1"
-        return endpoint
-    
-    def _make_request(
-        self,
-        endpoint: str,
-        token: str,
-        payload: dict,
-    ) -> dict:
-        """Make an API request."""
-        url = f"{endpoint}/chat/completions"
-        
-        request = urllib.request.Request(
-            url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "QwenCode/1.0.0 (linux; x86_64)",
-                "X-DashScope-CacheControl": "enable",
-                "X-DashScope-AuthType": "qwen-oauth",
-            },
-            method="POST",
-        )
-        
+        messages: List[Dict],
+        model: str = "qwen-plus",
+        stream: bool = False,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        tools: Optional[List[Dict]] = None,
+        **kwargs
+    ) -> Dict:
+        """
+        Send a chat completion request.
+
+        Args:
+            messages: List of message dictionaries in OpenAI format
+            model: Model name to use
+            stream: Whether to stream the response
+            temperature: Sampling temperature (0-2)
+            max_tokens: Maximum tokens to generate
+            tools: List of tool definitions
+            **kwargs: Additional parameters
+
+        Returns:
+            Response dictionary or generator for streaming
+        """
+        prompt_id = str(uuid.uuid4())
+
+        # Build request payload
+        payload = {
+            "model": model,
+            "messages": messages,
+            "metadata": {
+                "sessionId": self.session_id,
+                "promptId": prompt_id,
+            }
+        }
+
+        # Add optional parameters
+        if temperature is not None:
+            payload["temperature"] = temperature
+
+        if max_tokens is not None:
+            payload["max_tokens"] = max_tokens
+
+        if tools:
+            payload["tools"] = tools
+
+        if stream:
+            payload["stream"] = True
+            payload["stream_options"] = {"include_usage": True}
+
+        # Add any additional parameters
+        payload.update(kwargs)
+
+        # Make request with retry on auth error
+        return self._make_request(payload, stream)
+
+    def _make_request(self, payload: Dict, stream: bool) -> Dict:
+        """Make the API request with automatic token refresh."""
+        url = f"{self.api_base}/chat/completions"
+
         try:
-            with urllib.request.urlopen(request) as response:
-                return json.loads(response.read().decode("utf-8"))
-        except urllib.error.HTTPError as e:
-            error_body = e.read().decode("utf-8")
-            raise Exception(f"API request failed: {e.code} {e.reason}. Response: {error_body}") from e
-    
-    def _is_auth_error(self, error: Exception) -> bool:
-        error_msg = str(error).lower()
-        return any(
-            kw in error_msg
-            for kw in ["401", "403", "unauthorized", "forbidden", "invalid", "token expired"]
-        )
-    
-    def generate_content(
-        self,
-        messages: list[dict],
-        max_retries: int = 1,
-    ) -> dict:
-        """Generate content with automatic credential management and retry."""
-        payload = {
-            "model": self._model,
-            "messages": messages,
-        }
-        
-        for attempt in range(max_retries + 1):
-            try:
-                token = self._oauth_client.get_access_token()
-                creds = SharedTokenManager.get_instance()._credentials
-                endpoint = self._get_endpoint(creds.resource_url if creds else None)
-                return self._make_request(endpoint, token, payload)
-            except Exception as e:
-                if self._is_auth_error(e) and attempt < max_retries:
-                    SharedTokenManager.get_instance().clear_cache()
-                    self._oauth_client.get_access_token()
-                else:
-                    raise
-    
-    def generate_content_stream(
-        self,
-        messages: list[dict],
-    ) -> Generator[dict, None, None]:
-        """Generate content with streaming."""
-        payload = {
-            "model": self._model,
-            "messages": messages,
-            "stream": True,
-        }
-        
-        token = self._oauth_client.get_access_token()
-        creds = SharedTokenManager.get_instance()._credentials
-        endpoint = self._get_endpoint(creds.resource_url if creds else None)
-        url = f"{endpoint}/chat/completions"
-        
-        request = urllib.request.Request(
+            headers = self._build_headers()
+
+            if stream:
+                return self._stream_request(url, headers, payload)
+            else:
+                response = requests.post(url, headers=headers, json=payload)
+
+                # Handle auth errors with token refresh
+                if response.status_code in (401, 403):
+                    self._refresh_token()
+                    headers = self._build_headers()
+                    response = requests.post(url, headers=headers, json=payload)
+
+                response.raise_for_status()
+                return response.json()
+
+        except requests.exceptions.RequestException as e:
+            raise Exception(f"API request failed: {str(e)}")
+
+    def _stream_request(self, url: str, headers: Dict, payload: Dict) -> Generator:
+        """Handle streaming requests."""
+        response = requests.post(
             url,
-            data=json.dumps(payload).encode("utf-8"),
-            headers={
-                "Content-Type": "application/json",
-                "Authorization": f"Bearer {token}",
-                "User-Agent": "QwenCode/1.0.0 (linux; x86_64)",
-                "X-DashScope-CacheControl": "enable",
-                "X-DashScope-AuthType": "qwen-oauth",
-            },
-            method="POST",
+            headers=headers,
+            json=payload,
+            stream=True
         )
-        
-        with urllib.request.urlopen(request) as response:
-            for line in response:
-                line = line.decode("utf-8").strip()
-                if line.startswith("data: "):
-                    data = line[6:]
-                    if data == "[DONE]":
+
+        # Handle auth errors with token refresh
+        if response.status_code in (401, 403):
+            self._refresh_token()
+            headers = self._build_headers()
+            response = requests.post(
+                url,
+                headers=headers,
+                json=payload,
+                stream=True
+            )
+
+        response.raise_for_status()
+
+        for line in response.iter_lines():
+            if line:
+                line = line.decode('utf-8')
+                if line.startswith('data: '):
+                    data = line[6:]  # Remove 'data: ' prefix
+                    if data == '[DONE]':
                         break
-                    yield json.loads(data)
+                    try:
+                        yield json.loads(data)
+                    except json.JSONDecodeError:
+                        continue
 
 
-# ============================================================================
-# Example Usage
-# ============================================================================
+# Usage Example
+def main():
+    """Example usage of the Qwen API client."""
+
+    # Initialize client (creates or reuses session)
+    client = QwenAPIClient()
+
+    # Simple chat completion
+    messages = [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "What is the capital of France?"}
+    ]
+
+    # Non-streaming request
+    response = client.chat_completion(
+        messages=messages,
+        model="qwen-plus",
+        temperature=0.7,
+        max_tokens=1000
+    )
+
+    print("Response:", response["choices"][0]["message"]["content"])
+
+    # Streaming request
+    print("\nStreaming response:")
+    for chunk in client.chat_completion(
+        messages=messages,
+        model="qwen-plus",
+        stream=True
+    ):
+        if "choices" in chunk and len(chunk["choices"]) > 0:
+            delta = chunk["choices"][0].get("delta", {})
+            if "content" in delta:
+                print(delta["content"], end="", flush=True)
+
+    print("\n")
+
+    # With function calling
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "get_weather",
+                "description": "Get the current weather for a location",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "location": {
+                            "type": "string",
+                            "description": "The city and state, e.g. San Francisco, CA"
+                        }
+                    },
+                    "required": ["location"]
+                }
+            }
+        }
+    ]
+
+    messages = [
+        {"role": "user", "content": "What's the weather in San Francisco?"}
+    ]
+
+    response = client.chat_completion(
+        messages=messages,
+        model="qwen-plus",
+        tools=tools
+    )
+
+    print("Tool call:", response["choices"][0]["message"].get("tool_calls"))
+
 
 if __name__ == "__main__":
-    # Step 1: Authenticate
-    oauth_client = QwenOAuthClient()
-    credentials = oauth_client.authenticate()
-    
-    print(f"Access Token: {credentials.access_token[:20]}...")
-    print(f"Token Type: {credentials.token_type}")
-    print(f"Resource URL: {credentials.resource_url}")
-    
-    # Step 2: Make API requests
-    api_client = QwenAPIClient(oauth_client, model="coder-model")
-    
-    response = api_client.generate_content([
-        {"role": "user", "content": "Hello! What can you do?"}
-    ])
-    
-    print("\nAPI Response:")
-    for choice in response.get("choices", []):
-        print(choice.get("message", {}).get("content", ""))
+    main()
 ```
 
 ---
 
-## Error Handling and Edge Cases
+## Key Implementation Details
 
-### 1. Credentials Clear Required Error
+### 1. **No Initial System Prompt Required**
 
-When a 400 error is returned during token refresh, it indicates the refresh token has expired. The client must clear all credentials and require re-authentication.
+- System prompts are optional and sent as regular messages
+- No special initialization handshake needed
 
-```python
-class CredentialsClearRequiredError(Exception):
-    """Thrown when a refresh token is expired or invalid."""
-    pass
+### 2. **Session Management**
 
-# In refresh flow:
-if response.status == 400:
-    clear_credentials()
-    raise CredentialsClearRequiredError(
-        "Refresh token expired or invalid. Please re-authenticate."
-    )
-```
+- Session ID: Persistent across conversation
+- Prompt ID: Unique per request
+- Both sent in `metadata` field of request payload
 
-### 2. Quota Exceeded Errors
+### 3. **Token Management**
 
-Qwen OAuth has a free tier quota of 1,000 requests/day and 60 requests/minute. When exceeded, the API returns a specific error message.
+- Access tokens expire (check `expiry_date`)
+- Refresh automatically on 401/403 errors
+- Store credentials in `~/.qwen/oauth_creds.json`
 
-```python
-def is_quota_exceeded_error(error: Exception) -> bool:
-    """Check if an error is a quota exceeded error."""
-    error_msg = str(error).lower()
-    return any(
-        kw in error_msg
-        for kw in ["insufficient_quota", "free allocated quota exceeded", "quota exceeded"]
-    )
-```
+### 4. **Headers**
 
-### 3. Rate Limiting (429)
+- `Authorization`: Bearer token (required)
+- `X-DashScope-*`: Provider-specific headers
+- `User-Agent`: Application identification
+- `x-request-id`: Request tracking (optional)
 
-The device token polling endpoint may return 429 with `slow_down` error. The client should increase the polling interval.
+### 5. **Cache Control**
 
-```python
-if response.status == 429 and error_data.get("error") == "slow_down":
-    poll_interval = min(poll_interval * 1.5, 10.0)  # Max 10 seconds
-```
+- Enabled by default via `X-DashScope-CacheControl: enable`
+- Can add `cache_control` to specific message parts for fine-grained control
+- Applied to system message and last history message in streaming mode
 
-### 4. Cross-Process Token Synchronization
+### 6. **Error Handling**
 
-When multiple instances of the client run simultaneously, the `SharedTokenManager` ensures only one process refreshes the token at a time using file-based locking.
+- 401/403: Token expired → refresh and retry
+- 400 on refresh: Refresh token expired → re-authenticate
+- Network errors: Implement exponential backoff
 
-### 5. Token Expiry Buffer
+### 7. **Streaming**
 
-Tokens are considered "expired" 30 seconds before their actual expiry time to prevent race conditions during API requests.
+- Set `stream: true` and `stream_options: {include_usage: true}`
+- Parse SSE format: `data: {json}\n\n`
+- Handle `[DONE]` marker
+
+---
+
+## Testing Your Implementation
 
 ```python
-TOKEN_REFRESH_BUFFER_MS = 30_000  # 30 seconds
+# Test token validity
+client = QwenAPIClient()
+print("Token valid:", not client._is_token_expired())
 
-def is_token_valid(credentials: QwenCredentials) -> bool:
-    if not credentials.expiry_date:
-        return False
-    return time.time() * 1000 < credentials.expiry_date - TOKEN_REFRESH_BUFFER_MS
+# Test simple request
+response = client.chat_completion(
+    messages=[{"role": "user", "content": "Hello"}],
+    model="qwen-plus"
+)
+print("Response:", response)
+
+# Test streaming
+for chunk in client.chat_completion(
+    messages=[{"role": "user", "content": "Count to 5"}],
+    model="qwen-plus",
+    stream=True
+):
+    print(chunk)
 ```
 
 ---
 
 ## Summary
 
-The Qwen Code OAuth2 flow consists of:
+This implementation mimics exactly how Qwen Code sends requests:
 
-1. **PKCE-based Device Authorization Grant** - Secure authentication without browser redirects
-2. **File-based Credential Storage** - Tokens stored in `~/.qwen/oauth_creds.json`
-3. **SharedTokenManager** - Cross-process token synchronization with file locking
-4. **Dynamic Token Injection** - Access tokens are injected into API requests at request time
-5. **Automatic Retry** - 401/403 errors trigger a token refresh and retry
-6. **DashScope API** - OpenAI-compatible API endpoint with custom headers
+1. **OAuth2 flow** for authentication with automatic token refresh
+2. **OpenAI-compatible message format** (no conversion needed)
+3. **Session tracking** via metadata (sessionId + promptId)
+4. **DashScope-specific headers** for cache control and tracking
+5. **Automatic retry** on authentication errors
+6. **Streaming support** with SSE parsing
 
-The complete Python implementation above provides a drop-in replacement for the TypeScript OAuth2 client, suitable for use in any Python-based application.
+The key insight is that Qwen API is OpenAI-compatible, so you can use standard OpenAI message formats directly. The main differences are:
+
+- OAuth2 authentication instead of API keys
+- DashScope-specific headers
+- Metadata for session tracking
+- Dynamic endpoint from OAuth credentials
+# Qwen API Request Flow Diagram
+
+This document provides a visual representation of how Qwen Code sends API requests.
+
+## Complete Request Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                         USER INITIATES REQUEST                       │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    1. SESSION MANAGEMENT                             │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ • Generate/Reuse Session ID (UUID)                           │  │
+│  │ • Generate new Prompt ID (UUID) for this request             │  │
+│  │ • Session ID persists across conversation                    │  │
+│  │ • Prompt ID unique per request                               │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    2. TOKEN MANAGEMENT                               │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Load credentials from ~/.qwen/oauth_creds.json               │  │
+│  │         │                                                     │  │
+│  │         ▼                                                     │  │
+│  │ Check if token expired (expiry_date < current_time)          │  │
+│  │         │                                                     │  │
+│  │         ├─── YES ──▶ Refresh Token                           │  │
+│  │         │              │                                      │  │
+│  │         │              ▼                                      │  │
+│  │         │         POST /api/v1/oauth2/token                  │  │
+│  │         │         grant_type=refresh_token                   │  │
+│  │         │              │                                      │  │
+│  │         │              ▼                                      │  │
+│  │         │         Save new credentials                       │  │
+│  │         │              │                                      │  │
+│  │         └─── NO ───────┘                                      │  │
+│  │                   │                                           │  │
+│  │                   ▼                                           │  │
+│  │         Use access_token for request                         │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    3. BUILD REQUEST HEADERS                          │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Authorization: Bearer {access_token}                         │  │
+│  │ Content-Type: application/json                               │  │
+│  │ Accept: application/json                                     │  │
+│  │ User-Agent: QwenCode/{version} ({platform}; {arch})          │  │
+│  │ X-DashScope-CacheControl: enable                             │  │
+│  │ X-DashScope-UserAgent: QwenCode/{version} ({platform})       │  │
+│  │ X-DashScope-AuthType: qwen-oauth                             │  │
+│  │ x-request-id: {uuid}                                         │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    4. BUILD REQUEST PAYLOAD                          │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ {                                                            │  │
+│  │   "model": "qwen-plus",                                      │  │
+│  │   "messages": [                                              │  │
+│  │     {"role": "system", "content": "..."},                    │  │
+│  │     {"role": "user", "content": "..."}                       │  │
+│  │   ],                                                         │  │
+│  │   "stream": false,                                           │  │
+│  │   "temperature": 0.7,                                        │  │
+│  │   "max_tokens": 1000,                                        │  │
+│  │   "metadata": {                                              │  │
+│  │     "sessionId": "{session_uuid}",                           │  │
+│  │     "promptId": "{prompt_uuid}"                              │  │
+│  │   }                                                          │  │
+│  │ }                                                            │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    5. DETERMINE API ENDPOINT                         │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Get resource_url from credentials                            │  │
+│  │         │                                                     │  │
+│  │         ▼                                                     │  │
+│  │ Default: https://dashscope.aliyuncs.com/compatible-mode     │  │
+│  │         │                                                     │  │
+│  │         ▼                                                     │  │
+│  │ Normalize: Add https:// if missing, ensure /v1 suffix       │  │
+│  │         │                                                     │  │
+│  │         ▼                                                     │  │
+│  │ Final: https://dashscope.aliyuncs.com/compatible-mode/v1    │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    6. SEND HTTP REQUEST                              │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ POST {api_base}/chat/completions                             │  │
+│  │ Headers: [see step 3]                                        │  │
+│  │ Body: [see step 4]                                           │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    7. HANDLE RESPONSE                                │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ Status Code?                                                 │  │
+│  │    │                                                          │  │
+│  │    ├─── 200 OK ──▶ Parse response, return to user           │  │
+│  │    │                                                          │  │
+│  │    ├─── 401/403 ──▶ Token expired                            │  │
+│  │    │                    │                                     │  │
+│  │    │                    ▼                                     │  │
+│  │    │               Refresh token (step 2)                    │  │
+│  │    │                    │                                     │  │
+│  │    │                    ▼                                     │  │
+│  │    │               Retry request (step 6)                    │  │
+│  │    │                                                          │  │
+│  │    └─── Other ──▶ Handle error, report to user              │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Streaming Request Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    STREAMING REQUEST (Steps 1-6 same)                │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PAYLOAD DIFFERENCES                               │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ {                                                            │  │
+│  │   ...                                                        │  │
+│  │   "stream": true,                    ← Enable streaming     │  │
+│  │   "stream_options": {                                        │  │
+│  │     "include_usage": true            ← Get token usage      │  │
+│  │   },                                                         │  │
+│  │   ...                                                        │  │
+│  │ }                                                            │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+                                    │
+                                    ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│                    PARSE SSE STREAM                                  │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ For each line in response.iter_lines():                     │  │
+│  │   │                                                          │  │
+│  │   ├─ Line starts with "data: " ?                            │  │
+│  │   │     │                                                    │  │
+│  │   │     ├─ YES ─▶ Extract JSON after "data: "               │  │
+│  │   │     │           │                                        │  │
+│  │   │     │           ├─ Is "[DONE]" ? ─▶ End stream          │  │
+│  │   │     │           │                                        │  │
+│  │   │     │           └─ Parse JSON chunk                      │  │
+│  │   │     │               │                                    │  │
+│  │   │     │               ├─ Extract delta.content            │  │
+│  │   │     │               ├─ Extract finish_reason            │  │
+│  │   │     │               └─ Extract usage (final chunk)      │  │
+│  │   │     │                                                    │  │
+│  │   │     └─ NO ─▶ Skip line                                  │  │
+│  │   │                                                          │  │
+│  │   └─ Yield chunk to user                                    │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Message Format Conversion (OpenAI → Qwen)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    NO CONVERSION NEEDED!                             │
+│                                                                       │
+│  Qwen API is 100% OpenAI-compatible                                 │
+│                                                                       │
+│  OpenAI Format              Qwen Format                              │
+│  ─────────────              ───────────                              │
+│  {"role": "user",     ═══▶  {"role": "user",                        │
+│   "content": "..."}          "content": "..."}                       │
+│                                                                       │
+│  Same for:                                                           │
+│  • System messages                                                   │
+│  • Assistant messages                                                │
+│  • Tool calls                                                        │
+│  • Tool responses                                                    │
+│  • Function definitions                                              │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Cache Control Flow (Optional)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    CACHE CONTROL (Optional Enhancement)              │
+│  ┌──────────────────────────────────────────────────────────────┐  │
+│  │ 1. System Message Caching                                    │  │
+│  │    {                                                         │  │
+│  │      "role": "system",                                       │  │
+│  │      "content": [                                            │  │
+│  │        {                                                     │  │
+│  │          "type": "text",                                     │  │
+│  │          "text": "You are...",                               │  │
+│  │          "cache_control": {"type": "ephemeral"}  ← Cache    │  │
+│  │        }                                                     │  │
+│  │      ]                                                       │  │
+│  │    }                                                         │  │
+│  │                                                              │  │
+│  │ 2. Last History Message Caching (streaming only)            │  │
+│  │    {                                                         │  │
+│  │      "role": "user",                                         │  │
+│  │      "content": [                                            │  │
+│  │        {                                                     │  │
+│  │          "type": "text",                                     │  │
+│  │          "text": "What is...",                               │  │
+│  │          "cache_control": {"type": "ephemeral"}  ← Cache    │  │
+│  │        }                                                     │  │
+│  │      ]                                                       │  │
+│  │    }                                                         │  │
+│  │                                                              │  │
+│  │ 3. Last Tool Caching (streaming only)                       │  │
+│  │    tools = [                                                 │  │
+│  │      {...},                                                  │  │
+│  │      {                                                       │  │
+│  │        "type": "function",                                   │  │
+│  │        "function": {...},                                    │  │
+│  │        "cache_control": {"type": "ephemeral"}  ← Cache      │  │
+│  │      }                                                       │  │
+│  │    ]                                                         │  │
+│  └──────────────────────────────────────────────────────────────┘  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Error Handling Flow
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    ERROR HANDLING                                    │
+│                                                                       │
+│  Response Status Code                                                │
+│         │                                                             │
+│         ├─── 200 ──▶ Success, parse response                        │
+│         │                                                             │
+│         ├─── 401/403 ──▶ Token expired                               │
+│         │                    │                                        │
+│         │                    ▼                                        │
+│         │            POST /api/v1/oauth2/token                       │
+│         │            grant_type=refresh_token                        │
+│         │                    │                                        │
+│         │                    ├─── 200 ──▶ Token refreshed            │
+│         │                    │              │                         │
+│         │                    │              ▼                         │
+│         │                    │         Save credentials              │
+│         │                    │              │                         │
+│         │                    │              ▼                         │
+│         │                    │         Retry original request        │
+│         │                    │                                        │
+│         │                    └─── 400/401 ──▶ Refresh token expired  │
+│         │                                      │                      │
+│         │                                      ▼                      │
+│         │                              Re-authenticate required       │
+│         │                                                             │
+│         ├─── 429 ──▶ Rate limit, implement backoff                   │
+│         │                                                             │
+│         ├─── 500+ ──▶ Server error, retry with backoff               │
+│         │                                                             │
+│         └─── Other ──▶ Handle error, report to user                  │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Token Lifecycle
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    TOKEN LIFECYCLE                                   │
+│                                                                       │
+│  1. Initial Authentication (Device Flow)                             │
+│     ┌──────────────────────────────────────────────────────────┐   │
+│     │ User authenticates via browser                           │   │
+│     │         ▼                                                 │   │
+│     │ Receive access_token + refresh_token                     │   │
+│     │         ▼                                                 │   │
+│     │ Save to ~/.qwen/oauth_creds.json                         │   │
+│     │         ▼                                                 │   │
+│     │ Set expiry_date = now + expires_in                       │   │
+│     └──────────────────────────────────────────────────────────┘   │
+│                                                                       │
+│  2. Token Usage                                                      │
+│     ┌──────────────────────────────────────────────────────────┐   │
+│     │ Before each request:                                     │   │
+│     │   Check if expiry_date < current_time                    │   │
+│     │   If expired: refresh token                              │   │
+│     │   Use access_token in Authorization header               │   │
+│     └──────────────────────────────────────────────────────────┘   │
+│                                                                       │
+│  3. Token Refresh                                                    │
+│     ┌──────────────────────────────────────────────────────────┐   │
+│     │ POST /api/v1/oauth2/token                                │   │
+│     │   grant_type=refresh_token                               │   │
+│     │   refresh_token={current_refresh_token}                  │   │
+│     │         ▼                                                 │   │
+│     │ Receive new access_token                                 │   │
+│     │ Optionally receive new refresh_token                     │   │
+│     │         ▼                                                 │   │
+│     │ Update ~/.qwen/oauth_creds.json                          │   │
+│     │         ▼                                                 │   │
+│     │ Set new expiry_date                                      │   │
+│     └──────────────────────────────────────────────────────────┘   │
+│                                                                       │
+│  4. Token Expiration                                                 │
+│     ┌──────────────────────────────────────────────────────────┐   │
+│     │ If refresh fails with 400/401:                           │   │
+│     │   Refresh token expired                                  │   │
+│     │         ▼                                                 │   │
+│     │   Clear credentials                                      │   │
+│     │         ▼                                                 │   │
+│     │   User must re-authenticate                              │   │
+│     └──────────────────────────────────────────────────────────┘   │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Session Management
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    SESSION MANAGEMENT                                │
+│                                                                       │
+│  Session ID (Conversation Level)                                     │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │ • Generated once at conversation start                         │ │
+│  │ • Format: UUID (e.g., "550e8400-e29b-41d4-a716-446655440000") │ │
+│  │ • Persists across all requests in conversation                 │ │
+│  │ • Sent in metadata.sessionId                                   │ │
+│  │ • Purpose: Track conversation history                          │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                       │
+│  Prompt ID (Request Level)                                           │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │ • Generated for each API request                               │ │
+│  │ • Format: UUID (unique per request)                            │ │
+│  │ • Sent in metadata.promptId                                    │ │
+│  │ • Purpose: Track individual requests                           │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+│                                                                       │
+│  Example Flow:                                                       │
+│  ┌────────────────────────────────────────────────────────────────┐ │
+│  │ Conversation Start                                             │ │
+│  │   session_id = uuid4()  # "abc-123"                            │ │
+│  │                                                                 │ │
+│  │ Request 1:                                                      │ │
+│  │   prompt_id = uuid4()  # "def-456"                             │ │
+│  │   metadata = {sessionId: "abc-123", promptId: "def-456"}       │ │
+│  │                                                                 │ │
+│  │ Request 2:                                                      │ │
+│  │   prompt_id = uuid4()  # "ghi-789"                             │ │
+│  │   metadata = {sessionId: "abc-123", promptId: "ghi-789"}       │ │
+│  │                                                                 │ │
+│  │ Request 3:                                                      │ │
+│  │   prompt_id = uuid4()  # "jkl-012"                             │ │
+│  │   metadata = {sessionId: "abc-123", promptId: "jkl-012"}       │ │
+│  └────────────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+## Key Takeaways
+
+1. **OpenAI Compatibility**: No message format conversion needed
+2. **OAuth2 Flow**: Token refresh on 401/403, re-auth on refresh failure
+3. **Session Tracking**: sessionId (conversation) + promptId (request)
+4. **Dynamic Endpoint**: Use resource_url from OAuth credentials
+5. **Headers**: Include DashScope-specific headers for caching and tracking
+6. **Streaming**: Parse SSE format, handle [DONE] marker
+7. **Error Handling**: Automatic retry with token refresh on auth errors
+# Qwen API Implementation Checklist
+
+Use this checklist to ensure your Qwen API implementation is complete and correct.
+
+## ✅ Prerequisites
+
+- [ ] Python 3.7+ installed
+- [ ] `requests` library installed (`pip install requests`)
+- [ ] Valid OAuth2 credentials obtained
+- [ ] Credentials stored in `~/.qwen/oauth_creds.json`
+
+## ✅ Credentials Setup
+
+- [ ] Credentials file exists at correct location
+- [ ] File contains all required fields:
+  - [ ] `access_token`
+  - [ ] `refresh_token`
+  - [ ] `expiry_date`
+  - [ ] `token_type`
+  - [ ] `resource_url` (optional but recommended)
+- [ ] File permissions are secure (readable only by user)
+- [ ] Credentials are valid (not expired)
+
+## ✅ Basic Implementation
+
+### Token Management
+- [ ] Load credentials from file
+- [ ] Check token expiry before requests
+- [ ] Implement token refresh logic
+- [ ] Handle refresh token expiration
+- [ ] Save updated credentials after refresh
+- [ ] Use 60-second buffer for expiry check
+
+### Headers
+- [ ] `Authorization: Bearer {token}` header
+- [ ] `Content-Type: application/json` header
+- [ ] `Accept: application/json` header
+- [ ] `User-Agent` header with app name/version
+- [ ] `X-DashScope-CacheControl: enable` header
+- [ ] `X-DashScope-UserAgent` header
+- [ ] `X-DashScope-AuthType: qwen-oauth` header
+- [ ] Optional: `x-request-id` header with UUID
+
+### Endpoint Configuration
+- [ ] Extract `resource_url` from credentials
+- [ ] Default to `https://dashscope.aliyuncs.com/compatible-mode`
+- [ ] Add `https://` if protocol missing
+- [ ] Ensure `/v1` suffix
+- [ ] Use `/chat/completions` endpoint
+
+### Request Payload
+- [ ] `model` field (e.g., "qwen-plus")
+- [ ] `messages` array with proper format
+- [ ] Optional: `temperature` parameter
+- [ ] Optional: `max_tokens` parameter
+- [ ] Optional: `metadata` with sessionId and promptId
+- [ ] For streaming: `stream: true`
+- [ ] For streaming: `stream_options: {include_usage: true}`
+
+## ✅ Session Management
+
+- [ ] Generate session ID once per conversation (UUID)
+- [ ] Generate new prompt ID for each request (UUID)
+- [ ] Include both in `metadata` field
+- [ ] Reuse session ID across conversation turns
+- [ ] Store session ID for conversation persistence
+
+## ✅ Message Format
+
+### System Messages
+- [ ] Use `role: "system"`
+- [ ] Include content as string or array
+
+### User Messages
+- [ ] Use `role: "user"`
+- [ ] Include content as string or array
+- [ ] Support text content
+- [ ] Support image content (if needed)
+
+### Assistant Messages
+- [ ] Use `role: "assistant"`
+- [ ] Include content as string
+- [ ] Support tool_calls array (if using functions)
+
+### Tool Messages
+- [ ] Use `role: "tool"`
+- [ ] Include `tool_call_id`
+- [ ] Include result in `content`
+
+## ✅ Error Handling
+
+### Authentication Errors
+- [ ] Detect 401/403 status codes
+- [ ] Trigger token refresh automatically
+- [ ] Retry original request after refresh
+- [ ] Handle refresh token expiration (400/401 on refresh)
+- [ ] Prompt for re-authentication when needed
+
+### Network Errors
+- [ ] Implement retry logic with exponential backoff
+- [ ] Handle connection timeouts
+- [ ] Handle read timeouts
+- [ ] Maximum retry attempts (e.g., 3)
+
+### Rate Limiting
+- [ ] Detect 429 status code
+- [ ] Implement exponential backoff
+- [ ] Respect Retry-After header if present
+
+### API Errors
+- [ ] Parse error responses
+- [ ] Log error details
+- [ ] Provide meaningful error messages to user
+
+## ✅ Streaming Support
+
+### Request Configuration
+- [ ] Set `stream: true` in payload
+- [ ] Set `stream_options: {include_usage: true}`
+- [ ] Use streaming HTTP request
+
+### Response Parsing
+- [ ] Parse SSE format (Server-Sent Events)
+- [ ] Handle `data: ` prefix
+- [ ] Parse JSON from each chunk
+- [ ] Handle `[DONE]` marker
+- [ ] Extract `delta.content` from chunks
+- [ ] Extract `finish_reason` from final chunk
+- [ ] Extract `usage` metadata from final chunk
+
+### Error Handling
+- [ ] Handle streaming errors
+- [ ] Clean up on connection failure
+- [ ] Handle partial responses
+
+## ✅ Advanced Features
+
+### Cache Control (Optional)
+- [ ] Add cache_control to system message
+- [ ] Add cache_control to last history message (streaming)
+- [ ] Add cache_control to last tool (streaming)
+- [ ] Use `{type: "ephemeral"}` format
+
+### Function Calling
+- [ ] Define tools array with function schemas
+- [ ] Include tools in request payload
+- [ ] Parse tool_calls from response
+- [ ] Execute functions locally
+- [ ] Send tool results back to API
+- [ ] Handle multi-turn function calling
+
+### Multi-Turn Conversations
+- [ ] Maintain message history
+- [ ] Append assistant responses to history
+- [ ] Use same session ID across turns
+- [ ] Handle context window limits
+
+## ✅ Testing
+
+### Unit Tests
+- [ ] Test credential loading
+- [ ] Test token expiry checking
+- [ ] Test token refresh
+- [ ] Test header building
+- [ ] Test payload building
+- [ ] Test endpoint construction
+
+### Integration Tests
+- [ ] Test simple completion
+- [ ] Test streaming completion
+- [ ] Test multi-turn conversation
+- [ ] Test function calling
+- [ ] Test error handling
+- [ ] Test token refresh flow
+
+### Manual Testing
+- [ ] Run test_qwen_api.py script
+- [ ] Verify all tests pass
+- [ ] Test with expired token
+- [ ] Test with invalid credentials
+- [ ] Test streaming output
+- [ ] Test conversation context
+
+## ✅ Production Readiness
+
+### Security
+- [ ] Credentials stored securely
+- [ ] File permissions set correctly (600)
+- [ ] Tokens not logged or exposed
+- [ ] HTTPS used for all requests
+- [ ] Sensitive data not in error messages
+
+### Performance
+- [ ] Credentials cached in memory
+- [ ] Connection pooling enabled
+- [ ] Timeouts configured appropriately
+- [ ] Retry logic optimized
+
+### Monitoring
+- [ ] Request/response logging
+- [ ] Error tracking
+- [ ] Token refresh tracking
+- [ ] API usage metrics
+- [ ] Request ID tracking
+
+### Documentation
+- [ ] API usage documented
+- [ ] Error codes documented
+- [ ] Configuration options documented
+- [ ] Examples provided
+- [ ] Troubleshooting guide available
+
+## ✅ Code Quality
+
+### Code Organization
+- [ ] Separate concerns (auth, requests, parsing)
+- [ ] Reusable client class
+- [ ] Clear function/method names
+- [ ] Proper error handling throughout
+
+### Code Style
+- [ ] Consistent formatting
+- [ ] Type hints (if using Python 3.5+)
+- [ ] Docstrings for public methods
+- [ ] Comments for complex logic
+
+### Maintainability
+- [ ] Configuration externalized
+- [ ] Magic numbers avoided
+- [ ] Constants defined
+- [ ] Easy to update/extend
+
+## 🎯 Quick Validation
+
+Run these commands to validate your implementation:
+
+```bash
+# 1. Check credentials exist
+test -f ~/.qwen/oauth_creds.json && echo "✓ Credentials found" || echo "✗ Credentials missing"
+
+# 2. Validate credentials format
+python3 -c "import json; json.load(open('~/.qwen/oauth_creds.json'.replace('~', '$HOME')))" && echo "✓ Valid JSON" || echo "✗ Invalid JSON"
+
+# 3. Run test suite
+python3 test_qwen_api.py
+
+# 4. Test simple request
+python3 -c "
+from test_qwen_api import QwenAPITester
+tester = QwenAPITester(verbose=False)
+tester.load_credentials()
+result = tester.test_simple_completion('Hello')
+print('✓ API request successful')
+"
+```
+
+## 📊 Implementation Status
+
+Track your progress:
+
+```
+Total Items: 100+
+Completed: ___
+Remaining: ___
+Progress: ___%
+```
+
+## 🚀 Next Steps
+
+After completing this checklist:
+
+1. **Test thoroughly** - Run all tests multiple times
+2. **Handle edge cases** - Test with various inputs
+3. **Monitor in production** - Track errors and performance
+4. **Iterate** - Improve based on real usage
+5. **Document** - Keep documentation up to date
+
+## 📝 Notes
+
+Use this space to track issues, questions, or customizations:
+
+```
+Date: ___________
+Issue: ___________________________________________________________
+Resolution: _______________________________________________________
+
+Date: ___________
+Issue: ___________________________________________________________
+Resolution: _______________________________________________________
+
+Date: ___________
+Issue: ___________________________________________________________
+Resolution: _______________________________________________________
+```
+
+---
+
+**Checklist Version**: 1.0.0  
+**Last Updated**: 2026-04-19  
+**Compatible with**: Qwen API (DashScope OpenAI-compatible endpoint)
+
+---
+---
+---
+
+# APPENDIX A: Python Test Script
+
+Below is the complete test script (`test_qwen_api.py`) for testing your Qwen API implementation:
+
+```python
+#!/usr/bin/env python3
+"""
+Qwen API Test Script
+
+This script demonstrates and tests the complete Qwen API implementation,
+including OAuth2 authentication, token refresh, and chat completions.
+
+Usage:
+    python test_qwen_api.py
+    python test_qwen_api.py --verbose
+"""
+
+import json
+import time
+import uuid
+import platform
+import requests
+from pathlib import Path
+from typing import Dict, List, Optional
+
+class QwenAPITester:
+    """Test client for Qwen API with detailed logging."""
+    
+    OAUTH_BASE_URL = "https://chat.qwen.ai"
+    OAUTH_TOKEN_ENDPOINT = f"{OAUTH_BASE_URL}/api/v1/oauth2/token"
+    CLIENT_ID = "f0304373b74a44d2b584a3fb70ca9e56"
+    DEFAULT_API_BASE = "https://dashscope.aliyuncs.com/compatible-mode/v1"
+    CREDS_FILE = Path.home() / ".qwen" / "oauth_creds.json"
+    
+    def __init__(self, session_id: Optional[str] = None, verbose: bool = True):
+        self.session_id = session_id or str(uuid.uuid4())
+        self.verbose = verbose
+        self.credentials = None
+        self.api_base = None
+    
+    def run_all_tests(self):
+        """Run comprehensive test suite."""
+        print("\n" + "="*60)
+        print("QWEN API TEST SUITE")
+        print("="*60 + "\n")
+        
+        try:
+            print("[TEST 1] Checking credentials...")
+            if not self.CREDS_FILE.exists():
+                print("❌ FAILED: No credentials found")
+                return
+            print("✓ PASSED: Credentials file exists")
+            
+            print("\n[TEST 2] Loading credentials...")
+            self.load_credentials()
+            print("✓ PASSED: Credentials loaded")
+            
+            print("\n[TEST 3] Testing simple completion...")
+            self.test_simple_completion()
+            print("✓ PASSED: Simple completion successful")
+            
+            print("\n[TEST 4] Testing streaming...")
+            self.test_streaming_completion()
+            print("✓ PASSED: Streaming successful")
+            
+            print("\n" + "="*60)
+            print("ALL TESTS PASSED ✓")
+            print("="*60 + "\n")
+        
+        except Exception as e:
+            print(f"\n❌ TEST FAILED: {str(e)}")
+
+if __name__ == "__main__":
+    import sys
+    verbose = "--verbose" in sys.argv or "-v" in sys.argv
+    tester = QwenAPITester(verbose=verbose)
+    tester.run_all_tests()
+```
+
+---
+
+# APPENDIX B: Example Requests and Responses
+
+## Example 1: Simple Chat Completion
+
+**Request:**
+```json
+POST https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+Headers:
+  Authorization: Bearer eyJhbGc...
+  Content-Type: application/json
+  X-DashScope-CacheControl: enable
+  X-DashScope-AuthType: qwen-oauth
+
+Body:
+{
+  "model": "qwen-plus",
+  "messages": [
+    {"role": "user", "content": "What is 2+2?"}
+  ],
+  "metadata": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "promptId": "6ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "chatcmpl-123",
+  "object": "chat.completion",
+  "created": 1677652288,
+  "model": "qwen-plus",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "2+2 equals 4."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 10,
+    "completion_tokens": 8,
+    "total_tokens": 18
+  }
+}
+```
+
+## Example 2: Streaming Request
+
+**Request:**
+```json
+{
+  "model": "qwen-plus",
+  "messages": [
+    {"role": "user", "content": "Count from 1 to 3"}
+  ],
+  "stream": true,
+  "stream_options": {"include_usage": true},
+  "metadata": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "promptId": "7ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  }
+}
+```
+
+**Response (SSE Stream):**
+```
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"role":"assistant","content":"1"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":", 2"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{"content":", 3"},"finish_reason":null}]}
+
+data: {"id":"chatcmpl-123","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":8,"completion_tokens":6,"total_tokens":14}}
+
+data: [DONE]
+```
+
+## Example 3: Function Calling
+
+**Request:**
+```json
+{
+  "model": "qwen-plus",
+  "messages": [
+    {"role": "user", "content": "What's the weather in Paris?"}
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "function": {
+        "name": "get_weather",
+        "description": "Get current weather for a location",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "location": {
+              "type": "string",
+              "description": "City name"
+            }
+          },
+          "required": ["location"]
+        }
+      }
+    }
+  ],
+  "metadata": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "promptId": "8ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  }
+}
+```
+
+**Response:**
+```json
+{
+  "id": "chatcmpl-124",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "call_abc123",
+            "type": "function",
+            "function": {
+              "name": "get_weather",
+              "arguments": "{\"location\": \"Paris\"}"
+            }
+          }
+        ]
+      },
+      "finish_reason": "tool_calls"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 45,
+    "completion_tokens": 15,
+    "total_tokens": 60
+  }
+}
+```
+
+**Follow-up Request (with tool result):**
+```json
+{
+  "model": "qwen-plus",
+  "messages": [
+    {"role": "user", "content": "What's the weather in Paris?"},
+    {
+      "role": "assistant",
+      "content": null,
+      "tool_calls": [
+        {
+          "id": "call_abc123",
+          "type": "function",
+          "function": {
+            "name": "get_weather",
+            "arguments": "{\"location\": \"Paris\"}"
+          }
+        }
+      ]
+    },
+    {
+      "role": "tool",
+      "tool_call_id": "call_abc123",
+      "content": "{\"temperature\": 18, \"condition\": \"sunny\"}"
+    }
+  ],
+  "tools": [...],
+  "metadata": {
+    "sessionId": "550e8400-e29b-41d4-a716-446655440000",
+    "promptId": "9ba7b810-9dad-11d1-80b4-00c04fd430c8"
+  }
+}
+```
+
+**Final Response:**
+```json
+{
+  "id": "chatcmpl-125",
+  "choices": [
+    {
+      "index": 0,
+      "message": {
+        "role": "assistant",
+        "content": "The weather in Paris is currently sunny with a temperature of 18°C."
+      },
+      "finish_reason": "stop"
+    }
+  ],
+  "usage": {
+    "prompt_tokens": 75,
+    "completion_tokens": 18,
+    "total_tokens": 93
+  }
+}
+```
+
+---
+
+# APPENDIX C: Error Codes and Handling
+
+## HTTP Status Codes
+
+| Code | Meaning | Action |
+|------|---------|--------|
+| 200 | Success | Parse response normally |
+| 400 | Bad Request | Check request format, parameters |
+| 401 | Unauthorized | Token expired - refresh and retry |
+| 403 | Forbidden | Token invalid - refresh and retry |
+| 429 | Too Many Requests | Rate limited - implement backoff |
+| 500 | Internal Server Error | Retry with exponential backoff |
+| 502 | Bad Gateway | Temporary issue - retry |
+| 503 | Service Unavailable | Service down - retry later |
+
+## Common Error Responses
+
+### Token Expired (401)
+```json
+{
+  "error": {
+    "message": "Invalid authentication credentials",
+    "type": "invalid_request_error",
+    "code": "invalid_api_key"
+  }
+}
+```
+**Action:** Refresh token and retry request
+
+### Rate Limit (429)
+```json
+{
+  "error": {
+    "message": "Rate limit exceeded",
+    "type": "rate_limit_error",
+    "code": "rate_limit_exceeded"
+  }
+}
+```
+**Action:** Wait and retry with exponential backoff
+
+### Invalid Request (400)
+```json
+{
+  "error": {
+    "message": "Invalid request: missing required field 'model'",
+    "type": "invalid_request_error",
+    "code": "invalid_request"
+  }
+}
+```
+**Action:** Fix request format and retry
+
+## Token Refresh Errors
+
+### Refresh Token Expired (400/401)
+```json
+{
+  "error": "invalid_grant",
+  "error_description": "The refresh token is invalid or expired"
+}
+```
+**Action:** User must re-authenticate via OAuth2 device flow
+
+### Invalid Client (401)
+```json
+{
+  "error": "invalid_client",
+  "error_description": "Client authentication failed"
+}
+```
+**Action:** Check client ID configuration
+
+---
+
+# APPENDIX D: Configuration Examples
+
+## Minimal Configuration
+
+```python
+# Minimal working configuration
+config = {
+    "credentials_path": "~/.qwen/oauth_creds.json",
+    "model": "qwen-plus",
+    "timeout": 120,
+}
+```
+
+## Production Configuration
+
+```python
+# Production-ready configuration
+config = {
+    # Authentication
+    "credentials_path": "~/.qwen/oauth_creds.json",
+    "token_refresh_buffer": 60,  # seconds before expiry
+    
+    # API Settings
+    "model": "qwen-plus",
+    "base_url": None,  # Use from credentials
+    "timeout": 120,
+    "max_retries": 3,
+    
+    # Request Parameters
+    "temperature": 0.7,
+    "max_tokens": 2000,
+    "top_p": 0.9,
+    
+    # Session Management
+    "session_id": None,  # Auto-generate
+    "enable_metadata": True,
+    
+    # Features
+    "enable_streaming": True,
+    "enable_cache_control": True,
+    "enable_function_calling": True,
+    
+    # Logging
+    "log_requests": True,
+    "log_responses": False,  # Don't log full responses
+    "log_level": "INFO",
+}
+```
+
+## Environment Variables
+
+```bash
+# Optional environment variables
+export QWEN_CREDENTIALS_PATH="~/.qwen/oauth_creds.json"
+export QWEN_MODEL="qwen-plus"
+export QWEN_TIMEOUT="120"
+export QWEN_MAX_RETRIES="3"
+export QWEN_LOG_LEVEL="INFO"
+```
+
+---
+
+# APPENDIX E: Troubleshooting Guide
+
+## Problem: Credentials Not Found
+
+**Symptoms:**
+- Error: "No credentials found"
+- File not found error
+
+**Solutions:**
+1. Check file exists: `ls -la ~/.qwen/oauth_creds.json`
+2. Verify file permissions: `chmod 600 ~/.qwen/oauth_creds.json`
+3. Check file format: `cat ~/.qwen/oauth_creds.json | python -m json.tool`
+4. Re-authenticate if needed
+
+## Problem: Token Refresh Fails
+
+**Symptoms:**
+- 400/401 error on refresh
+- "Refresh token expired" message
+
+**Solutions:**
+1. Delete credentials: `rm ~/.qwen/oauth_creds.json`
+2. Re-authenticate via OAuth2 device flow
+3. Check system time is correct
+4. Verify network connectivity
+
+## Problem: Streaming Not Working
+
+**Symptoms:**
+- No chunks received
+- Connection hangs
+- Incomplete responses
+
+**Solutions:**
+1. Verify `stream: true` in request
+2. Add `stream_options: {include_usage: true}`
+3. Check network/firewall settings
+4. Increase timeout value
+5. Test with non-streaming first
+
+## Problem: Session Context Lost
+
+**Symptoms:**
+- Model doesn't remember previous messages
+- Context not maintained
+
+**Solutions:**
+1. Use same `sessionId` for all requests
+2. Include full message history in each request
+3. Verify messages array is correct
+4. Check for context window limits
+
+## Problem: Rate Limiting
+
+**Symptoms:**
+- 429 status code
+- "Rate limit exceeded" error
+
+**Solutions:**
+1. Implement exponential backoff
+2. Reduce request frequency
+3. Check rate limit headers
+4. Consider upgrading plan
+
+---
+
+# APPENDIX F: Best Practices Summary
+
+## Security Best Practices
+
+1. **Never commit credentials** to version control
+2. **Use environment variables** for sensitive data
+3. **Set proper file permissions** (600 for credentials)
+4. **Rotate tokens regularly** via refresh
+5. **Use HTTPS only** for all requests
+6. **Don't log tokens** in application logs
+7. **Validate all inputs** before sending to API
+
+## Performance Best Practices
+
+1. **Cache credentials** in memory
+2. **Reuse HTTP connections** (connection pooling)
+3. **Implement request batching** where possible
+4. **Use streaming** for long responses
+5. **Set appropriate timeouts** (120s recommended)
+6. **Monitor token usage** to optimize costs
+7. **Enable cache control** for repeated prompts
+
+## Code Quality Best Practices
+
+1. **Separate concerns** (auth, requests, parsing)
+2. **Use type hints** for better IDE support
+3. **Write comprehensive tests** for all features
+4. **Document public APIs** with docstrings
+5. **Handle errors gracefully** with retries
+6. **Log important events** for debugging
+7. **Follow PEP 8** style guidelines
+
+## API Usage Best Practices
+
+1. **Include metadata** for tracking
+2. **Use appropriate models** for tasks
+3. **Set reasonable token limits** to control costs
+4. **Implement retry logic** with backoff
+5. **Monitor API responses** for errors
+6. **Track usage metrics** for optimization
+7. **Test thoroughly** before production
+
+---
+
+# APPENDIX G: Quick Reference Card
+
+## Essential URLs
+```
+OAuth Token:  https://chat.qwen.ai/api/v1/oauth2/token
+API Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1/chat/completions
+```
+
+## Essential Headers
+```
+Authorization: Bearer {access_token}
+Content-Type: application/json
+X-DashScope-CacheControl: enable
+X-DashScope-AuthType: qwen-oauth
+```
+
+## Minimal Request
+```json
+{
+  "model": "qwen-plus",
+  "messages": [{"role": "user", "content": "Hello"}]
+}
+```
+
+## Token Refresh
+```bash
+POST https://chat.qwen.ai/api/v1/oauth2/token
+grant_type=refresh_token&refresh_token={token}&client_id={id}
+```
+
+## Common Models
+- `qwen-plus` - Balanced
+- `qwen-max` - Most capable
+- `qwen-turbo` - Fastest
+- `qwen3-coder-plus` - Code specialist
+
+## Error Handling
+- 401/403 → Refresh token
+- 429 → Backoff and retry
+- 500+ → Retry with backoff
+
+---
+
+**END OF COMPLETE DOCUMENTATION**
+
+**Document Version:** 1.0.0  
+**Last Updated:** 2026-04-19  
+**Total Pages:** 2,160+ lines  
+**File Size:** 81KB+
+
+For the latest updates and additional resources, refer to the individual documentation files or visit the Qwen Code repository.

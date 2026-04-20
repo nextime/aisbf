@@ -1,299 +1,218 @@
-# ChatGPT API Implementation Guide for Codex-CLI
+# Complete ChatGPT/OpenAI API Request Flow Documentation
 
-This document provides a comprehensive analysis of how codex-cli communicates with ChatGPT API endpoints, including exact endpoints, headers, authentication, request schemas, and implementation details.
+This document provides a comprehensive analysis of how Codex sends requests to the ChatGPT/OpenAI API, including authentication, headers, request format, session management, and endpoints.
 
 ## Table of Contents
 
-1. [Overview](#overview)
-2. [API Endpoints](#api-endpoints)
-3. [Authentication](#authentication)
-4. [Request Headers](#request-headers)
-5. [Request/Response Schemas](#requestresponse-schemas)
-6. [Model List Retrieval](#model-list-retrieval)
-7. [Streaming Responses](#streaming-responses)
-8. [WebSocket Support](#websocket-support)
-9. [Message Conversion Between OpenAI and Codex Formats](#message-conversion-between-openai-and-codex-formats)
-10. [Python Implementation Examples](#python-implementation-examples)
-11. [Implementation Examples (Rust)](#implementation-examples-rust)
-12. [Developer Role Messages](#developer-role-messages)
-13. [Session Flow](#session-flow)
+1. [Authentication & OAuth2 Flow](#1-authentication--oauth2-flow)
+2. [API Endpoints](#2-api-endpoints)
+3. [Request Headers](#3-request-headers)
+4. [Request Body Format](#4-request-body-format)
+5. [Session Management](#5-session-management)
+6. [Transport Mechanisms](#6-transport-mechanisms)
+7. [System Prompt (Instructions)](#7-system-prompt-instructions)
+8. [Message Format Conversion](#8-message-format-conversion-openai-compatible--chatgpt)
+9. [Complete Request Flow](#9-complete-request-flow)
+10. [Python Implementation Example](#10-python-implementation-example)
 
 ---
 
-## Overview
+## 1. Authentication & OAuth2 Flow
 
-Codex-CLI uses OpenAI's **Responses API** (not the Chat Completions API) to communicate with ChatGPT. The primary endpoints are:
+### OAuth2 Token Management
 
-- **Base URL (ChatGPT mode)**: `https://chatgpt.com/backend-api/codex`
-- **Base URL (API Key mode)**: `https://api.openai.com/v1`
+**Location**: `codex-rs/login/src/auth/manager.rs`
 
-The client supports both HTTP/SSE and WebSocket transports for streaming responses.
+Codex uses OAuth2 device code flow for ChatGPT authentication:
+
+#### 1.1 Device Code Request
+
+- **Endpoint**: `https://auth0.openai.com/oauth/device/code`
+- **Client ID**: Retrieved from configuration
+- **Scope**: `openid profile email offline_access`
+
+#### 1.2 Token Exchange
+
+- **Endpoint**: `https://auth0.openai.com/oauth/token`
+- **Grant type**: `urn:ietf:params:oauth:grant-type:device_code`
+- **Returns**: `access_token`, `refresh_token`, `id_token`
+
+#### 1.3 Token Storage
+
+- Tokens stored in `~/.codex/auth.json` or system keyring
+- ID token contains `chatgpt_account_id` claim
+- Access token used for API authentication
+
+#### 1.4 Token Refresh
+
+- Automatic refresh on 401 responses
+- Uses refresh token to get new access token
+- Implements retry logic with exponential backoff
+
+### Token Data Structure
+
+```rust
+pub struct TokenData {
+    pub access_token: String,
+    pub refresh_token: Option<String>,
+    pub account_id: Option<String>,  // From chatgpt_account_id claim
+    pub id_token: IdTokenClaims,
+}
+```
 
 ---
 
-## API Endpoints
+## 2. API Endpoints
+
+### Base URL
+
+- **Default**: `https://chatgpt.com/backend-api/`
+- **Configurable**: via `chatgpt_base_url` in config
 
 ### Primary Endpoints
 
-#### 1. Responses Endpoint (Streaming)
-- **Path**: `/v1/responses` (or `/responses` relative to base)
+#### 2.1 Responses API (Main chat endpoint)
+
+- **Path**: `/v1/responses`
 - **Method**: `POST`
-- **Purpose**: Stream AI responses for a given prompt
-- **Transport**: HTTP with Server-Sent Events (SSE) or WebSocket
+- **Transport**: HTTP (SSE) or WebSocket
+- **Purpose**: Streaming chat completions
 
-#### 2. Models Endpoint
-- **Path**: `/v1/models` (or `/models` relative to base)
-- **Method**: `GET`
-- **Purpose**: Retrieve available models and their capabilities
-- **Query Parameters**: `client_version=<version>` (e.g., `0.99.0`)
+#### 2.2 Compact API (History compression)
 
-#### 3. Compact Endpoint
-- **Path**: `/v1/responses/compact` (or `/responses/compact` relative to base)
+- **Path**: `/v1/responses/compact`
 - **Method**: `POST`
-- **Purpose**: Compact conversation history
+- **Purpose**: Compress conversation history
 
-#### 4. Memory Summarization Endpoint
-- **Path**: `/v1/memories/trace_summarize` (or `/memories/trace_summarize` relative to base)
+#### 2.3 Memories API (Memory summarization)
+
+- **Path**: `/v1/memories/trace_summarize`
 - **Method**: `POST`
-- **Purpose**: Summarize memory traces
+- **Purpose**: Summarize conversation memories
 
-### ChatGPT-Specific Backend Endpoints (OAuth Mode)
+#### 2.4 Models List
 
-When using ChatGPT authentication, additional endpoints are available:
-
-#### 5. Config Requirements
-- **Path**: `/backend-api/wham/config/requirements`
+- **Path**: `/models`
 - **Method**: `GET`
-- **Purpose**: Retrieve cloud configuration requirements
+- **Purpose**: Retrieve available models
 
-#### 6. Rate Limits
-- **Path**: `/backend-api/api/codex/usage`
-- **Method**: `GET`
-- **Purpose**: Get account rate limits
+#### 2.5 Plugins
 
-#### 7. Plugin/App Management
-- **Path**: `/backend-api/plugins/list`
-- **Method**: `GET`
-- **Purpose**: List installed plugins
+- **Path**: `/plugins/list`
+- **Path**: `/plugins/featured`
+- **Path**: `/plugins/export/curated`
 
-- **Path**: `/backend-api/plugins/featured`
-- **Method**: `GET`
-- **Query Parameters**: `platform=codex`
-- **Purpose**: Get featured plugins
+#### 2.6 Files (OpenAI file uploads)
 
-- **Path**: `/backend-api/plugins/{plugin_id}/enable`
+- **Path**: `/files`
 - **Method**: `POST`
-- **Purpose**: Enable a plugin
-
-- **Path**: `/backend-api/plugins/{plugin_id}/uninstall`
+- **Path**: `/files/{file_id}/uploaded`
 - **Method**: `POST`
-- **Purpose**: Uninstall a plugin
 
-#### 8. MCP Apps
-- **Path**: `/backend-api/wham/apps`
-- **Method**: WebSocket connection
-- **Purpose**: MCP (Model Context Protocol) server communication
+#### 2.7 Realtime (Voice/WebRTC)
 
-**Important Note**: When using ChatGPT OAuth authentication, the base instructions field in the request is **required** and should reference "Codex" specifically. The example from the blog post shows:
-
-```json
-{
-  "instructions": "You are Codex, based on GPT-5. You are running as a coding agent ..."
-}
-```
-
-This appears to be a requirement for the ChatGPT backend API to accept requests properly.
+- **Path**: `/v1/realtime/calls`
+- **Method**: `POST`
+- **Purpose**: Create WebRTC voice sessions
 
 ---
 
-## Authentication
+## 3. Request Headers
 
-### Two Authentication Modes
+### 3.1 Authentication Headers
 
-#### 1. API Key Mode
-- **Header**: `Authorization: Bearer <api_key>`
-- **Source**: Environment variable (typically `OPENAI_API_KEY`)
-- **Base URL**: `https://api.openai.com/v1`
+**Location**: `codex-rs/model-provider/src/bearer_auth_provider.rs`
 
-#### 2. ChatGPT Mode (OAuth2)
-- **Header**: `Authorization: Bearer <access_token>`
-- **Additional Header**: `ChatGPT-Account-ID: <account_id>`
-- **Base URL**: `https://chatgpt.com/backend-api/codex`
-- **Token Management**: Automatic refresh on 401 responses
-
-### Authentication Implementation
-
-The authentication is handled through the `AuthProvider` trait:
-
-```rust
-pub trait AuthProvider: Send + Sync {
-    fn bearer_token(&self) -> Option<String>;
-    fn account_id(&self) -> Option<String> {
-        None
-    }
-}
+```http
+Authorization: Bearer {access_token}
+ChatGPT-Account-ID: {account_id}
 ```
 
-Headers are added via:
+For FedRAMP accounts:
 
-```rust
-pub(crate) fn add_auth_headers_to_header_map<A: AuthProvider>(auth: &A, headers: &mut HeaderMap) {
-    if let Some(token) = auth.bearer_token()
-        && let Ok(header) = HeaderValue::from_str(&format!("Bearer {token}"))
-    {
-        let _ = headers.insert(http::header::AUTHORIZATION, header);
-    }
-    if let Some(account_id) = auth.account_id()
-        && let Ok(header) = HeaderValue::from_str(&account_id)
-    {
-        let _ = headers.insert("ChatGPT-Account-ID", header);
-    }
-}
+```http
+X-OpenAI-Fedramp: true
 ```
 
-**Location**: `codex-rs/codex-api/src/auth.rs`
+### 3.2 Standard Headers
+
+**Location**: `codex-rs/login/src/auth/default_client.rs`
+
+```http
+User-Agent: {originator}/{version} ({os} {os_version}; {arch}) {terminal_info} ({suffix})
+originator: codex_cli_rs
+Content-Type: application/json
+```
+
+Example User-Agent:
+
+```
+codex_cli_rs/0.1.0 (Linux 5.15.0; x86_64) iTerm2/3.4.0
+```
+
+### 3.3 Codex-Specific Headers
+
+**Location**: `codex-rs/core/src/client.rs`
+
+#### Session Identification
+
+```http
+session_id: {conversation_id}
+x-client-request-id: {conversation_id}
+```
+
+#### Installation Tracking
+
+```http
+x-codex-installation-id: {installation_id}
+```
+
+#### Window/Turn Tracking
+
+```http
+x-codex-window-id: {conversation_id}:{window_generation}
+x-codex-turn-state: {sticky_routing_token}
+x-codex-turn-metadata: {base64_encoded_metadata}
+```
+
+#### Subagent Identification
+
+```http
+x-openai-subagent: review|compact|memory_consolidation|collab_spawn
+x-codex-parent-thread-id: {parent_thread_id}
+```
+
+#### Feature Flags
+
+```http
+x-codex-beta-features: {comma_separated_features}
+OpenAI-Beta: responses_websockets=2026-02-06
+```
+
+#### Telemetry
+
+```http
+x-responsesapi-include-timing-metrics: true
+```
+
+#### Residency (Enterprise)
+
+```http
+x-openai-internal-codex-residency: us
+```
 
 ---
 
-## Request Headers
+## 4. Request Body Format
 
-### Standard Headers (All Requests)
+### 4.1 Main Request Structure
 
-1. **User-Agent**
-   - Format: `{originator}/{version} ({os} {os_version}; {arch}) {terminal_type} ({suffix})`
-   - Example: `codex_cli_rs/0.99.0 (Linux 6.12; x86_64) xterm-256color (vscode; 1.86.0)`
-   - **Location**: `codex-rs/login/src/auth/default_client.rs:131-155`
-
-2. **originator**
-   - Value: `codex_cli_rs` (default) or custom via `CODEX_INTERNAL_ORIGINATOR_OVERRIDE`
-   - Purpose: Identifies the client application
-
-3. **Content-Type**
-   - Value: `application/json` (for POST requests)
-
-4. **Accept**
-   - Value: `text/event-stream` (for SSE streaming)
-
-### Responses API Specific Headers
-
-5. **x-client-request-id**
-   - Value: Thread/conversation ID
-   - Purpose: Request correlation
-
-6. **session_id**
-   - Value: Thread/conversation ID
-   - Purpose: Session tracking
-
-7. **x-codex-turn-state**
-   - Value: Sticky routing token from previous response
-   - Purpose: Maintain routing to same backend instance within a turn
-
-8. **x-codex-turn-metadata**
-   - Value: Optional turn metadata (JSON)
-   - Purpose: Observability and debugging
-
-9. **x-codex-window-id**
-   - Format: `{conversation_id}:{window_generation}`
-   - Purpose: Window/context tracking
-
-10. **x-openai-subagent**
-    - Values: `review`, `compact`, `memory_consolidation`, `collab_spawn`
-    - Purpose: Identify subagent requests
-
-11. **x-codex-parent-thread-id**
-    - Value: Parent thread ID (for spawned threads)
-    - Purpose: Thread hierarchy tracking
-
-12. **x-codex-beta-features**
-    - Value: Comma-separated beta feature keys
-    - Purpose: Enable experimental features
-
-13. **x-responsesapi-include-timing-metrics**
-    - Value: `true`
-    - Purpose: Request timing metrics in response
-
-### WebSocket Specific Headers
-
-14. **OpenAI-Beta**
-    - Value: `responses_websockets=2026-02-06`
-    - Purpose: Enable WebSocket protocol version
-
-### Developer Role Messages
-
-When using the ChatGPT OAuth API, requests often include a `developer` role message in the input array. This is distinct from the `instructions` field:
-
-- **`instructions` field**: Base system instructions (e.g., "You are Codex, based on GPT-5...")
-- **`developer` role message**: Additional contextual instructions injected as a message in the conversation
-
-Example from the blog post:
-```json
-{
-  "input": [
-    {
-      "type": "message",
-      "role": "developer",
-      "content": [
-        {
-          "type": "input_text",
-          "text": "You are a helpful assistant. Respond directly to the user request without running tools or shell commands."
-        }
-      ]
-    },
-    {
-      "type": "message",
-      "role": "user",
-      "content": [
-        {
-          "type": "input_text",
-          "text": "Generate an SVG of a pelican riding a bicycle"
-        }
-      ]
-    }
-  ]
-}
-```
-
-The `developer` role is used for:
-- Permission instructions (sandbox mode, approval policies)
-- Capability instructions (available tools, restrictions)
-- Context-specific guidance (collaboration mode, personality specs)
-- Model switching notifications
-- Realtime conversation boundaries
-
-**Location**: `codex-rs/protocol/src/models.rs:755-767`
-
-### Optional Headers
-
-15. **OpenAI-Organization**
-    - Source: `OPENAI_ORGANIZATION` environment variable
-    - Purpose: Organization routing
-
-16. **OpenAI-Project**
-    - Source: `OPENAI_PROJECT` environment variable
-    - Purpose: Project routing
-
-17. **version**
-    - Value: Package version (e.g., `0.99.0`)
-    - Purpose: Client version tracking
-
-### Request Compression
-
-When using ChatGPT authentication with OpenAI provider:
-- **Content-Encoding**: `zstd`
-- Body is compressed using Zstandard algorithm
-
-**Location**: `codex-rs/core/src/client.rs:1040-1049`
-
----
-
-## Request/Response Schemas
-
-### Responses API Request Schema
+**Location**: `codex-rs/codex-api/src/common.rs`
 
 ```json
 {
   "model": "gpt-4",
-  "instructions": "You are a helpful assistant...",
+  "instructions": "You are a helpful coding assistant...",
   "input": [
     {
       "type": "message",
@@ -317,1244 +236,1248 @@ When using ChatGPT authentication with OpenAI provider:
   "stream": true,
   "include": ["reasoning.encrypted_content"],
   "service_tier": "default",
-  "prompt_cache_key": "<conversation_id>",
+  "prompt_cache_key": "{conversation_id}",
   "text": {
-    "type": "text",
-    "verbosity": "normal"
+    "verbosity": "medium",
+    "format": {
+      "type": "json_schema",
+      "strict": true,
+      "schema": {},
+      "name": "codex_output_schema"
+    }
+  },
+  "client_metadata": {
+    "x-codex-installation-id": "...",
+    "ws_request_header_traceparent": "...",
+    "ws_request_header_tracestate": "..."
   }
 }
 ```
 
-**Key Fields**:
-- `model`: Model identifier (e.g., `gpt-4`, `o1-preview`)
-- `instructions`: System instructions/base prompt
-- `input`: Array of conversation items (messages, tool calls, tool results)
-- `tools`: Available tools in JSON Schema format
-- `reasoning`: Reasoning configuration (effort level, summary mode)
-- `store`: Whether to store in Azure (provider-specific)
-- `stream`: Always `true` for streaming
-- `include`: Additional fields to include in response
-- `service_tier`: Priority level (`default`, `priority`, `flex`)
-- `prompt_cache_key`: Cache key for prompt caching
-- `text`: Text generation parameters (verbosity, output schema)
+### 4.2 Input Items (ResponseItem)
 
-**Location**: `codex-rs/codex-api/src/endpoint/responses.rs`
+**Location**: `codex-rs/protocol/src/models.rs`
 
-### Response Stream Events (SSE)
-
-The server sends Server-Sent Events with the following event types:
-
-1. **response.created**
-   ```json
-   event: response.created
-   data: {"response_id": "resp_123", "status": "in_progress"}
-   ```
-
-2. **response.output_item.added**
-   ```json
-   event: response.output_item.added
-   data: {"item": {"type": "message", "role": "assistant", "content": []}}
-   ```
-
-3. **response.content_part.added**
-   ```json
-   event: response.content_part.added
-   data: {"part": {"type": "text", "text": ""}}
-   ```
-
-4. **response.content_part.delta**
-   ```json
-   event: response.content_part.delta
-   data: {"delta": {"text": "Hello"}}
-   ```
-
-5. **response.output_item.done**
-   ```json
-   event: response.output_item.done
-   data: {"item": {"type": "message", "role": "assistant", "content": [...]}}
-   ```
-
-6. **response.done**
-   ```json
-   event: response.done
-   data: {
-     "response_id": "resp_123",
-     "usage": {
-       "input_tokens": 100,
-       "output_tokens": 50,
-       "total_tokens": 150,
-       "cached_input_tokens": 0,
-       "reasoning_output_tokens": 0
-     }
-   }
-   ```
-
-7. **error**
-   ```json
-   event: error
-   data: {"error": {"message": "Rate limit exceeded", "code": "rate_limit_exceeded"}}
-   ```
-
-**Location**: Event parsing in `codex-rs/codex-api/src/sse.rs`
-
-### Models Response Schema
-
-```json
-{
-  "models": [
-    {
-      "slug": "gpt-4",
-      "display_name": "GPT-4",
-      "description": "Most capable model",
-      "default_reasoning_level": "medium",
-      "supported_reasoning_levels": [
-        {"effort": "low", "description": "Fast"},
-        {"effort": "medium", "description": "Balanced"},
-        {"effort": "high", "description": "Thorough"}
-      ],
-      "shell_type": "shell_command",
-      "visibility": "list",
-      "minimal_client_version": [0, 99, 0],
-      "supported_in_api": true,
-      "priority": 1,
-      "upgrade": null,
-      "base_instructions": "You are a helpful assistant",
-      "supports_reasoning_summaries": true,
-      "support_verbosity": true,
-      "default_verbosity": "normal",
-      "apply_patch_tool_type": "unified_diff",
-      "truncation_policy": {"mode": "bytes", "limit": 100000},
-      "supports_parallel_tool_calls": true,
-      "supports_image_detail_original": true,
-      "context_window": 128000,
-      "experimental_supported_tools": []
-    }
-  ]
-}
-```
-
-**Location**: `codex-rs/codex-api/src/endpoint/models.rs`
-
----
-
-## Model List Retrieval
-
-### Request Details
-
-**Endpoint**: `GET /v1/models?client_version=<version>`
-
-**Headers**:
-- `Authorization: Bearer <token>`
-- `ChatGPT-Account-ID: <account_id>` (if ChatGPT mode)
-- `User-Agent: <codex_user_agent>`
-- `originator: <originator>`
-
-**Query Parameters**:
-- `client_version`: Client version string (e.g., `0.99.0`)
-
-### Response Handling
-
-The response includes an `ETag` header for caching:
+The `input` array contains conversation history as `ResponseItem` objects:
 
 ```rust
-let header_etag = resp
-    .headers
-    .get(ETAG)
-    .and_then(|value| value.to_str().ok())
-    .map(ToString::to_string);
-```
-
-**Location**: `codex-rs/codex-api/src/endpoint/models.rs:58-62`
-
-### Model Selection
-
-Models are filtered based on:
-1. `visibility`: Must be `"list"` to appear in UI
-2. `minimal_client_version`: Client version must meet minimum
-3. `supported_in_api`: Must be `true` for API usage
-
----
-
-## Streaming Responses
-
-### HTTP/SSE Transport
-
-1. **Connection Setup**
-   - POST request to `/v1/responses`
-   - `Accept: text/event-stream` header
-   - Optional `Content-Encoding: zstd` for compression
-
-2. **Event Stream Processing**
-   - Parse SSE events line-by-line
-   - Handle `event:` and `data:` lines
-   - Reconstruct JSON from multi-line data
-   - Parse event-specific payloads
-
-3. **Idle Timeout**
-   - Default: 300 seconds (5 minutes)
-   - Configurable via `stream_idle_timeout_ms`
-   - Connection reset if no data received within timeout
-
-4. **Retry Logic**
-   - Default max retries: 5 attempts
-   - Exponential backoff: 200ms base delay
-   - Retry on: 5xx errors, transport errors
-   - No retry on: 429 (rate limit), 401 (unauthorized)
-
-**Location**: `codex-rs/codex-api/src/sse.rs`
-
-### WebSocket Transport
-
-1. **Connection Handshake**
-   - Upgrade HTTP connection to WebSocket
-   - URL: `wss://chatgpt.com/backend-api/codex/responses`
-   - Headers: Same as HTTP plus `OpenAI-Beta: responses_websockets=2026-02-06`
-
-2. **Request Format**
-   ```json
-   {
-     "type": "response.create",
-     "response": {
-       "model": "gpt-4",
-       "instructions": "...",
-       "input": [...],
-       "client_metadata": {
-         "x-codex-window-id": "...",
-         "x-openai-subagent": "...",
-         "x-codex-parent-thread-id": "...",
-         "x-codex-turn-metadata": "..."
-       }
-     }
-   }
-   ```
-
-3. **Incremental Requests**
-   - Reuse WebSocket connection for multiple requests
-   - Send only delta items with `previous_response_id`
-   - Server maintains conversation state
-
-4. **Connection Reuse**
-   - Connection cached per turn
-   - Reused across multiple requests in same turn
-   - Reset on window generation change
-
-5. **Fallback to HTTP**
-   - On `426 Upgrade Required` response
-   - On connection timeout (15 seconds default)
-   - On WebSocket errors
-
-**Location**: `codex-rs/codex-api/src/websocket.rs`
-
----
-
-## Message Conversion Between OpenAI and Codex Formats
-
-### Overview
-
-Codex uses the OpenAI Responses API format which is more structured than the traditional Chat Completions API. Understanding how to convert between standard OpenAI message formats and Codex's internal format is essential for implementing compatible clients.
-
-### Key Type Definitions
-
-#### Codex Internal Types (`ResponseInputItem` and `ResponseItem`)
-
-Codex uses two main types for messages:
-
-1. **`ResponseInputItem`** - Messages sent TO the API
-2. **`ResponseItem`** - Messages received FROM the API
-
-```rust
-// From codex-rs/protocol/src/models.rs
-
-// Input items (sent to API)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ResponseInputItem {
+pub enum ResponseItem {
     Message {
-        role: String,
+        role: String,  // "user", "assistant", "developer"
         content: Vec<ContentItem>,
+    },
+    FunctionCall {
+        call_id: String,
+        name: String,
+        arguments: String,
     },
     FunctionCallOutput {
         call_id: String,
         output: FunctionCallOutputPayload,
     },
-    McpToolCallOutput {
+    CustomToolCall {
         call_id: String,
-        output: CallToolResult,
+        name: String,
+        input: Value,
     },
     CustomToolCallOutput {
         call_id: String,
-        name: Option<String>,
         output: FunctionCallOutputPayload,
     },
-    ToolSearchOutput {
-        call_id: String,
-        status: String,
-        execution: String,
-        tools: Vec<serde_json::Value>,
+    Reasoning {
+        content: Vec<ReasoningContent>,
+        summary: Vec<String>,
     },
+    // ... other types
 }
+```
 
-// Output items (received from API)
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
-pub enum ResponseItem {
-    Message { id: Option<String>, role: String, content: Vec<ContentItem>, ... },
-    Reasoning { id: String, summary: Vec<ReasoningItemReasoningSummary>, ... },
-    FunctionCall { id: Option<String>, name: String, arguments: String, call_id: String, ... },
-    CustomToolCall { id: Option<String>, status: Option<String>, call_id: String, name: String, ... },
-    // ... and more
-}
+### 4.3 Content Items
 
-// Content items within messages
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, JsonSchema, TS)]
-#[serde(tag = "type", rename_all = "snake_case")]
+```rust
 pub enum ContentItem {
     InputText { text: String },
-    InputImage { image_url: String },
+    InputImage {
+        source: ImageSource,
+        detail: Option<String>,
+    },
     OutputText { text: String },
+    // ... other types
 }
 ```
 
-**Location**: `codex-rs/protocol/src/models.rs:119-159`
+---
 
-### Converting User Input to Codex Format
+## 5. Session Management
 
-#### Simple Text Messages
+### 5.1 Conversation ID (ThreadId)
 
-**Standard OpenAI format:**
+**Location**: `codex-rs/protocol/src/protocol.rs`
+
+- **Format**: UUID v4
+- **Persistence**: Across entire conversation
+- **Used for**:
+  - Session identification (`session_id` header)
+  - Prompt caching (`prompt_cache_key`)
+  - Window tracking (`x-codex-window-id`)
+
+### 5.2 Window Generation
+
+**Location**: `codex-rs/core/src/client.rs`
+
+- Increments when conversation context is reset
+- **Format**: `{conversation_id}:{window_generation}`
+- **Sent in**: `x-codex-window-id` header
+
+### 5.3 Turn State (Sticky Routing)
+
+**Location**: `codex-rs/core/src/client.rs`
+
+```http
+# Server sends in response header:
+x-codex-turn-state: {opaque_token}
+
+# Client echoes back in subsequent requests within same turn:
+x-codex-turn-state: {same_token}
+```
+
+**Purpose**: Ensures requests within a turn hit the same backend instance
+
+---
+
+## 6. Transport Mechanisms
+
+### 6.1 HTTP (SSE - Server-Sent Events)
+
+**Location**: `codex-rs/core/src/client.rs:1132`
+
+1. POST to `/v1/responses`
+2. Response: `Content-Type: text/event-stream`
+3. **Events**:
+   - `response.created`
+   - `response.output_item.added`
+   - `response.output_item.done`
+   - `response.completed`
+   - `response.failed`
+
+### 6.2 WebSocket
+
+**Location**: `codex-rs/core/src/client.rs:1229`
+
+#### Connection
+
+- Upgrade HTTP to WebSocket
+- **Path**: `/v1/responses`
+- **Protocol**: `responses_websockets=2026-02-06`
+
+#### Request Format
+
 ```json
-{
-  "messages": [
-    {"role": "user", "content": "Hello, how are you?"}
-  ]
-}
-```
-
-**Codex format:**
-```json
-{
-  "input": [
-    {
-      "type": "message",
-      "role": "user",
-      "content": [
-        {"type": "input_text", "text": "Hello, how are you?"}
-      ]
-    }
-  ]
-}
-```
-
-**Conversion logic:**
-```rust
-// From codex-rs/protocol/src/models.rs:1015-1053
-impl From<Vec<UserInput>> for ResponseInputItem {
-    fn from(items: Vec<UserInput>) -> Self {
-        Self::Message {
-            role: "user".to_string(),
-            content: items
-                .into_iter()
-                .flat_map(|c| match c {
-                    UserInput::Text { text, .. } => {
-                        vec![ContentItem::InputText { text }]
-                    }
-                    // ... handle images, local images, etc.
-                })
-                .collect(),
-        }
-    }
-}
-```
-
-#### Messages with Images
-
-**Standard OpenAI format:**
-```json
-{
-  "messages": [
-    {
-      "role": "user",
-      "content": [
-        {"type": "text", "text": "What's in this image?"},
-        {
-          "type": "image_url",
-          "image_url": {"url": "data:image/png;base64,..."}
-        }
-      ]
-    }
-  ]
-}
-```
-
-**Codex format (with image tags):**
-```json
-{
-  "input": [
-    {
-      "type": "message",
-      "role": "user",
-      "content": [
-        {"type": "input_text", "text": "<image>"},
-        {"type": "input_image", "image_url": "data:image/png;base64,..."},
-        {"type": "input_text", "text": "</image>What's in this image?"}
-      ]
-    }
-  ]
-}
-```
-
-**Image tagging rules:**
-- Remote images: wrapped with `<image>` and `</image>` tags
-- Local images: wrapped with `<image name=[Image #N]>` and `</image>` tags
-- Multiple images share a sequential label counter
-
-**Location**: `codex-rs/protocol/src/models.rs:867-906`
-
-### Converting Tool Calls/Function Calls
-
-#### Tool Call Request (Model → API)
-
-**Codex receives from model:**
-```rust
-// From codex-rs/protocol/src/models.rs:227-240
-ResponseItem::FunctionCall {
-    name: "shell",
-    arguments: "{\"command\": [\"ls\"]}",
-    call_id: "call_123",
-    namespace: Some("mcp"),
-}
-```
-
-**Wire format (Responses API):**
-```json
-{
-  "type": "function_call",
-  "name": "shell",
-  "arguments": "{\"command\": [\"ls\"]}",
-  "call_id": "call_123"
-}
-```
-
-#### Tool Result Response (API → Model)
-
-**Codex sends back to API:**
-```rust
-ResponseInputItem::FunctionCallOutput {
-    call_id: "call_123".to_string(),
-    output: FunctionCallOutputPayload {
-        body: FunctionCallOutputBody::Text("total 0".to_string()),
-        success: Some(true),
-    },
-}
-```
-
-**Wire format:**
-```json
-{
-  "type": "function_call_output",
-  "call_id": "call_123",
-  "output": "total 0"
-}
-```
-
-Or for multimodal tool outputs:
-```json
-{
-  "type": "function_call_output",
-  "call_id": "call_123",
-  "output": [
-    {"type": "input_text", "text": "File listing:"},
-    {"type": "input_image", "image_url": "data:image/png;base64,..."}
-  ]
-}
-```
-
-**Location**: `codex-rs/protocol/src/models.rs:1180-1288`
-
-### Tool Definition Format
-
-**Codex tool format (JSON Schema):**
-```rust
-// Tools are passed to the Responses API in OpenAI function format
-{
-  "type": "function",
-  "name": "shell",
-  "description": "Execute a shell command",
-  "parameters": {
-    "type": "object",
-    "properties": {
-      "command": {
-        "type": "array",
-        "items": {"type": "string"},
-        "description": "Command as array of strings"
-      },
-      "workdir": {
-        "type": "string",
-        "description": "Working directory"
-      }
-    },
-    "required": ["command"]
-  }
-}
-```
-
-**Location**: `codex-rs/codex-tools/src/lib.rs`
-
-### Streaming Message Handling
-
-#### SSE Events to ResponseItem Conversion
-
-The Responses API streams events that must be assembled into `ResponseItem` objects:
-
-```rust
-// From codex-rs/codex-api/src/sse.rs
-
-// Event sequence:
-// 1. response.created - Start of response
-// 2. response.output_item.added - New item created
-// 3. response.content_part.added - Content started
-// 4. response.content_part.delta - Incremental content
-// 5. response.output_item.done - Item complete
-// 6. response.done - All done
-
-// Each event type maps to internal types:
-// - response.output_item.added (type=message) -> ResponseItem::Message
-// - response.output_item.added (type=function_call) -> ResponseItem::FunctionCall
-// - response.output_item.added (type=reasoning) -> ResponseItem::Reasoning
-```
-
-**Location**: `codex-rs/codex-api/src/sse.rs`
-
-#### Converting Streaming Deltas to Codex Format
-
-```rust
-// Incremental text delta
-{
-  "event": "response.content_part.delta",
-  "data": {
-    "delta": {"text": "Hello"}
-  }
-}
-
-// Becomes:
-ResponseItem::Message {
-    content: vec![ContentItem::OutputText { text: "Hello" }],
-    // ...
-}
-```
-
-### Complete Conversion Flow
-
-#### Non-Streaming Request Flow
-
-1. **User Input → Codex Input:**
-   ```rust
-   // User input (text, images, etc.)
-   let user_input = vec![UserInput::Text { text: "Hello".to_string() }];
-   
-   // Convert to ResponseInputItem
-   let input_item: ResponseInputItem = user_input.into();
-   // Results in: ResponseInputItem::Message { role: "user", content: [...] }
-   ```
-
-2. **Build Request:**
-   ```rust
-   // From codex-rs/core/src/client.rs:749-815
-   let request = ResponsesApiRequest {
-       model: "gpt-4".to_string(),
-       instructions: base_instructions.text,
-       input: vec![input_item],  // ResponseInputItem array
-       tools: create_tools_json(tools)?,
-       // ... other fields
-   };
-   ```
-
-3. **Response → ResponseItem:**
-   ```rust
-   // Parse JSON response into ResponseItem
-   let response_item: ResponseItem = serde_json::from_value(response_json)?;
-   // Handle Message, FunctionCall, Reasoning, etc.
-   ```
-
-#### Streaming Request Flow
-
-1. **Send Request** (same as non-streaming)
-2. **Process SSE Events:**
-   ```rust
-   // From codex-rs/core/src/client.rs:1496-1576
-   while let Some(event) = stream.next().await {
-       match event {
-           Ok(ResponseEvent::OutputItemDone(item)) => {
-               // Item is complete, convert to ResponseItem
-               items_added.push(item);
-           }
-           Ok(ResponseEvent::ContentPartDelta { delta }) => {
-               // Accumulate incremental text
-           }
-           Ok(ResponseEvent::Completed { response_id, usage }) => {
-               // Final response with usage stats
-           }
-       }
-   }
-   ```
-
-3. **Reconstruct Full Message:**
-   ```rust
-   // Multiple deltas are assembled into complete ResponseItem
-   // e.g., multiple response.content_part.delta events -> complete message
-   ```
-
-### WebSocket Message Format
-
-For WebSocket transport, messages use a different structure:
-
-```rust
-// From codex-rs/codex-api/src/websocket.rs
-
-// Request (WebSocket)
 {
   "type": "response.create",
-  "response": {
-    "model": "gpt-4",
-    "instructions": "...",
-    "input": [...],
-    "client_metadata": {
-      "x-codex-window-id": "...",
-      "x-openai-subagent": "..."
-    }
-  }
-}
-
-// Incremental request (subsequent requests in same turn)
-{
-  "type": "response.create",
+  "model": "gpt-4",
+  "instructions": "...",
+  "input": [],
   "previous_response_id": "resp_123",
-  "input": [...],  // Only new items, not full history
-  "response": { ... }
+  "generate": false,
+  ...
 }
 ```
 
-**Location**: `codex-rs/codex-api/src/websocket.rs`
+#### Incremental Requests
 
-### Summary: Key Conversion Points
+- Reuses WebSocket connection
+- Sends only delta of new input items
+- References `previous_response_id`
 
-| Aspect | OpenAI Standard | Codex Internal |
-|--------|----------------|----------------|
-| Messages field | `messages` | `input` |
-| Message structure | `{role, content}` | `{type: message, role, content[]}` |
-| Content structure | `{type, text}` or `{type, image_url}` | `{type: input_text/input_image/output_text}` |
-| Tool calls | `tool_calls` array | `ResponseItem::FunctionCall` |
-| Tool results | `function_call_output` (string) | `FunctionCallOutputPayload` (string or array) |
-| Images | Simple array | Wrapped with `<image>` tags |
-| Streaming | SSE with deltas | Assembled into complete `ResponseItem` |
+#### Fallback
 
-### Important Implementation Notes
-
-1. **Content Array**: Messages always have a `content` array, even for single text
-2. **Type Tags**: All items use snake_case type tags (`message`, `function_call`, `input_text`)
-3. **Image Handling**: Images require special tagging with `<image>` and `</image>`
-4. **Tool Output**: Can be plain text OR array of content items for multimodal
-5. **Namespace**: MCP tools include `namespace` field; built-in tools don't
+- Falls back to HTTP on connection failure
+- Session-scoped: once activated, stays on HTTP
 
 ---
 
-## WebSocket Support
+## 7. System Prompt (Instructions)
 
-### Prewarm/Preconnect
+### 7.1 Base Instructions
 
-Before sending the first request, the client can establish a WebSocket connection:
+**Location**: `codex-rs/protocol/src/models.rs`
 
 ```rust
-pub async fn preconnect_websocket(
-    &mut self,
-    session_telemetry: &SessionTelemetry,
-    _model_info: &ModelInfo,
-) -> std::result::Result<(), ApiError>
+pub struct BaseInstructions {
+    pub text: String,
+    pub personality: Option<Personality>,
+}
 ```
 
-This reduces latency for the first actual request.
+### 7.2 Instruction Sources (Priority Order)
 
-### Warmup Request
+1. **User Override**: `config.base_instructions`
+2. **Model Default**: `model_info.base_instructions`
+3. **Personality Template**: Applied if no override
 
-A special request with `generate: false` to establish connection without generating output:
+### 7.3 Instruction Composition
+
+**Location**: `codex-rs/core/src/session/session.rs`
+
+```rust
+// Final instructions sent to API:
+instructions = base_instructions + tool_instructions + context_tags
+```
+
+Context tags include:
+
+- Sandbox mode information
+- Collaboration mode
+- Realtime conversation state
+- Approval settings
+
+---
+
+## 8. Message Format Conversion (OpenAI Compatible → ChatGPT)
+
+### 8.1 Key Differences
+
+1. **No Direct OpenAI Format**:
+   - Codex doesn't use OpenAI's `messages` array format
+   - Uses custom `ResponseItem` enum instead
+
+2. **Input Array**:
+   - **OpenAI**: `messages: [{role, content}]`
+   - **Codex**: `input: [ResponseItem]`
+
+3. **Instructions vs System Message**:
+   - **OpenAI**: System message in `messages` array
+   - **Codex**: Separate `instructions` field
+
+4. **Tool Calls**:
+   - **OpenAI**: Embedded in message content
+   - **Codex**: Separate `ResponseItem` types (`FunctionCall`, `FunctionCallOutput`)
+
+### 8.2 Conversion Example
+
+**OpenAI Format**:
 
 ```json
 {
-  "type": "response.create",
-  "response": {
-    "model": "gpt-4",
-    "generate": false,
-    ...
-  }
+  "model": "gpt-4",
+  "messages": [
+    { "role": "system", "content": "You are helpful" },
+    { "role": "user", "content": "Hello" },
+    { "role": "assistant", "content": "Hi there!" }
+  ]
 }
 ```
 
-The client waits for completion before sending the actual request.
+**Codex Format**:
 
-**Location**: `codex-rs/core/src/client.rs:1303-1351`
-
----
-
-## Implementation Examples
-
-### Example 1: Basic Request (HTTP/SSE)
-
-```rust
-use codex_api::{ResponsesClient, ResponsesApiRequest, ResponsesOptions};
-use codex_api::requests::responses::Compression;
-
-// Setup
-let transport = ReqwestTransport::new(build_reqwest_client());
-let provider = Provider {
-    name: "OpenAI".to_string(),
-    base_url: "https://api.openai.com/v1".to_string(),
-    query_params: None,
-    headers: HeaderMap::new(),
-    retry: RetryConfig { /* ... */ },
-    stream_idle_timeout: Duration::from_secs(300),
-};
-let auth = /* implement AuthProvider */;
-
-let client = ResponsesClient::new(transport, provider, auth);
-
-// Build request
-let request = ResponsesApiRequest {
-    model: "gpt-4".to_string(),
-    instructions: "You are a helpful assistant".to_string(),
-    input: vec![/* conversation items */],
-    tools: vec![],
-    tool_choice: "auto".to_string(),
-    parallel_tool_calls: true,
-    reasoning: None,
-    store: false,
-    stream: true,
-    include: vec![],
-    service_tier: None,
-    prompt_cache_key: Some("conversation_123".to_string()),
-    text: None,
-};
-
-let options = ResponsesOptions {
-    conversation_id: Some("conversation_123".to_string()),
-    session_source: None,
-    extra_headers: HeaderMap::new(),
-    compression: Compression::None,
-    turn_state: None,
-};
-
-// Stream response
-let mut stream = client.stream_request(request, options).await?;
-while let Some(event) = stream.next().await {
-    match event {
-        Ok(ResponseEvent::ContentPartDelta { delta }) => {
-            print!("{}", delta.text);
-        }
-        Ok(ResponseEvent::Completed { response_id, token_usage }) => {
-            println!("\nCompleted: {}", response_id);
-        }
-        Err(e) => {
-            eprintln!("Error: {}", e);
-            break;
-        }
-        _ => {}
-    }
-}
-```
-
-### Example 2: Retrieve Models
-
-```rust
-use codex_api::{ModelsClient, Provider};
-
-let transport = ReqwestTransport::new(build_reqwest_client());
-let provider = Provider { /* ... */ };
-let auth = /* implement AuthProvider */;
-
-let client = ModelsClient::new(transport, provider, auth);
-
-let (models, etag) = client
-    .list_models("0.99.0", HeaderMap::new())
-    .await?;
-
-for model in models {
-    println!("{}: {}", model.slug, model.display_name);
-}
-```
-
-### Example 3: WebSocket Request
-
-```rust
-use codex_api::{ResponsesWebsocketClient, ResponseCreateWsRequest};
-
-let provider = Provider { /* ... */ };
-let auth = /* implement AuthProvider */;
-
-let ws_client = ResponsesWebsocketClient::new(provider, auth);
-
-// Connect
-let mut connection = ws_client
-    .connect(headers, default_headers, turn_state, telemetry)
-    .await?;
-
-// Send request
-let request = ResponsesWsRequest::ResponseCreate(ResponseCreateWsRequest {
-    model: "gpt-4".to_string(),
-    instructions: "You are a helpful assistant".to_string(),
-    input: vec![/* items */],
-    client_metadata: HashMap::new(),
-    /* ... */
-});
-
-let mut stream = connection.stream_request(request, false).await?;
-
-// Process events
-while let Some(event) = stream.next().await {
-    // Handle events
-}
-```
-
-### Example 4: Authentication Headers
-
-```rust
-// API Key Mode
-struct ApiKeyAuth {
-    api_key: String,
-}
-
-impl AuthProvider for ApiKeyAuth {
-    fn bearer_token(&self) -> Option<String> {
-        Some(self.api_key.clone())
-    }
-}
-
-// ChatGPT Mode
-struct ChatGptAuth {
-    access_token: String,
-    account_id: String,
-}
-
-impl AuthProvider for ChatGptAuth {
-    fn bearer_token(&self) -> Option<String> {
-        Some(self.access_token.clone())
-    }
-    
-    fn account_id(&self) -> Option<String> {
-        Some(self.account_id.clone())
-    }
-}
-```
-
-### Example 5: User-Agent Construction
-
-```rust
-pub fn get_codex_user_agent() -> String {
-    let build_version = env!("CARGO_PKG_VERSION");
-    let os_info = os_info::get();
-    let originator = originator();
-    let prefix = format!(
-        "{}/{build_version} ({} {}; {}) {}",
-        originator.value.as_str(),
-        os_info.os_type(),
-        os_info.version(),
-        os_info.architecture().unwrap_or("unknown"),
-        user_agent() // terminal detection
-    );
-    let suffix = USER_AGENT_SUFFIX
-        .lock()
-        .ok()
-        .and_then(|guard| guard.clone());
-    let suffix = suffix
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map_or_else(String::new, |value| format!(" ({value})"));
-
-    format!("{prefix}{suffix}")
-}
-```
-
-**Result**: `codex_cli_rs/0.99.0 (Linux 6.12; x86_64) xterm-256color (vscode; 1.86.0)`
-
----
-
-## Key Implementation Details
-
-### 1. Base URL Selection
-
-```rust
-pub fn to_api_provider(&self, auth_mode: Option<AuthMode>) -> CodexResult<ApiProvider> {
-    let default_base_url = if matches!(auth_mode, Some(AuthMode::Chatgpt)) {
-        "https://chatgpt.com/backend-api/codex"
-    } else {
-        "https://api.openai.com/v1"
-    };
-    let base_url = self
-        .base_url
-        .clone()
-        .unwrap_or_else(|| default_base_url.to_string());
-    // ...
-}
-```
-
-**Location**: `codex-rs/model-provider-info/src/lib.rs:184-193`
-
-### 2. Request Compression
-
-```rust
-fn responses_request_compression(&self, auth: Option<&CodexAuth>) -> Compression {
-    if self.client.state.enable_request_compression
-        && auth.is_some_and(CodexAuth::is_chatgpt_auth)
-        && self.client.state.provider.is_openai()
-    {
-        Compression::Zstd
-    } else {
-        Compression::None
-    }
-}
-```
-
-**Location**: `codex-rs/core/src/client.rs:1040-1049`
-
-### 3. Retry Logic
-
-```rust
-pub struct RetryConfig {
-    pub max_attempts: u64,
-    pub base_delay: Duration,
-    pub retry_429: bool,
-    pub retry_5xx: bool,
-    pub retry_transport: bool,
-}
-```
-
-Default values:
-- `max_attempts`: 4 (requests), 5 (streams)
-- `base_delay`: 200ms
-- `retry_429`: false
-- `retry_5xx`: true
-- `retry_transport`: true
-
-**Location**: `codex-rs/codex-api/src/provider.rs:16-22`
-
-### 4. Sticky Routing (Turn State)
-
-```rust
-/// Turn state for sticky routing.
-///
-/// This is an `OnceLock` that stores the turn state value received from the server
-/// on turn start via the `x-codex-turn-state` response header. Once set, this value
-/// should be sent back to the server in the `x-codex-turn-state` request header for
-/// all subsequent requests within the same turn to maintain sticky routing.
-turn_state: Arc<OnceLock<String>>,
-```
-
-**Location**: `codex-rs/core/src/client.rs:209-219`
-
-### 5. Session vs Turn Scope
-
-- **Session-scoped**: `ModelClient` - lives for entire conversation
-- **Turn-scoped**: `ModelClientSession` - created per turn, manages WebSocket connection
-
-```rust
-pub fn new_session(&self) -> ModelClientSession {
-    ModelClientSession {
-        client: self.clone(),
-        websocket_session: self.take_cached_websocket_session(),
-        turn_state: Arc::new(OnceLock::new()),
-    }
-}
-```
-
-**Location**: `codex-rs/core/src/client.rs:300-306`
-
----
-
-## Session Flow
-
-### Overview of a Complete Session
-
-A session represents an entire conversation from start to finish. Understanding the flow of requests and how conversation state is maintained is essential for implementing a compatible client.
-
-### Lifecycle of a Session
-
-```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                        SESSION LIFETIME                                    │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  1. Initialization                                                          │
-│     ├── Load/validate authentication credentials                           │
-│     ├── Fetch available models from /v1/models                            │
-│     └── Create ModelClient (session-scoped)                               │
-│                                                                             │
-│  2. Turn 1: User Input → First Response                                   │
-│     ├── Create ModelClientSession (turn-scoped)                          │
-│     ├── Preconnect WebSocket (optional, recommended)                  │
-│     ├── Build request with base instructions                             │
-│     ├── Send user message in input array                                 │
-│     ├── Receive streaming response (SSE events)                        │
-│     └── Extract response items, tool calls                               │
-│                                                                             │
-│  3. Tool Execution Loop (within Turn N)                                   │
-│     ├── API emits FunctionCall item                                      │
-│     ├── Client executes tool locally                                     │
-│     ├── Send FunctionCallOutput back in next request                    │
-│     └── Continue receiving response (may loop)                          │
-│                                                                             │
-│  4. Turn N: Subsequent Requests                                           │
-│     ├── Build request with previous_response_id                         │
-│     ├── Include all tool call results since turn start                  │
-│     ├── Optionally compact conversation history                         │
-│     └── Receive updated conversation state                               │
-│                                                                             │
-│  5. Session End                                                           │
-│     ├── Final response received                                          │
-│     ├── Close WebSocket connection                                      │
-│     └── Session cleanup                                                 │
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
-```
-
-### Detailed Turn Flow
-
-#### Turn 1: Initial Request
-
-```rust
-// 1. Create session (turn-scoped)
-let session = client.new_session();
-
-// 2. Optionally preconnect WebSocket for lower latency
-session.preconnect_websocket(telemetry, &model_info).await?;
-
-// 3. Build first request
-let request = ResponsesApiRequest {
-    model: "gpt-4".to_string(),
-    instructions: base_instructions.text,  // Required for ChatGPT mode
-    input: vec![
-        // Developer message (optional, for system context)
-        ResponseInputItem::Message {
-            role: "developer".to_string(),
-            content: vec![ContentItem::InputText {
-                text: permissions_instructions
-            }],
-        },
-        // User message
-        ResponseInputItem::Message {
-            role: "user".to_string(),
-            content: vec![ContentItem::InputText {
-                text: user_input.clone()
-            }],
-        },
-    ],
-    tools: create_tools_json(tools)?,
-    // ...other fields
-};
-
-// 4. Send request and process streaming response
-let mut stream = session.stream_request(request, options).await?;
-
-while let Some(event) = stream.next().await {
-    match event {
-        Ok(ResponseEvent::OutputItemAdded { item }) => {
-            // New item created - could be Message, FunctionCall, Reasoning
-            match item {
-                ResponseItem::FunctionCall { name, arguments, call_id, .. } => {
-                    // Tool call to execute
-                    tool_calls_to_execute.push((call_id, name, arguments));
-                }
-                ResponseItem::Message { content, .. } => {
-                    // Text response
-                }
-                _ => {}
-            }
-        }
-        Ok(ResponseEvent::ContentPartDelta { delta }) => {
-            // Accumulate incremental text
-        }
-        Ok(ResponseEvent::Completed { response_id, usage }) => {
-            // Turn complete
-        }
-        Err(e) => { /* Handle error */ }
-    }
-}
-```
-
-**Location**: `codex-rs/core/src/client.rs:1303-1576`
-
-#### Subsequent Turns: Tool Execution Loop
-
-```rust
-// After receiving a FunctionCall, execute the tool and send results back
-
-// 1. Execute tool (shell command, file operation, etc.)
-let tool_result = execute_tool(&tool_name, tool_args).await?;
-
-// 2. Send tool result back to API
-let next_request = ResponsesApiRequest {
-    model: "gpt-4".to_string(),
-    instructions: base_instructions.text,
-    input: vec![
-        // Include original user message
-        user_message.clone(),
-        // Include the assistant's function call
-        ResponseItem::FunctionCall { ... }.into(),
-        // Send tool result
-        ResponseInputItem::FunctionCallOutput {
-            call_id: tool_call.call_id,
-            output: FunctionCallOutputPayload {
-                body: FunctionCallOutputBody::Text(tool_result),
-                success: Some(true),
-            },
-        },
-    ],
-    // ...
-};
-```
-
-**Location**: `codex-rs/protocol/src/models.rs:1180-1288`
-
-### Conversation State Management
-
-#### Maintaining Conversation History
-
-Codex maintains conversation state across requests within a turn. This is handled in two ways:
-
-1. **HTTP/SSE**: Full `input` array sent with each request
-2. **WebSocket**: Server maintains state, client sends `previous_response_id`
-
-```rust
-// For HTTP: Include full conversation history
-let input_items: Vec<ResponseInputItem> = conversation
-    .items()
-    .iter()
-    .flat_map(|item| item.to_input_item())
-    .collect();
-
-let request = ResponsesApiRequest {
-    // ...
-    input: input_items,
-    // ...
-};
-
-// For WebSocket: Only send new items + previous_response_id
-let request = ResponseCreateWsRequest {
-    previous_response_id: last_response_id,  // Links to previous
-    input: new_items_only,  // Just the new messages
-    // ...
-};
-```
-
-**Location**: `codex-rs/codex-api/src/websocket.rs:89-156`
-
-#### Session vs Turn
-
-Understanding the distinction between session and turn is critical:
-
-| Concept      | Scope               | Description                                              |
-|--------------|---------------------|----------------------------------------------------------|
-| **Session**  | Entire conversation | From first user message to session end                  |
-| **Turn**     | Single exchange     | One user message + all subsequent tool calls + response |
-| **Window**   | UI context          | Visible context in the interface                         |
-
-```rust
-// Session lives for the entire conversation
-pub struct ModelClient {
-    // Authentication and transport (permanent)
-    transport: T,
-    provider: Provider,
-    auth: Box<dyn CodexAuth>,
-}
-
-// Turn is created fresh for each user message
-pub struct ModelClientSession {
-    client: ModelClient,
-    websocket_session: Option<WebSocketSession>,
-    turn_state: Arc<OnceLock<String>>,  // Turn-scoped sticky routing
-}
-```
-
-**Location**: `codex-rs/core/src/client.rs:183-306`
-
-### Compact/Summarize Flow
-
-When conversation history grows too large, Codex can compact it:
-
-```rust
-// Compact request (HTTP)
-let compact_request = ResponsesApiRequest {
-    model: model.slug.clone(),
-    instructions: base_instructions.text,
-    input: vec![/* conversation items to compact */],
-    tools: vec![],
-    // ...
-};
-
-// Or via MCP subagent
-let subagent_request = ResponsesApiRequestWithMetadata {
-    // ...
-    metadata: RequestMetadata {
-        x_openai_subagent: Some("compact"),
-        // ...
-    },
-};
-```
-
-**Location**: `codex-rs/core/src/client.rs:1610-1650`
-
-### Error Handling and Recovery
-
-#### Retry on Transient Errors
-
-```rust
-async fn with_retry<R, F, Fut>(&self, request: R, mut attempts: u64) -> Result<F::Output, ApiError>
-where
-    R: Clone,
-    F: Fn(T, R) -> Fut,
-    Fut: Future<Output = Result<F::Output, ApiError>>,
+```json
 {
-    let base_delay = Duration::from_millis(200);
-    
-    loop {
-        match self.send_request(request.clone()).await {
-            Ok(response) => return Ok(response),
-            Err(ApiError::ServerError(status)) if status.as_u16() >= 500 && attempts > 0 => {
-                // Exponential backoff
-                tokio::time::sleep(base_delay * 2_u64.pow(4 - attempts)).await;
-                attempts -= 1;
-            }
-            Err(e) => return Err(e),
-        }
+  "model": "gpt-4",
+  "instructions": "You are helpful",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [{ "type": "input_text", "text": "Hello" }]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [{ "type": "output_text", "text": "Hi there!" }]
     }
+  ]
 }
 ```
 
-#### Rate Limit Handling
+---
 
-```rust
-match error {
-    ApiError::RateLimited { retry_after } => {
-        // Wait and retry (or notify user)
-        tokio::time::sleep(Duration::from_secs(retry_after)).await;
-    }
-    _ => return Err(error),
+## 9. Complete Request Flow
+
+### Step-by-Step Process
+
+#### Step 1: Authentication
+
+```python
+# Load tokens from storage
+tokens = load_from_auth_json()
+access_token = tokens['access_token']
+account_id = tokens['id_token']['chatgpt_account_id']
+```
+
+#### Step 2: Build Headers
+
+```python
+headers = {
+    'Authorization': f'Bearer {access_token}',
+    'ChatGPT-Account-ID': account_id,
+    'User-Agent': 'codex_cli_rs/0.1.0 (Linux 5.15.0; x86_64) iTerm2',
+    'originator': 'codex_cli_rs',
+    'Content-Type': 'application/json',
+    'session_id': conversation_id,
+    'x-codex-installation-id': installation_id,
+    'x-codex-window-id': f'{conversation_id}:0',
+    'OpenAI-Beta': 'responses_websockets=2026-02-06',
 }
+```
+
+#### Step 3: Build Request Body
+
+```python
+body = {
+    'model': 'gpt-4',
+    'instructions': base_instructions,
+    'input': conversation_history,  # List of ResponseItem
+    'tools': tool_definitions,
+    'tool_choice': 'auto',
+    'parallel_tool_calls': True,
+    'stream': True,
+    'store': False,
+    'prompt_cache_key': conversation_id,
+}
+```
+
+#### Step 4: Send Request
+
+```python
+# HTTP/SSE
+response = requests.post(
+    'https://chatgpt.com/backend-api/v1/responses',
+    headers=headers,
+    json=body,
+    stream=True
+)
+
+# Or WebSocket
+ws = websocket.create_connection(
+    'wss://chatgpt.com/backend-api/v1/responses',
+    header=headers
+)
+ws.send(json.dumps({'type': 'response.create', **body}))
+```
+
+#### Step 5: Handle Response
+
+```python
+# SSE
+for line in response.iter_lines():
+    if line.startswith(b'data: '):
+        event = json.loads(line[6:])
+        handle_event(event)
+
+# WebSocket
+while True:
+    message = json.loads(ws.recv())
+    handle_event(message)
+```
+
+#### Step 6: Handle 401 (Token Refresh)
+
+```python
+if response.status_code == 401:
+    # Refresh token
+    new_tokens = refresh_access_token(refresh_token)
+    # Retry request with new token
+```
+
+#### Step 7: Update Turn State
+
+```python
+# Extract from response headers
+turn_state = response.headers.get('x-codex-turn-state')
+# Include in next request within same turn
+headers['x-codex-turn-state'] = turn_state
+```
+
+---
+
+## 10. Python Implementation Example
+
+```python
+import requests
+import json
+import uuid
+from typing import List, Dict, Any
+
+class CodexChatGPTClient:
+    def __init__(self, access_token: str, account_id: str):
+        self.base_url = "https://chatgpt.com/backend-api"
+        self.access_token = access_token
+        self.account_id = account_id
+        self.conversation_id = str(uuid.uuid4())
+        self.installation_id = str(uuid.uuid4())
+        self.window_generation = 0
+        self.turn_state = None
+
+    def _build_headers(self) -> Dict[str, str]:
+        headers = {
+            'Authorization': f'Bearer {self.access_token}',
+            'ChatGPT-Account-ID': self.account_id,
+            'User-Agent': 'custom_client/1.0.0 (Linux; x86_64)',
+            'originator': 'custom_client',
+            'Content-Type': 'application/json',
+            'session_id': self.conversation_id,
+            'x-client-request-id': self.conversation_id,
+            'x-codex-installation-id': self.installation_id,
+            'x-codex-window-id': f'{self.conversation_id}:{self.window_generation}',
+        }
+
+        if self.turn_state:
+            headers['x-codex-turn-state'] = self.turn_state
+
+        return headers
+
+    def send_message(self,
+                     user_message: str,
+                     conversation_history: List[Dict],
+                     instructions: str = "You are a helpful assistant.") -> None:
+
+        # Build input array
+        input_items = []
+        for item in conversation_history:
+            input_items.append({
+                'type': 'message',
+                'role': item['role'],
+                'content': [{'type': 'input_text', 'text': item['content']}]
+            })
+
+        # Add current message
+        input_items.append({
+            'type': 'message',
+            'role': 'user',
+            'content': [{'type': 'input_text', 'text': user_message}]
+        })
+
+        # Build request body
+        body = {
+            'model': 'gpt-4',
+            'instructions': instructions,
+            'input': input_items,
+            'tools': [],
+            'tool_choice': 'auto',
+            'parallel_tool_calls': True,
+            'stream': True,
+            'store': False,
+            'prompt_cache_key': self.conversation_id,
+        }
+
+        # Send request
+        response = requests.post(
+            f'{self.base_url}/v1/responses',
+            headers=self._build_headers(),
+            json=body,
+            stream=True
+        )
+
+        # Update turn state from response
+        if 'x-codex-turn-state' in response.headers:
+            self.turn_state = response.headers['x-codex-turn-state']
+
+        # Process SSE stream
+        for line in response.iter_lines():
+            if line.startswith(b'data: '):
+                try:
+                    event = json.loads(line[6:])
+                    self._handle_event(event)
+                except json.JSONDecodeError:
+                    continue
+
+    def _handle_event(self, event: Dict[str, Any]):
+        event_type = event.get('type')
+
+        if event_type == 'response.output_item.done':
+            item = event.get('item', {})
+            if item.get('type') == 'message':
+                content = item.get('content', [])
+                for c in content:
+                    if c.get('type') == 'output_text':
+                        print(c.get('text', ''), end='', flush=True)
+
+        elif event_type == 'response.completed':
+            print()  # New line after completion
+
+
+# Usage example
+if __name__ == "__main__":
+    # Assuming you have valid tokens from OAuth2 flow
+    client = CodexChatGPTClient(
+        access_token="your_access_token_here",
+        account_id="your_account_id_here"
+    )
+
+    # Send a message
+    client.send_message(
+        user_message="Hello, how are you?",
+        conversation_history=[],
+        instructions="You are a helpful coding assistant."
+    )
 ```
 
 ---
 
 ## Summary
 
-To implement a compatible client that mimics codex-cli:
+This documentation provides a complete reference for implementing a standalone client that mimics Codex's request behavior to ChatGPT's backend API. Key takeaways:
 
-1. **Use the Responses API** (`/v1/responses`), not Chat Completions
-2. **Implement proper authentication** with Bearer token and optional ChatGPT-Account-ID
-3. **Set correct User-Agent** following the format: `{originator}/{version} ({os} {version}; {arch}) {terminal}`
-4. **Include required headers**: `originator`, `x-client-request-id`, `session_id`
-5. **Handle SSE streaming** with proper event parsing
-6. **Implement retry logic** with exponential backoff
-7. **Support WebSocket transport** for better performance
-8. **Handle turn state** for sticky routing
-9. **Compress requests** with zstd when using ChatGPT auth
-10. **Parse model capabilities** from `/v1/models` endpoint
+1. **Authentication**: Uses OAuth2 device code flow with token refresh
+2. **Headers**: Requires `Authorization`, `ChatGPT-Account-ID`, and various Codex-specific headers
+3. **Format**: Uses custom `ResponseItem` format instead of OpenAI's `messages` array
+4. **Transport**: Supports both HTTP/SSE and WebSocket with automatic fallback
+5. **Session Management**: Uses conversation IDs, window generations, and turn state for routing
+6. **Instructions**: Separate `instructions` field instead of system messages
 
-All code references are from the `codex-rs` directory in the repository.
+All code locations reference the Codex Rust codebase for verification and deeper exploration.
+
+---
+
+## 11. Detailed Request Examples with Tool Usage
+
+### 11.1 Simple Text Request (No Tools)
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful coding assistant.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What is Python?"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "reasoning": null,
+  "store": false,
+  "stream": true,
+  "include": [],
+  "service_tier": null,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000",
+  "text": null,
+  "client_metadata": {
+    "x-codex-installation-id": "123e4567-e89b-12d3-a456-426614174000"
+  }
+}
+```
+
+### 11.2 Request with Function Tools
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful coding assistant with access to shell commands.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "List files in the current directory"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Execute a shell command and return the output",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string",
+            "description": "The shell command to execute"
+          },
+          "workdir": {
+            "type": "string",
+            "description": "Working directory for command execution"
+          }
+        },
+        "required": ["command"],
+        "additionalProperties": false
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "reasoning": null,
+  "store": false,
+  "stream": true,
+  "include": [],
+  "service_tier": null,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000",
+  "text": null,
+  "client_metadata": {
+    "x-codex-installation-id": "123e4567-e89b-12d3-a456-426614174000"
+  }
+}
+```
+
+### 11.3 Request with Tool Call and Output in History
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful coding assistant.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "List files in the current directory"
+        }
+      ]
+    },
+    {
+      "type": "message",
+      "role": "assistant",
+      "content": [
+        {
+          "type": "output_text",
+          "text": "I'll list the files for you."
+        }
+      ]
+    },
+    {
+      "type": "function_call",
+      "call_id": "call_abc123",
+      "name": "shell",
+      "arguments": "{\"command\":\"ls -la\"}"
+    },
+    {
+      "type": "function_call_output",
+      "call_id": "call_abc123",
+      "output": {
+        "type": "text",
+        "text": "total 48\ndrwxr-xr-x  12 user  staff   384 Apr 19 10:30 .\ndrwxr-xr-x   6 user  staff   192 Apr 18 15:20 ..\n-rw-r--r--   1 user  staff  1234 Apr 19 10:25 README.md\n-rw-r--r--   1 user  staff   567 Apr 19 10:30 main.py"
+      }
+    },
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What's in main.py?"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "function",
+      "name": "shell",
+      "description": "Execute a shell command",
+      "parameters": {
+        "type": "object",
+        "properties": {
+          "command": {
+            "type": "string"
+          }
+        },
+        "required": ["command"]
+      }
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### 11.4 Request with Built-in Tools
+
+**Request with local_shell, web_search, and image_generation:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful assistant with access to shell, web search, and image generation.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Search for Python tutorials and create a diagram"
+        }
+      ]
+    }
+  ],
+  "tools": [
+    {
+      "type": "local_shell"
+    },
+    {
+      "type": "web_search",
+      "external_web_access": true,
+      "search_context_size": "medium",
+      "search_content_types": ["text", "image"]
+    },
+    {
+      "type": "image_generation",
+      "output_format": "url"
+    }
+  ],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### 11.5 Request with Reasoning Controls
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful coding assistant.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Explain how quicksort works"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "reasoning": {
+    "effort": "high",
+    "summary": "auto"
+  },
+  "store": false,
+  "stream": true,
+  "include": ["reasoning.encrypted_content"],
+  "service_tier": null,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Reasoning effort options:**
+- `"low"` - Minimal reasoning
+- `"medium"` - Balanced reasoning (default)
+- `"high"` - Extended reasoning
+
+**Reasoning summary options:**
+- `"auto"` - Automatic summary generation
+- `"none"` - No summary
+- `"concise"` - Brief summary
+- `"detailed"` - Detailed summary
+
+### 11.6 Request with Verbosity Control
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful coding assistant.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "Explain Python decorators"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "text": {
+    "verbosity": "high"
+  },
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Verbosity options:**
+- `"low"` - Concise responses
+- `"medium"` - Balanced responses (default)
+- `"high"` - Detailed responses
+
+### 11.7 Request with JSON Schema Output
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful assistant that returns structured data.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "List 3 programming languages with their use cases"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "text": {
+    "format": {
+      "type": "json_schema",
+      "strict": true,
+      "name": "programming_languages",
+      "schema": {
+        "type": "object",
+        "properties": {
+          "languages": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "name": {
+                  "type": "string"
+                },
+                "use_case": {
+                  "type": "string"
+                }
+              },
+              "required": ["name", "use_case"],
+              "additionalProperties": false
+            }
+          }
+        },
+        "required": ["languages"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+### 11.8 Request with Image Input
+
+**Request:**
+```json
+{
+  "model": "gpt-4",
+  "instructions": "You are a helpful assistant that can analyze images.",
+  "input": [
+    {
+      "type": "message",
+      "role": "user",
+      "content": [
+        {
+          "type": "input_text",
+          "text": "What's in this image?"
+        },
+        {
+          "type": "input_image",
+          "source": {
+            "type": "url",
+            "url": "https://example.com/image.jpg"
+          },
+          "detail": "high"
+        }
+      ]
+    }
+  ],
+  "tools": [],
+  "tool_choice": "auto",
+  "parallel_tool_calls": true,
+  "store": false,
+  "stream": true,
+  "prompt_cache_key": "550e8400-e29b-41d4-a716-446655440000"
+}
+```
+
+**Image detail options:**
+- `"low"` - Low resolution analysis
+- `"high"` - High resolution analysis
+- `"auto"` - Automatic selection
+
+---
+
+## 12. Key Differences from Standard OpenAI API
+
+### 12.1 Missing Fields in Codex/ChatGPT Format
+
+The following OpenAI API fields are **NOT supported** in Codex's ChatGPT backend format:
+
+#### Not Supported:
+- `temperature` - Not configurable per request
+- `top_p` - Not configurable per request
+- `max_tokens` - Not configurable per request (handled internally)
+- `max_completion_tokens` - Not configurable per request
+- `presence_penalty` - Not supported
+- `frequency_penalty` - Not supported
+- `logit_bias` - Not supported
+- `logprobs` - Not supported
+- `top_logprobs` - Not supported
+- `n` - Always 1 (single response)
+- `stop` - Not configurable
+- `seed` - Not supported
+- `user` - Not used (account ID in header instead)
+
+### 12.2 Codex-Specific Fields
+
+Fields that exist in Codex but not in standard OpenAI API:
+
+#### Codex-Only Fields:
+- `instructions` - Replaces system message
+- `input` - Replaces `messages` array
+- `prompt_cache_key` - For prompt caching
+- `client_metadata` - For telemetry and tracking
+- `include` - For including reasoning content
+- `text.verbosity` - Response verbosity control
+- `reasoning.effort` - Reasoning effort level
+- `reasoning.summary` - Reasoning summary type
+
+### 12.3 Tool Definition Differences
+
+**OpenAI Standard:**
+```json
+{
+  "type": "function",
+  "function": {
+    "name": "get_weather",
+    "description": "Get weather information",
+    "parameters": {
+      "type": "object",
+      "properties": {
+        "location": {"type": "string"}
+      },
+      "required": ["location"]
+    }
+  }
+}
+```
+
+**Codex/ChatGPT Format:**
+```json
+{
+  "type": "function",
+  "name": "get_weather",
+  "description": "Get weather information",
+  "parameters": {
+    "type": "object",
+    "properties": {
+      "location": {"type": "string"}
+    },
+    "required": ["location"],
+    "additionalProperties": false
+  }
+}
+```
+
+**Key differences:**
+- No nested `function` object
+- `additionalProperties: false` is typically included
+- Tool definition is flatter
+
+### 12.4 Built-in Tool Types
+
+Codex supports special built-in tool types not in standard OpenAI:
+
+```json
+{
+  "type": "local_shell"
+}
+```
+
+```json
+{
+  "type": "web_search",
+  "external_web_access": true,
+  "search_context_size": "medium"
+}
+```
+
+```json
+{
+  "type": "image_generation",
+  "output_format": "url"
+}
+```
+
+```json
+{
+  "type": "tool_search",
+  "execution": "client",
+  "description": "Search for available tools",
+  "parameters": {...}
+}
+```
+
+```json
+{
+  "type": "namespace",
+  "name": "mcp_server_name",
+  "description": "Tools from MCP server",
+  "tools": [...]
+}
+```
+
+### 12.5 Response Format Differences
+
+**OpenAI Standard Response:**
+```json
+{
+  "id": "chatcmpl-123",
+  "object": "chat.completion.chunk",
+  "created": 1677652288,
+  "model": "gpt-4",
+  "choices": [{
+    "index": 0,
+    "delta": {
+      "content": "Hello"
+    },
+    "finish_reason": null
+  }]
+}
+```
+
+**Codex/ChatGPT SSE Events:**
+```
+data: {"type":"response.created","response_id":"resp_123"}
+
+data: {"type":"response.output_item.added","item":{"type":"message","role":"assistant","content":[]}}
+
+data: {"type":"response.output_text.delta","delta":"Hello"}
+
+data: {"type":"response.output_item.done","item":{"type":"message","role":"assistant","content":[{"type":"output_text","text":"Hello"}]}}
+
+data: {"type":"response.completed","response_id":"resp_123","token_usage":{"input_tokens":10,"output_tokens":5}}
+```
+
+### 12.6 Service Tier
+
+Codex uses `service_tier` field for priority routing:
+
+```json
+{
+  "service_tier": "default"
+}
+```
+
+**Options:**
+- `"default"` - Standard priority
+- `"priority"` - High priority (maps to "fast" internally)
+- `null` - No specific tier
+
+This is different from OpenAI's standard API which doesn't have this field.
+
+---
+
+## 13. Complete Conversion Guide: OpenAI → Codex Format
+
+### 13.1 Basic Conversion Function
+
+```python
+def convert_openai_to_codex(openai_request: dict) -> dict:
+    """
+    Convert OpenAI API format to Codex/ChatGPT format
+    """
+    codex_request = {
+        "model": openai_request.get("model", "gpt-4"),
+        "instructions": "",
+        "input": [],
+        "tools": [],
+        "tool_choice": openai_request.get("tool_choice", "auto"),
+        "parallel_tool_calls": openai_request.get("parallel_tool_calls", True),
+        "store": False,
+        "stream": openai_request.get("stream", True),
+        "include": [],
+        "service_tier": None,
+        "prompt_cache_key": str(uuid.uuid4()),
+    }
+    
+    # Extract system message as instructions
+    messages = openai_request.get("messages", [])
+    for msg in messages:
+        if msg.get("role") == "system":
+            codex_request["instructions"] = msg.get("content", "")
+            break
+    
+    # Convert messages to input items
+    for msg in messages:
+        if msg.get("role") == "system":
+            continue  # Already handled
+            
+        role = msg.get("role")
+        content = msg.get("content", "")
+        
+        # Handle string content
+        if isinstance(content, str):
+            codex_request["input"].append({
+                "type": "message",
+                "role": role,
+                "content": [{
+                    "type": "input_text" if role == "user" else "output_text",
+                    "text": content
+                }]
+            })
+        # Handle array content (multimodal)
+        elif isinstance(content, list):
+            content_items = []
+            for item in content:
+                if item.get("type") == "text":
+                    content_items.append({
+                        "type": "input_text" if role == "user" else "output_text",
+                        "text": item.get("text", "")
+                    })
+                elif item.get("type") == "image_url":
+                    content_items.append({
+                        "type": "input_image",
+                        "source": {
+                            "type": "url",
+                            "url": item.get("image_url", {}).get("url", "")
+                        },
+                        "detail": item.get("image_url", {}).get("detail", "auto")
+                    })
+            
+            codex_request["input"].append({
+                "type": "message",
+                "role": role,
+                "content": content_items
+            })
+        
+        # Handle tool calls in assistant messages
+        if msg.get("tool_calls"):
+            for tool_call in msg["tool_calls"]:
+                codex_request["input"].append({
+                    "type": "function_call",
+                    "call_id": tool_call.get("id", ""),
+                    "name": tool_call.get("function", {}).get("name", ""),
+                    "arguments": tool_call.get("function", {}).get("arguments", "{}")
+                })
+        
+        # Handle tool responses
+        if msg.get("role") == "tool":
+            codex_request["input"].append({
+                "type": "function_call_output",
+                "call_id": msg.get("tool_call_id", ""),
+                "output": {
+                    "type": "text",
+                    "text": msg.get("content", "")
+                }
+            })
+    
+    # Convert tools
+    if "tools" in openai_request:
+        for tool in openai_request["tools"]:
+            if tool.get("type") == "function":
+                func = tool.get("function", {})
+                codex_request["tools"].append({
+                    "type": "function",
+                    "name": func.get("name", ""),
+                    "description": func.get("description", ""),
+                    "parameters": func.get("parameters", {})
+                })
+    
+    return codex_request
+```
+
+### 13.2 Usage Example
+
+```python
+# OpenAI format request
+openai_request = {
+    "model": "gpt-4",
+    "messages": [
+        {"role": "system", "content": "You are a helpful assistant."},
+        {"role": "user", "content": "Hello!"},
+        {"role": "assistant", "content": "Hi there!"},
+        {"role": "user", "content": "How are you?"}
+    ],
+    "temperature": 0.7,  # Will be ignored
+    "max_tokens": 100,   # Will be ignored
+    "stream": True
+}
+
+# Convert to Codex format
+codex_request = convert_openai_to_codex(openai_request)
+
+# Send to ChatGPT backend
+response = requests.post(
+    "https://chatgpt.com/backend-api/v1/responses",
+    headers=headers,
+    json=codex_request,
+    stream=True
+)
+```
+
+---
+
+## 14. Summary of Request Fields
+
+### 14.1 Required Fields
+
+- `model` - Model identifier (e.g., "gpt-4")
+- `input` - Array of ResponseItem objects
+- `tools` - Array of tool definitions (can be empty)
+- `tool_choice` - Tool selection mode ("auto", "none", or specific tool)
+- `parallel_tool_calls` - Boolean for parallel execution
+- `store` - Boolean for storing conversation
+- `stream` - Boolean for streaming responses
+
+### 14.2 Optional Fields
+
+- `instructions` - System prompt (empty string if not provided)
+- `reasoning` - Reasoning controls (effort and summary)
+- `include` - Array of fields to include (e.g., reasoning content)
+- `service_tier` - Priority routing ("default", "priority", or null)
+- `prompt_cache_key` - Cache key for prompt caching
+- `text` - Text controls (verbosity and format)
+- `client_metadata` - Metadata for telemetry
+
+### 14.3 Field Value Constraints
+
+**model:**
+- Must be a valid model identifier
+- Examples: "gpt-4", "gpt-4-turbo", "gpt-3.5-turbo"
+
+**tool_choice:**
+- `"auto"` - Model decides when to use tools
+- `"none"` - Never use tools
+- `{"type": "function", "name": "tool_name"}` - Force specific tool
+
+**parallel_tool_calls:**
+- `true` - Allow multiple tool calls in parallel
+- `false` - Execute tools sequentially
+
+**store:**
+- `false` - Don't store (typical for Codex)
+- `true` - Store conversation
+
+**stream:**
+- `true` - Stream responses via SSE
+- `false` - Return complete response
+
+This completes the comprehensive documentation of the ChatGPT/Codex API request format with detailed examples and conversion guidance.
