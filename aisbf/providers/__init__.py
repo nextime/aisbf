@@ -122,17 +122,7 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
         handler = handler_class(provider_id, api_key)
         # Set user_id manually for base class compatibility
         handler.user_id = user_id
-        # Fix error tracking and rate limit for user providers
-        if user_id is not None:
-            handler.error_tracking = {
-                "enabled": True,
-                "max_errors": 5,
-                "cooldown_seconds": 60,
-                "failures": 0,
-                "last_failure": 0,
-                "disabled_until": None
-            }
-            handler.rate_limit = 60
+        # Base class already handles default error tracking and rate limit for user providers
     
     # Store user provider config on the handler for later use
     if user_id is not None and provider_config is not None:

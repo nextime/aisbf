@@ -748,9 +748,7 @@ class BaseProviderHandler:
         self.user_provider_config = None
         
         # Get error tracking config - use user-specific or default to global
-        if user_id is not None and provider_id in config.error_tracking:
-            self.error_tracking = config.error_tracking[provider_id]
-        elif user_id is not None:
+        if user_id is not None:
             # Default error tracking for user providers
             self.error_tracking = {
                 "enabled": True,
@@ -766,8 +764,9 @@ class BaseProviderHandler:
         self.last_request_time = 0
         
         # Get rate limit - use user-specific or default to global
-        if user_id is not None and provider_id in config.providers:
-            self.rate_limit = config.providers[provider_id].rate_limit
+        if user_id is not None and hasattr(self, 'user_provider_config') and self.user_provider_config is not None:
+            # User provider config (dict)
+            self.rate_limit = self.user_provider_config.get('rate_limit', 60)
         elif user_id is not None:
             # Default rate limit for user providers
             self.rate_limit = 60
