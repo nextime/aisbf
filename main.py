@@ -1101,7 +1101,6 @@ async def startup_event():
                 # Check 3: Database-stored credentials (uploaded via dashboard)
                 if not has_valid_auth:
                     try:
-                        from aisbf.database import get_database
                         db = DatabaseRegistry.get_config_database()
                         if db:
                             # Check for uploaded credentials files for this provider
@@ -1330,7 +1329,6 @@ async def auth_middleware(request: Request, call_next):
             request.state.is_admin = True  # Global tokens have admin access
         else:
             # Check user API tokens
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_auth = db.authenticate_user_token(token)
 
@@ -1379,7 +1377,6 @@ async def auth_middleware(request: Request, call_next):
         user_id = request.session.get('user_id')
         if user_id and require_verification:
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 current_user = db.get_user_by_id(user_id)
                 if current_user and current_user.get('email_verified') != request.session.get('email_verified'):
@@ -1395,7 +1392,6 @@ async def auth_middleware(request: Request, call_next):
         user_id = request.session.get('user_id')
         if user_id:
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 current_user = db.get_user_by_id(user_id)
                 if not current_user:
@@ -1457,7 +1453,6 @@ async def tier_limit_middleware(request: Request, call_next):
     if not user_id:
         return await call_next(request)
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get user tier and current usage
@@ -1620,7 +1615,6 @@ async def tier_limit_middleware(request: Request, call_next):
 async def record_token_usage_async(user_id: int, token_id: int):
     """Asynchronously record token usage"""
     try:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         # Record with dummy values for now - will be updated when we know the actual usage
         db.record_user_token_usage(user_id, token_id, '', '', 0)
@@ -1723,7 +1717,6 @@ async def get_current_user(request: Request) -> dict:
         raise HTTPException(status_code=401, detail="Authentication required")
     
     # Get user from database
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user = db.get_user_by_id(user_id)
     
@@ -1998,7 +1991,6 @@ async def dashboard_analytics(
         return auth_check
     
     from aisbf.analytics import get_analytics
-    from aisbf.database import get_database
     
     # Get analytics and database
     db = DatabaseRegistry.get_config_database()
@@ -2234,7 +2226,6 @@ async def auth_logincheck(request: Request):
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...), remember_me: bool = Form(False)):
     """Handle dashboard login"""
-    from aisbf.database import get_database
 
     # Hash the submitted password
     password_hash = hashlib.sha256(password.encode()).hexdigest()
@@ -2361,7 +2352,6 @@ async def dashboard_signup(
     confirm_password: str = Form(...)
 ):
     """Handle user signup"""
-    from aisbf.database import get_database
     from aisbf.email_utils import hash_password, generate_verification_token, send_verification_email
     import logging
 
@@ -2508,7 +2498,6 @@ async def dashboard_signup(
 @app.get("/dashboard/verify")
 async def verify_email_page(request: Request):
     """Show email verification page"""
-    from aisbf.database import get_database
     import logging
 
     logger = logging.getLogger(__name__)
@@ -2553,7 +2542,6 @@ async def verify_email_page(request: Request):
 @app.post("/dashboard/resend-verification")
 async def resend_verification(request: Request):
     """Resend verification email"""
-    from aisbf.database import get_database
     from aisbf.email_utils import send_verification_email, generate_verification_token
     import logging
 
@@ -2623,7 +2611,6 @@ async def resend_verification(request: Request):
 @app.get("/dashboard/verify-email")
 async def verify_email(request: Request, token: str, email: str):
     """Handle email verification"""
-    from aisbf.database import get_database
     import logging
 
     logger = logging.getLogger(__name__)
@@ -2701,7 +2688,6 @@ async def dashboard_forgot_password_page(request: Request):
 @app.post("/dashboard/forgot-password")
 async def dashboard_forgot_password(request: Request, email: str = Form(...)):
     """Handle forgot password request"""
-    from aisbf.database import get_database
     from aisbf.email_utils import generate_password_reset_token, send_password_reset_email
     import logging
     from datetime import datetime, timedelta
@@ -2819,7 +2805,6 @@ async def dashboard_reset_password(
     confirm_password: str = Form(...)
 ):
     """Handle password reset confirmation"""
-    from aisbf.database import get_database
     from aisbf.email_utils import hash_password
     import logging
 
@@ -2916,7 +2901,6 @@ async def dashboard_profile(request: Request):
     if isinstance(auth_check, RedirectResponse):
         return auth_check
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
 
@@ -2942,7 +2926,6 @@ async def dashboard_profile_save(request: Request, username: str = Form(...), di
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
-    from aisbf.database import get_database
     user_id = request.session.get('user_id')
     db = DatabaseRegistry.get_config_database()
     
@@ -2964,7 +2947,6 @@ async def dashboard_change_password(request: Request):
         return auth_check
     
     # User dashboard - load usage stats same as main dashboard user route
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -3018,7 +3000,6 @@ async def dashboard_change_password_save(request: Request, current_password: str
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
-    from aisbf.database import get_database
     user_id = request.session.get('user_id')
     db = DatabaseRegistry.get_config_database()
     
@@ -3067,7 +3048,6 @@ async def dashboard_change_email_save(request: Request, new_email: str = Form(..
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
-    from aisbf.database import get_database
     from aisbf.email_utils import send_email_verification, hash_password
     import secrets
     
@@ -3122,7 +3102,6 @@ async def dashboard_change_email_save(request: Request, new_email: str = Form(..
 @app.get("/dashboard/verify-email-change")
 async def verify_email_change(request: Request, token: str = Query(...), email: str = Query(...)):
     """Verify new email address"""
-    from aisbf.database import get_database
     
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
@@ -3186,7 +3165,6 @@ async def dashboard_delete_account(request: Request):
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
-    from aisbf.database import get_database
     user_id = request.session.get('user_id')
     db = DatabaseRegistry.get_config_database()
     
@@ -3214,7 +3192,6 @@ async def dashboard_delete_account_confirm(request: Request, password: str = For
     if isinstance(auth_check, RedirectResponse):
         return auth_check
     
-    from aisbf.database import get_database
     user_id = request.session.get('user_id')
     db = DatabaseRegistry.get_config_database()
     
@@ -3302,7 +3279,6 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
     
     try:
         from aisbf.auth.google import GoogleOAuth2
-        from aisbf.database import get_database
         
         client_id = config.aisbf.oauth2.google.client_id
         client_secret = config.aisbf.oauth2.google.client_secret
@@ -3496,7 +3472,6 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
     
     try:
         from aisbf.auth.github import GitHubOAuth2
-        from aisbf.database import get_database
         
         client_id = config.aisbf.oauth2.github.client_id
         client_secret = config.aisbf.oauth2.github.client_secret
@@ -3732,7 +3707,6 @@ async def dashboard_index(request: Request):
         )
     else:
         # User dashboard - show user stats
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_id = request.session.get('user_id')
         
@@ -3826,7 +3800,6 @@ async def dashboard_providers(request: Request):
             providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
     else:
         # Database user: load from database
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         
@@ -4038,8 +4011,17 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                 json.dump(full_config, f, indent=2)
         else:
             # Database user: save to database
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
+            
+            # Get existing providers to find which to delete
+            existing_providers = db.get_user_providers(current_user_id)
+            existing_provider_keys = {p['provider_id'] for p in existing_providers}
+            new_provider_keys = set(providers_data.keys())
+            
+            # Delete providers that are no longer present
+            providers_to_delete = existing_provider_keys - new_provider_keys
+            for provider_key in providers_to_delete:
+                db.delete_user_provider(current_user_id, provider_key)
             
             # Save each provider to database
             for provider_key, provider_config in providers_data.items():
@@ -4105,7 +4087,6 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                 }
             )
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_providers = db.get_user_providers(current_user_id)
             
@@ -4233,7 +4214,6 @@ async def dashboard_rotations(request: Request):
             rotations_data = json.load(f)
     else:
         # Database user: load from database
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_rotations = db.get_user_rotations(current_user_id)
         
@@ -4248,7 +4228,6 @@ async def dashboard_rotations(request: Request):
         available_providers = list(config.providers.keys()) if config else []
     else:
         # Database user: use ONLY their own providers
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         available_providers = [p['provider_id'] for p in user_providers]
@@ -4317,7 +4296,6 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                 json.dump(rotations_data, f, indent=2)
         else:
             # Database user: save to database
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             
             # Save each rotation to database
@@ -4345,7 +4323,6 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                 }
             )
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_rotations = db.get_user_rotations(current_user_id)
             
@@ -4378,7 +4355,6 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             with open(config_path) as f:
                 rotations_data = json.load(f)
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_rotations = db.get_user_rotations(current_user_id)
             rotations_data = {"rotations": {}, "notifyerrors": False}
@@ -4401,7 +4377,6 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                 }
             )
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_providers = db.get_user_providers(current_user_id)
             available_providers = [p['provider_id'] for p in user_providers]
@@ -4441,7 +4416,6 @@ async def dashboard_autoselect(request: Request):
             autoselect_data = json.load(f)
     else:
         # Database user: load from database
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
         
@@ -4501,7 +4475,6 @@ async def dashboard_autoselect(request: Request):
         )
     else:
         # Database user: use ONLY their own rotations and providers
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
         
@@ -4571,7 +4544,6 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                 json.dump(autoselect_data, f, indent=2)
         else:
             # Database user: save to database
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             
             # Save each autoselect to database
@@ -4630,7 +4602,6 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                 }
             )
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_autoselects = db.get_user_autoselects(current_user_id)
             
@@ -4688,7 +4659,6 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             with open(config_path) as f:
                 autoselect_data = json.load(f)
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             user_autoselects = db.get_user_autoselects(current_user_id)
             autoselect_data = {}
@@ -4743,7 +4713,6 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                 }
             )
         else:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             
             # For database users, get available user rotations
@@ -4807,7 +4776,6 @@ async def dashboard_prompts(request: Request):
     ]
     
     prompts_data = []
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     for prompt_file in prompt_files:
@@ -4919,7 +4887,6 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
             f.write(prompt_content)
     else:
         # Regular user saves to database
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         db.save_user_prompt(user_id, prompt_key, prompt_content)
     
@@ -4936,7 +4903,6 @@ async def dashboard_prompts_reset(request: Request, prompt_key: str):
     if not user_id:
         return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     db.delete_user_prompt(user_id, prompt_key)
     
@@ -5317,7 +5283,6 @@ async def dashboard_users(
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get paginated users
@@ -5378,7 +5343,6 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Hash the password
@@ -5410,7 +5374,6 @@ async def dashboard_users_edit(request: Request, user_id: int, username: str = F
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -5441,7 +5404,6 @@ async def dashboard_users_toggle(request: Request, user_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -5462,7 +5424,6 @@ async def dashboard_users_delete(request: Request, user_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -5478,7 +5439,6 @@ async def dashboard_users_update_tier(request: Request, user_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -5510,7 +5470,6 @@ async def dashboard_users_bulk(request: Request):
     if auth_check:
         return auth_check
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
 
     try:
@@ -5763,7 +5722,6 @@ async def dashboard_provider_upload(
             })
         else:
             # Database user: save to database
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
 
             # Get user auth files directory
@@ -5857,7 +5815,6 @@ async def dashboard_provider_upload_form(
             })
         else:
             # Database user: save to database
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
 
             # Get user auth files directory
@@ -5973,7 +5930,6 @@ async def dashboard_provider_upload_chunk(
 
             # Save metadata to database if not admin
             if not is_config_admin:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 db.save_user_auth_file(
                     user_id=current_user_id,
@@ -6229,7 +6185,6 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 )
                 # Load credentials from database
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
@@ -6270,7 +6225,6 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 )
                 # Load credentials from database
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
@@ -6310,7 +6264,6 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 )
                 # Load credentials from database
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
@@ -6351,7 +6304,6 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 )
                 # Load credentials from database
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
@@ -6408,7 +6360,6 @@ async def dashboard_user_rotations_delete(request: Request, rotation_name: str):
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
 
     try:
@@ -6439,7 +6390,6 @@ async def dashboard_user_autoselects_delete(request: Request, autoselect_name: s
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
 
     try:
@@ -6502,7 +6452,6 @@ async def dashboard_user_tokens(request: Request):
     if not user_id:
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
 
     # Get user API tokens
@@ -6531,7 +6480,6 @@ async def dashboard_user_tokens_create(request: Request, description: str = Form
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
-    from aisbf.database import get_database
     import secrets
 
     db = DatabaseRegistry.get_config_database()
@@ -6560,7 +6508,6 @@ async def dashboard_user_tokens_delete(request: Request, token_id: int):
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
 
     try:
@@ -6612,7 +6559,6 @@ async def dashboard_admin_tiers(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_all_tiers()
@@ -6635,7 +6581,6 @@ async def api_list_tiers(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_all_tiers()
@@ -6648,7 +6593,6 @@ async def api_get_tier(tier_id: int, request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     tier = db.get_tier_by_id(tier_id)
@@ -6664,7 +6608,6 @@ async def api_create_tier(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -6698,7 +6641,6 @@ async def api_update_tier(request: Request, tier_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -6750,7 +6692,6 @@ async def api_delete_tier(request: Request, tier_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -6789,7 +6730,6 @@ async def dashboard_admin_tier_edit(request: Request, tier_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     tier = db.get_tier_by_id(tier_id)
@@ -6813,7 +6753,6 @@ async def dashboard_admin_tier_save(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     try:
@@ -6856,7 +6795,6 @@ async def api_get_currency_settings(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get currency settings from database
@@ -6874,7 +6812,6 @@ async def api_save_currency_settings(request: Request):
     try:
         body = await request.json()
         
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         
         # Save currency settings to database
@@ -6893,7 +6830,6 @@ async def api_get_payment_gateways(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get payment gateway settings from database
@@ -6911,7 +6847,6 @@ async def api_save_payment_gateways(request: Request):
     try:
         body = await request.json()
         
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         
         # Save payment gateway settings to database
@@ -7693,7 +7628,6 @@ async def dashboard_pricing(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     tiers = db.get_visible_tiers()
@@ -7701,7 +7635,6 @@ async def dashboard_pricing(request: Request):
     
     # Get enabled payment gateways
     enabled_gateways = []
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     gateways = db.get_payment_gateway_settings()
     for gateway, settings in gateways.items():
@@ -7732,7 +7665,6 @@ async def dashboard_subscription(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -7773,7 +7705,6 @@ async def dashboard_billing(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -7809,7 +7740,6 @@ async def dashboard_add_payment_method(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get enabled payment gateways
@@ -7847,7 +7777,6 @@ async def dashboard_add_payment_method_post(request: Request):
     payment_type = data.get('type')
     
     if payment_type in ['bitcoin', 'eth', 'usdt', 'usdc']:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         
         # Set as default payment method
@@ -7871,7 +7800,6 @@ async def dashboard_add_payment_method_stripe(request: Request):
     if not payment_method_id:
         return JSONResponse({"success": False, "error": "Payment method ID required"}, status_code=400)
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Store payment method in database
@@ -7889,7 +7817,6 @@ async def dashboard_delete_payment_method(request: Request, method_id: int):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -7913,7 +7840,6 @@ async def dashboard_set_default_payment_method(request: Request, method_id: int)
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -7957,7 +7883,6 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -8031,7 +7956,6 @@ async def dashboard_add_payment_method_paypal_callback(request: Request):
     if auth_check:
         return auth_check
     
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
@@ -8314,7 +8238,6 @@ async def dashboard_rate_limits_data(request: Request):
         return auth_check
     
     from aisbf.providers import get_all_adaptive_rate_limiters
-    from aisbf.database import get_database
     
     is_admin = request.session.get('role') == 'admin'
     current_user_id = request.session.get('user_id')
@@ -8360,7 +8283,6 @@ async def dashboard_rate_limits_reset(request: Request, provider_id: str):
     current_user_id = request.session.get('user_id')
     
     from aisbf.providers import get_all_adaptive_rate_limiters, get_adaptive_rate_limiter
-    from aisbf.database import get_database
     
     try:
         if is_admin:
@@ -8751,7 +8673,6 @@ async def list_all_models(request: Request):
     if auth_header and auth_header.startswith("Bearer "):
         # Try to authenticate user
         try:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             token = auth_header.split(" ")[1]
             user = db.get_user_by_token(token)
@@ -8818,7 +8739,6 @@ async def v1_list_all_models(request: Request):
     if auth_header and auth_header.startswith("Bearer "):
         # Try to authenticate user
         try:
-            from aisbf.database import get_database
             db = DatabaseRegistry.get_config_database()
             token = auth_header.split(" ")[1]
             user = db.get_user_by_token(token)
@@ -10230,7 +10150,6 @@ async def mcp_user_list_tools(request: Request, username: str):
     
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -10261,7 +10180,6 @@ async def mcp_user_call_tool(request: Request, username: str):
     
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -10394,7 +10312,6 @@ async def user_list_models_by_username(request: Request, username: str):
     Example:
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/models
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     # Get target user by username
@@ -10613,7 +10530,6 @@ async def user_list_models(request: Request, username: str):
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -10812,7 +10728,6 @@ async def user_list_providers(request: Request, username: str):
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -10932,7 +10847,6 @@ async def user_list_rotations(request: Request, username: str):
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -11010,7 +10924,6 @@ async def user_list_autoselects(request: Request, username: str):
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -11092,7 +11005,6 @@ async def user_list_providers_by_username(request: Request, username: str):
     Example:
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/providers
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11211,7 +11123,6 @@ async def user_list_rotations_by_username(request: Request, username: str):
     Example:
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11291,7 +11202,6 @@ async def user_list_autoselects_by_username(request: Request, username: str):
     Example:
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/autoselects
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11392,7 +11302,6 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
              -d '{"model": "rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
              http://localhost:17765/api/u/{username}/chat/completions
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11590,7 +11499,6 @@ async def user_list_provider_models_by_username(request: Request, username: str,
     """
     List models for a specific user provider.
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11671,7 +11579,6 @@ async def user_list_config_models_by_username(request: Request, username: str, c
     Example:
         curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/{username}/rotations/models
     """
-    from aisbf.database import get_database
     db = DatabaseRegistry.get_config_database()
     
     target_user = db.get_user_by_username(username)
@@ -11800,7 +11707,6 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -11949,7 +11855,6 @@ async def user_list_config_models(request: Request, username: str, config_type: 
 
     # Validate username matches authenticated user (unless admin/global token)
     if not is_global_token and not is_admin and user_id:
-        from aisbf.database import get_database
         db = DatabaseRegistry.get_config_database()
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
@@ -12500,7 +12405,6 @@ async def dashboard_claude_auth_complete(request: Request):
             
             def save_callback(creds):
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     if db and current_user_id and provider_key:
                         db.save_user_oauth2_credentials(
@@ -12634,7 +12538,6 @@ async def dashboard_claude_auth_status(request: Request):
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
@@ -12812,7 +12715,6 @@ async def dashboard_kilo_auth_poll(request: Request):
                 if not is_config_admin:
                     # Non-config-admin user: save credentials to database
                     try:
-                        from aisbf.database import get_database
                         db = DatabaseRegistry.get_config_database()
                         provider_key = request.session.get('kilo_provider')
                         if db and current_user_id and provider_key:
@@ -12921,7 +12823,6 @@ async def dashboard_kilo_auth_status(request: Request):
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
@@ -13125,7 +13026,6 @@ async def dashboard_codex_auth_poll(request: Request):
             if not is_config_admin:
                 # Non-admin user: save credentials to database instead of file
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     provider_key = request.session.get('codex_provider')
                     if db and current_user_id and provider_key:
@@ -13238,7 +13138,6 @@ async def dashboard_codex_auth_status(request: Request):
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
@@ -13491,7 +13390,6 @@ async def dashboard_qwen_auth_poll(request: Request):
             if not is_config_admin:
                 # Non-config-admin user: also save credentials to database
                 try:
-                    from aisbf.database import get_database
                     db = DatabaseRegistry.get_config_database()
                     provider_key = request.session.get('qwen_provider')
                     if db and current_user_id and provider_key:
@@ -13604,7 +13502,6 @@ async def dashboard_qwen_auth_status(request: Request):
         if not is_config_admin:
             # Non-config-admin user: check database for credentials
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 if db and current_user_id:
                     db_creds = db.get_user_oauth2_credentials(
@@ -13682,7 +13579,6 @@ async def dashboard_qwen_auth_logout(request: Request):
         current_user_id = request.session.get('user_id')
         if current_user_id:
             try:
-                from aisbf.database import get_database
                 db = DatabaseRegistry.get_config_database()
                 if db:
                     db.delete_user_oauth2_credentials(current_user_id, provider_key, 'qwen_oauth2')
