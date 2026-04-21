@@ -3865,8 +3865,8 @@ class AutoselectHandler:
             self._load_user_configs()
             # Override config to only use user-specific configs with NO global fallback
             self.autoselects = {}
-            for autoselect_id, autoselect_config in self.user_autoselects.items():
-                self.autoselects[autoselect_id] = autoselect_config
+            for autoselect in self.user_autoselects:
+                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
         else:
             self.user_providers = {}
             self.user_rotations = {}
@@ -3887,8 +3887,8 @@ class AutoselectHandler:
             self._load_user_configs()
             # Refresh autoselects dict after reload
             self.autoselects = {}
-            for autoselect_id, autoselect_config in self.user_autoselects.items():
-                self.autoselects[autoselect_id] = autoselect_config
+            for autoselect in self.user_autoselects:
+                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
 
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""

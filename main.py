@@ -10522,6 +10522,7 @@ async def user_list_models_by_username(request: Request, username: str):
     handler = get_user_handler('request', target_user_id)
     
     # Add user providers - fetch live models from each provider API
+    from aisbf.providers import get_provider_handler
     for provider_id, provider_config in handler.user_providers.items():
         try:
             # Get provider handler for this user provider
