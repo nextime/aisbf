@@ -3934,6 +3934,13 @@ async def dashboard_providers(request: Request):
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         
+        # Convert datetime objects to strings for JSON serialization
+        for provider in user_providers:
+            if 'created_at' in provider and provider['created_at']:
+                provider['created_at'] = provider['created_at'].isoformat() if hasattr(provider['created_at'], 'isoformat') else str(provider['created_at'])
+            if 'updated_at' in provider and provider['updated_at']:
+                provider['updated_at'] = provider['updated_at'].isoformat() if hasattr(provider['updated_at'], 'isoformat') else str(provider['updated_at'])
+        
         # Always pass raw user providers format to the template (array)
         providers_data = user_providers
     
