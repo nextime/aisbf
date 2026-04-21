@@ -1315,6 +1315,9 @@ async def api_token_authorization_middleware(request: Request, call_next):
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     
+    # Debug logging
+    logger.info(f"API Token Auth: path={path}, is_global_token={is_global_token}, user_id={user_id}")
+    
     # --- USER-SPECIFIC ENDPOINTS (/api/u/*) ---
     if (path.startswith("/api/u/") or 
         path.startswith("/mcp/u/") or
@@ -1350,7 +1353,8 @@ async def api_token_authorization_middleware(request: Request, call_next):
                 )
             
             # Debug logging
-            logger.info(f"Token auth check: user_id={user_id}, authenticated_username={authenticated_user.get('username')}, target_username={target_username}")
+            token_short = token[:8] + "..." if len(token) > 8 else token
+            logger.info(f"Token auth check: token={token_short}, user_id={user_id}, authenticated_username={authenticated_user.get('username')}, target_username={target_username}")
             
             if authenticated_user['username'] != target_username:
                 return JSONResponse(
