@@ -4225,8 +4225,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
         except Exception as e:
             logger.warning(f"Migration check for {table_name} table: {e}")
 
-    # Run all configuration database migrations
-    self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
+
 
     conn.commit()
     logger.info("✅ All database migrations completed")
