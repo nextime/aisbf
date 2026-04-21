@@ -181,6 +181,48 @@ class PaymentMigrations:
     def _create_payment_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
         """Create payment-related tables"""
         
+        # Payment methods table
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS payment_methods (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                type VARCHAR(50) NOT NULL,
+                gateway VARCHAR(50),
+                identifier VARCHAR(255),
+                crypto_type VARCHAR(20),
+                last4 VARCHAR(4),
+                brand VARCHAR(50),
+                paypal_email VARCHAR(255),
+                is_default {boolean_type} DEFAULT 0,
+                status VARCHAR(20) DEFAULT 'active',
+                metadata {text_type},
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        ''')
+        
+        # Payment transactions table
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS payment_transactions (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                subscription_id INTEGER,
+                payment_method_id INTEGER,
+                amount {decimal_type} NOT NULL,
+                currency VARCHAR(10) DEFAULT 'USD',
+                status VARCHAR(50) NOT NULL,
+                transaction_type VARCHAR(50) NOT NULL,
+                external_transaction_id VARCHAR(255),
+                metadata {text_type},
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                completed_at TIMESTAMP NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (subscription_id) REFERENCES subscriptions(id),
+                FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
+            )
+        ''')
+        
         # Payment retry queue
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS payment_retry_queue (
@@ -216,10 +258,14 @@ class PaymentMigrations:
         
         # Create indexes
         try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_methods_user ON payment_methods(user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_transactions_user ON payment_transactions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_retry_status ON payment_retry_queue(status, next_retry_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_requests_user_time ON api_requests(user_id, created_at)')
         except:
             pass
+        
+        logger.info("✅ Created/verified payment tables")
     
     def _create_subscription_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
         """Create subscription-related tables"""

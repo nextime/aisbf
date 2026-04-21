@@ -165,6 +165,40 @@ class PaymentService:
             logger.error(f"Error completing PayPal billing agreement: {e}")
             return {'success': False, 'error': str(e)}
     
+    async def initiate_paypal_vault_setup(self, user_id: int, return_url: str, cancel_url: str) -> dict:
+        """Initiate PayPal Vault Setup Token for saving payment method"""
+        try:
+            result = await self.paypal_handler.create_setup_token(return_url, cancel_url)
+            return result
+        except Exception as e:
+            logger.error(f"Error initiating PayPal vault setup: {e}")
+            return {'success': False, 'error': str(e)}
+    
+    async def complete_paypal_vault_setup(self, user_id: int, setup_token_id: str) -> dict:
+        """Complete PayPal vault setup and store payment method"""
+        try:
+            result = await self.paypal_handler.create_payment_token(setup_token_id)
+            
+            if not result['success']:
+                return result
+            
+            # Store payment method
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    INSERT INTO payment_methods
+                    (user_id, type, gateway, identifier, paypal_email, is_default, status)
+                    VALUES (?, 'paypal', 'paypal_v3', ?, ?, 1, 'active')
+                """, (user_id, result['payment_token_id'], result['payer_email']))
+                conn.commit()
+            
+            logger.info(f"Added PayPal vault payment method for user {user_id}")
+            return result
+            
+        except Exception as e:
+            logger.error(f"Error completing PayPal vault setup: {e}")
+            return {'success': False, 'error': str(e)}
+    
     async def get_payment_methods(self, user_id: int) -> list:
         """Get all payment methods for user"""
         try:
