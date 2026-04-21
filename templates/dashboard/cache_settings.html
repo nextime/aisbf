@@ -57,11 +57,9 @@
 
 <script>
 let cacheSettings = [];
-let userProviders = [];
 
 document.addEventListener('DOMContentLoaded', function() {
     loadCacheSettings();
-    loadUserProviders();
 });
 
 async function loadCacheSettings() {
@@ -71,65 +69,14 @@ async function loadCacheSettings() {
         });
         const data = await response.json();
         cacheSettings = data.settings || [];
-        renderCacheSettings();
+        
+        // Update global toggle
+        const globalSetting = cacheSettings.find(s => !s.provider_id && !s.model_name);
+        document.getElementById('globalCacheToggle').checked = globalSetting ? globalSetting.cache_enabled : true;
     } catch (error) {
         console.error('Error loading cache settings:', error);
-        document.getElementById('cacheSettingsTable').innerHTML = '<tr><td colspan="5" style="text-align: center; color: #e74c3c;">Error loading settings</td></tr>';
+        showToast('Error loading cache settings', 'danger');
     }
-}
-
-async function loadUserProviders() {
-    try {
-        const response = await fetch('{{ url_for(request, "/api/user/providers") }}', {
-            credentials: 'same-origin'
-        });
-        const data = await response.json();
-        userProviders = data.providers || [];
-        
-        const select = document.getElementById('providerSelect');
-        select.innerHTML = '<option value="">Select provider...</option>';
-        
-        userProviders.forEach(provider => {
-            const option = document.createElement('option');
-            option.value = provider.id || provider.key;
-            option.textContent = provider.name || provider.id || provider.key;
-            select.appendChild(option);
-        });
-    } catch (error) {
-        console.error('Error loading providers:', error);
-    }
-}
-
-function renderCacheSettings() {
-    const tbody = document.getElementById('cacheSettingsTable');
-    
-    if (cacheSettings.length === 0) {
-        tbody.innerHTML = '<tr><td colspan="5" style="text-align: center; color: #888;">No custom settings defined</td></tr>';
-        return;
-    }
-    
-    tbody.innerHTML = cacheSettings.map(setting => `
-        <tr>
-            <td>${setting.provider_id || '<em>All</em>'}</td>
-            <td>${setting.model_name || '<em>All</em>'}</td>
-            <td>
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" ${setting.cache_enabled ? 'checked' : ''} 
-                           onchange="setCacheSetting('${setting.provider_id || ''}', '${setting.model_name || ''}', this.checked)">
-                </div>
-            </td>
-            <td>${setting.updated_at || '-'}</td>
-            <td>
-                <button type="button" class="btn btn-sm btn-danger" onclick="deleteCacheSetting('${setting.provider_id || ''}', '${setting.model_name || ''}')">
-                    <i class="fas fa-trash"></i>
-                </button>
-            </td>
-        </tr>
-    `).join('');
-    
-    // Update global toggle
-    const globalSetting = cacheSettings.find(s => !s.provider_id && !s.model_name);
-    document.getElementById('globalCacheToggle').checked = globalSetting ? globalSetting.cache_enabled : true;
 }
 
 async function setCacheSetting(provider_id, model_name, enabled) {
@@ -154,50 +101,6 @@ async function setCacheSetting(provider_id, model_name, enabled) {
     } catch (error) {
         console.error('Error updating cache setting:', error);
         showToast('Error updating setting', 'danger');
-    }
-}
-
-async function addProviderSetting() {
-    const provider_id = document.getElementById('providerSelect').value;
-    const model_name = document.getElementById('modelInput').value.trim();
-    const enabled = document.getElementById('addProviderCacheToggle').checked;
-    
-    if (!provider_id) {
-        showToast('Please select a provider', 'warning');
-        return;
-    }
-    
-    await setCacheSetting(provider_id, model_name, enabled);
-    
-    // Clear inputs
-    document.getElementById('providerSelect').value = '';
-    document.getElementById('modelInput').value = '';
-}
-
-async function deleteCacheSetting(provider_id, model_name) {
-    if (!confirm('Are you sure you want to delete this setting?')) {
-        return;
-    }
-    
-    try {
-        const url = new URL('{{ url_for(request, "/dashboard/api/cache-settings") }}', window.location.origin);
-        if (provider_id) url.searchParams.append('provider_id', provider_id);
-        if (model_name) url.searchParams.append('model_name', model_name);
-        
-        const response = await fetch(url, { 
-            method: 'DELETE',
-            credentials: 'same-origin'
-        });
-        
-        if (response.ok) {
-            showToast('Cache setting deleted', 'success');
-            await loadCacheSettings();
-        } else {
-            showToast('Failed to delete setting', 'danger');
-        }
-    } catch (error) {
-        console.error('Error deleting cache setting:', error);
-        showToast('Error deleting setting', 'danger');
     }
 }
 
