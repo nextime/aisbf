@@ -720,8 +720,6 @@ class MCPServer:
         """
         # Route to appropriate handler
         handlers = {
-        # Common tools
-        handlers = {
             # Common tools
             'list_models': self._list_models,
             'list_rotations': self._list_rotations,
