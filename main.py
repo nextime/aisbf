@@ -9392,7 +9392,7 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
             raise
 
     # Check if it's a rotation
-    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).user_rotations):
+    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).rotations):
         logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation request")
         token_id = getattr(request.state, 'token_id', None)
@@ -9463,7 +9463,7 @@ async def list_models(request: Request, provider_id: str):
             raise
 
     # Check if it's a rotation
-    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).user_rotations):
+    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).rotations):
         logger.info(f"Provider ID '{provider_id}' found in rotations")
         logger.debug("Handling rotation model list request")
         handler = get_user_handler('rotation', user_id)
@@ -10484,7 +10484,7 @@ async def user_list_models_by_username(request: Request, username: str):
                 logger.warning(f"Error listing models for user provider {provider_id}: {e}")
         
         rotation_handler = get_user_handler('rotation', target_user_id)
-        for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+        for rotation_id, rotation_config in rotation_handler.rotations.items():
             try:
                 all_models.append({
                     'id': f"user-rotation/{rotation_id}",
@@ -10499,7 +10499,7 @@ async def user_list_models_by_username(request: Request, username: str):
                 logger.warning(f"Error listing user rotation {rotation_id}: {e}")
         
         autoselect_handler = get_user_handler('autoselect', target_user_id)
-        for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+        for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
             try:
                 all_models.append({
                     'id': f"user-autoselect/{autoselect_id}",
@@ -10545,7 +10545,7 @@ async def user_list_models_by_username(request: Request, username: str):
     
     # Add user rotations
     rotation_handler = get_user_handler('rotation', target_user_id)
-    for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+    for rotation_id, rotation_config in rotation_handler.rotations.items():
         try:
             all_models.append({
                 'id': f"user-rotation/{rotation_id}",
@@ -10563,7 +10563,7 @@ async def user_list_models_by_username(request: Request, username: str):
     
     # Add user autoselects
     autoselect_handler = get_user_handler('autoselect', target_user_id)
-    for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+    for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
         try:
             all_models.append({
                 'id': f"user-autoselect/{autoselect_id}",
@@ -10683,7 +10683,7 @@ async def user_list_models(request: Request, username: str):
                     logger.warning(f"Error listing models for user provider {provider_id}: {e}")
             
             rotation_handler = get_user_handler('rotation', user_id)
-            for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+            for rotation_id, rotation_config in rotation_handler.rotations.items():
                 try:
                     all_models.append({
                         'id': f"user-rotation/{rotation_id}",
@@ -10698,7 +10698,7 @@ async def user_list_models(request: Request, username: str):
                     logger.warning(f"Error listing user rotation {rotation_id}: {e}")
             
             autoselect_handler = get_user_handler('autoselect', user_id)
-            for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+            for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
                 try:
                     all_models.append({
                         'id': f"user-autoselect/{autoselect_id}",
@@ -10750,7 +10750,7 @@ async def user_list_models(request: Request, username: str):
     
     # Add user rotations
     rotation_handler = get_user_handler('rotation', user_id)
-    for rotation_id, rotation_config in rotation_handler.user_rotations.items():
+    for rotation_id, rotation_config in rotation_handler.rotations.items():
         try:
             all_models.append({
                 'id': f"user-rotation/{rotation_id}",
@@ -10768,7 +10768,7 @@ async def user_list_models(request: Request, username: str):
     
     # Add user autoselects
     autoselect_handler = get_user_handler('autoselect', user_id)
-    for autoselect_id, autoselect_config in autoselect_handler.user_autoselects.items():
+    for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
         try:
             all_models.append({
                 'id': f"user-autoselect/{autoselect_id}",
@@ -10952,7 +10952,7 @@ async def user_list_rotations(request: Request, username: str):
         # If not global token, also add user-specific rotations
         if user_id and not is_global_token:
             handler = get_user_handler('rotation', user_id)
-            for rotation_id, rotation_config in handler.user_rotations.items():
+            for rotation_id, rotation_config in handler.rotations.items():
                 try:
                     rotations_info[rotation_id] = {
                         "model_name": rotation_config.get('model_name', rotation_id),
@@ -10974,7 +10974,7 @@ async def user_list_rotations(request: Request, username: str):
     handler = get_user_handler('rotation', user_id)
     
     rotations_info = {}
-    for rotation_id, rotation_config in handler.user_rotations.items():
+    for rotation_id, rotation_config in handler.rotations.items():
         try:
             rotations_info[rotation_id] = {
                 "model_name": rotation_config.get('model_name', rotation_id),
@@ -11035,7 +11035,7 @@ async def user_list_autoselects(request: Request, username: str):
         # If not global token, also add user-specific autoselects
         if user_id and not is_global_token:
             handler = get_user_handler('autoselect', user_id)
-            for autoselect_id, autoselect_config in handler.user_autoselects.items():
+            for autoselect_id, autoselect_config in handler.autoselects.items():
                 try:
                     autoselects_info[autoselect_id] = {
                         "model_name": autoselect_config.get('model_name', autoselect_id),
@@ -11059,7 +11059,7 @@ async def user_list_autoselects(request: Request, username: str):
     handler = get_user_handler('autoselect', user_id)
     
     autoselects_info = {}
-    for autoselect_id, autoselect_config in handler.user_autoselects.items():
+    for autoselect_id, autoselect_config in handler.autoselects.items():
         try:
             autoselects_info[autoselect_id] = {
                 "model_name": autoselect_config.get('model_name', autoselect_id),
@@ -11240,7 +11240,7 @@ async def user_list_rotations_by_username(request: Request, username: str):
         
         if not is_global_token and target_user_id:
             handler = get_user_handler('rotation', target_user_id)
-            for rotation_id, rotation_config in handler.user_rotations.items():
+            for rotation_id, rotation_config in handler.rotations.items():
                 try:
                     rotations_info[rotation_id] = {
                         "model_name": rotation_config.get('model_name', rotation_id),
@@ -11261,7 +11261,7 @@ async def user_list_rotations_by_username(request: Request, username: str):
     handler = get_user_handler('rotation', target_user_id)
     
     rotations_info = {}
-    for rotation_id, rotation_config in handler.user_rotations.items():
+    for rotation_id, rotation_config in handler.rotations.items():
         try:
             rotations_info[rotation_id] = {
                 "model_name": rotation_config.get('model_name', rotation_id),
@@ -11325,7 +11325,7 @@ async def user_list_autoselects_by_username(request: Request, username: str):
         
         if not is_global_token and target_user_id:
             handler = get_user_handler('autoselect', target_user_id)
-            for autoselect_id, autoselect_config in handler.user_autoselects.items():
+            for autoselect_id, autoselect_config in handler.autoselects.items():
                 try:
                     autoselects_info[autoselect_id] = {
                         "model_name": autoselect_config.get('model_name', autoselect_id),
@@ -11348,7 +11348,7 @@ async def user_list_autoselects_by_username(request: Request, username: str):
     handler = get_user_handler('autoselect', target_user_id)
     
     autoselects_info = {}
-    for autoselect_id, autoselect_config in handler.user_autoselects.items():
+    for autoselect_id, autoselect_config in handler.autoselects.items():
         try:
             autoselects_info[autoselect_id] = {
                 "model_name": autoselect_config.get('model_name', autoselect_id),
@@ -11421,10 +11421,10 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         # Normalize to user-rotation handler
         rotation_name = actual_model
         handler = get_user_handler('rotation', target_user_id)
-        if rotation_name not in handler.user_rotations:
+        if rotation_name not in handler.rotations:
             raise HTTPException(
                 status_code=400,
-                detail=f"User rotation '{rotation_name}' not found. Available: {list(handler.user_rotations.keys())}"
+                detail=f"User rotation '{rotation_name}' not found. Available: {list(handler.rotations.keys())}"
             )
         body_dict['model'] = rotation_name
         token_id = getattr(request.state, 'token_id', None)
@@ -11464,10 +11464,10 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
     
     if provider_id == "user-rotation":
         handler = get_user_handler('rotation', target_user_id)
-        if actual_model not in handler.user_rotations:
+        if actual_model not in handler.rotations:
             raise HTTPException(
                 status_code=400,
-                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.user_rotations.keys())}"
+                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.rotations.keys())}"
             )
         body_dict['model'] = actual_model
         token_id = getattr(request.state, 'token_id', None)
@@ -11700,7 +11700,7 @@ async def user_list_config_models_by_username(request: Request, username: str, c
     
     elif config_type == "rotations":
         handler = get_user_handler('rotation', target_user_id)
-        for rotation_id, rotation_config in handler.user_rotations.items():
+        for rotation_id, rotation_config in handler.rotations.items():
             try:
                 providers = rotation_config.get('providers', [])
                 for provider in providers:
@@ -11722,7 +11722,7 @@ async def user_list_config_models_by_username(request: Request, username: str, c
     
     elif config_type == "autoselects":
         handler = get_user_handler('autoselect', target_user_id)
-        for autoselect_id, autoselect_config in handler.user_autoselects.items():
+        for autoselect_id, autoselect_config in handler.autoselects.items():
             try:
                 for model_info in autoselect_config.get('available_models', []):
                     all_models.append({
@@ -11819,10 +11819,10 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
     # Handle user rotation (format: user-rotation/{name})
     if provider_id == "user-rotation":
         handler = get_user_handler('rotation', user_id)
-        if actual_model not in handler.user_rotations:
+        if actual_model not in handler.rotations:
             raise HTTPException(
                 status_code=400,
-                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.user_rotations.keys())}"
+                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.rotations.keys())}"
             )
         body_dict['model'] = actual_model
         token_id = getattr(request.state, 'token_id', None)
@@ -11966,7 +11966,7 @@ async def user_list_config_models(request: Request, username: str, config_type: 
     
     elif config_type == "rotations":
         handler = get_user_handler('rotation', user_id)
-        for rotation_id, rotation_config in handler.user_rotations.items():
+        for rotation_id, rotation_config in handler.rotations.items():
             try:
                 providers = rotation_config.get('providers', [])
                 for provider in providers:
@@ -11988,7 +11988,7 @@ async def user_list_config_models(request: Request, username: str, config_type: 
     
     elif config_type == "autoselects":
         handler = get_user_handler('autoselect', user_id)
-        for autoselect_id, autoselect_config in handler.user_autoselects.items():
+        for autoselect_id, autoselect_config in handler.autoselects.items():
             try:
                 for model_info in autoselect_config.get('available_models', []):
                     all_models.append({
