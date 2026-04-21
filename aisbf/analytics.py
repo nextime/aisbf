@@ -95,7 +95,7 @@ class Analytics:
         
         # Try to get provider config
         try:
-            provider_config = config.get_provider(provider_id)
+            provider_config = config.get_provider(provider_id, warn=False)
             if provider_config:
                 # Check if it's a subscription provider (free)
                 is_subscription = getattr(provider_config, 'is_subscription', False)
@@ -793,7 +793,7 @@ class Analytics:
             provider_type = 'unknown'
             try:
                 from .config import config
-                provider_config = config.get_provider(provider_id)
+                provider_config = config.get_provider(provider_id, warn=False)
                 if provider_config:
                     provider_type = provider_config.type
             except Exception:

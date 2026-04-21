@@ -819,7 +819,7 @@ class Config:
         logger.info("=" * 80)
         logger.info("")
 
-    def get_provider(self, provider_id: str) -> ProviderConfig:
+    def get_provider(self, provider_id: str, warn: bool = True) -> ProviderConfig:
         import logging
         logger = logging.getLogger(__name__)
         logger.info(f"Config.get_provider called with provider_id: {provider_id}")
@@ -828,7 +828,8 @@ class Config:
         if result:
             logger.info(f"Found provider: {result}")
         else:
-            logger.warning(f"Provider {provider_id} not found!")
+            if warn:
+                logger.warning(f"Provider {provider_id} not found!")
         return result
 
     def get_rotation(self, rotation_id: str) -> RotationConfig:
