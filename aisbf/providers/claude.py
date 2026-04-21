@@ -837,6 +837,18 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
         
+        # Sanitize system message to avoid Claude's unofficial client detection
+        # Replace "You are Kilo," or "You are Kiro," with "You are" to prevent
+        # contradiction with "You are Claude Code" that triggers detection
+        if system_message:
+            import re
+            system_message = re.sub(
+                r'\bYou are (Kilo|Kiro),',
+                'You are',
+                system_message,
+                flags=re.IGNORECASE
+            )
+        
         payload = {
             'model': model,
             'messages': anthropic_messages,

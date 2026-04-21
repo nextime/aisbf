@@ -8058,7 +8058,9 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
     paypal_auth_url = f"{auth_base_url}?{urlencode(params)}"
     
     logger.info(f"Initiating PayPal OAuth for user {user_id}, sandbox={is_sandbox}")
-    logger.debug(f"PayPal OAuth redirect_uri: {redirect_uri}")
+    logger.info(f"PayPal OAuth client_id: {client_id}")
+    logger.info(f"PayPal OAuth redirect_uri: {redirect_uri}")
+    logger.info(f"PayPal OAuth full URL: {paypal_auth_url}")
     
     return RedirectResponse(url=paypal_auth_url, status_code=302)
 
