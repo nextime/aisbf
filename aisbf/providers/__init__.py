@@ -112,9 +112,16 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
     # Check if handler supports user_id parameter
     import inspect
     sig = inspect.signature(handler_class.__init__)
-    if 'user_id' in sig.parameters:
+    if 'user_id' in sig.parameters and 'provider_config' in sig.parameters:
+        logger.info(f"Creating handler with provider_id, api_key, user_id, and provider_config")
+        handler = handler_class(provider_id, api_key, user_id=user_id, provider_config=provider_config)
+    elif 'user_id' in sig.parameters:
         logger.info(f"Creating handler with provider_id, api_key, and user_id")
         handler = handler_class(provider_id, api_key, user_id=user_id)
+        # Set provider config to the user-specific config instead of loading from global config
+        if provider_config is not None:
+            handler.user_provider_config = provider_config
+            handler.provider_config = provider_config
     else:
         # For older providers that don't accept user_id parameter
         logger.info(f"Creating handler with provider_id and api_key (no user_id support)")
@@ -122,12 +129,10 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
         handler = handler_class(provider_id, api_key)
         # Set user_id manually for base class compatibility
         handler.user_id = user_id
-        # Base class already handles default error tracking and rate limit for user providers
-    
-    # Set provider config to the user-specific config instead of loading from global config
-    if user_id is not None and provider_config is not None:
-        handler.user_provider_config = provider_config
-        handler.provider_config = provider_config
+        # Set provider config to the user-specific config instead of loading from global config
+        if provider_config is not None:
+            handler.user_provider_config = provider_config
+            handler.provider_config = provider_config
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
     logger.info(f"=== get_provider_handler END ===")

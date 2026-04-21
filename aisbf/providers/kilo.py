@@ -39,9 +39,14 @@ class KiloProviderHandler(BaseProviderHandler):
     For non-admin users, credentials are loaded from the database.
     """
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None, provider_config: Optional[Any] = None):
         super().__init__(provider_id, api_key, user_id=user_id)
-        self.provider_config = config.get_provider(provider_id)
+        if provider_config is not None:
+            # Use provider config passed from factory (user-specific config)
+            self.provider_config = provider_config
+        else:
+            # Fallback to global config
+            self.provider_config = config.get_provider(provider_id)
         
         # Unified auth config with backward compatibility
         # Handle both dict (user) and object (global) config formats
