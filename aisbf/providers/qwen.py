@@ -70,7 +70,8 @@ class QwenProviderHandler(BaseProviderHandler):
             self.provider_config = provider_config
         else:
             # Fallback to global config
-        
+            self.provider_config = config.get_provider(provider_id)
+
         import logging
         logger = logging.getLogger(__name__)
         logger.warning(
@@ -78,7 +79,6 @@ class QwenProviderHandler(BaseProviderHandler):
             "OAuth2 tokens are no longer accepted by DashScope API. "
             "Please use API key authentication instead."
         )
-        self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config
         if isinstance(self.provider_config, dict):
