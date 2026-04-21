@@ -127,9 +127,16 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
             handler.error_tracking = {
                 "enabled": True,
                 "max_errors": 5,
-                "cooldown_seconds": 60
+                "cooldown_seconds": 60,
+                "failures": 0,
+                "last_failure": 0,
+                "disabled_until": None
             }
             handler.rate_limit = 60
+    
+    # Store user provider config on the handler for later use
+    if user_id is not None and provider_config is not None:
+        handler.user_provider_config = provider_config
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
     logger.info(f"=== get_provider_handler END ===")

@@ -1035,9 +1035,22 @@ class BaseProviderHandler:
     
     def _get_model_config(self, model: str) -> Optional[Dict]:
         """Get model configuration from provider config"""
-        provider_config = config.providers.get(self.provider_id)
-        if provider_config and hasattr(provider_config, 'models') and provider_config.models:
-            for model_config in provider_config.models:
+        # Use user provider config if available, otherwise global config
+        if self.user_id is not None and hasattr(self, 'user_provider_config'):
+            provider_config = self.user_provider_config
+        else:
+            provider_config = config.providers.get(self.provider_id)
+            
+        # Handle both dict (user) and object (global) config formats
+        if provider_config:
+            # Get models list depending on config type
+            if isinstance(provider_config, dict):
+                models = provider_config.get('models', [])
+            else:
+                models = provider_config.models if hasattr(provider_config, 'models') else []
+                
+            if models:
+                for model_config in models:
                 # Handle both Pydantic objects and dictionaries
                 model_name_value = model_config.name if hasattr(model_config, 'name') else model_config.get('name')
                 if model_name_value == model:
