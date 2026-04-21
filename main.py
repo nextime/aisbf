@@ -1349,10 +1349,17 @@ async def api_token_authorization_middleware(request: Request, call_next):
                     content={"error": "Invalid user token."}
                 )
             
+            # Debug logging
+            logger.info(f"Token auth check: user_id={user_id}, authenticated_username={authenticated_user.get('username')}, target_username={target_username}")
+            
             if authenticated_user['username'] != target_username:
                 return JSONResponse(
                     status_code=403,
-                    content={"error": "You can only access your own user-specific endpoints."}
+                    content={
+                        "error": "You can only access your own user-specific endpoints.",
+                        "authenticated_as": authenticated_user['username'],
+                        "requested_user": target_username
+                    }
                 )
     
     # --- GLOBAL ENDPOINTS (all other API paths) ---
