@@ -186,8 +186,8 @@ class KiloProviderHandler(BaseProviderHandler):
             return
         
         try:
-            from ..database import get_database
-            db = get_database()
+            from ..database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
             if db:
                 db.save_user_oauth2_credentials(
                     user_id=self.user_id,

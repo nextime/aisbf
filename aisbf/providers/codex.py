@@ -129,8 +129,8 @@ class CodexProviderHandler(BaseProviderHandler):
         
         # Regular user: ONLY use database credentials, NO file fallback
         try:
-            from ..database import get_database
-            db = get_database()
+            from ..database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
             if db:
                 db_creds = db.get_user_oauth2_credentials(
                     user_id=self.user_id,
@@ -199,8 +199,8 @@ class CodexProviderHandler(BaseProviderHandler):
                 # Save to configuration file or database
                 if self.user_id is not None:
                     # User-specific provider: update in database
-                    from ..database import get_database
-                    db = get_database()
+                    from ..database import DatabaseRegistry
+                    db = DatabaseRegistry.get_config_database()
                     if db:
                         # Update user provider endpoint in database
                         db.update_user_provider_endpoint(

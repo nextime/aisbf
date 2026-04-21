@@ -28,7 +28,7 @@ from typing import Dict, List, Optional, Union, Any
 from ..models import Provider, Model, ErrorTracking
 from ..config import config
 from ..utils import count_messages_tokens
-from ..database import get_database
+from ..database import DatabaseRegistry
 from ..batching import get_request_batcher
 
 # Check if debug mode is enabled
