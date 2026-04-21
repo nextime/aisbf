@@ -1693,18 +1693,22 @@ app.add_middleware(ProxyHeadersMiddleware)
 # Dashboard context middleware - adds is_aisbf_cloud and welcome_shown to all template contexts
 @app.middleware("http")
 async def dashboard_context_middleware(request: Request, call_next):
-    if request.url.path.startswith("/dashboard") and 'session' in request.scope and request.session.get('logged_in'):
-        # Set these values in request.state so they're available to all template renders
+    if request.url.path.startswith("/dashboard") and 'session' in request.scope:
+        # ALWAYS set is_aisbf_cloud for ALL dashboard paths (to show footer links everywhere)
         is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
         is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
         request.state.is_aisbf_cloud = is_cloud or is_onion
         
-        # Check if welcome modal has been shown this session
-        if not request.session.get('welcome_shown', False) and request.state.is_aisbf_cloud:
-            request.session['welcome_shown'] = True
-            request.state.welcome_shown = False
+        # Only handle welcome_shown logic when user is LOGGED IN
+        if request.session.get('logged_in', False):
+            # Check if welcome modal has been shown this session
+            if not request.session.get('welcome_shown', False) and request.state.is_aisbf_cloud:
+                request.state.welcome_shown = False
+            else:
+                request.state.welcome_shown = request.session.get('welcome_shown', False)
         else:
-            request.state.welcome_shown = request.session.get('welcome_shown', False)
+            # For unauthenticated users, never show welcome modal
+            request.state.welcome_shown = True
     
     response = await call_next(request)
     return response
@@ -2173,7 +2177,15 @@ async def dashboard_login_page(request: Request):
 
         # Get and render template using templates Jinja2Templates instance
         template = templates.get_template("dashboard/login.html")
-        html_content = template.render(request=request, signup_enabled=signup_enabled, smtp_enabled=smtp_enabled, show_verify_email=show_verify_email, error=error_message, success=success_message, config=config.aisbf if config and config.aisbf else {})
+        html_content = template.render(
+            request=request, 
+            signup_enabled=signup_enabled, 
+            smtp_enabled=smtp_enabled, 
+            show_verify_email=show_verify_email, 
+            error=error_message, 
+            success=success_message, 
+            config=config.aisbf if config and config.aisbf else {}
+        )
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -2326,16 +2338,12 @@ async def dashboard_signup_page(request: Request):
         if not signup_enabled:
             return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
-        # Create a completely fresh Jinja2 environment to avoid any caching issues
-        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
-
-        # Add the required globals
-        env.globals['url_for'] = url_for
-        env.globals['get_base_url'] = get_base_url
-
-        # Get and render template
-        template = env.get_template("dashboard/signup.html")
-        html_content = template.render(request=request, config=config.aisbf if config and config.aisbf else {})
+        # Get and render template using templates Jinja2Templates instance
+        template = templates.get_template("dashboard/signup.html")
+        html_content = template.render(
+            request=request, 
+            config=config.aisbf if config and config.aisbf else {}
+        )
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -3680,13 +3688,8 @@ async def dashboard_index(request: Request):
     if auth_check:
         return auth_check
     
-    # Check if running on AISBF Cloud domain
-    is_aisbf_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
-    
-    # Check if welcome modal has been shown this session
-    welcome_shown = request.session.get('welcome_shown', False)
-    if is_aisbf_cloud and not welcome_shown:
-        request.session['welcome_shown'] = True
+    # Welcome modal and footer links are handled by dashboard_context_middleware
+    # No need to override them here - request.state already has the correct values
 
     if request.session.get('role') == 'admin':
         # Admin dashboard
@@ -3700,9 +3703,7 @@ async def dashboard_index(request: Request):
                 "providers_count": len(config.providers) if config else 0,
                 "rotations_count": len(config.rotations) if config else 0,
                 "autoselect_count": len(config.autoselect) if config else 0,
-                "server_config": server_config or {},
-                "is_aisbf_cloud": is_aisbf_cloud,
-                "welcome_shown": welcome_shown
+                "server_config": server_config or {}
             }
         )
     else:
@@ -3766,9 +3767,7 @@ async def dashboard_index(request: Request):
             "subscription": subscription,
             "current_tier": current_tier,
             "payment_methods": payment_methods,
-            "currency_symbol": currency_symbol,
-            "is_aisbf_cloud": is_aisbf_cloud,
-            "welcome_shown": welcome_shown
+            "currency_symbol": currency_symbol
         }
     )
 
@@ -13704,6 +13703,14 @@ Message:
     except Exception as e:
         logger.error(f"Contact form error: {e}")
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+
+@app.post("/dashboard/welcome-shown")
+async def dashboard_welcome_shown(request: Request):
+    """Mark welcome modal as shown for this session"""
+    if 'session' in request.scope:
+        request.session['welcome_shown'] = True
+    return JSONResponse({'success': True})
 
 
 @app.get("/dashboard/tor/status")

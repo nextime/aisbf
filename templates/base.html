@@ -789,6 +789,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         function closeWelcomeModal() {
             document.getElementById('welcomeModal').classList.remove('active');
+            // Mark welcome modal as shown on server
+            fetch('/dashboard/welcome-shown', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json'},
+                credentials: 'same-origin'
+            }).catch(err => console.log('Could not mark welcome as shown:', err));
         }
         
         function openContactModal() {
@@ -875,6 +881,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         document.getElementById('donateModal').addEventListener('click', function(e) {
             if (e.target === this) {
                 closeDonateModal();
+            }
+        });
+        
+        document.getElementById('welcomeModal').addEventListener('click', function(e) {
+            if (e.target === this) {
+                closeWelcomeModal();
             }
         });
         
