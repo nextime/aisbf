@@ -168,8 +168,14 @@ def get_max_request_tokens_for_model(
         return max_tokens
     
     # Then check provider models config
-    if hasattr(provider_config, 'models') and provider_config.models:
-        for model in provider_config.models:
+    # Handle both dict (user) and object (global) config formats
+    if isinstance(provider_config, dict):
+        models = provider_config.get('models', [])
+    else:
+        models = provider_config.models if hasattr(provider_config, 'models') else []
+        
+    if models:
+        for model in models:
             # Handle both Pydantic objects and dictionaries
             model_name_value = model.name if hasattr(model, 'name') else model.get('name')
             if model_name_value == model_name:
