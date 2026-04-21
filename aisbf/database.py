@@ -4200,6 +4200,15 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
     except Exception as e:
         logger.warning(f"Migration check for default free tier: {e}")
 
+    # Migration: Ensure users table exists first
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+        else:
+            cursor.execute("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
+    except Exception as e:
+        logger.warning(f"Failed to create users table: {e}")
+
     # Migration: Add tier_id column to users table
     try:
         if self.db_type == 'sqlite':

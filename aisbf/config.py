@@ -454,6 +454,7 @@ class Config:
 
     def _load_rotations(self):
         import logging
+        import time
         logger = logging.getLogger(__name__)
         logger.info(f"=== Config._load_rotations START ===")
         
@@ -472,6 +473,7 @@ class Config:
                 raise FileNotFoundError("Could not find rotations.json configuration file")
         
         logger.info(f"Loading rotations from: {rotations_path}")
+        self.rotations = {}
         try:
             with open(rotations_path) as f:
                 data = json.load(f)
@@ -524,7 +526,34 @@ class Config:
                             logger.info(f"  ✓ Provider '{provider_id}' is available")
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse rotations.json: {e}")
-            raise ValueError(f"Invalid JSON in rotations.json: {e}")
+            if rotations_path != Path.home() / '.aisbf' / 'rotations.json':
+                # Not user config, just raise
+                raise ValueError(f"Invalid JSON in rotations.json: {e}")
+            
+            # This is the user's config file - we need to recover
+            logger.warning("⚠️  Detected corrupted user config file!")
+            
+            # Backup corrupted file
+            backup_path = rotations_path.with_suffix(f".json.corrupted.{int(time.time())}")
+            shutil.copy2(rotations_path, backup_path)
+            logger.warning(f"📋  Corrupted config backed up to: {backup_path}")
+            
+            # Copy fresh default config
+            try:
+                source_dir = self._get_config_source_dir()
+                src = source_dir / 'rotations.json'
+                shutil.copy2(src, rotations_path)
+                logger.warning(f"✅  Replaced corrupted rotations.json with default valid file")
+                logger.warning("⚠️  Your previous settings were backed up - you can restore them from the backup file")
+                
+                # Load the fresh config now
+                # Don't call recursively - Uvicorn reloader will restart after file change
+                pass
+                
+            except Exception as backup_err:
+                logger.error(f"Failed to recover corrupted config: {backup_err}")
+                raise ValueError(f"Invalid JSON in rotations.json: {e}")
+                
         except Exception as e:
             logger.error(f"Failed to load rotations.json: {e}")
             raise
