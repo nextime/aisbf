@@ -51,7 +51,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
         self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config
-        claude_config = getattr(self.provider_config, 'claude_config', None)
+        if isinstance(self.provider_config, dict):
+            claude_config = self.provider_config.get('claude_config')
+        else:
+            claude_config = getattr(self.provider_config, 'claude_config', None)
         credentials_file = None
         if claude_config and isinstance(claude_config, dict):
             credentials_file = claude_config.get('credentials_file')
@@ -501,6 +504,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
         }
         
         if self.provider_config:
+            if isinstance(self.provider_config, dict):
+            claude_config = self.provider_config.get('claude_config')
+        else:
             claude_config = getattr(self.provider_config, 'claude_config', None)
             if claude_config and isinstance(claude_config, dict):
                 cache_config['enabled'] = claude_config.get('enable_prompt_caching', False)
@@ -513,6 +519,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
         fallback_models = []
         
         if self.provider_config:
+            if isinstance(self.provider_config, dict):
+            claude_config = self.provider_config.get('claude_config')
+        else:
             claude_config = getattr(self.provider_config, 'claude_config', None)
             if claude_config and isinstance(claude_config, dict):
                 fallback_models = claude_config.get('fallback_models', [])
