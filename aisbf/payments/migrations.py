@@ -59,6 +59,7 @@ class PaymentMigrations:
             self._create_job_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_config_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_notification_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
+            self._create_wallet_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._add_stripe_customer_id_column(cursor)
             self._insert_default_data(cursor)
             
@@ -601,3 +602,56 @@ class PaymentMigrations:
                 logger.info(f"✅ Account tiers table has {tier_count} record(s), skipping default tier insertion")
         except Exception as e:
             logger.warning(f"Failed to check/insert default free tier: {e}")
+     
+    def _create_wallet_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
+        """Create unified user wallet and transaction tables"""
+        
+        # Unified user fiat wallet table
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS user_wallets (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER UNIQUE NOT NULL,
+                balance DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                currency_code VARCHAR(3) NOT NULL DEFAULT 'USD',
+                auto_topup_enabled {boolean_type} NOT NULL DEFAULT 0,
+                auto_topup_amount DECIMAL(10,2),
+                auto_topup_threshold DECIMAL(10,2),
+                auto_topup_payment_method_id INTEGER,
+                created_at TIMESTAMP NOT NULL DEFAULT {timestamp_default},
+                updated_at TIMESTAMP NOT NULL DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (auto_topup_payment_method_id) REFERENCES payment_methods(id)
+            )
+        ''')
+        
+        # Wallet transactions history table
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS wallet_transactions (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                wallet_id INTEGER NOT NULL,
+                amount DECIMAL(10,2) NOT NULL,
+                type VARCHAR(32) NOT NULL,
+                status VARCHAR(32) NOT NULL,
+                payment_method_id INTEGER,
+                payment_gateway VARCHAR(32),
+                gateway_transaction_id VARCHAR(255),
+                description TEXT,
+                metadata {text_type},
+                created_at TIMESTAMP NOT NULL DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (wallet_id) REFERENCES user_wallets(id),
+                FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
+            )
+        ''')
+        
+        # Create indexes
+        try:
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_wallets_user ON user_wallets(user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_wallet ON wallet_transactions(wallet_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id)')
+            cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at)')
+        except:
+            pass
+        
+        logger.info("✅ Created/verified wallet system tables")

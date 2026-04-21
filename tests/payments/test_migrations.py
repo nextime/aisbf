@@ -35,6 +35,8 @@ def test_migrations_create_all_tables(tmp_path):
     assert 'job_locks' in table_names
     assert 'crypto_price_sources' in table_names
     assert 'email_notification_settings' in table_names
+    assert 'user_wallets' in table_names
+    assert 'wallet_transactions' in table_names
 
 
 def test_migrations_insert_default_data(tmp_path):
