@@ -1047,62 +1047,7 @@ function renderModels(providerKey) {
     });
 }
 
-async function setCacheSetting(provider_id, model_name, enabled) {
-    try {
-        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                provider_id: provider_id || null,
-                model_name: model_name || null,
-                cache_enabled: enabled
-            })
-        });
-        
-        if (response.ok) {
-            showToast('Cache setting updated', 'success');
-            // Refresh cache settings
-            await loadCacheSettings();
-        } else {
-            showToast('Failed to update cache setting', 'danger');
-        }
-    } catch (error) {
-        console.error('Error updating cache setting:', error);
-        showToast('Error updating cache setting', 'danger');
-    }
-}
 
-// Global cache settings cache (pun intended)
-let cacheSettings = [];
-async function loadCacheSettings() {
-    try {
-        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}');
-        const data = await response.json();
-        cacheSettings = data.settings || [];
-    } catch (error) {
-        console.error('Error loading cache settings:', error);
-    }
-}
-
-// Check if cache is enabled for a provider/model
-function isCacheEnabled(provider_id, model_name = null) {
-    // Check model-level setting first
-    if (model_name) {
-        const modelSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === model_name);
-        if (modelSetting) return modelSetting.cache_enabled;
-    }
-    
-    // Check provider-level setting
-    const providerSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === null);
-    if (providerSetting) return providerSetting.cache_enabled;
-    
-    // Check global setting
-    const globalSetting = cacheSettings.find(s => s.provider_id === null && s.model_name === null);
-    if (globalSetting) return globalSetting.cache_enabled;
-    
-    // Default: enabled
-    return true;
-}
 
 function showAddProviderForm() {
     document.getElementById('new-provider-form').style.display = 'block';
