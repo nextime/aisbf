@@ -11480,7 +11480,7 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         token_id = getattr(request.state, 'token_id', None)
         return await handler.handle_rotation_request(actual_model, body_dict, authenticated_user_id, token_id)
     
-    if provider_id == "user-provider" or provider_id in (p['provider_id'] for p in (get_user_handler('request', target_user_id).user_providers.values() if target_user_id else [])):
+    if provider_id == "user-provider" or provider_id in (get_user_handler('request', target_user_id).user_providers.keys() if target_user_id else []):
         # Check if this is a user provider
         handler = get_user_handler('request', target_user_id)
         provider_name = actual_model if provider_id == "user-provider" else provider_id

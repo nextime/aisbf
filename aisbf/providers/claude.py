@@ -1649,6 +1649,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
             logging.info("ClaudeProviderHandler: Starting model list retrieval")
             logging.info("=" * 80)
 
+            # First try to load from cache
+            cached_models = self._load_models_cache()
+            if cached_models:
+                logging.info(f"ClaudeProviderHandler: ✓ Returning {len(cached_models)} models from cache")
+                return cached_models
+
             await self.apply_rate_limit()
 
             try:
