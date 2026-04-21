@@ -70,8 +70,11 @@ async function loadCacheSettings() {
         const data = await response.json();
         cacheSettings = data.settings || [];
         
-        // Update global toggle
-        const globalSetting = cacheSettings.find(s => !s.provider_id && !s.model_name);
+        console.log('Loaded cache settings:', cacheSettings);
+        
+        // Update global toggle - find setting where both provider_id and model_name are null
+        const globalSetting = cacheSettings.find(s => s.provider_id === null && s.model_name === null);
+        console.log('Global setting found:', globalSetting);
         document.getElementById('globalCacheToggle').checked = globalSetting ? globalSetting.cache_enabled : true;
     } catch (error) {
         console.error('Error loading cache settings:', error);
