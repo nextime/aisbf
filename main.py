@@ -6705,17 +6705,14 @@ async def dashboard_user_cache_settings(request: Request):
         }
     )
 
-@app.get("/api/user/cache-settings")
-async def api_get_user_cache_settings(request: Request):
-    """Get user's cache settings"""
-    auth_check = require_api_auth(request)
+@app.get("/dashboard/api/cache-settings")
+async def dashboard_api_get_cache_settings(request: Request):
+    """Get logged-in user's cache settings"""
+    auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
 
     user_id = request.session.get('user_id')
-    if not user_id:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
-
     db = DatabaseRegistry.get_config_database()
     
     provider_id = request.query_params.get('provider_id')
@@ -6730,16 +6727,14 @@ async def api_get_user_cache_settings(request: Request):
         settings = db.get_all_user_cache_settings(user_id)
         return JSONResponse({"settings": settings})
 
-@app.post("/api/user/cache-settings")
-async def api_set_user_cache_setting(request: Request):
-    """Set user's cache setting"""
-    auth_check = require_api_auth(request)
+@app.post("/dashboard/api/cache-settings")
+async def dashboard_api_set_cache_setting(request: Request):
+    """Set logged-in user's cache setting"""
+    auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
 
     user_id = request.session.get('user_id')
-    if not user_id:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     try:
         body = await request.json()
@@ -6758,16 +6753,14 @@ async def api_set_user_cache_setting(request: Request):
         logger.error(f"Error setting cache setting: {e}")
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.delete("/api/user/cache-settings")
-async def api_delete_user_cache_setting(request: Request):
-    """Delete user's cache setting"""
-    auth_check = require_api_auth(request)
+@app.delete("/dashboard/api/cache-settings")
+async def dashboard_api_delete_cache_setting(request: Request):
+    """Delete logged-in user's cache setting"""
+    auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
 
     user_id = request.session.get('user_id')
-    if not user_id:
-        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
     try:
         provider_id = request.query_params.get('provider_id')
