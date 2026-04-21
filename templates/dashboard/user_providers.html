@@ -139,7 +139,7 @@ let cacheSettings = [];
 
 async function setCacheSetting(provider_id, model_name, enabled) {
     try {
-        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
+        const response = await fetch('{{ url_for(request, "/dashboard/api/cache-settings") }}', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
@@ -164,7 +164,9 @@ async function setCacheSetting(provider_id, model_name, enabled) {
 
 async function loadCacheSettings() {
     try {
-        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}');
+        const response = await fetch('{{ url_for(request, "/dashboard/api/cache-settings") }}', {
+            credentials: 'same-origin'
+        });
         const data = await response.json();
         cacheSettings = data.settings || [];
     } catch (error) {
