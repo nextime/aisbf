@@ -6661,7 +6661,7 @@ async def dashboard_user_tokens_delete(request: Request, token_id: int):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
-@app.get("/dashboard/user/cache-settings", response_class=HTMLResponse)
+@app.get("/dashboard/cache-settings", response_class=HTMLResponse)
 async def dashboard_user_cache_settings(request: Request):
     """User prompt cache settings page"""
     auth_check = require_dashboard_auth(request)
@@ -6689,7 +6689,7 @@ async def dashboard_user_cache_settings(request: Request):
 
     return templates.TemplateResponse(
         request=request,
-        name="dashboard/user_cache_settings.html",
+        name="dashboard/cache_settings.html",
         context={
             "request": request,
             "session": request.session,
