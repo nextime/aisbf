@@ -152,12 +152,18 @@ class ClaudeAuth:
         - If save_callback is provided, use it (database save for user providers)
         - Otherwise, save to file with file locking to prevent race conditions
         """
+        # Normalize and prepare token data
         self.tokens = data
+        # Store id_token if received (contains account info)
+        if 'id_token' in data:
+            self.tokens['id_token'] = data['id_token']
+        # Add local expiry timestamp for easier checking - DO THIS FOR BOTH FILE AND DB USERS!
+        self.tokens['expires_at'] = time.time() + data.get('expires_in', 3600)
         
         if self._save_callback:
             # User provider: ONLY use callback, NO file fallback EVER
             try:
-                self._save_callback({'tokens': data})
+                self._save_callback({'tokens': self.tokens})
                 logger.info("ClaudeAuth: Saved credentials via callback")
                 return
             except Exception as e:
@@ -167,12 +173,6 @@ class ClaudeAuth:
         
         # Admin/global provider ONLY: save to file
         try:
-            self.tokens = data
-            # Store id_token if received (contains account info)
-            if 'id_token' in data:
-                self.tokens['id_token'] = data['id_token']
-            # Add local expiry timestamp for easier checking
-            self.tokens['expires_at'] = time.time() + data.get('expires_in', 3600)
             
             # Ensure directory exists
             self.credentials_file.parent.mkdir(parents=True, exist_ok=True)

@@ -132,8 +132,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         skip_initial_load=True,
                         save_callback=lambda creds: self._save_auth_to_db(creds)
                     )
-                    # Set tokens directly from database
-                    auth.tokens = db_creds['credentials'].get('tokens', {})
+                     # Set tokens directly from database
+                     auth.tokens = db_creds['credentials'].get('tokens', {})
+                     # Add expires_at if missing (for existing credentials saved before fix)
+                     if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
+                         import time
+                         auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
                     import logging
                     logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
                     return auth

@@ -6217,7 +6217,34 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 claude_config = provider_config.get('claude_config', {})
             else:
                 claude_config = provider_config.claude_config or {}
-            auth = ClaudeAuth(credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'))
+            
+            if current_user_id is None:
+                # Admin user: load from file
+                auth = ClaudeAuth(credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'))
+            else:
+                # Regular user: load from database
+                auth = ClaudeAuth(
+                    credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'),
+                    skip_initial_load=True
+                )
+                # Load credentials from database
+                try:
+                    from aisbf.database import get_database
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        db_creds = db.get_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_name,
+                            auth_type='claude_oauth2'
+                        )
+                        if db_creds and db_creds.get('credentials'):
+                            auth.tokens = db_creds['credentials'].get('tokens', {})
+                            # Add expires_at if missing (for existing credentials saved before fix)
+                            if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
+                                auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
+                except Exception as e:
+                    logger.warning(f"Failed to load Claude credentials from database: {e}")
+            
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
             if is_auth and auth.tokens and 'expires_at' in auth.tokens:
@@ -6231,7 +6258,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 kilo_config = provider_config.get('kilo_config', {})
             else:
                 kilo_config = provider_config.kilo_config or {}
-            auth = KiloOAuth2(credentials_file=kilo_config.get('credentials_file', '~/.kilo_credentials.json'))
+            
+            if current_user_id is None:
+                # Admin user: load from file
+                auth = KiloOAuth2(credentials_file=kilo_config.get('credentials_file', '~/.kilo_credentials.json'))
+            else:
+                # Regular user: load from database
+                auth = KiloOAuth2(
+                    credentials_file=kilo_config.get('credentials_file', '~/.kilo_credentials.json'),
+                    skip_initial_load=True
+                )
+                # Load credentials from database
+                try:
+                    from aisbf.database import get_database
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        db_creds = db.get_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_name,
+                            auth_type='kilo_oauth2'
+                        )
+                        if db_creds and db_creds.get('credentials'):
+                            auth.credentials = db_creds['credentials']
+                except Exception as e:
+                    logger.warning(f"Failed to load Kilo credentials from database: {e}")
+            
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
             if is_auth and auth.credentials:
@@ -6247,7 +6298,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 qwen_config = provider_config.get('qwen_config', {})
             else:
                 qwen_config = provider_config.qwen_config or {}
-            auth = QwenOAuth2(credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'))
+            
+            if current_user_id is None:
+                # Admin user: load from file
+                auth = QwenOAuth2(credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'))
+            else:
+                # Regular user: load from database
+                auth = QwenOAuth2(
+                    credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'),
+                    skip_initial_load=True
+                )
+                # Load credentials from database
+                try:
+                    from aisbf.database import get_database
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        db_creds = db.get_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_name,
+                            auth_type='qwen_oauth2'
+                        )
+                        if db_creds and db_creds.get('credentials'):
+                            auth.credentials = db_creds['credentials']
+                except Exception as e:
+                    logger.warning(f"Failed to load Qwen credentials from database: {e}")
+            
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
             if is_auth and auth.credentials:
@@ -6264,7 +6339,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 codex_config = provider_config.get('codex_config', {})
             else:
                 codex_config = provider_config.codex_config or {}
-            auth = CodexOAuth2(credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'))
+            
+            if current_user_id is None:
+                # Admin user: load from file
+                auth = CodexOAuth2(credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'))
+            else:
+                # Regular user: load from database
+                auth = CodexOAuth2(
+                    credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'),
+                    skip_initial_load=True
+                )
+                # Load credentials from database
+                try:
+                    from aisbf.database import get_database
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        db_creds = db.get_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_name,
+                            auth_type='codex_oauth2'
+                        )
+                        if db_creds and db_creds.get('credentials'):
+                            auth.credentials = db_creds['credentials']
+                except Exception as e:
+                    logger.warning(f"Failed to load Codex credentials from database: {e}")
+            
             is_auth = auth.is_authenticated()
             result = {"authenticated": is_auth}
             if is_auth and auth.credentials:
