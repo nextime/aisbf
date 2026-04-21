@@ -66,7 +66,9 @@ document.addEventListener('DOMContentLoaded', function() {
 
 async function loadCacheSettings() {
     try {
-        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}');
+        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
+            credentials: 'same-origin'
+        });
         const data = await response.json();
         cacheSettings = data.settings || [];
         renderCacheSettings();
@@ -78,7 +80,9 @@ async function loadCacheSettings() {
 
 async function loadUserProviders() {
     try {
-        const response = await fetch('{{ url_for(request, "/api/user/providers") }}');
+        const response = await fetch('{{ url_for(request, "/api/user/providers") }}', {
+            credentials: 'same-origin'
+        });
         const data = await response.json();
         userProviders = data.providers || [];
         
@@ -133,6 +137,7 @@ async function setCacheSetting(provider_id, model_name, enabled) {
         const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
+            credentials: 'same-origin',
             body: JSON.stringify({
                 provider_id: provider_id || null,
                 model_name: model_name || null,
@@ -179,7 +184,10 @@ async function deleteCacheSetting(provider_id, model_name) {
         if (provider_id) url.searchParams.append('provider_id', provider_id);
         if (model_name) url.searchParams.append('model_name', model_name);
         
-        const response = await fetch(url, { method: 'DELETE' });
+        const response = await fetch(url, { 
+            method: 'DELETE',
+            credentials: 'same-origin'
+        });
         
         if (response.ok) {
             showToast('Cache setting deleted', 'success');
