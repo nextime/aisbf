@@ -6721,10 +6721,19 @@ async def dashboard_api_get_cache_settings(request: Request):
     if provider_id or model_name:
         # Get specific setting
         setting = db.get_user_cache_settings(user_id, provider_id, model_name)
+        # Convert datetime to string if present
+        if setting and 'updated_at' in setting and setting['updated_at']:
+            setting['updated_at'] = setting['updated_at'].isoformat() if hasattr(setting['updated_at'], 'isoformat') else str(setting['updated_at'])
         return JSONResponse(setting)
     else:
         # Get all settings
         settings = db.get_all_user_cache_settings(user_id)
+        # Convert datetime objects to strings
+        for setting in settings:
+            if 'updated_at' in setting and setting['updated_at']:
+                setting['updated_at'] = setting['updated_at'].isoformat() if hasattr(setting['updated_at'], 'isoformat') else str(setting['updated_at'])
+            if 'created_at' in setting and setting['created_at']:
+                setting['created_at'] = setting['created_at'].isoformat() if hasattr(setting['created_at'], 'isoformat') else str(setting['created_at'])
         return JSONResponse({"settings": settings})
 
 @app.post("/dashboard/api/cache-settings")
