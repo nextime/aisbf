@@ -2,60 +2,86 @@
 
 ## Overview
 
-AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Claude Code, Ollama, Kiro) with support for provider rotation, AI-assisted model selection, and error tracking.
+AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Claude Code, Ollama, Kiro, Kilocode, Codex, Qwen) with support for provider rotation, AI-assisted model selection, unified wallet system, and error tracking.
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, Kiro (Amazon Q Developer), Kiro-cli, and Kilocode (OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, Kiro (Amazon Q Developer), Kilocode (OAuth2), Codex (OAuth2), and Qwen (API Key/OAuth2)
+- **Unified Wallet System**: Fiat wallet with crypto/PayPal/Stripe top-ups and auto top-up for subscription renewals
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh, Chrome extension for remote servers, and curl_cffi TLS fingerprinting support
 - **Kiro-cli Support**: Full support for Amazon Q Developer CLI authentication with Device Authorization Grant
 - **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
+- **Codex OAuth2 Authentication**: OAuth2 Device Authorization Grant for OpenAI Codex with automatic token refresh and API key exchange
+- **Qwen Authentication**: API key authentication (recommended) or OAuth2 (discontinued as of April 2026)
 - **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
 - **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
+- **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
+- **Content Classification**: NSFW/privacy content filtering with configurable classification windows
 - **Streaming Support**: Full support for streaming responses from all providers with proper serialization
 - **Error Tracking**: Automatic provider disabling after consecutive failures with configurable cooldown periods
-- **Rate Limiting**: Built-in rate limiting and graceful error handling with persistent tracking across restarts
-- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control` and Google Context Caching APIs
-- **Persistent Database**: SQLite-based tracking of token usage, context dimensions, and model embeddings with automatic cleanup
+- **Adaptive Rate Limiting**: Intelligent rate limit management that learns from 429 responses with exponential backoff, gradual recovery, and dashboard monitoring
+- **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control`, Google Context Caching, and OpenAI-compatible APIs
+- **Response Caching**: 20-30% cache hit rate with intelligent request deduplication using SHA256-based cache keys
+- **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window
+- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, performance metrics, and export functionality
+- **Context Management**: Automatic context condensation with 8+ methods when approaching model limits
+- **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
+- **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
+- **MCP Server**: Model Context Protocol server for remote agent configuration and model access
+- **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, model embeddings, and user configurations
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
-- **Security**: Default localhost-only access for improved security
-- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, model performance comparison, and export functionality
-
-## Author
-
-Stefy Lanza <stefy@nexlab.net>
-
-## Repository
-
-Official repository: https://git.nexlab.net/nexlab/aisbf.git
+- **User-Specific API Endpoints**: Dedicated API endpoints for authenticated users to access their own configurations with Bearer token authentication
+- **Proxy-Awareness**: Full support for reverse proxy deployments with automatic URL generation and subpath support
 
 ## Project Structure
 
 ```
-geminiproxy/
-├── aisbf/                    # Main Python module
-│   ├── __init__.py          # Module initialization with exports
-│   ├── config.py            # Configuration management
-│   ├── models.py            # Pydantic models
-│   ├── providers.py         # Provider handlers
-│   ├── handlers.py          # Request handlers
-│   ├── providers.json       # Default provider configs (moved to config/)
-│   └── rotations.json       # Default rotation configs (moved to config/)
-├── config/                   # Configuration files directory
-│   ├── providers.json       # Default provider configurations
-│   └── rotations.json       # Default rotation configurations
-├── main.py                   # FastAPI application entry point
-├── setup.py                  # Installation script
-├── pyproject.toml            # Modern packaging configuration
-├── MANIFEST.in               # Package manifest for distribution
-├── build.sh                  # Build script for PyPI packages
-├── clean.sh                  # Clean script for build artifacts
-├── start_proxy.sh           # Development start script
-├── aisbf.sh                 # Alternative start script
-├── requirements.txt         # Python dependencies
-├── INSTALL.md               # Installation guide
-├── PYPI.md                 # PyPI publishing guide
-└── README.md                # Project documentation
+aisbf/
+├── aisbf/                        # Main Python module
+│   ├── __init__.py               # Module initialization with exports
+│   ├── config.py                 # Configuration management
+│   ├── models.py                 # Pydantic models
+│   ├── providers.py              # Provider handlers
+│   ├── handlers.py               # Request handlers
+│   ├── payments/                 # Payment system
+│   │   ├── __init__.py
+│   │   ├── models.py             # Payment models
+│   │   ├── service.py            # Payment service
+│   │   ├── fiat/                 # Fiat payment handlers
+│   │   │   ├── __init__.py
+│   │   │   ├── stripe_handler.py # Stripe integration
+│   │   │   └── paypal_handler.py # PayPal integration
+│   │   ├── crypto/               # Crypto payment handlers
+│   │   │   ├── __init__.py
+│   │   │   ├── wallet.py         # HD wallet manager
+│   │   │   └── monitor.py        # Crypto payment monitor
+│   │   ├── subscription/         # Subscription management
+│   │   │   ├── __init__.py
+│   │   │   ├── manager.py        # Subscription lifecycle
+│   │   │   ├── renewal.py        # Renewal processing
+│   │   │   └── quota.py          # Quota management
+│   │   └── wallet/               # Wallet system (NEW)
+│   │       ├── __init__.py
+│   │       └── manager.py        # Wallet operations
+│   ├── notifications/            # Notification system
+│   ├── __init__.py
+│   └── [other modules...]
+├── config/                       # Configuration files
+│   ├── providers.json            # Default provider configs
+│   ├── rotations.json            # Default rotation configs
+│   ├── autoselect.json           # Default autoselect configs
+│   └── aisbf.json                # Main configuration
+├── templates/                    # HTML templates
+│   └── dashboard/                # Dashboard templates
+├── static/                       # Static assets (CSS, JS, images)
+├── docs/                         # Documentation
+├── main.py                       # FastAPI application entry point
+├── cli.py                        # Command-line interface
+├── setup.py                      # Installation script
+├── pyproject.toml                # Modern packaging configuration
+├── requirements.txt              # Python dependencies
+├── README.md                     # Project overview
+└── DOCUMENTATION.md              # Comprehensive documentation (this file)
 ```
 
 ## Installation
@@ -82,7 +108,14 @@ Installs to:
 - `/usr/local/share/aisbf/` - Config files
 - `/usr/local/bin/aisbf` - Executable script
 
-## Configuration Management
+### Development Installation
+```bash
+./start_proxy.sh
+```
+
+Creates local virtual environment and installs in development mode with auto-reload.
+
+## Configuration
 
 ### Configuration File Locations
 
@@ -93,6 +126,8 @@ Installs to:
 **User Configuration Files (writable):**
 - `~/.aisbf/providers.json` - Provider configurations
 - `~/.aisbf/rotations.json` - Rotation configurations
+- `~/.aisbf/autoselect.json` - Autoselect configurations
+- `~/.aisbf/aisbf.json` - Main server configuration
 
 **Development Mode:**
 - `config/providers.json` and `config/rotations.json` in source tree
@@ -103,493 +138,278 @@ Installs to:
 3. Copies default configs from installed location to `~/.aisbf/`
 4. Loads configuration from `~/.aisbf/` on subsequent runs
 
-## TOR Hidden Service Support
-
-AISBF includes full support for exposing the API and dashboard over the TOR network as a hidden service. This provides anonymous access to your AI proxy server without revealing your server's IP address.
-
-### Prerequisites
-
-**TOR Installation:**
-```bash
-# Ubuntu/Debian
-sudo apt-get install tor
-
-# CentOS/RHEL
-sudo yum install tor
-
-# macOS
-brew install tor
-```
-
-**Python stem Library:**
-```bash
-pip install stem
-```
-
-**Enable TOR Control Port:**
-
-Edit `/etc/tor/torrc` (or `~/.torrc` on macOS):
-```
-ControlPort 9051
-HashedControlPassword 16:YOUR_HASHED_PASSWORD_HERE
-```
-
-Generate a hashed password:
-```bash
-tor --hash-password "your_secure_password"
-```
-
-**For persistent hidden services, also add:**
-```
-HiddenServiceDir /home/yourusername/.aisbf/tor_hidden_service
-HiddenServicePort 80 127.0.0.1:17765
-```
-
-**Important:** Replace `/home/yourusername` with your actual home directory path. Tor does NOT expand `~` in torrc - you must use absolute paths.
-
-Restart TOR:
-```bash
-sudo systemctl restart tor  # Linux
-brew services restart tor   # macOS
-```
-
-### Configuration
-
-TOR hidden service can be configured via the dashboard or configuration file.
-
-**Configuration File (`~/.aisbf/aisbf.json`):**
+### Main Configuration (aisbf.json)
 ```json
 {
-  "tor": {
-    "enabled": true,
-    "control_port": 9051,
-    "control_host": "127.0.0.1",
-    "control_password": "your_secure_password",
-    "hidden_service_dir": "~/.aisbf/tor_hidden_service",
-    "hidden_service_port": 80,
-    "socks_port": 9050,
-    "socks_host": "127.0.0.1"
-  }
-}
-```
-
-**Important:** Set `control_password` to match the password you used when generating the HashedControlPassword for torrc.
-
-**Configuration Options:**
-
-- **`enabled`**: Enable/disable TOR hidden service (default: false)
-- **`control_port`**: TOR control port (default: 9051)
-- **`control_host`**: TOR control host (default: 127.0.0.1)
-- **`control_password`**: Optional password for TOR control authentication
-- **`hidden_service_dir`**: Directory for persistent hidden service keys (null for ephemeral)
-- **`hidden_service_port`**: Port exposed on the hidden service (default: 80)
-- **`socks_port`**: TOR SOCKS proxy port (default: 9050)
-- **`socks_host`**: TOR SOCKS proxy host (default: 127.0.0.1)
-
-### Ephemeral vs Persistent Hidden Services
-
-**Ephemeral Hidden Service (Default):**
-- Temporary service created on startup
-- New onion address generated each time
-- No files stored on disk
-- Ideal for testing or temporary deployments
-- Set `hidden_service_dir` to `null`
-
-**Persistent Hidden Service:**
-- Permanent service with fixed onion address
-- Address persists across restarts
-- Keys stored in specified directory
-- Ideal for production use
-- Set `hidden_service_dir` to a path (e.g., `~/.aisbf/tor_hidden_service`)
-- **Must be manually configured in torrc** - see configuration instructions above
-
-Example persistent configuration:
-```json
-{
-  "tor": {
-    "enabled": true,
-    "control_password": "your_secure_password",
-    "hidden_service_dir": "~/.aisbf/tor_hidden_service",
-    "hidden_service_port": 80
-  }
-}
-```
-
-When you start aisbf with a persistent hidden service directory configured:
-1. It checks if the hidden service already exists (looks for hostname file)
-2. If found, it uses the existing onion address
-3. If not found, it displays manual configuration instructions
-4. You must add the HiddenServiceDir and HiddenServicePort to torrc manually
-5. After configuring torrc and restarting Tor, start aisbf again
-
-### Dashboard Configuration
-
-1. Navigate to **Dashboard → Settings**
-2. Scroll to **TOR Hidden Service** section
-3. Enable **Enable TOR Hidden Service** checkbox
-4. Configure options as needed
-5. Save settings and restart server
-
-The dashboard displays:
-- Current TOR status (Active/Disabled/Error)
-- Onion address (when active)
-- Real-time status updates
-
-### Accessing the Hidden Service
-
-Once enabled, the onion address is displayed:
-- In server logs on startup
-- In Dashboard → Settings → TOR Hidden Service status
-- Via MCP `get_tor_status` tool (fullconfig access required)
-
-Access via TOR Browser or TOR-enabled client:
-```
-http://your-onion-address.onion/
-```
-
-All AISBF endpoints are available over TOR:
-- API endpoints: `http://your-onion-address.onion/api/v1/chat/completions`
-- Dashboard: `http://your-onion-address.onion/dashboard`
-- MCP server: `http://your-onion-address.onion/mcp`
-
-### Security Considerations
-
-**Authentication:**
-- TOR provides anonymity, not authentication
-- Enable API authentication in AISBF settings
-- Use strong dashboard passwords
-- Consider IP-based access controls for clearnet access
-
-**Best Practices:**
-- Use persistent hidden services for production
-- Regularly update TOR and AISBF
-- Monitor access logs for suspicious activity
-- Enable rate limiting
-- Use HTTPS for clearnet access (TOR handles encryption)
-
-**Network Isolation:**
-- TOR traffic is automatically encrypted
-- Hidden services don't reveal server IP
-- Consider running AISBF in isolated environment
-- Use firewall rules to restrict clearnet access
-
-### Troubleshooting
-
-**Connection Failed:**
-- Verify TOR is running: `systemctl status tor` or `brew services list`
-- Check TOR control port is enabled in torrc
-- Verify control port is accessible: `telnet 127.0.0.1 9051`
-- Check AISBF logs for detailed error messages
-
-**Authentication Failed:**
-- Use password authentication instead of CookieAuthentication
-- Generate hashed password: `tor --hash-password "your_password"`
-- Add to torrc: `HashedControlPassword 16:YOUR_HASH`
-- Set `control_password` in aisbf.json to match your password
-- Restart Tor: `sudo systemctl restart tor`
-
-**Onion Address Not Generated:**
-- Check TOR logs: `journalctl -u tor` or `tail -f /var/log/tor/log`
-- Verify hidden_service_dir permissions (if using persistent)
-- Ensure stem library is installed: `pip list | grep stem`
-
-**Service Not Accessible:**
-- Verify AISBF is running and listening on configured port
-- Check hidden_service_port matches AISBF local port
-- Test local access first: `curl http://localhost:17765`
-- Verify TOR Browser is configured correctly
-
-### MCP Integration
-
-The MCP server includes a `get_tor_status` tool for monitoring TOR hidden service status:
-
-```json
-{
-  "method": "tools/call",
-  "params": {
-    "name": "get_tor_status",
-    "arguments": {}
-  }
-}
-```
-
-Response includes:
-- `enabled`: Whether TOR is enabled
-- `connected`: Connection status to TOR control port
-- `onion_address`: Current onion address (if active)
-- `service_id`: Service ID for ephemeral services
-- `control_host` and `control_port`: TOR control connection details
-
-## Database Features
-
-AISBF includes a comprehensive database system that provides persistent tracking and multi-user support, with support for both SQLite (default) and MySQL databases:
-
-### Database Schema
-
-The database (`~/.aisbf/aisbf.db`) contains the following tables:
-
-#### Core Tracking Tables
-- **`context_dimensions`**: Tracks context size, condensation settings, and effective context per model
-- **`token_usage`**: Persistent token usage tracking with TPM/TPH/TPD rate limiting across restarts
-- **`model_embeddings`**: Caches model embeddings for semantic classification performance
-
-#### Multi-User Tables
-- **`users`**: User management with authentication, roles (admin/user), and metadata
-- **`user_providers`**: Isolated provider configurations per user (JSON stored configurations)
-- **`user_rotations`**: Isolated rotation configurations per user (JSON stored configurations)
-- **`user_autoselects`**: Isolated autoselect configurations per user (JSON stored configurations)
-- **`user_api_tokens`**: API token management per user for MCP and API access
-- **`user_token_usage`**: Per-user token usage tracking and analytics
-
-### Database Backends
-
-AISBF supports two database backends:
-
-#### SQLite (Default)
-- **Recommended for most users**: No additional setup required
-- **File-based**: Single database file stored in `~/.aisbf/aisbf.db`
-- **Zero configuration**: Works out of the box
-- **Performance**: Excellent for typical workloads
-
-#### MySQL
-- **For advanced users**: Requires MySQL server setup
-- **Network-based**: Can be hosted on separate server
-- **Scalability**: Better for high-traffic deployments
-- **Features**: Full MySQL feature set and ecosystem
-
-### Database Configuration
-
-Database backend can be configured via the web dashboard or configuration file:
-
-**Configuration File (`~/.aisbf/aisbf.json`):**
-```json
-{
+  "host": "127.0.0.1",
+  "port": 17765,
   "database": {
-    "type": "sqlite",  // or "mysql"
-    "sqlite_path": "~/.aisbf/aisbf.db",
-    "mysql_host": "localhost",
-    "mysql_port": 3306,
-    "mysql_user": "aisbf",
-    "mysql_password": "your-password",
-    "mysql_database": "aisbf"
+    "type": "sqlite",
+    "sqlite_path": "~/.aisbf/aisbf.db"
+  },
+  "cache": {
+    "type": "sqlite",
+    "sqlite_path": "~/.aisbf/cache.db"
+  },
+  "ssl": {
+    "enabled": false,
+    "cert_file": null,
+    "key_file": null
+  },
+  "tor": {
+    "enabled": false,
+    "control_port": 9051,
+    "control_host": "127.0.0.1"
+  },
+  "adaptive_rate_limiting": {
+    "enabled": true,
+    "learning_rate": 0.1,
+    "headroom_percent": 10
+  },
+  "response_cache": {
+    "enabled": true,
+    "backend": "memory",
+    "ttl": 600
   }
 }
 ```
 
-**Dashboard Configuration:**
-1. Navigate to **Dashboard → Settings**
-2. Scroll to **Database Configuration** section
-3. Select database type (SQLite or MySQL)
-4. Configure connection parameters as needed
-5. Save settings and restart server
+## Wallet System
 
-**Migration Notes:**
-- Switching between database types requires manual data migration
-- SQLite to MySQL: Use tools like `sqlite3-to-mysql` or manual export/import
-- MySQL to SQLite: Use MySQL export and SQLite import tools
-- All database schemas are compatible between backends
+AISBF includes a comprehensive unified wallet system that manages user fiat balances for subscription payments and provides multiple top-up methods.
 
-### Database Initialization
+### Features
 
-The database is automatically initialized on startup:
-- WAL mode enabled for better concurrency (SQLite)
-- Foreign key constraints enabled
-- Automatic cleanup of old records (>7 days)
-- Schema migrations handled automatically
-- Compatible schema across all supported database backends
+- **Unified Fiat Wallet**: Single wallet per user in system-configured currency
+- **Multiple Top-Up Methods**: Crypto (BTC, ETH, USDT, USDC), PayPal, Stripe (credit cards)
+- **Auto Top-Up**: Automatic balance replenishment when subscription renewal fails
+- **Transaction History**: Complete audit trail of all wallet operations
+- **Subscription Integration**: Automatic deduction for subscription renewals
+- **Configurable Amounts**: Fixed preset amounts (10, 15, 20, 50, 100) plus custom amounts
 
-### Multi-User Support
+### Wallet Balance Management
 
-AISBF supports multiple users with complete isolation through database-backed configurations:
+Each user has a single fiat wallet with the following properties:
+- **Balance**: Current fiat balance in system currency
+- **Currency**: Configurable system-wide currency (default: USD)
+- **Auto Top-Up**: Optional automatic top-up when balance falls below threshold
+- **Transaction History**: Complete log of all credits and debits
 
-#### User Authentication System
-- **Database-First Authentication**: User credentials stored in SQLite database with SHA256 password hashing
-- **Config Admin Fallback**: Legacy config-based admin authentication for backward compatibility
-- **Role-Based Access Control**: Two roles - `admin` (full access) and `user` (isolated access)
-- **Session-Based Authentication**: Secure session management for dashboard access
+### Top-Up Methods
 
-#### User Isolation Architecture
-Each user has completely isolated configurations stored as JSON in the database:
+#### 1. Cryptocurrency Top-Up
+- **Supported Currencies**: BTC, ETH, USDT (ERC20), USDC (ERC20)
+- **Process**: Generate unique address → User sends crypto → Automatic balance credit
+- **Confirmation**: Requires blockchain confirmations (6 for BTC, 12 for ETH/ERC20)
 
-- **Provider Configurations**: `user_providers` table stores individual API keys, endpoints, and model settings
-- **Rotation Configurations**: `user_rotations` table stores personal load balancing rules
-- **Autoselect Configurations**: `user_autoselects` table stores custom AI-assisted model selection rules
-- **API Tokens**: `user_api_tokens` table manages multiple API tokens per user
-- **Usage Tracking**: `user_token_usage` table provides per-user analytics and rate limiting
+#### 2. PayPal Top-Up
+- **Integration**: PayPal Checkout Orders API
+- **Amounts**: Fixed presets or custom amounts
+- **Process**: Create payment link → User completes PayPal payment → Automatic balance credit
 
-#### Handler Architecture
-The system uses user-specific handler instances that load configurations from the database:
+#### 3. Stripe Top-Up (Credit Cards)
+- **Integration**: Stripe PaymentIntents API
+- **Amounts**: Fixed presets or custom amounts
+- **Process**: Secure card payment → User completes payment → Automatic balance credit
 
-```python
-# Handler instantiation with user context
-request_handler = RequestHandler(user_id=user_id)
-rotation_handler = RotationHandler(user_id=user_id)
-autoselect_handler = AutoselectHandler(user_id=user_id)
+### Auto Top-Up System
 
-# Automatic loading of user configs
-handler.user_providers = db.get_user_providers(user_id)
-handler.user_rotations = db.get_user_rotations(user_id)
-handler.user_autoselects = db.get_user_autoselects(user_id)
-```
+Auto top-up automatically replenishes wallet balance when needed for subscription renewals:
 
-#### Configuration Priority
-When processing requests, handlers check for user-specific configurations first:
-
-1. **User-specific configs** (from database)
-2. **Global configs** (from JSON files)
-3. **System defaults**
-
-#### Admin Features
-- Create and manage users via database
-- Full access to global configurations and user management
-- System-wide analytics and monitoring
-- User administration dashboard
-
-#### User Dashboard Features
-- **Personal Configuration Management**: Create/edit/delete provider, rotation, and autoselect configs
-- **Usage Statistics**: Real-time token usage tracking and analytics
-- **API Token Management**: Generate, view, and delete API tokens
-- **Isolated Access**: No visibility of other users' configurations or system settings
-
-### Persistent Tracking
-
-#### Token Usage Tracking
-- Persistent across application restarts
-- TPM/TPH/TPD rate limiting maintained
-- Per-user and per-provider tracking
-- Automatic cleanup of old records
-
-#### Context Dimension Tracking
-- Context size monitoring per model
-- Condensation effectiveness tracking
-- Effective context reporting in API responses
-- Analytics foundation for optimization
-
-#### Model Embeddings Caching
-- Semantic classification performance optimization
-- Automatic model library indexing
-- Reduced API calls for autoselect operations
-- Cached embeddings for faster similarity matching
-
-### Cache Configuration
-
-AISBF includes a flexible caching system for model embeddings and other performance-critical data:
-
-#### Cache Backends
-
-##### SQLite Cache (Default)
-- **Recommended for most users**: No additional services required
-- **Persistent**: Cache survives application restarts
-- **Database-backed**: Structured storage with automatic cleanup
-- **Performance**: Fast local database access
-- **Storage**: Uses `~/.aisbf/cache.db` file
-
-##### MySQL Cache
-- **For database users**: Shares MySQL server with main database
-- **Network-based**: Can be hosted on separate server
-- **Scalability**: Better for multi-server deployments
-- **Features**: Full MySQL feature set and ecosystem
-
-##### Redis Cache
-- **For performance**: Requires Redis server
-- **Distributed**: Can be shared across multiple AISBF instances
-- **Memory-based**: Extremely fast access
-- **Scalability**: Better for high-traffic deployments
-
-##### File-based Cache
-- **Legacy option**: Simple file-based storage
-- **Persistent**: Cache survives application restarts
-- **Basic**: No advanced features like TTL or cleanup
-- **Storage**: Uses `~/.aisbf/cache/` directory
-
-##### Memory Cache
-- **For development**: In-memory only
-- **Fastest**: No disk I/O
-- **Temporary**: Lost on application restart
-- **Limited**: Not suitable for production use
-
-##### Memory Cache
-- **For development**: In-memory only
-- **Fastest**: No disk I/O
-- **Temporary**: Lost on application restart
-- **Limited**: Not suitable for production use
-
-#### Cache Configuration
-
-Cache backend can be configured via the web dashboard or configuration file:
-
-**Configuration File (`~/.aisbf/aisbf.json`):**
+#### Configuration
 ```json
 {
-  "cache": {
-    "type": "sqlite",  // "sqlite", "mysql", "redis", "file", or "memory"
-    "sqlite_path": "~/.aisbf/cache.db",
-    "mysql_host": "localhost",
-    "mysql_port": 3306,
-    "mysql_user": "aisbf",
-    "mysql_password": "your-password",
-    "mysql_database": "aisbf_cache",
-    "redis_host": "localhost",
-    "redis_port": 6379,
-    "redis_db": 0,
-    "redis_password": null,
-    "redis_key_prefix": "aisbf:"
+  "wallet": {
+    "auto_topup_enabled": true,
+    "auto_topup_amount": 20.00,
+    "auto_topup_threshold": 5.00,
+    "auto_topup_payment_method_id": "stripe_card_123"
   }
 }
 ```
 
-**Dashboard Configuration:**
-1. Navigate to **Dashboard → Settings**
-2. Scroll to **Cache Configuration** section
-3. Select cache type (File-based, Redis, or Memory)
-4. Configure connection parameters as needed (for Redis)
-5. Save settings and restart server
+#### How It Works
+1. **Threshold Monitoring**: System checks wallet balance before subscription renewal
+2. **Auto Top-Up Trigger**: If balance < threshold, auto top-up is activated
+3. **Payment Processing**: Uses stored Stripe payment method for automatic charge
+4. **Balance Credit**: Wallet is topped up with configured amount
+5. **Renewal Retry**: Subscription renewal proceeds with sufficient balance
 
-**Cache Features:**
-- **Model Embeddings**: Semantic classification model embeddings
-- **TTL Support**: Configurable time-to-live for cache entries
-- **Automatic Fallback**: Falls back to memory cache if Redis is unavailable
-- **Key Prefixing**: Redis keys are prefixed to avoid conflicts
+### Subscription Renewal Flow
 
-### Backup and Maintenance
+```
+Subscription Renewal Process:
+   ↳ Check Wallet Balance
+      ↳ Sufficient? → Deduct Amount → Success ✅
+      ↳ Insufficient?
+         ↳ Auto Top-Up Enabled?
+            ↳ Yes → Charge Stripe → Top Up Wallet → Retry Deduction → Success ✅
+            ↳ No → Renewal Failed → Grace Period → Future Retry ❌
+```
 
-- Automatic cleanup removes records older than 7 days
-- WAL mode ensures data integrity
-- Database file can be backed up manually from `~/.aisbf/aisbf.db`
-- No external dependencies required (uses built-in SQLite)
+### Wallet API Endpoints
+
+#### Get Wallet Balance
+```http
+GET /api/wallet/balance
+Authorization: Bearer <token>
+```
+
+Response:
+```json
+{
+  "balance": 25.50,
+  "currency": "USD",
+  "auto_topup_enabled": true,
+  "auto_topup_threshold": 10.00
+}
+```
+
+#### Top-Up Wallet
+```http
+POST /api/wallet/topup
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "amount": 20.00,
+  "payment_method": "stripe",
+  "custom_amount": false
+}
+```
+
+#### Configure Auto Top-Up
+```http
+POST /api/wallet/auto-topup
+Content-Type: application/json
+Authorization: Bearer <token>
+
+{
+  "enabled": true,
+  "amount": 15.00,
+  "threshold": 5.00,
+  "payment_method_id": "stripe_pm_123"
+}
+```
+
+#### Transaction History
+```http
+GET /api/wallet/transactions?page=1&limit=20
+Authorization: Bearer <token>
+```
+
+Response:
+```json
+{
+  "transactions": [
+    {
+      "id": 123,
+      "type": "credit",
+      "amount": 10.00,
+      "description": "Stripe top-up",
+      "created_at": "2026-04-21T10:30:00Z"
+    }
+  ],
+  "total": 45,
+  "page": 1,
+  "pages": 3
+}
+```
+
+### Dashboard Wallet Management
+
+The dashboard provides complete wallet management:
+
+- **Balance Display**: Current balance and recent transactions
+- **Top-Up Options**: Quick top-up buttons for preset amounts
+- **Custom Top-Up**: Enter custom amounts with payment method selection
+- **Auto Top-Up Settings**: Configure automatic top-up preferences
+- **Transaction History**: Paginated view of all wallet activity
+- **Payment Method Management**: Add/remove payment methods for auto top-up
+
+### Supported Top-Up Amounts
+
+- **Fixed Amounts**: $10, $15, $20, $50, $100
+- **Custom Amounts**: $5 - $500 (configurable per payment method)
+- **Currency**: System-configured currency (default: USD)
+
+### Security Features
+
+- **Atomic Transactions**: All wallet operations use database transactions
+- **Audit Trail**: Complete transaction history with tamper-evident logging
+- **Payment Method Security**: Secure storage of payment method tokens
+- **Rate Limiting**: Protection against excessive top-up attempts
+- **Fraud Prevention**: Monitoring for suspicious transaction patterns
+
+### Integration with Subscriptions
+
+Wallet system integrates seamlessly with subscription management:
+
+- **Automatic Deduction**: Subscription renewals deduct from wallet first
+- **Graceful Handling**: Failed renewals enter grace period with retry logic
+- **Cost Tracking**: All subscription charges logged in transaction history
+- **Multi-Currency**: Supports system-wide currency configuration
 
 ## API Endpoints
 
+### Three Proxy Paths
+
+AISBF provides three ways to proxy AI models:
+
+#### PATH 1: Direct Provider Models
+Format: `{provider_id}/{model_name}`
+- Access specific models from configured providers
+- Example: `openai/gpt-4`, `gemini/gemini-2.0-flash`, `anthropic/claude-3-5-sonnet-20241022`
+
+#### PATH 2: Rotations
+Format: `rotation/{rotation_name}`
+- Weighted load balancing across multiple providers
+- Example: `rotation/coding`, `rotation/general`
+
+#### PATH 3: Autoselect
+Format: `autoselect/{autoselect_name}`
+- AI-powered model selection based on content analysis
+- Example: `autoselect/autoselect`
+
 ### General Endpoints
-- `GET /` - Returns server status and list of available providers, rotations, and autoselect configurations
+- `GET /` - Server status and provider list
+- `GET /api/models` - List all available models from all three proxy paths
+- `GET /api/v1/models` - OpenAI-compatible model listing
 
-### Provider Endpoints
-- `POST /api/{provider_id}/chat/completions` - Handle chat completion requests for a specific provider
-  - Supports both streaming and non-streaming responses
-- `GET /api/{provider_id}/models` - List available models for a specific provider
+### Chat Completions
 
-### Rotation Endpoints
-- `GET /api/rotations` - List all available rotation configurations
-- `POST /api/rotations/chat/completions` - Chat completions using rotation (load balancing across providers)
-  - **Rotation Models**: Weighted random selection of models across multiple providers
-  - Automatic failover between providers on errors
-  - Configurable weights for each model to prioritize preferred options
-  - Supports both streaming and non-streaming responses
-  - Error tracking and rate limiting per provider
-- `GET /api/rotations/models` - List all models across all rotation configurations
+#### Unified Endpoints (Recommended)
+These endpoints accept all three proxy path formats in the model field:
 
-### Autoselect Endpoints
-- `GET /api/autoselect` - List all available autoselect configurations
-- `POST /api/autoselect/chat/completions` - Chat completions using AI-assisted selection based on content analysis
-  - **Autoselect Models**: AI analyzes request content to select the most appropriate model
-  - Automatic routing to specialized models based on task type:
-    - Coding/Programming tasks → Models optimized for code generation
-    - Analysis tasks → Models optimized for reasoning and problem-solving
-    - Creative tasks → Models optimized for creative writing
-    - General queries → General-purpose models
-  - Fallback to default model if selection fails
-  - Supports both streaming and non-streaming responses
-- `GET /api/autoselect/models` - List all models across all autoselect configurations
+**OpenAI-Compatible Format:**
+```bash
+POST /api/v1/chat/completions
+{
+  "model": "openai/gpt-4",           # PATH 1: Direct provider
+  "messages": [...]
+}
+
+POST /api/v1/chat/completions
+{
+  "model": "rotation/coding",        # PATH 2: Rotation
+  "messages": [...]
+}
+
+POST /api/v1/chat/completions
+{
+  "model": "autoselect/autoselect",  # PATH 3: Autoselect
+  "messages": [...]
+}
+```
+
+**Alternative Format:**
+```bash
+POST /api/{provider_id}/chat/completions
+# Where provider_id can be:
+# - A provider name (e.g., "openai", "gemini")
+# - A rotation name (e.g., "coding", "general")
+# - An autoselect name (e.g., "autoselect")
+```
 
 ### User-Specific API Endpoints
 
@@ -616,12 +436,12 @@ Authorization: Bearer YOUR_API_TOKEN
 | `GET /api/u/{username}/rotations` | List user's rotation configurations |
 | `GET /api/u/{username}/autoselects` | List user's autoselect configurations |
 | `POST /api/u/{username}/chat/completions` | Chat completions using user's own models |
-| `GET /api/u/{username}/{config_type}/models` | List models for specific config type (provider, rotation, autoselect) |
+| `GET /api/u/{username}/{config_type}/models` | List models for specific config type |
 
 **Access Control:**
-- **Admin Users** have access to both global and user configurations when using user API endpoints
+- **Admin Users** have access to both global and user configurations
 - **Regular Users** can only access their own configurations
-- **Global Tokens** (configured in aisbf.json) have full access to all configurations
+- **Global Tokens** have full access to all configurations
 
 #### Example: Using User API with cURL
 
@@ -641,28 +461,24 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
 AISBF provides an MCP server for remote agent configuration and model access:
 
 **Global MCP Endpoints (Admin-configured tokens):**
-- **SSE Endpoint**: `GET /mcp` - Server-Sent Events for MCP communication
-- **HTTP Endpoint**: `POST /mcp` - Direct HTTP transport for MCP
-- **Tools**: `GET /mcp/tools` - List available MCP tools
-- **Call Tool**: `POST /mcp/tools/call` - Call an MCP tool
+- `GET /mcp` - SSE endpoint for MCP communication
+- `POST /mcp` - HTTP POST endpoint for MCP
+- `GET /mcp/tools` - List available global MCP tools
+- `POST /mcp/tools/call` - Call global MCP tools
 
 **User-Specific MCP Endpoints (User API tokens):**
-- **Tools**: `GET /mcp/u/{username}/tools` - List user's MCP tools
-- **Call Tool**: `POST /mcp/u/{username}/tools/call` - Call user's MCP tool
+- `GET /mcp/u/{username}/tools` - List user's MCP tools
+- `POST /mcp/u/{username}/tools/call` - Call user's MCP tool
 
 MCP tools include:
-- `list_models` - List available models (user or global depending on auth)
+- `list_models` - List available models
 - `chat_completions` - Send chat completion requests
+- `get_wallet_balance` - Check wallet balance
 - `get_providers` - Get provider configurations
 - `get_rotations` - Get rotation configurations
 - `get_autoselects` - Get autoselect configurations
-- And more for authenticated users to manage their own configs
-
-User tokens authenticate MCP requests, with admin users getting full access and regular users getting user-only access.
 
 ## Provider Support
-
-AISBF supports the following AI providers:
 
 ### Model Metadata Extraction
 
@@ -678,15 +494,6 @@ AISBF automatically extracts and tracks model metadata from provider responses:
 - **"Get Models" Button**: Fetches and displays comprehensive model metadata
 - **Real-time Display**: Shows pricing, rate limits, and capabilities for each model
 - **Extended Fields**: OpenRouter-style metadata including top_provider, pricing details, and architecture
-
-**Configuration:**
-Model metadata is automatically extracted from provider responses and stored in the database. No manual configuration required.
-
-**Benefits:**
-- Automatic rate limit configuration from provider responses
-- Cost estimation based on actual pricing data
-- Better model selection with detailed capability information
-- Reduced manual configuration overhead
 
 ### Google
 - Uses google-genai SDK
@@ -710,249 +517,117 @@ Model metadata is automatically extracted from provider responses and stored in 
 - Full OAuth2 PKCE authentication flow
 - Automatic token refresh with refresh token rotation
 - Chrome extension for remote server OAuth2 callback interception
-- Proxy-aware extension serving: automatically detects reverse proxy deployments via X-Forwarded-* headers
-- Force interception mechanism: extension activates for localhost when OAuth flow initiated from dashboard
-- Supports nginx, caddy, and other reverse proxies with automatic proxy detection
-- Dashboard integration with authentication UI
-- Credentials stored in `~/.aisbf/claude_credentials.json`
-- Optional curl_cffi TLS fingerprinting for Cloudflare bypass
-- Compatible with official claude-cli credentials
-- Access to latest Claude models (3.7 Sonnet, 3.5 Sonnet, 3.5 Haiku, etc.)
-- Supports streaming, tool calling, vision, and all Claude features
-- See [`CLAUDE_OAUTH2_SETUP.md`](CLAUDE_OAUTH2_SETUP.md) for setup instructions
+- Proxy-aware extension serving: automatically detects reverse proxy deployments
+- Supports all Claude models with streaming, tool calling, vision, and extended thinking
 
 ### Ollama
 - Uses direct HTTP API
 - No API key required
 - Local model hosting support
 
-### Kiro (Amazon Q Developer / AWS CodeWhisperer)
+### Kiro (Amazon Q Developer)
 - Native integration with Kiro authentication
 - Supports IDE credentials and CLI authentication
-- Access to Claude models through Kiro
-- No separate API key required (uses Kiro credentials)
+- No separate API key required
 
 ### Kilocode
 - OAuth2 Device Authorization Grant flow
 - Supports both API key and OAuth2 authentication
-- Seamless integration with Kilocode services
 - Dashboard OAuth2 authentication UI
-- Credentials stored in ~/.kilo_credentials.json
-- Access to Kilocode AI models and services
-- Supports streaming, tool calling, and extended thinking
 
-## Rotation Models
+### Codex
+- OAuth2 Device Authorization Grant for OpenAI protocol
+- API key exchange from ID token
+- Dashboard authentication UI
 
-AISBF supports provider rotation with weighted model selection, allowing intelligent load balancing across multiple AI providers:
+### Qwen
+- API key authentication (recommended)
+- OpenAI-compatible DashScope API endpoint
+- Supports all Qwen models
 
-### How Rotation Models Work
+## Advanced Features
 
-Rotation models provide automatic load balancing and failover by:
-1. **Weighted Selection**: Each model is assigned a weight that determines its selection probability
-2. **Automatic Failover**: If a provider fails, the system automatically tries the next best model
-3. **Error Tracking**: Providers are temporarily disabled after 3 consecutive failures (5-minute cooldown)
-4. **Rate Limiting**: Respects provider rate limits to avoid service disruptions
+### Provider-Native Caching
 
-### Rotation Configuration
+AISBF supports provider-native caching APIs for cost reduction:
+
+#### Supported Providers
+- **Anthropic**: `cache_control` with ephemeral caching
+- **Google**: Context Caching API with TTL support
+- **OpenAI**: Automatic prefix caching
+
+#### Configuration
 ```json
 {
-  "rotations": {
-    "my_rotation": {
-      "providers": [
-        {
-          "provider_id": "openai",
-          "models": [
-            {"name": "gpt-4", "weight": 1},
-            {"name": "gpt-3.5-turbo", "weight": 3}
-          ]
-        },
-        {
-          "provider_id": "anthropic",
-          "models": [
-            {"name": "claude-3-haiku-20240307", "weight": 2}
-          ]
-        }
-      ]
+  "providers": {
+    "anthropic": {
+      "enable_native_caching": true,
+      "min_cacheable_tokens": 1024
     }
   }
 }
 ```
 
-### Rotation Behavior
+### Response Caching
 
-When using rotation models:
-- Models with higher weights are selected more frequently
-- The system automatically retries with alternative models on failures
-- Failed providers are temporarily disabled and automatically re-enabled after cooldown
-- All requests are logged for monitoring and debugging
+Intelligent response caching with semantic deduplication:
 
-### Example Use Cases
+#### Features
+- SHA256-based cache key generation
+- Multiple backends (Redis, SQLite, MySQL, memory)
+- TTL-based expiration
+- Cache statistics and dashboard management
 
-- **High Availability**: Configure multiple providers with the same model for redundancy
-- **Cost Optimization**: Use cheaper models with higher weights, fallback to expensive models when needed
-- **Performance**: Prioritize faster models, fallback to slower models if they fail
-- **Geographic Distribution**: Route requests to providers in different regions
-
-## Autoselect Models
-
-AISBF supports AI-assisted model selection that automatically routes requests to the most appropriate model based on content analysis:
-
-### How Autoselect Models Work
-
-Autoselect models use AI to analyze the user's request and select the best model:
-1. **Content Analysis**: The AI analyzes the request to determine task type, complexity, and domain
-2. **Model Matching**: Matches request characteristics to available model capabilities
-3. **Automatic Routing**: Routes the request to the most suitable model
-4. **Fallback**: Uses a default model if selection fails or is uncertain
-
-### Semantic Classification (New Feature)
-
-Autoselect configurations can now use semantic classification instead of AI model selection for faster and potentially more accurate model selection:
-
-- **Hybrid BM25 + Semantic Search**: Combines fast keyword matching with semantic similarity using sentence transformers
-- **Automatic Model Library Indexing**: Builds and caches model embeddings for efficient similarity matching
-- **Performance Optimized**: No API calls required, significantly faster than AI-based selection
-- **Fallback Support**: Falls back to AI model selection if semantic classification fails
-
-**Enable Semantic Classification:**
+#### Configuration
 ```json
 {
-  "autoselect": {
-    "smart": {
-      "classify_semantic": true,
-      "selection_model": "openai/gpt-4",
-      "available_models": [...]
-    }
+  "response_cache": {
+    "enabled": true,
+    "backend": "redis",
+    "ttl": 600,
+    "max_size": 1000
   }
 }
 ```
 
-**Benefits:**
-- Faster model selection (no API costs)
-- Deterministic results based on semantic similarity
-- Automatic model library caching in `~/.aisbf/`
-- Lower latency for model selection
+### Adaptive Rate Limiting
 
-### Content Classification and Filtering (New Feature)
+Intelligent rate limit management that learns from provider responses:
 
-AISBF provides advanced content classification for NSFW and privacy-sensitive content:
+#### Features
+- Learns optimal request rates from 429 responses
+- Exponential backoff with jitter
+- Per-provider tracking
+- Dashboard monitoring
 
-#### NSFW/Privacy Content Filtering
+#### Configuration
+```json
+{
+  "adaptive_rate_limiting": {
+    "enabled": true,
+    "learning_rate": 0.1,
+    "headroom_percent": 10
+  }
+}
+```
 
-Models can be configured with boolean flags to indicate their suitability for sensitive content:
-- **`nsfw`**: Model supports NSFW (Not Safe For Work) content
-- **`privacy`**: Model supports privacy-sensitive content (medical, financial, legal data)
+### Context Management
 
-When global `classify_nsfw` or `classify_privacy` is enabled, AISBF analyzes the last 3 user messages and routes requests only to appropriate models. If no suitable models are available, requests return a 404 error.
+Automatic context condensation with multiple methods:
 
-**Configuration Levels (cascading priority):**
-1. Rotation model config (highest priority)
-2. Provider model config
-3. Global AISBF config (enables/disables classification)
+#### Condensation Methods
+1. **Hierarchical**: Separates persistent and transient layers
+2. **Conversational**: Summarizes old messages
+3. **Semantic**: Prunes irrelevant context
+4. **Algorithmic**: Mathematical compression
 
-**Example Model Configuration:**
+#### Configuration
 ```json
 {
   "models": [
     {
       "name": "gpt-4",
-      "nsfw": true,
-      "privacy": true
-    },
-    {
-      "name": "gpt-3.5-turbo",
-      "nsfw": false,
-      "privacy": true
-    }
-  ]
-}
-```
-
-**Global Classification Settings:**
-```json
-{
-  "classify_nsfw": true,
-  "classify_privacy": true
-}
-```
-
-**Content Classification Window:**
-- Only analyzes the last 3 user messages for performance
-- Avoids processing full conversation history
-- Uses HuggingFace transformers for content analysis
-- Automatic fallback if classification models are unavailable
-
-### Autoselect Configuration
-
-```json
-{
-  "autoselect": {
-    "smart": {
-      "model_name": "smart",
-      "description": "AI-assisted model selection",
-      "fallback": "general",
-      "available_models": [
-        {
-          "model_id": "coding",
-          "description": "Best for programming, code generation, debugging, and technical tasks"
-        },
-        {
-          "model_id": "analysis",
-          "description": "Best for analysis, reasoning, and problem-solving"
-        },
-        {
-          "model_id": "creative",
-          "description": "Best for creative writing, storytelling, and content generation"
-        },
-        {
-          "model_id": "general",
-          "description": "General purpose model for everyday tasks and conversations"
-        }
-      ]
-    }
-  }
-}
-```
-
-### Autoselect Behavior
-
-When using autoselect models:
-- The AI analyzes the request content to determine the best model
-- Requests are automatically routed to specialized models based on task type
-- The system provides explicit output requirements to ensure reliable model selection
-- Falls back to a default model if selection is uncertain
-
-### Example Use Cases
-
-- **Intelligent Routing**: Automatically route coding tasks to code-optimized models
-- **Cost Efficiency**: Use cheaper models for simple tasks, expensive models for complex ones
-- **User Experience**: Provide optimal responses without manual model selection
-- **Adaptive Selection**: Dynamically adjust model selection based on request characteristics
-
-## Context Management
-
-AISBF provides intelligent context management to handle large conversation histories and prevent exceeding model context limits:
-
-### How Context Management Works
-
-Context management automatically monitors and condenses conversation context:
-
-1. **Effective Context Tracking**: Calculates and reports total tokens used (effective_context) for every request
-2. **Automatic Condensation**: When context exceeds configured percentage of model's context_size, triggers condensation
-3. **Multiple Condensation Methods**: Supports 8 condensation methods including hierarchical, conversational, semantic, algorithmic, sliding window, importance-based, entity-aware, and code-aware condensation
-4. **Method Chaining**: Multiple condensation methods can be applied in sequence for optimal results
-5. **Condensation Analytics**: Tracks effectiveness (token reduction %) and latency for each condensation operation
-
-### Context Configuration
-
-Models can be configured with context management fields:
-
-```json
-{
-  "models": [
-    {
-      "name": "gemini-2.0-flash",
-      "context_size": 1000000,
+      "context_size": 128000,
       "condense_context": 80,
       "condense_method": ["hierarchical", "semantic"]
     }
@@ -960,1004 +635,114 @@ Models can be configured with context management fields:
 }
 ```
 
-**Configuration Fields:**
-- **`context_size`**: Maximum context size in tokens for the model
-- **`condense_context`**: Percentage (0-100) at which to trigger condensation. 0 means disabled
-- **`condense_method`**: String or list of strings specifying condensation method(s)
+### SSL/TLS Support
 
-### Condensation Methods
+Built-in HTTPS with Let's Encrypt integration:
 
-#### 1. Hierarchical Context Engineering
-Separates context into persistent (long-term facts) and transient (immediate task) layers:
-- **Persistent State**: Architecture, project state, core principles
-- **Recent History**: Summarized conversation history
-- **Active Code**: High-fidelity current code
-- **Instruction**: Current task/goal
+#### Self-Signed Certificates
+- Automatic generation for development
+- Stored in `~/.aisbf/cert.pem` and `key.pem`
 
-#### 2. Conversational Summarization (Memory Buffering)
-Replaces old messages with high-density summaries:
-- Uses a smaller model to summarize conversation progress
-- Maintains continuity without hitting token caps
-- Preserves key facts, decisions, and current goals
+#### Let's Encrypt
+- Automatic certificate generation and renewal
+- Requires certbot installation
+- Public domain configuration in dashboard
 
-#### 3. Semantic Context Pruning (Observation Masking)
-Removes irrelevant details based on current query:
-- Uses a smaller "janitor" model to extract relevant facts
-- Can reduce history by 50-80% without losing critical information
-- Focuses on information relevant to the specific current request
+### TOR Hidden Service
 
-#### 4. Algoritmic Token Compression
-Mathematical compression for technical data and logs:
-- Similar to LLMLingua compression
-- Achieves up to 20x compression for technical data
-- Removes low-information tokens systematically
+Anonymous access via TOR network:
 
-### Effective Context Reporting
-
-All responses include `effective_context` in the usage field:
-
-**Non-streaming responses:**
+#### Configuration
 ```json
 {
-  "usage": {
-    "prompt_tokens": 1000,
-    "completion_tokens": 500,
-    "total_tokens": 1500,
-    "effective_context": 1000
-  }
-}
-```
-
-**Streaming responses:**
-The final chunk includes effective_context:
-```json
-{
-  "usage": {
-    "prompt_tokens": null,
-    "completion_tokens": null,
-    "total_tokens": null,
-    "effective_context": 1000
-  }
-}
-```
-
-### Example Use Cases
-
-- **Long Conversations**: Maintain context across extended conversations without hitting limits
-- **Code Analysis**: Handle large codebases with intelligent context pruning
-- **Document Processing**: Process large documents with automatic summarization
-- **Multi-turn Tasks**: Maintain task context across multiple interactions
-
-## Provider-Native Caching
-
-AISBF supports provider-native caching APIs to dramatically reduce costs by caching reusable content like system prompts and conversation prefixes. This feature provides 50-70% cost reduction for supported providers.
-
-### Supported Providers
-
-#### Anthropic (cache_control)
-Anthropic's `cache_control` feature allows caching of system messages and conversation prefixes to reduce API costs.
-
-**Features:**
-- **Automatic Detection**: System messages and long conversation prefixes are automatically marked as cacheable
-- **Token Threshold**: Configurable minimum token count for content to be cacheable (default: 1000)
-- **Ephemeral Caching**: Uses Anthropic's ephemeral cache type for optimal performance
-
-#### Google (Context Caching)
-Google's Context Caching API allows caching of conversation context for reuse across multiple requests.
-
-**Features:**
-- **TTL Support**: Configurable cache time-to-live (default: 3600 seconds / 1 hour)
-- **Framework Ready**: Configuration and logging infrastructure in place for future full implementation
-
-### Configuration
-
-Provider-native caching can be configured via the web dashboard or configuration file:
-
-#### Dashboard Configuration
-1. Navigate to **Dashboard → Providers**
-2. Select the provider (Anthropic or Google)
-3. Enable **Native Caching** checkbox
-4. Configure **Cache TTL** (Google only, in seconds)
-5. Set **Min Cacheable Tokens** (minimum token count for cacheable content)
-6. Save settings
-
-#### Configuration File (`~/.aisbf/providers.json`)
-
-```json
-{
-  "providers": {
-    "anthropic": {
-      "id": "anthropic",
-      "name": "Anthropic",
-      "endpoint": "https://api.anthropic.com/v1",
-      "type": "anthropic",
-      "api_key_required": true,
-      "api_key": "YOUR_ANTHROPIC_API_KEY",
-      "enable_native_caching": true,
-      "cache_ttl": null,
-      "min_cacheable_tokens": 1000
-    },
-    "gemini": {
-      "id": "gemini",
-      "name": "Google AI Studio",
-      "endpoint": "https://generativelanguage.googleapis.com/v1beta",
-      "type": "google",
-      "api_key_required": true,
-      "api_key": "YOUR_GEMINI_API_KEY",
-      "enable_native_caching": true,
-      "cache_ttl": 3600,
-      "min_cacheable_tokens": 1000
-    }
-  }
-}
-```
-
-### Configuration Fields
-
-- **`enable_native_caching`**: Enable/disable native caching for this provider (default: false)
-- **`cache_ttl`**: Cache time-to-live in seconds (Google only, default: 3600)
-- **`min_cacheable_tokens`**: Minimum token count for content to be cacheable (default: 1000)
-
-### How It Works
-
-#### Anthropic Caching Logic
-When `enable_native_caching: true` for Anthropic:
-
-1. **System Messages**: Always marked as cacheable with `{"type": "ephemeral"}`
-2. **Conversation Prefixes**: Messages before the last 2 are evaluated for caching
-3. **Token Counting**: Cumulative token count determines cache eligibility
-4. **Automatic Application**: Eligible messages get `cache_control` parameter automatically
-
-**Example of cached request:**
-```json
-{
-  "model": "claude-3-haiku-20240307",
-  "messages": [
-    {
-      "role": "system",
-      "content": "You are a helpful assistant...",
-      "cache_control": {"type": "ephemeral"}
-    },
-    {
-      "role": "user",
-      "content": "Tell me about...",
-      "cache_control": {"type": "ephemeral"}
-    },
-    {
-      "role": "assistant",
-      "content": "Let me explain..."
-    },
-    {
-      "role": "user",
-      "content": "What about..."
-    }
-  ]
-}
-```
-
-#### Google Context Caching
-Google's Context Caching API requires separate cache creation and reference calls:
-
-1. **Cache Creation**: Content is cached using dedicated API calls
-2. **Cache References**: Subsequent requests reference cached content by ID
-3. **TTL Management**: Automatic cache expiration and cleanup
-4. **Cost Optimization**: Significant reduction in input token costs
-
-**Note**: Full Google Context Caching implementation is planned for future releases. Current version includes configuration framework and logging.
-
-### Cost Savings
-
-**Expected Cost Reductions:**
-- **Anthropic**: 50-70% reduction for requests with cacheable content
-- **Google**: 50-70% reduction for supported Gemini models (when fully implemented)
-
-**Factors Affecting Savings:**
-- **System Prompt Length**: Longer system prompts provide higher savings
-- **Conversation Reuse**: Repeated conversation patterns maximize cache hits
-- **Token Threshold**: Higher `min_cacheable_tokens` focuses caching on substantial content
-
-### Best Practices
-
-1. **Enable for Production**: Enable caching for production workloads with consistent prompts
-2. **Monitor Usage**: Check logs for cache application statistics
-3. **Tune Thresholds**: Adjust `min_cacheable_tokens` based on your use case
-4. **Test Thoroughly**: Verify caching doesn't affect response quality
-
-### Monitoring
-
-Cache usage is logged in AISBF's application logs:
-
-```
-AnthropicProviderHandler: Applied cache_control to message 0 (1250 tokens, cumulative: 1250)
-AnthropicProviderHandler: Applied cache_control to message 1 (850 tokens, cumulative: 2100)
-GoogleProviderHandler: Native caching enabled but not yet implemented
-```
-
-### Troubleshooting
-
-**Caching Not Applied:**
-- Verify `enable_native_caching: true` in provider configuration
-- Check that content exceeds `min_cacheable_tokens` threshold
-- Ensure system messages are present for Anthropic
-
-**Configuration Not Taking Effect:**
-- Restart AISBF after configuration changes
-- Check provider configuration in dashboard
-- Verify JSON syntax in configuration files
-
-## Error Tracking and Rate Limiting
-
-### Error Tracking
-- Tracks failures per provider
-- Disables providers after 3 consecutive failures
-- Configurable cooldown period for disabled providers (default: 5 minutes)
-- Automatic re-enabling after cooldown period expires
-
-### Configurable Error Cooldown
-
-The cooldown period after 3 consecutive failures can be configured at multiple levels with cascading defaults:
-
-**Configuration Levels (in order of precedence):**
-1. **Model-specific**: Set `error_cooldown` in individual model configuration
-2. **Provider default**: Set `default_error_cooldown` in provider configuration
-3. **System default**: 300 seconds (5 minutes) if not configured
-
-**Example Provider Configuration:**
-```json
-{
-  "providers": {
-    "openai": {
-      "id": "openai",
-      "name": "OpenAI",
-      "endpoint": "https://api.openai.com/v1",
-      "type": "openai",
-      "api_key_required": true,
-      "default_error_cooldown": 600,
-      "models": [
-        {
-          "name": "gpt-4",
-          "error_cooldown": 900
-        },
-        {
-          "name": "gpt-3.5-turbo",
-          "error_cooldown": 300
-        }
-      ]
-    }
-  }
-}
-```
-
-In this example:
-- `gpt-4` will have a 900-second (15-minute) cooldown after failures
-- `gpt-3.5-turbo` will have a 300-second (5-minute) cooldown
-- Any other OpenAI models will use the provider default of 600 seconds (10 minutes)
-- Providers without configuration will use the system default of 300 seconds
-
-**Rotation Configuration:**
-```json
-{
-  "rotations": {
-    "balanced": {
-      "model_name": "balanced",
-      "default_error_cooldown": 450,
-      "providers": [...]
-    }
-  }
-}
-```
-
-### Rate Limiting
-
-#### Adaptive Rate Limiting
-
-AISBF includes intelligent rate limit management that learns from provider 429 responses and automatically adjusts request rates:
-
-**Features:**
-- **Learning from 429 Responses**: Automatically detects rate limits from provider error responses
-- **Exponential Backoff with Jitter**: Configurable backoff strategy to avoid thundering herd
-- **Rate Limit Headroom**: Stays 10% below learned limits to prevent hitting rate limits
-- **Gradual Recovery**: Slowly increases rate after consecutive successful requests
-- **Per-Provider Tracking**: Independent rate limiters for each provider
-- **Dashboard Monitoring**: Real-time view of current limits, 429 counts, success rates, and recovery progress
-
-**Configuration:**
-
-Via Dashboard:
-1. Navigate to Dashboard → Rate Limits
-2. View current rate limits and statistics for each provider
-3. Reset individual provider limits or reset all
-4. Monitor 429 response patterns and success rates
-
-Via Configuration File (`~/.aisbf/aisbf.json`):
-```json
-{
-  "adaptive_rate_limiting": {
+  "tor": {
     "enabled": true,
-    "learning_rate": 0.1,
-    "headroom_percent": 10,
-    "recovery_rate": 0.05,
-    "base_backoff": 1.0,
-    "jitter_factor": 0.1,
-    "history_window": 100
+    "control_port": 9051,
+    "hidden_service_dir": "~/.aisbf/tor_hidden_service"
   }
 }
 ```
 
-**Configuration Fields:**
-- `enabled`: Enable adaptive rate limiting (default: true)
-- `learning_rate`: How quickly to adjust limits (0.0-1.0, default: 0.1)
-- `headroom_percent`: Safety margin below learned limit (default: 10%)
-- `recovery_rate`: Rate of limit increase after successes (default: 0.05)
-- `base_backoff`: Base backoff time in seconds (default: 1.0)
-- `jitter_factor`: Random jitter to prevent synchronized retries (default: 0.1)
-- `history_window`: Number of recent requests to track (default: 100)
-
-**Benefits:**
-- Automatic optimization without manual rate limit configuration
-- Reduced 429 errors by learning optimal request rates
-- Better resource utilization by maximizing throughput while respecting limits
-- Provider-specific tracking for independent rate limit management
-
-#### Traditional Rate Limiting
-- Automatic provider disabling when rate limited
-- Intelligent parsing of 429 responses to determine wait time
-- Graceful error handling
-- Configurable retry behavior
-
-## Development vs Production
-
-### Development
-Use `start_proxy.sh`:
-- Creates local venv in `./venv/`
-- Installs dependencies from `requirements.txt`
-- Starts server with auto-reload enabled
-- Uses `config/` directory for configuration
-
-### Production
-Install with `python setup.py install`:
-- Creates isolated venv
-- Installs all dependencies
-- Provides `aisbf` command with daemon support
-- Uses installed config files
-
-## PyPI Packaging
+## Development
 
 ### Building the Package
-
-To build the package for PyPI distribution:
 
 ```bash
 ./build.sh
 ```
 
-This script:
-- Checks for build tools (build, twine)
-- Installs them if not present
-- Cleans previous build artifacts
-- Builds the package using `python -m build`
-- Verifies the package with `twine check`
-- Displays created files and upload instructions
+Creates distribution files in `dist/`.
 
-### Cleaning Build Artifacts
+### PyPI Publishing
 
-To remove all build artifacts and temporary files:
+See `PYPI.md` for detailed publishing instructions.
+
+### Running Tests
 
 ```bash
-./clean.sh
+pytest tests/
 ```
 
-This removes:
-- `dist/` directory (distribution packages)
-- `build/` directory (build artifacts)
-- `*.egg-info` directories (package metadata)
-- `__pycache__/` directories (Python bytecode cache)
-- `*.pyc`, `*.pyo`, `*.pyd` files (compiled Python files)
-- `.pytest_cache/`, `.mypy_cache/` directories
-- `.coverage` file, `htmlcov/` directory
+### Code Style
 
-### Package Structure
+- Follow PEP 8
+- Use type hints
+- Add docstrings to all functions
 
-The package includes:
-- **Python Module**: `aisbf/` directory with all Python code
-- **Configuration Files**: `config/` directory with JSON configs
-- **Main Application**: `main.py` - FastAPI application
-- **Documentation**: `README.md`, `DOCUMENTATION.md`
-- **License**: `LICENSE.txt` (GPL-3.0-or-later)
-- **Requirements**: `requirements.txt`
+## Troubleshooting
 
-### Installation from PyPI
+### Common Issues
 
-Users can install AISBF with:
+#### Import Errors
+- Ensure AISBF is properly installed
+- Check Python path
+- Verify dependencies in requirements.txt
 
+#### Authentication Failures
+- Check API keys in provider configuration
+- Verify OAuth2 credentials are valid
+- Check network connectivity to provider endpoints
+
+#### Rate Limiting Issues
+- Monitor dashboard rate limit statistics
+- Adjust adaptive rate limiting settings
+- Check provider account limits
+
+#### Database Issues
+- Verify database file permissions
+- Check SQLite/MySQL connectivity
+- Run database migrations if needed
+
+### Debug Mode
+
+Enable debug logging:
 ```bash
-# User installation (recommended)
-pip install aisbf
-
-# System-wide installation (requires root)
-sudo pip install aisbf
-```
-
-### Publishing to PyPI
-
-See [`PYPI.md`](PYPI.md) for detailed instructions on:
-- Setting up PyPI account and API tokens
-- Building and testing packages
-- Publishing to TestPyPI and PyPI
-- Version management
-- Troubleshooting
-
-## AISBF Script Commands
-
-### Starting in Foreground (Default)
-```bash
+export AISBF_DEBUG=1
 aisbf
 ```
-Starts server in foreground with visible output on `http://127.0.0.1:17765`.
 
-### Starting as Daemon
-```bash
-aisbf daemon
-```
-- Starts in background on `http://127.0.0.1:17765`
-- Saves PID to `/tmp/aisbf.pid`
-- Redirects output to `/dev/null`
-- Prints PID of started process
+### Logs Location
 
-### Checking Status
-```bash
-aisbf status
-```
-Checks if AISBF is running and reports status/PID.
-
-### Stopping the Daemon
-```bash
-aisbf stop
-```
-Stops running daemon and removes PID file.
-
-## Proxy Deployment
-
-AISBF is fully proxy-aware and can be deployed behind reverse proxies like nginx, Apache, or Caddy. The application automatically detects and respects standard proxy headers to ensure correct URL generation and routing.
-
-### Proxy-Awareness Features
-
-AISBF automatically handles:
-- **X-Forwarded-Proto**: Detects original protocol (http/https)
-- **X-Forwarded-Host**: Detects original hostname
-- **X-Forwarded-Port**: Detects original port
-- **X-Forwarded-Prefix** or **X-Script-Name**: Detects URL subpath/prefix
-- **X-Forwarded-For**: Detects original client IP address
-
-All URLs in the dashboard, redirects, and API responses are automatically adjusted based on these headers.
-
-### Nginx Proxy Configuration Examples
-
-#### Example 1: Simple Reverse Proxy (Root Path)
-
-Deploy AISBF at the root of a domain (e.g., `https://aisbf.example.com/`):
-
-```nginx
-server {
-    listen 80;
-    server_name aisbf.example.com;
-    
-    # Redirect HTTP to HTTPS
-    return 301 https://$server_name$request_uri;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name aisbf.example.com;
-    
-    # SSL configuration
-    ssl_certificate /etc/ssl/certs/aisbf.example.com.crt;
-    ssl_certificate_key /etc/ssl/private/aisbf.example.com.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    
-    # Proxy settings
-    location / {
-        proxy_pass http://127.0.0.1:17765;
-        proxy_http_version 1.1;
-        
-        # Proxy headers for AISBF proxy-awareness
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        
-        # WebSocket support for streaming
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts for long-running requests
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        
-        # Buffering settings for streaming
-        proxy_buffering off;
-        proxy_cache off;
-    }
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    
-    # Logging
-    access_log /var/log/nginx/aisbf_access.log;
-    error_log /var/log/nginx/aisbf_error.log;
-}
-```
-
-#### Example 2: Reverse Proxy with Subpath
-
-Deploy AISBF at a subpath (e.g., `https://example.com/aisbf/`):
-
-```nginx
-server {
-    listen 443 ssl http2;
-    server_name example.com;
-    
-    # SSL configuration
-    ssl_certificate /etc/ssl/certs/example.com.crt;
-    ssl_certificate_key /etc/ssl/private/example.com.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    
-    # AISBF at /aisbf subpath
-    location /aisbf/ {
-        # Remove /aisbf prefix before proxying
-        rewrite ^/aisbf/(.*) /$1 break;
-        
-        proxy_pass http://127.0.0.1:17765;
-        proxy_http_version 1.1;
-        
-        # Proxy headers for AISBF proxy-awareness
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        
-        # IMPORTANT: Set the subpath prefix
-        proxy_set_header X-Forwarded-Prefix /aisbf;
-        
-        # WebSocket support for streaming
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts for long-running requests
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        
-        # Buffering settings for streaming
-        proxy_buffering off;
-        proxy_cache off;
-    }
-    
-    # Other locations for your main application
-    location / {
-        # Your main application configuration
-        root /var/www/html;
-        index index.html;
-    }
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    
-    # Logging
-    access_log /var/log/nginx/example_access.log;
-    error_log /var/log/nginx/example_error.log;
-}
-```
-
-#### Example 3: Load Balancing Multiple AISBF Instances
-
-Deploy multiple AISBF instances for high availability:
-
-```nginx
-upstream aisbf_backend {
-    # Multiple AISBF instances
-    server 127.0.0.1:17765 max_fails=3 fail_timeout=30s;
-    server 127.0.0.1:17766 max_fails=3 fail_timeout=30s;
-    server 127.0.0.1:17767 max_fails=3 fail_timeout=30s;
-    
-    # Load balancing method
-    least_conn;  # Route to instance with fewest connections
-    
-    # Session persistence (optional, for dashboard sessions)
-    ip_hash;
-}
-
-server {
-    listen 443 ssl http2;
-    server_name aisbf.example.com;
-    
-    # SSL configuration
-    ssl_certificate /etc/ssl/certs/aisbf.example.com.crt;
-    ssl_certificate_key /etc/ssl/private/aisbf.example.com.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    
-    location / {
-        proxy_pass http://aisbf_backend;
-        proxy_http_version 1.1;
-        
-        # Proxy headers for AISBF proxy-awareness
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        
-        # WebSocket support for streaming
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts for long-running requests
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 300s;
-        proxy_read_timeout 300s;
-        
-        # Buffering settings for streaming
-        proxy_buffering off;
-        proxy_cache off;
-        
-        # Health check
-        proxy_next_upstream error timeout http_502 http_503 http_504;
-    }
-    
-    # Health check endpoint
-    location /health {
-        proxy_pass http://aisbf_backend/health;
-        access_log off;
-    }
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    
-    # Logging
-    access_log /var/log/nginx/aisbf_access.log;
-    error_log /var/log/nginx/aisbf_error.log;
-}
-```
-
-#### Example 4: API-Only Deployment with Rate Limiting
-
-Deploy AISBF as an API-only service with rate limiting:
-
-```nginx
-# Define rate limiting zones
-limit_req_zone $binary_remote_addr zone=aisbf_api:10m rate=10r/s;
-limit_req_zone $binary_remote_addr zone=aisbf_dashboard:10m rate=5r/s;
-
-server {
-    listen 443 ssl http2;
-    server_name api.example.com;
-    
-    # SSL configuration
-    ssl_certificate /etc/ssl/certs/api.example.com.crt;
-    ssl_certificate_key /etc/ssl/private/api.example.com.key;
-    ssl_protocols TLSv1.2 TLSv1.3;
-    ssl_ciphers HIGH:!aNULL:!MD5;
-    
-    # API endpoints with rate limiting
-    location /api/ {
-        # Apply rate limiting
-        limit_req zone=aisbf_api burst=20 nodelay;
-        
-        proxy_pass http://127.0.0.1:17765;
-        proxy_http_version 1.1;
-        
-        # Proxy headers for AISBF proxy-awareness
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        
-        # WebSocket support for streaming
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
-        
-        # Timeouts for long-running AI requests
-        proxy_connect_timeout 60s;
-        proxy_send_timeout 600s;
-        proxy_read_timeout 600s;
-        
-        # Buffering settings for streaming
-        proxy_buffering off;
-        proxy_cache off;
-        
-        # CORS headers (if needed)
-        add_header Access-Control-Allow-Origin "*" always;
-        add_header Access-Control-Allow-Methods "GET, POST, OPTIONS" always;
-        add_header Access-Control-Allow-Headers "Authorization, Content-Type" always;
-    }
-    
-    # Dashboard with stricter rate limiting
-    location /dashboard/ {
-        limit_req zone=aisbf_dashboard burst=10 nodelay;
-        
-        proxy_pass http://127.0.0.1:17765;
-        proxy_http_version 1.1;
-        
-        # Proxy headers for AISBF proxy-awareness
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_set_header X-Forwarded-Host $host;
-        proxy_set_header X-Forwarded-Port $server_port;
-        
-        # Standard proxy settings
-        proxy_buffering off;
-    }
-    
-    # Block all other paths
-    location / {
-        return 404;
-    }
-    
-    # Security headers
-    add_header X-Frame-Options "SAMEORIGIN" always;
-    add_header X-Content-Type-Options "nosniff" always;
-    add_header X-XSS-Protection "1; mode=block" always;
-    
-    # Logging
-    access_log /var/log/nginx/aisbf_api_access.log;
-    error_log /var/log/nginx/aisbf_api_error.log;
-}
-```
-
-### Testing Proxy Configuration
-
-After configuring nginx, test the setup:
-
-1. **Test nginx configuration:**
-   ```bash
-   sudo nginx -t
-   ```
-
-2. **Reload nginx:**
-   ```bash
-   sudo systemctl reload nginx
-   ```
-
-3. **Test AISBF through proxy:**
-   ```bash
-   # Test root endpoint
-   curl https://aisbf.example.com/
-   
-   # Test with subpath
-   curl https://example.com/aisbf/
-   
-   # Test API endpoint
-   curl -X POST https://aisbf.example.com/api/v1/chat/completions \
-     -H "Content-Type: application/json" \
-     -d '{"model": "provider/model-name", "messages": [{"role": "user", "content": "Hello"}]}'
-   ```
-
-4. **Check dashboard URLs:**
-   - Open the dashboard in a browser
-   - Verify all links and redirects work correctly
-   - Check that the restart button uses the correct URL
-
-### Troubleshooting Proxy Issues
-
-If you encounter issues:
-
-1. **Check nginx error logs:**
-   ```bash
-   sudo tail -f /var/log/nginx/aisbf_error.log
-   ```
-
-2. **Verify proxy headers are being sent:**
-   - Check AISBF logs for received headers
-   - Enable debug logging in AISBF if needed
-
-3. **Common issues:**
-   - **404 errors with subpath**: Ensure `X-Forwarded-Prefix` header is set correctly
-   - **Redirect loops**: Check that `X-Forwarded-Proto` is set to `https`
-   - **Broken dashboard links**: Verify all proxy headers are configured
-   - **Streaming not working**: Ensure `proxy_buffering off` is set
-
-### Security Considerations
-
-When deploying behind a proxy:
-
-1. **Bind AISBF to localhost only** (default: `127.0.0.1:17765`)
-2. **Use HTTPS** for all external connections
-3. **Enable authentication** in AISBF configuration
-4. **Configure rate limiting** in nginx
-5. **Set security headers** in nginx configuration
-6. **Keep SSL certificates up to date**
-7. **Monitor access logs** for suspicious activity
-
-## Key Classes and Functions
-
-### aisbf/config.py
-- `Config` - Configuration management class
-- `ProviderConfig` - Provider configuration model
-- `RotationConfig` - Rotation configuration model
-- `AppConfig` - Application configuration model
-
-### aisbf/models.py
-- `Message` - Chat message structure
-- `ChatCompletionRequest` - Request model
-- `ChatCompletionResponse` - Response model
-- `Model` - Model information (includes context_size, condense_context, condense_method fields)
-- `Provider` - Provider information
-- `ErrorTracking` - Error tracking data
-
-### aisbf/providers.py
-- `BaseProviderHandler` - Base provider handler class
-- `GoogleProviderHandler` - Google provider implementation
-- `OpenAIProviderHandler` - OpenAI provider implementation
-- `AnthropicProviderHandler` - Anthropic provider implementation
-- `OllamaProviderHandler` - Ollama provider implementation
-- `get_provider_handler()` - Factory function for provider handlers
-
-### aisbf/context.py
-- `ContextManager` - Context management class for automatic condensation
-- `get_context_config_for_model()` - Retrieves context configuration from provider or rotation model config
-
-### aisbf/handlers.py
-- `RequestHandler` - Request handling logic with streaming support and context management
-- `RotationHandler` - Rotation handling logic with streaming support and context management
-- `AutoselectHandler` - AI-assisted model selection with streaming support
-
-## Dependencies
-
-Key dependencies from requirements.txt:
-- fastapi - Web framework
-- uvicorn - ASGI server
-- pydantic - Data validation
-- httpx - HTTP client
-- google-genai - Google AI SDK
-- openai - OpenAI SDK
-- anthropic - Anthropic SDK
-- langchain-text-splitters - Intelligent text splitting for request chunking
-- tiktoken - Accurate token counting for context management
-
-## Adding New Providers
-
-### Steps to Add a New Provider
-1. Create handler class in `aisbf/providers.py` inheriting from `BaseProviderHandler`
-2. Add to `PROVIDER_HANDLERS` dictionary
-3. Add provider configuration to `config/providers.json`
-
-### Provider Handler Requirements
-- Implement `handle_request()` method
-- Implement `get_models()` method
-- Handle error tracking and rate limiting
-
-## Configuration Examples
-
-### Provider Configuration
-```json
-{
-  "providers": {
-    "openai": {
-      "id": "openai",
-      "name": "OpenAI",
-      "endpoint": "https://api.openai.com/v1",
-      "type": "openai",
-      "api_key_required": true
-    }
-  }
-}
-```
-
-### Rotation Configuration
-```json
-{
-  "rotations": {
-    "balanced": {
-      "providers": [
-        {
-          "provider_id": "openai",
-          "models": [
-            {"name": "gpt-4", "weight": 1},
-            {"name": "gpt-3.5-turbo", "weight": 3}
-          ]
-        },
-        {
-          "provider_id": "anthropic",
-          "models": [
-            {"name": "claude-3-haiku-20240307", "weight": 2}
-          ]
-        }
-      ]
-    }
-  }
-}
-```
-
-## Testing and Development
-
-### Development Workflow
-1. Use `start_proxy.sh` for development
-2. Test with `start_proxy.sh` for development
-3. Install with `python setup.py install` for production testing
-4. Test all `aisbf` script commands (default, daemon, status, stop)
-5. Verify configuration file locations and behavior
-6. Test both user and system installations
-7. Test streaming responses with OpenAI-compatible providers
-8. Verify autoselect model selection returns only the model ID tag
-
-### Common Development Tasks
-- Adding new providers
-- Modifying configuration
-- Updating installation
-- Testing error handling
-
-## License
-
-This program is free software: you can redistribute it and/or modify it under the terms of the GNU General Public License as published by the Free Software Foundation, either version 3 of the License, or (at your option) any later version.
-
-This program is distributed in the hope that it will be useful, but WITHOUT ANY WARRANTY; without even the implied warranty of MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the GNU General Public License for more details.
-
-You should have received a copy of the GNU General Public License along with this program. If not, see <https://www.gnu.org/licenses/>.
-
-## Version 0.3.0 Changes
-
-### Streaming Improvements
-- Fixed streaming response serialization for OpenAI-compatible providers
-- Properly serialize Stream chunks to JSON format
-- Convert ChatCompletionChunk objects before yielding
-- Resolves socket.send() exceptions during streaming
-
-### Autoselect Enhancements
-- Made autoselect skill file more explicit about output requirements
-- Added prominent warnings about outputting ONLY the model selection tag
-- Improved reliability of AI-assisted model selection
-
-### Security Improvements
-- Changed default listening address from 0.0.0.0:8000 to 127.0.0.1:17765
-- Server now only accepts connections from localhost by default
+- Application logs: Console output
+- Database logs: `~/.aisbf/aisbf.log`
+- Error logs: Check application output
 
 ## Contributing
 
-When making changes:
-1. Update AI.PROMPT file with significant changes
-2. Test all functionality including streaming
-3. Update documentation as needed
-4. Follow the project's coding conventions
-5. Ensure all tests pass
-6. Verify localhost-only access when appropriate
+1. Fork the repository
+2. Create a feature branch
+3. Make your changes
+4. Add tests
+5. Submit a pull request
 
-## Support
+## License
 
-For support and questions:
-- Check the AI.PROMPT file for project-specific instructions
-- Review the INSTALL.md file for installation details
-- Check the README.md file for project overview
-- Test with development scripts before production deployment
+GNU General Public License v3.0
 
-## Donations
+## Author
 
-The extension includes multiple donation options to support its development:
+Stefy Lanza <stefy@nexlab.net>
 
-### Ethereum Donation
-ETH to 0xdA6dAb526515b5cb556d20269207D43fcc760E51
+## Repository
 
-### PayPal Donation
-https://paypal.me/nexlab
-
-### Bitcoin Donation
-Address: bc1qcpt2uutqkz4456j5r78rjm3gwq03h5fpwmcc5u
-Traditional BTC donation method
+https://git.nexlab.net/nexlab/aisbf.git
