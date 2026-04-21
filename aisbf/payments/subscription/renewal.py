@@ -162,7 +162,7 @@ class RenewalProcessor:
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
                 cursor.execute("""
-                    SELECT id, user_id, type, identifier, metadata
+                    SELECT id, user_id, type, gateway, identifier, metadata
                     FROM payment_methods WHERE id = ?
                 """, (subscription['payment_method_id'],))
                 pm_row = cursor.fetchone()
@@ -174,8 +174,9 @@ class RenewalProcessor:
                 'id': pm_row[0],
                 'user_id': pm_row[1],
                 'type': pm_row[2],
-                'identifier': pm_row[3],
-                'metadata': pm_row[4]
+                'gateway': pm_row[3],
+                'identifier': pm_row[4],
+                'metadata': pm_row[5]
             }
             
             # Extract crypto_type from identifier for crypto payments
@@ -316,6 +317,7 @@ class RenewalProcessor:
                              amount: float, description: str) -> Dict:
         """Charge payment using appropriate gateway"""
         payment_type = payment_method['type']
+        gateway = payment_method.get('gateway')
         
         if payment_type == 'card':
             # Stripe card payment
@@ -326,9 +328,21 @@ class RenewalProcessor:
                 return {'success': True, 'transaction_id': 'mock_tx'}
             return {'success': True, 'transaction_id': 'mock_tx'}
         elif payment_type == 'paypal':
-            # PayPal payment
-            if self.paypal:
-                # Would call paypal handler
+            # PayPal payment - check gateway version
+            if gateway == 'paypal_v3' and self.paypal:
+                # Use Vault v3 API for off-session charge
+                payment_token_id = payment_method['identifier']
+                result = await self.paypal.charge_payment_token(
+                    payment_token_id=payment_token_id,
+                    amount=amount,
+                    currency_code='USD'
+                )
+                if result['success']:
+                    return {'success': True, 'transaction_id': result['order_id']}
+                else:
+                    return {'success': False, 'error': result.get('error', 'PayPal charge failed')}
+            elif self.paypal:
+                # Legacy billing agreement (deprecated but kept for backward compatibility)
                 return {'success': True, 'transaction_id': 'mock_tx'}
             return {'success': True, 'transaction_id': 'mock_tx'}
         elif payment_type == 'crypto':
