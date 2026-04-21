@@ -11499,7 +11499,13 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
                 detail=f"Provider '{provider_name}' credentials not available."
             )
         
-        body_dict['model'] = provider_name
+        # Extract actual model name: if format is "provider/model", keep only "model" part
+        if actual_model.startswith(f"{provider_name}/"):
+            actual_model_name = actual_model[len(provider_name)+1:]
+            body_dict['model'] = actual_model_name
+        else:
+            # Keep original model name if no slash
+            body_dict['model'] = actual_model
         
         if body.stream:
             return await handler.handle_streaming_chat_completion(request, provider_name, body_dict)
