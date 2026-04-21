@@ -2930,20 +2930,38 @@ class DatabaseManager:
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             
             try:
-                if self.db_type == 'sqlite':
+                # First, check if a record exists (handle NULL values explicitly)
+                if provider_id is None and model_name is None:
                     cursor.execute(f'''
-                        INSERT OR REPLACE INTO user_cache_settings 
-                        (user_id, provider_id, model_name, cache_enabled, updated_at)
-                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-                    ''', (user_id, provider_id, model_name, cache_enabled))
+                        SELECT id FROM user_cache_settings 
+                        WHERE user_id = {placeholder} AND provider_id IS NULL AND model_name IS NULL
+                    ''', (user_id,))
+                elif provider_id is not None and model_name is None:
+                    cursor.execute(f'''
+                        SELECT id FROM user_cache_settings 
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name IS NULL
+                    ''', (user_id, provider_id))
                 else:
+                    cursor.execute(f'''
+                        SELECT id FROM user_cache_settings 
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name = {placeholder}
+                    ''', (user_id, provider_id, model_name))
+                
+                existing = cursor.fetchone()
+                
+                if existing:
+                    # Update existing record
+                    cursor.execute(f'''
+                        UPDATE user_cache_settings 
+                        SET cache_enabled = {placeholder}, updated_at = CURRENT_TIMESTAMP
+                        WHERE id = {placeholder}
+                    ''', (cache_enabled, existing[0]))
+                else:
+                    # Insert new record
                     cursor.execute(f'''
                         INSERT INTO user_cache_settings 
                         (user_id, provider_id, model_name, cache_enabled, updated_at)
                         VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-                        ON DUPLICATE KEY UPDATE 
-                        cache_enabled = VALUES(cache_enabled),
-                        updated_at = CURRENT_TIMESTAMP
                     ''', (user_id, provider_id, model_name, cache_enabled))
                 
                 conn.commit()
