@@ -2956,8 +2956,8 @@ class DatabaseRegistry:
                 # ✅ FIX: Allow MySQL configuration for config database
                 elif config_type == 'mysql':
                     # Validate MySQL configuration is present
-                    required_mysql_fields = ['mysql_host', 'mysql_port', 'mysql_user', 'mysql_password', 'mysql_database']
-                    missing_fields = [field for field in required_mysql_fields if field not in db_config or not db_config[field]]
+                    required_mysql_fields = ['mysql_host', 'mysql_port', 'mysql_user', 'mysql_database']
+                    missing_fields = [field for field in required_mysql_fields if field not in db_config]
                     if missing_fields:
                         logger.warning(f"⚠️ CONFIG DATABASE: MySQL configuration missing fields: {missing_fields}, falling back to SQLite")
                         aisbf_dir = Path.home() / '.aisbf'

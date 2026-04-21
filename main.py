@@ -987,9 +987,20 @@ async def startup_event():
         # Initialize database
         try:
             db_config = config.aisbf.database if config.aisbf and config.aisbf.database else None
+            if db_config:
+                logger.info(f"Database config from aisbf.json: type={db_config.type if hasattr(db_config, 'type') else db_config.get('type')}, mysql_host={db_config.mysql_host if hasattr(db_config, 'mysql_host') else db_config.get('mysql_host')}, mysql_database={db_config.mysql_database if hasattr(db_config, 'mysql_database') else db_config.get('mysql_database')}")
+                # Convert to dict if it's a Pydantic model
+                if hasattr(db_config, 'model_dump'):
+                    db_config = db_config.model_dump()
+                elif hasattr(db_config, 'dict'):
+                    db_config = db_config.dict()
+            else:
+                logger.warning("No database config found in aisbf.json, using defaults")
             DatabaseRegistry.get_config_database(db_config)
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
             # Continue startup even if database fails
 
         # Initialize cache
