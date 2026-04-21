@@ -927,14 +927,19 @@ class Analytics:
         logger.info(f"  tokens_used: {tokens_used}, prompt: {prompt_tokens}, completion: {completion_tokens}")
         logger.info(f"  Pricing: prompt=${provider_pricing.get('prompt', 0)}/M, completion=${provider_pricing.get('completion', 0)}/M")
         
+        # Convert Decimal values from MySQL to float for calculations
+        tokens_used = float(tokens_used) if tokens_used is not None else 0
+        prompt_tokens = float(prompt_tokens) if prompt_tokens is not None else 0
+        completion_tokens = float(completion_tokens) if completion_tokens is not None else 0
+
         # Calculate cost with actual token breakdown if available
-        if prompt_tokens is not None and completion_tokens is not None:
+        if prompt_tokens > 0 and completion_tokens > 0:
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens / 1_000_000) * provider_pricing.get('completion', 0)
             total_cost = prompt_cost + completion_cost
             logger.info(f"  Calculated: ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
             return total_cost
-        elif prompt_tokens is not None:
+        elif prompt_tokens > 0:
             # Only prompt tokens provided, calculate completion from total
             completion_tokens_calc = tokens_used - prompt_tokens
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
