@@ -666,11 +666,12 @@ def initialize_app(custom_config_dir=None):
         }
     
     # Initialize analytics with the config database
-    from aisbf.analytics import initialize_analytics
-    from aisbf.database import DatabaseRegistry
-    db = DatabaseRegistry.get_config_database()
-    initialize_analytics(db)
-    logger.info("Analytics module initialized")
+    # NOTE: Database will be initialized later with proper config
+    # from aisbf.analytics import initialize_analytics
+    # from aisbf.database import DatabaseRegistry
+    # db = DatabaseRegistry.get_config_database()
+    # initialize_analytics(db)
+    # logger.info("Analytics module initialized")
     
     _initialized = True
     logger.info("App initialization complete")
@@ -997,6 +998,12 @@ async def startup_event():
             else:
                 logger.warning("No database config found in aisbf.json, using defaults")
             DatabaseRegistry.get_config_database(db_config)
+            
+            # Initialize analytics after database is set up
+            from aisbf.analytics import initialize_analytics
+            db = DatabaseRegistry.get_config_database()
+            initialize_analytics(db)
+            logger.info("Analytics module initialized")
         except Exception as e:
             logger.error(f"Failed to initialize database: {e}")
             import traceback
