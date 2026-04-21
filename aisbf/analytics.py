@@ -805,9 +805,10 @@ class Analytics:
                 
                 # Check user providers first if user_filter is set (not global only)
                 if user_filter is not None and user_filter != -1:
-                    provider_config = self.db.get_user_provider(user_filter, provider_id)
-                    if provider_config:
-                        provider_type = provider_config['type']
+                    user_provider_data = self.db.get_user_provider(user_filter, provider_id)
+                    if user_provider_data:
+                        provider_config = user_provider_data['config']
+                        provider_type = provider_config.get('type', 'unknown')
                 
                 # Fall back to global config if not found as user provider
                 if not provider_config:

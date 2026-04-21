@@ -4070,19 +4070,20 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 user_id = user_row[0]
                 
                 # Get all global settings for this user, ordered by updated_at DESC
+                placeholder = '?' if self.db_type == 'sqlite' else '%s'
                 cursor.execute(f'''
                     SELECT id FROM user_cache_settings
                     WHERE user_id = {placeholder} AND provider_id IS NULL AND model_name IS NULL
                     ORDER BY updated_at DESC
                 ''', (user_id,))
-                
+
                 all_ids = [row[0] for row in cursor.fetchall()]
-                
+
                 if len(all_ids) > 1:
                     # Keep the first (most recent), delete the rest
                     keep_id = all_ids[0]
                     delete_ids = all_ids[1:]
-                    
+
                     placeholders = ','.join([placeholder] * len(delete_ids))
                     cursor.execute(f'''
                         DELETE FROM user_cache_settings
