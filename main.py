@@ -2175,6 +2175,11 @@ async def dashboard_login_page(request: Request):
         # Check for success message in query params
         success_message = request.query_params.get('success')
 
+        # Check if running on AISBF Cloud domain (for footer links)
+        is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
+        is_aisbf_cloud = is_cloud or is_onion
+
         # Get and render template using templates Jinja2Templates instance
         template = templates.get_template("dashboard/login.html")
         html_content = template.render(
@@ -2184,7 +2189,9 @@ async def dashboard_login_page(request: Request):
             show_verify_email=show_verify_email, 
             error=error_message, 
             success=success_message, 
-            config=config.aisbf if config and config.aisbf else {}
+            config=config.aisbf if config and config.aisbf else {},
+            is_aisbf_cloud=is_aisbf_cloud,
+            welcome_shown=True  # Never show welcome modal on login page
         )
 
         return HTMLResponse(content=html_content)
@@ -2338,11 +2345,18 @@ async def dashboard_signup_page(request: Request):
         if not signup_enabled:
             return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
+        # Check if running on AISBF Cloud domain (for footer links)
+        is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
+        is_aisbf_cloud = is_cloud or is_onion
+
         # Get and render template using templates Jinja2Templates instance
         template = templates.get_template("dashboard/signup.html")
         html_content = template.render(
             request=request, 
-            config=config.aisbf if config and config.aisbf else {}
+            config=config.aisbf if config and config.aisbf else {},
+            is_aisbf_cloud=is_aisbf_cloud,
+            welcome_shown=True  # Never show welcome modal on signup page
         )
 
         return HTMLResponse(content=html_content)
@@ -2676,16 +2690,19 @@ async def dashboard_forgot_password_page(request: Request):
         if not smtp_enabled:
             return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
 
-        # Create a completely fresh Jinja2 environment to avoid any caching issues
-        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+        # Check if running on AISBF Cloud domain (for footer links)
+        is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
+        is_aisbf_cloud = is_cloud or is_onion
 
-        # Add the required globals
-        env.globals['url_for'] = url_for
-        env.globals['get_base_url'] = get_base_url
-
-        # Get and render template
-        template = env.get_template("dashboard/forgot_password.html")
-        html_content = template.render(request=request, config=config.aisbf if config and config.aisbf else {})
+        # Get and render template using templates Jinja2Templates instance
+        template = templates.get_template("dashboard/forgot_password.html")
+        html_content = template.render(
+            request=request, 
+            config=config.aisbf if config and config.aisbf else {},
+            is_aisbf_cloud=is_aisbf_cloud,
+            welcome_shown=True  # Never show welcome modal on forgot password page
+        )
 
         return HTMLResponse(content=html_content)
     except Exception as e:
@@ -2787,16 +2804,21 @@ async def dashboard_reset_password_page(request: Request, token: str = Query(...
                 }
             )
 
-        # Create a completely fresh Jinja2 environment to avoid any caching issues
-        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
+        # Check if running on AISBF Cloud domain (for footer links)
+        is_cloud = request.url.hostname == 'aisbf.cloud' or request.url.hostname.endswith('.aisbf.cloud')
+        is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
+        is_aisbf_cloud = is_cloud or is_onion
 
-        # Add the required globals
-        env.globals['url_for'] = url_for
-        env.globals['get_base_url'] = get_base_url
-
-        # Get and render template
-        template = env.get_template("dashboard/reset_password.html")
-        html_content = template.render(request=request, email=email, token=token, config=config.aisbf if config and config.aisbf else {})
+        # Get and render template using templates Jinja2Templates instance
+        template = templates.get_template("dashboard/reset_password.html")
+        html_content = template.render(
+            request=request, 
+            email=email, 
+            token=token, 
+            config=config.aisbf if config and config.aisbf else {},
+            is_aisbf_cloud=is_aisbf_cloud,
+            welcome_shown=True  # Never show welcome modal on reset password page
+        )
 
         return HTMLResponse(content=html_content)
     except Exception as e:
