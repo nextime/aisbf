@@ -3968,6 +3968,48 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
     # ==============================================
     logger.info("Running database migrations...")
     
+    # Migration: Create user_cache_settings table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(user_cache_settings)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE user_cache_settings (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER NOT NULL,
+                        provider_id VARCHAR(255),
+                        model_name VARCHAR(255),
+                        cache_enabled {boolean_type} DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT {timestamp_default},
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        UNIQUE(user_id, provider_id, model_name)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_cache_settings table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME = 'user_cache_settings'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE user_cache_settings (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER NOT NULL,
+                        provider_id VARCHAR(255),
+                        model_name VARCHAR(255),
+                        cache_enabled {boolean_type} DEFAULT 1,
+                        created_at TIMESTAMP DEFAULT {timestamp_default},
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        FOREIGN KEY (user_id) REFERENCES users(id),
+                        UNIQUE(user_id, provider_id, model_name)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_cache_settings table")
+    except Exception as e:
+        logger.warning(f"Migration check for user_cache_settings table: {e}")
+    
     # Migration: Create account_tiers table if missing
     try:
         if self.db_type == 'sqlite':
