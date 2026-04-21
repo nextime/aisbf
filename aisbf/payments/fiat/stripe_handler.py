@@ -16,22 +16,15 @@ class StripePaymentHandler:
         self.db = db_manager
         self.config = config
         
-        # Load Stripe configuration from database
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM payment_gateway_config 
-                WHERE gateway_name = 'stripe'
-            """)
-            stripe_config = cursor.fetchone()
+        # Load Stripe configuration from admin_settings
+        gateways = self.db.get_payment_gateway_settings()
+        stripe_config = gateways.get('stripe', {})
         
-        if stripe_config and stripe_config[3]:  # is_enabled column
-            import json
-            config_json = json.loads(stripe_config[2])  # config_json column
-            stripe.api_key = config_json.get('secret_key')
-            self.publishable_key = config_json.get('publishable_key')
-            self.webhook_secret = config_json.get('webhook_secret')
-            self.test_mode = config_json.get('sandbox', False)
+        if stripe_config.get('enabled'):
+            stripe.api_key = stripe_config.get('secret_key')
+            self.publishable_key = stripe_config.get('publishable_key')
+            self.webhook_secret = stripe_config.get('webhook_secret')
+            self.test_mode = stripe_config.get('sandbox', False)
         else:
             self.publishable_key = None
             self.webhook_secret = None

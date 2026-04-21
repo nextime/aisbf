@@ -17,22 +17,15 @@ class PayPalPaymentHandler:
         self.config = config
         self.http_client = httpx.AsyncClient(timeout=30.0)
         
-        # Load PayPal configuration from database
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT * FROM payment_gateway_config 
-                WHERE gateway_name = 'paypal'
-            """)
-            paypal_config = cursor.fetchone()
+        # Load PayPal configuration from admin_settings
+        gateways = self.db.get_payment_gateway_settings()
+        paypal_config = gateways.get('paypal', {})
         
-        if paypal_config and paypal_config[3]:  # is_enabled column
-            import json
-            config_json = json.loads(paypal_config[2])  # config_json column
-            self.client_id = config_json.get('client_id')
-            self.client_secret = config_json.get('client_secret')
-            self.webhook_id = config_json.get('webhook_id')
-            self.sandbox = config_json.get('sandbox', False)
+        if paypal_config.get('enabled'):
+            self.client_id = paypal_config.get('client_id')
+            self.client_secret = paypal_config.get('client_secret')
+            self.webhook_secret = paypal_config.get('webhook_secret')
+            self.sandbox = paypal_config.get('sandbox', False)
             
             # Set API base URL
             if self.sandbox:
@@ -42,6 +35,7 @@ class PayPalPaymentHandler:
         else:
             self.client_id = None
             self.client_secret = None
+            self.base_url = None
     
     async def get_access_token(self) -> str:
         """Get PayPal OAuth access token"""
