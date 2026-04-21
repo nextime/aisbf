@@ -2208,11 +2208,9 @@ async def dashboard_analytics(
     # Get cost overview
     cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
     
-    # Get recommendations
-    recommendations = analytics.get_recommendations(from_datetime, to_datetime, user_filter=user_filter_int)
-    
-    # Get optimization savings
-    optimization_savings = analytics.get_optimization_savings(from_datetime, to_datetime, user_filter=user_filter_int)
+    # Placeholder for recommendations and optimization savings (not yet implemented)
+    recommendations = []
+    optimization_savings = 0
 
     # Handle Decimal values from MySQL for JSON serialization
     def decimal_default(obj):
