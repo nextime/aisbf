@@ -848,3 +848,6 @@ class Config:
         return self.aisbf
 
 config = Config()
+
+def get_config():
+    return config
