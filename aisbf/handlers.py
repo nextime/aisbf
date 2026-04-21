@@ -355,11 +355,21 @@ class RequestHandler:
                 logger.warning(f"Response cache check failed: {cache_error}")
 
         logger.info(f"Provider config: {provider_config}")
-        logger.info(f"Provider type: {provider_config.type}")
-        logger.info(f"Provider endpoint: {provider_config.endpoint}")
-        logger.info(f"API key required: {provider_config.api_key_required}")
+        # Handle both dict (user providers) and object (global providers) formats
+        if isinstance(provider_config, dict):
+            provider_type = provider_config.get('type')
+            provider_endpoint = provider_config.get('endpoint')
+            api_key_required = provider_config.get('api_key_required', False)
+        else:
+            provider_type = provider_config.type
+            provider_endpoint = provider_config.endpoint
+            api_key_required = provider_config.api_key_required
+            
+        logger.info(f"Provider type: {provider_type}")
+        logger.info(f"Provider endpoint: {provider_endpoint}")
+        logger.info(f"API key required: {api_key_required}")
 
-        if provider_config.api_key_required:
+        if api_key_required:
             api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
             logger.info(f"API key from request: {'***' if api_key else 'None'}")
             if not api_key:
