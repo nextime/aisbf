@@ -346,10 +346,14 @@ class Config:
             if (self._custom_config_dir / 'providers.json').exists():
                 return self._custom_config_dir
         
-        # Try installed location first
+        # Try installed locations in order of preference
+        # 1. User-local installation (pip install --user)
+        # 2. System-wide installation (sudo pip install)
+        # 3. Alternative system location
         installed_dirs = [
-            Path('/usr/share/aisbf'),
             Path.home() / '.local' / 'share' / 'aisbf',
+            Path('/usr/local/share/aisbf'),
+            Path('/usr/share/aisbf'),
         ]
         
         for installed_dir in installed_dirs:
@@ -391,6 +395,15 @@ class Config:
             if not dst.exists() and src.exists():
                 shutil.copy2(src, dst)
                 print(f"Created default config file: {dst}")
+        
+        # Copy markdown prompt files if they don't exist
+        for prompt_file in ['condensation_conversational.md', 'condensation_semantic.md', 'autoselect.md']:
+            src = source_dir / prompt_file
+            dst = config_dir / prompt_file
+            
+            if not dst.exists() and src.exists():
+                shutil.copy2(src, dst)
+                print(f"Created default prompt file: {dst}")
 
     def _load_providers(self):
         import logging
@@ -412,14 +425,32 @@ class Config:
                 raise FileNotFoundError("Could not find providers.json configuration file")
         
         logger.info(f"Loading providers from: {providers_path}")
-        with open(providers_path) as f:
-            data = json.load(f)
-            self.providers = {k: ProviderConfig(**v) for k, v in data['providers'].items()}
-            self._loaded_files['providers'] = str(providers_path.absolute())
-            logger.info(f"Loaded {len(self.providers)} providers: {list(self.providers.keys())}")
-            for provider_id, provider_config in self.providers.items():
-                logger.info(f"  - {provider_id}: type={provider_config.type}, endpoint={provider_config.endpoint}")
-            logger.info(f"=== Config._load_providers END ===")
+        try:
+            with open(providers_path) as f:
+                data = json.load(f)
+                
+                # Validate JSON structure
+                if not data or 'providers' not in data:
+                    logger.error(f"Invalid providers.json: missing 'providers' key")
+                    raise ValueError("Invalid providers.json: missing 'providers' key")
+                
+                if not isinstance(data['providers'], dict):
+                    logger.error(f"Invalid providers.json: 'providers' must be a dictionary")
+                    raise ValueError("Invalid providers.json: 'providers' must be a dictionary")
+                
+                self.providers = {k: ProviderConfig(**v) for k, v in data['providers'].items()}
+                self._loaded_files['providers'] = str(providers_path.absolute())
+                logger.info(f"Loaded {len(self.providers)} providers: {list(self.providers.keys())}")
+                for provider_id, provider_config in self.providers.items():
+                    logger.info(f"  - {provider_id}: type={provider_config.type}, endpoint={provider_config.endpoint}")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse providers.json: {e}")
+            raise ValueError(f"Invalid JSON in providers.json: {e}")
+        except Exception as e:
+            logger.error(f"Failed to load providers.json: {e}")
+            raise
+        
+        logger.info(f"=== Config._load_providers END ===")
 
     def _load_rotations(self):
         import logging
@@ -441,47 +472,64 @@ class Config:
                 raise FileNotFoundError("Could not find rotations.json configuration file")
         
         logger.info(f"Loading rotations from: {rotations_path}")
-        with open(rotations_path) as f:
-            data = json.load(f)
-            self._loaded_files['rotations'] = str(rotations_path.absolute())
-            
-            # Extract global notifyerrors setting (top-level, outside rotations)
-            self.global_notifyerrors = data.get('notifyerrors', False)
-            logger.info(f"Global notifyerrors setting: {self.global_notifyerrors}")
-            
-            # Load rotations, merging global notifyerrors with rotation-specific settings
-            self.rotations = {}
-            for k, v in data['rotations'].items():
-                # If rotation doesn't have its own notifyerrors, use global setting
-                if 'notifyerrors' not in v:
-                    v['notifyerrors'] = self.global_notifyerrors
-                    logger.info(f"Rotation '{k}' using global notifyerrors: {self.global_notifyerrors}")
-                else:
-                    logger.info(f"Rotation '{k}' has own notifyerrors: {v['notifyerrors']}")
-                self.rotations[k] = RotationConfig(**v)
-            
-            logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
-            
-            # Validate that all providers referenced in rotations exist
-            logger.info(f"=== VALIDATING ROTATION PROVIDERS ===")
-            available_providers = list(self.providers.keys())
-            logger.info(f"Available providers: {available_providers}")
-            
-            for rotation_id, rotation_config in self.rotations.items():
-                logger.info(f"Validating rotation: {rotation_id}")
-                for provider in rotation_config.providers:
-                    provider_id = provider['provider_id']
-                    if provider_id not in self.providers:
-                        logger.warning(f"!!! CONFIGURATION WARNING !!!")
-                        logger.warning(f"Rotation '{rotation_id}' references provider '{provider_id}' which is NOT defined in providers.json")
-                        logger.warning(f"Available providers: {available_providers}")
-                        logger.warning(f"This provider will be SKIPPED during rotation requests")
-                        logger.warning(f"Please add the provider to providers.json or remove it from the rotation configuration")
-                        logger.warning(f"!!! END WARNING !!!")
+        try:
+            with open(rotations_path) as f:
+                data = json.load(f)
+                
+                # Validate JSON structure
+                if not data or 'rotations' not in data:
+                    logger.error(f"Invalid rotations.json: missing 'rotations' key")
+                    raise ValueError("Invalid rotations.json: missing 'rotations' key")
+                
+                if not isinstance(data['rotations'], dict):
+                    logger.error(f"Invalid rotations.json: 'rotations' must be a dictionary")
+                    raise ValueError("Invalid rotations.json: 'rotations' must be a dictionary")
+                
+                self._loaded_files['rotations'] = str(rotations_path.absolute())
+                
+                # Extract global notifyerrors setting (top-level, outside rotations)
+                self.global_notifyerrors = data.get('notifyerrors', False)
+                logger.info(f"Global notifyerrors setting: {self.global_notifyerrors}")
+                
+                # Load rotations, merging global notifyerrors with rotation-specific settings
+                self.rotations = {}
+                for k, v in data['rotations'].items():
+                    # If rotation doesn't have its own notifyerrors, use global setting
+                    if 'notifyerrors' not in v:
+                        v['notifyerrors'] = self.global_notifyerrors
+                        logger.info(f"Rotation '{k}' using global notifyerrors: {self.global_notifyerrors}")
                     else:
-                        logger.info(f"  ✓ Provider '{provider_id}' is available")
-            
-            logger.info(f"=== Config._load_rotations END ===")
+                        logger.info(f"Rotation '{k}' has own notifyerrors: {v['notifyerrors']}")
+                    self.rotations[k] = RotationConfig(**v)
+                
+                logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
+                
+                # Validate that all providers referenced in rotations exist
+                logger.info(f"=== VALIDATING ROTATION PROVIDERS ===")
+                available_providers = list(self.providers.keys())
+                logger.info(f"Available providers: {available_providers}")
+                
+                for rotation_id, rotation_config in self.rotations.items():
+                    logger.info(f"Validating rotation: {rotation_id}")
+                    for provider in rotation_config.providers:
+                        provider_id = provider['provider_id']
+                        if provider_id not in self.providers:
+                            logger.warning(f"!!! CONFIGURATION WARNING !!!")
+                            logger.warning(f"Rotation '{rotation_id}' references provider '{provider_id}' which is NOT defined in providers.json")
+                            logger.warning(f"Available providers: {available_providers}")
+                            logger.warning(f"This provider will be SKIPPED during rotation requests")
+                            logger.warning(f"Please add the provider to providers.json or remove it from the rotation configuration")
+                            logger.warning(f"!!! END WARNING !!!")
+                        else:
+                            logger.info(f"  ✓ Provider '{provider_id}' is available")
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse rotations.json: {e}")
+            raise ValueError(f"Invalid JSON in rotations.json: {e}")
+        except Exception as e:
+            logger.error(f"Failed to load rotations.json: {e}")
+            raise
+        
+        logger.info(f"=== Config._load_rotations END ===")
 
     def _load_autoselect(self):
         """Load autoselect configuration and build model embeddings for semantic matching."""
@@ -504,14 +552,27 @@ class Config:
                 raise FileNotFoundError("Could not find autoselect.json configuration file")
         
         logger.info(f"Loading autoselect from: {autoselect_path}")
-        with open(autoselect_path) as f:
-            data = json.load(f)
-            self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
-            self._loaded_files['autoselect'] = str(autoselect_path.absolute())
-            logger.info(f"Loaded {len(self.autoselect)} autoselect configurations: {list(self.autoselect.keys())}")
-            
-            # Build and cache model embeddings for semantic matching
-            self._build_model_embeddings()
+        try:
+            with open(autoselect_path) as f:
+                data = json.load(f)
+                
+                # Validate JSON structure
+                if not data:
+                    logger.error(f"Invalid autoselect.json: empty file")
+                    raise ValueError("Invalid autoselect.json: empty file")
+                
+                self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
+                self._loaded_files['autoselect'] = str(autoselect_path.absolute())
+                logger.info(f"Loaded {len(self.autoselect)} autoselect configurations: {list(self.autoselect.keys())}")
+                
+                # Build and cache model embeddings for semantic matching
+                self._build_model_embeddings()
+        except json.JSONDecodeError as e:
+            logger.error(f"Failed to parse autoselect.json: {e}")
+            raise ValueError(f"Invalid JSON in autoselect.json: {e}")
+        except Exception as e:
+            logger.error(f"Failed to load autoselect.json: {e}")
+            raise
             
         logger.info(f"=== Config._load_autoselect END ===")
     
