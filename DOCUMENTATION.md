@@ -440,8 +440,7 @@ Authorization: Bearer YOUR_API_TOKEN
 
 **Access Control:**
 - **Global Tokens** (from `aisbf.json`): Access to global endpoints only (`/api/...`), no access to user-specific endpoints
-- **User Tokens** (from dashboard): Access to their user-specific endpoints (`/api/u/username/...`) and global endpoints, but not admin functions
-- **Admin Users**: Full access to all configurations and endpoints
+- **User Tokens** (from dashboard): Access to their user-specific endpoints (`/api/u/username/...`) and global endpoints
 
 #### Example: Using User API with cURL
 
