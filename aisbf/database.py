@@ -3912,6 +3912,10 @@ def DatabaseManager__initialize_database(self):
 #             
         #     logger.info("⚠️ CACHE DATABASE: Only minimal cache tables created - NO USER TABLES")
 
+        # Run configuration database migrations if this is a CONFIG database
+        if self.database_type == DatabaseRegistry.TYPE_CONFIG:
+            self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
+
         conn.commit()
         logger.info(f"Database tables initialized successfully for {self.database_type} database")
 
