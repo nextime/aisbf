@@ -1401,7 +1401,7 @@ class RequestHandler:
                     
                     # Skip rate limit and direct model fetch
                     model_filter = getattr(provider_config, 'model_filter', None)
-                    if model_filter and (not provider_config.models or len(provider_config.models) == 0):
+                    if model_filter and (not getattr(provider_config, "models", []) or len(getattr(provider_config, "models", [])) == 0):
                         logger.info(f"Applying model filter '{model_filter}' to provider {provider_id}")
                         original_count = len(models)
                         models = [m for m in models if model_filter.lower() in m.id.lower()]
@@ -1421,8 +1421,8 @@ class RequestHandler:
                         
                         # Try to find model config in provider config
                         model_config = None
-                        if provider_config.models:
-                            for m in provider_config.models:
+                        if getattr(provider_config, "models", []):
+                            for m in getattr(provider_config, "models", []):
                                 if m.name == model_name:
                                     model_config = m
                                     break
@@ -1497,7 +1497,7 @@ class RequestHandler:
             
             # Apply model filter if configured and no models are manually specified
             model_filter = getattr(provider_config, 'model_filter', None)
-            if model_filter and (not provider_config.models or len(provider_config.models) == 0):
+            if model_filter and (not getattr(provider_config, "models", []) or len(getattr(provider_config, "models", [])) == 0):
                 import logging
                 logger = logging.getLogger(__name__)
                 logger.info(f"Applying model filter '{model_filter}' to provider {provider_id}")
@@ -1521,8 +1521,8 @@ class RequestHandler:
                 
                 # Try to find model config in provider config
                 model_config = None
-                if provider_config.models:
-                    for m in provider_config.models:
+                if getattr(provider_config, "models", []):
+                    for m in getattr(provider_config, "models", []):
                         if m.name == model_name:
                             model_config = m
                             break
@@ -2059,8 +2059,8 @@ class RotationHandler:
                         model[field] = provider_default
                     else:
                         # Auto-derive from first model in provider config if available
-                        if provider_config and provider_config.models and len(provider_config.models) > 0:
-                            first_model = provider_config.models[0]
+                        if provider_config and getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                            first_model = getattr(provider_config, "models", [])[0]
                             # For context_size, check multiple field names (from dynamic fetch)
                             if field == 'context_size':
                                 model_field = getattr(first_model, 'context_size', None)
@@ -2137,8 +2137,8 @@ class RotationHandler:
                                 provider_id = first_provider.get('provider_id')
                                 provider_config = self.config.get_provider(provider_id)
                                 
-                                if provider_config and provider_config.models and len(provider_config.models) > 0:
-                                    first_model = provider_config.models[0]
+                                if provider_config and getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                                    first_model = getattr(provider_config, "models", [])[0]
                                     # Check for context_size, context_window, or context_length
                                     if field == 'context_size':
                                         model_field = getattr(first_model, 'context_size', None)
@@ -2441,10 +2441,10 @@ class RotationHandler:
                 logger.info(f"  Will use models from provider configuration")
                 
                 # Get models from provider config
-                if provider_config.models:
+                if getattr(provider_config, "models", []):
                     # Use models from provider config with provider-level weight
                     rotation_models = []
-                    for provider_model in provider_config.models:
+                    for provider_model in getattr(provider_config, "models", []):
                         model_dict = {
                             'name': provider_model.name,
                             'weight': provider_weight,  # Use provider-level weight
@@ -3745,15 +3745,15 @@ class RotationHandler:
                 elif provider_config:
                     # Try to find in provider config
                     found_in_provider = False
-                    for pm in provider_config.models or []:
+                    for pm in getattr(provider_config, "models", []) or []:
                         if pm.name == model_name and hasattr(pm, 'context_size') and pm.context_size:
                             model_dict['context_window'] = pm.context_size
                             found_in_provider = True
                             break
                     if not found_in_provider:
                         # Auto-derive from first model in provider (which has context_size from dynamic fetch)
-                        if provider_config.models and len(provider_config.models) > 0:
-                            first_model = provider_config.models[0]
+                        if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                            first_model = getattr(provider_config, "models", [])[0]
                             if hasattr(first_model, 'context_size') and first_model.context_size:
                                 model_dict['context_window'] = first_model.context_size
                             elif hasattr(first_model, 'context_window') and first_model.context_window:
@@ -3770,7 +3770,7 @@ class RotationHandler:
                     model_dict['capabilities'] = model['capabilities']
                 elif provider_config:
                     # Try to find in provider config
-                    for pm in provider_config.models or []:
+                    for pm in getattr(provider_config, "models", []) or []:
                         if pm.name == model_name and hasattr(pm, 'capabilities'):
                             model_dict['capabilities'] = pm.capabilities
                             break
@@ -4225,8 +4225,8 @@ class AutoselectHandler:
                 provider_config = self.config.get_provider(selection_model)
                 
                 # Get first available model from provider
-                if provider_config.models and len(provider_config.models) > 0:
-                    model_name = provider_config.models[0].name
+                if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                    model_name = getattr(provider_config, "models", [])[0].name
                     logger.info(f"  Using model: {model_name}")
                     
                     request_handler = RequestHandler()
@@ -4633,8 +4633,8 @@ class AutoselectHandler:
                 provider_config = self.config.get_provider(selected_model_id)
                 
                 # Get first available model from provider
-                if provider_config.models and len(provider_config.models) > 0:
-                    model_name = provider_config.models[0].name
+                if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                    model_name = getattr(provider_config, "models", [])[0].name
                     logger.info(f"  Using model: {model_name}")
                     
                     request_handler = RequestHandler()
