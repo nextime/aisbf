@@ -1690,8 +1690,11 @@ app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 2
 # This ensures proxy headers are processed before any other middleware (including auth_middleware)
 app.add_middleware(ProxyHeadersMiddleware)
 
+# Add dashboard context middleware LAST so it executes FIRST
+# This ensures context variables are available to all template renders
+app.add_middleware(dashboard_context_middleware)
+
 # Dashboard context middleware - adds is_aisbf_cloud and welcome_shown to all template contexts
-@app.middleware("http")
 async def dashboard_context_middleware(request: Request, call_next):
     if request.url.path.startswith("/dashboard") and 'session' in request.scope:
         # ALWAYS set is_aisbf_cloud for ALL dashboard paths (to show footer links everywhere)
