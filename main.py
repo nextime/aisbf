@@ -1353,8 +1353,7 @@ async def api_token_authorization_middleware(request: Request, call_next):
                 )
             
             # Debug logging
-            token_short = token[:8] + "..." if len(token) > 8 else token
-            logger.info(f"Token auth check: token={token_short}, user_id={user_id}, authenticated_username={authenticated_user.get('username')}, target_username={target_username}")
+            logger.info(f"Token auth check: user_id={user_id}, authenticated_username={authenticated_user.get('username')}, target_username={target_username}")
             
             if authenticated_user['username'] != target_username:
                 return JSONResponse(
