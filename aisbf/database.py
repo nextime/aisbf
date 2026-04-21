@@ -4038,6 +4038,64 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
     except Exception as e:
         logger.warning(f"Migration check for user_cache_settings table: {e}")
     
+    # Migration: Clean up duplicate cache settings (NULL values bypass UNIQUE constraint in MySQL)
+    try:
+        logger.info("Checking for duplicate cache settings...")
+        
+        # Get all users with duplicate global settings
+        if self.db_type == 'sqlite':
+            cursor.execute('''
+                SELECT user_id, COUNT(*) as cnt
+                FROM user_cache_settings
+                WHERE provider_id IS NULL AND model_name IS NULL
+                GROUP BY user_id
+                HAVING cnt > 1
+            ''')
+        else:
+            cursor.execute('''
+                SELECT user_id, COUNT(*) as cnt
+                FROM user_cache_settings
+                WHERE provider_id IS NULL AND model_name IS NULL
+                GROUP BY user_id
+                HAVING cnt > 1
+            ''')
+        
+        duplicate_users = cursor.fetchall()
+        
+        if duplicate_users:
+            logger.info(f"Found {len(duplicate_users)} users with duplicate global cache settings")
+            
+            for user_row in duplicate_users:
+                user_id = user_row[0]
+                
+                # Get all global settings for this user, ordered by updated_at DESC
+                cursor.execute(f'''
+                    SELECT id FROM user_cache_settings
+                    WHERE user_id = {placeholder} AND provider_id IS NULL AND model_name IS NULL
+                    ORDER BY updated_at DESC
+                ''', (user_id,))
+                
+                all_ids = [row[0] for row in cursor.fetchall()]
+                
+                if len(all_ids) > 1:
+                    # Keep the first (most recent), delete the rest
+                    keep_id = all_ids[0]
+                    delete_ids = all_ids[1:]
+                    
+                    placeholders = ','.join([placeholder] * len(delete_ids))
+                    cursor.execute(f'''
+                        DELETE FROM user_cache_settings
+                        WHERE id IN ({placeholders})
+                    ''', tuple(delete_ids))
+                    
+                    logger.info(f"✅ Cleaned up {len(delete_ids)} duplicate cache settings for user {user_id}, kept id={keep_id}")
+            
+            conn.commit()
+        else:
+            logger.info("No duplicate cache settings found")
+    except Exception as e:
+        logger.warning(f"Migration check for duplicate cache settings: {e}")
+    
     # Migration: Create account_tiers table if missing
     try:
         if self.db_type == 'sqlite':
