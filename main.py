@@ -9212,10 +9212,10 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     if body.model not in config.rotations:
         logger.error(f"Model '{body.model}' not found in rotations")
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
-            raise HTTPException(
-                status_code=404,
-                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.rotations.keys())}"
-            )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Rotation '{body.model}' not found. Available: {list(config.rotations.keys())}"
+        )
 
     logger.info(f"Model '{body.model}' found in rotations")
     logger.debug("Handling rotation request")
