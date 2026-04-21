@@ -727,6 +727,8 @@ curl -X POST http://localhost:17765/mcp/tools/call \
 - `list_rotations` - List all rotation configurations
 - `list_autoselect` - List all autoselect configurations
 - `chat_completion` - Make chat completion requests
+- `get_wallet_balance` - Get wallet balance and auto top-up settings
+- `get_wallet_transactions` - Get wallet transaction history
 
 **Autoselect-level tools:**
 - `get_autoselect_config` - Get autoselect configuration
@@ -993,6 +995,37 @@ curl -X POST http://localhost:17765/mcp \
       "arguments": {
         "model": "user-rotation/myrotation",
         "messages": [{"role": "user", "content": "Hello"}]
+      }
+    }
+  }'
+
+# Get user's wallet balance
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 2,
+    "method": "tools/call",
+    "params": {
+      "name": "get_user_wallet_balance",
+      "arguments": {}
+    }
+  }'
+
+# Get user's wallet transaction history
+curl -X POST http://localhost:17765/mcp \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "jsonrpc": "2.0",
+    "id": 3,
+    "method": "tools/call",
+    "params": {
+      "name": "get_user_wallet_transactions",
+      "arguments": {
+        "page": 1,
+        "limit": 10
       }
     }
   }'

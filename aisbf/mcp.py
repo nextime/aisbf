@@ -216,6 +216,35 @@ class MCPServer:
                     },
                     "required": ["model", "messages"]
                 }
+            },
+            {
+                "name": "get_wallet_balance",
+                "description": "Get current wallet balance and auto top-up settings",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {},
+                    "required": []
+                }
+            },
+            {
+                "name": "get_wallet_transactions",
+                "description": "Get wallet transaction history",
+                "inputSchema": {
+                    "type": "object",
+                    "properties": {
+                        "page": {
+                            "type": "integer",
+                            "description": "Page number (1-based)",
+                            "default": 1
+                        },
+                        "limit": {
+                            "type": "integer",
+                            "description": "Number of transactions per page",
+                            "default": 20
+                        }
+                    },
+                    "required": []
+                }
             }
         ])
         
@@ -398,6 +427,36 @@ class MCPServer:
                             }
                         },
                         "required": ["autoselect_id"]
+                    }
+                },
+                # User wallet tools
+                {
+                    "name": "get_user_wallet_balance",
+                    "description": "Get current user's wallet balance and auto top-up settings",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {},
+                        "required": []
+                    }
+                },
+                {
+                    "name": "get_user_wallet_transactions",
+                    "description": "Get user's wallet transaction history",
+                    "inputSchema": {
+                        "type": "object",
+                        "properties": {
+                            "page": {
+                                "type": "integer",
+                                "description": "Page number (1-based)",
+                                "default": 1
+                            },
+                            "limit": {
+                                "type": "integer",
+                                "description": "Number of transactions per page",
+                                "default": 20
+                            }
+                        },
+                        "required": []
                     }
                 },
                 # User chat completion
@@ -661,11 +720,15 @@ class MCPServer:
         """
         # Route to appropriate handler
         handlers = {
+        # Common tools
+        handlers = {
             # Common tools
             'list_models': self._list_models,
             'list_rotations': self._list_rotations,
             'list_autoselect': self._list_autoselect,
             'chat_completion': self._chat_completion,
+            'get_wallet_balance': self._get_wallet_balance,
+            'get_wallet_transactions': self._get_wallet_transactions,
         }
         
         # Add autoselect-level tools
@@ -712,6 +775,9 @@ class MCPServer:
                 'get_user_autoselect': self._get_user_autoselect,
                 'set_user_autoselect': self._set_user_autoselect,
                 'delete_user_autoselect': self._delete_user_autoselect,
+                # User wallet tools
+                'get_user_wallet_balance': self._get_user_wallet_balance,
+                'get_user_wallet_transactions': self._get_user_wallet_transactions,
                 # User chat completion
                 'user_chat_completion': self._user_chat_completion,
             })
@@ -1181,6 +1247,65 @@ class MCPServer:
                 }
             }
     
+    async def _get_wallet_balance(self, args: Dict) -> Dict:
+        """Get wallet balance (global context)"""
+        # This would require admin access to view global wallet stats
+        # For now, return not implemented as global wallets don't exist yet
+        raise HTTPException(status_code=501, detail="Global wallet balance not implemented")
+
+    async def _get_wallet_transactions(self, args: Dict) -> Dict:
+        """Get wallet transactions (global context)"""
+        # This would require admin access to view global wallet transactions
+        # For now, return not implemented as global wallets don't exist yet
+        raise HTTPException(status_code=501, detail="Global wallet transactions not implemented")
+
+    async def _get_user_wallet_balance(self, args: Dict, user_id: int) -> Dict:
+        """Get user wallet balance"""
+        try:
+            from .payments.wallet.manager import WalletManager
+            wallet_manager = WalletManager()
+            wallet = await wallet_manager.get_wallet(user_id)
+
+            return {
+                "balance": float(wallet.balance),
+                "currency": wallet.currency,
+                "auto_topup_enabled": wallet.auto_topup_enabled,
+                "auto_topup_threshold": float(wallet.auto_topup_threshold) if wallet.auto_topup_threshold else None,
+                "auto_topup_amount": float(wallet.auto_topup_amount) if wallet.auto_topup_amount else None
+            }
+        except Exception as e:
+            logger.error(f"Error getting user wallet balance: {e}")
+            raise HTTPException(status_code=500, detail="Failed to get wallet balance")
+
+    async def _get_user_wallet_transactions(self, args: Dict, user_id: int) -> Dict:
+        """Get user wallet transactions"""
+        try:
+            page = args.get('page', 1)
+            limit = args.get('limit', 20)
+
+            from .database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+
+            transactions = db.get_wallet_transactions(user_id, page=page, limit=limit)
+
+            return {
+                "transactions": [
+                    {
+                        "id": tx["id"],
+                        "type": tx["type"],
+                        "amount": float(tx["amount"]),
+                        "description": tx["description"],
+                        "created_at": tx["created_at"]
+                    }
+                    for tx in transactions
+                ],
+                "page": page,
+                "limit": limit
+            }
+        except Exception as e:
+            logger.error(f"Error getting user wallet transactions: {e}")
+            raise HTTPException(status_code=500, detail="Failed to get wallet transactions")
+
     async def _delete_autoselect_config(self, args: Dict) -> Dict:
         """Delete autoselect configuration"""
         autoselect_id = args.get('autoselect_id')

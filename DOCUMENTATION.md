@@ -473,9 +473,16 @@ MCP tools include:
 - `list_models` - List available models
 - `chat_completions` - Send chat completion requests
 - `get_wallet_balance` - Check wallet balance
+- `get_wallet_transactions` - Get wallet transaction history
 - `get_providers` - Get provider configurations
 - `get_rotations` - Get rotation configurations
 - `get_autoselects` - Get autoselect configurations
+
+**User-specific MCP tools (when authenticated with user token):**
+- `list_user_models` - List user's available models
+- `get_user_wallet_balance` - Check user's wallet balance
+- `get_user_wallet_transactions` - Get user's wallet transaction history
+- `user_chat_completion` - Send chat completion using user's configurations
 
 ## Provider Support
 
