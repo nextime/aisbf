@@ -878,23 +878,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         }
         
         // Close modals when clicking outside
-        document.getElementById('donateModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeDonateModal();
-            }
-        });
+        const donateModal = document.getElementById('donateModal');
+        if (donateModal) {
+            donateModal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeDonateModal();
+                }
+            });
+        }
         
-        document.getElementById('welcomeModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeWelcomeModal();
-            }
-        });
+        const welcomeModal = document.getElementById('welcomeModal');
+        if (welcomeModal) {
+            welcomeModal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeWelcomeModal();
+                }
+            });
+        }
         
-        document.getElementById('contactModal').addEventListener('click', function(e) {
-            if (e.target === this) {
-                closeContactModal();
-            }
-        });
+        const contactModal = document.getElementById('contactModal');
+        if (contactModal) {
+            contactModal.addEventListener('click', function(e) {
+                if (e.target === this) {
+                    closeContactModal();
+                }
+            });
+        }
     </script>
     
     {% block extra_js %}{% endblock %}
