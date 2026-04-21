@@ -439,9 +439,9 @@ Authorization: Bearer YOUR_API_TOKEN
 | `GET /api/u/{username}/{config_type}/models` | List models for specific config type |
 
 **Access Control:**
-- **Admin Users** have access to both global and user configurations
-- **Regular Users** can only access their own configurations
-- **Global Tokens** have full access to all configurations
+- **Global Tokens** (from `aisbf.json`): Full admin access to all configurations and endpoints
+- **User Tokens** (from dashboard): Access to their user-specific endpoints (`/api/u/username/...`) and global endpoints, but not admin functions
+- **Admin Users**: Full access to all configurations and endpoints
 
 #### Example: Using User API with cURL
 
