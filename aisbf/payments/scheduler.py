@@ -43,6 +43,7 @@ class PaymentScheduler:
             ('wallet_consolidation', 3600, self._run_wallet_consolidation),
             ('price_update', 300, self._run_price_update),
             ('notification_queue', 60, self._run_notification_queue),
+            ('auto_topup_check', 300, self._run_auto_topup_check),
         ]
     
     async def start(self):
@@ -285,6 +286,44 @@ class PaymentScheduler:
             await email_service.process_notification_queue()
         except Exception as e:
             logger.error(f"Notification queue job failed: {e}", exc_info=True)
+
+    async def _run_auto_topup_check(self):
+        """Run auto top up check job"""
+        logger.info("Running auto top up check job")
+        try:
+            from sqlalchemy.ext.asyncio import AsyncSession
+            from aisbf.payments.wallet.manager import WalletManager
+            
+            async with AsyncSession(self.db.engine) as session:
+                wallet_manager = WalletManager(session)
+                wallets = await wallet_manager.get_wallets_needing_auto_topup()
+                
+                logger.info(f"Found {len(wallets)} wallets needing auto top up")
+                
+                for wallet in wallets:
+                    try:
+                        # Execute auto charge
+                        result = await self.payment_service.stripe_handler.auto_charge(
+                            user_id=wallet["user_id"],
+                            amount=wallet["auto_topup_amount"],
+                            payment_method_id=wallet["auto_topup_payment_method_id"]
+                        )
+                        
+                        if result["success"]:
+                            await wallet_manager.record_auto_topup_attempt(wallet["id"], success=True)
+                            logger.info(f"Auto top up successful for user {wallet['user_id']}")
+                        else:
+                            await wallet_manager.record_auto_topup_attempt(wallet["id"], success=False)
+                            logger.warning(f"Auto top up failed for user {wallet['user_id']}: {result['error']}")
+                            
+                    except Exception as e:
+                        await wallet_manager.record_auto_topup_attempt(wallet["id"], success=False)
+                        logger.error(f"Error processing auto top up for user {wallet['user_id']}: {e}", exc_info=True)
+                
+                await session.commit()
+                
+        except Exception as e:
+            logger.error(f"Auto top up check job failed: {e}", exc_info=True)
     
     def get_job_status(self) -> Dict:
         """
@@ -327,7 +366,7 @@ class PaymentScheduler:
     async def run_job_now(self, job_name: str):
         """
         Manually trigger a job to run immediately.
-        
+
         Args:
             job_name: Name of the job to run
         """
@@ -337,12 +376,12 @@ class PaymentScheduler:
             if name == job_name:
                 handler = h
                 break
-        
+
         if not handler:
             raise ValueError(f"Unknown job: {job_name}")
-        
+
         logger.info(f"Manually running job: {job_name}")
-        
+
         # Try to acquire lock
         if await self._acquire_lock(job_name):
             try:
@@ -352,3 +391,46 @@ class PaymentScheduler:
                 await self._release_lock(job_name)
         else:
             raise RuntimeError(f"Job {job_name} is already running")
+
+
+async def trigger_auto_topup(user_id: int, wallet: dict) -> bool:
+    """
+    Trigger immediate auto top up for a user during subscription renewal
+    
+    Args:
+        user_id: User ID
+        wallet: Wallet dictionary from WalletManager
+        
+    Returns:
+        True if top up was successful, False otherwise
+    """
+    from aisbf.payments import get_payment_service
+    
+    try:
+        payment_service = get_payment_service()
+        
+        # Execute auto charge
+        result = await payment_service.stripe_handler.auto_charge(
+            user_id=user_id,
+            amount=wallet["auto_topup_amount"],
+            payment_method_id=wallet["auto_topup_payment_method_id"]
+        )
+        
+        from sqlalchemy.ext.asyncio import AsyncSession
+        from aisbf.payments.wallet.manager import WalletManager
+        
+        async with AsyncSession(payment_service.db.engine) as session:
+            wallet_manager = WalletManager(session)
+            await wallet_manager.record_auto_topup_attempt(wallet["id"], success=result["success"])
+            await session.commit()
+        
+        if result["success"]:
+            logger.info(f"Immediate auto top up successful for user {user_id}")
+        else:
+            logger.warning(f"Immediate auto top up failed for user {user_id}: {result['error']}")
+        
+        return result["success"]
+        
+    except Exception as e:
+        logger.error(f"Error triggering auto top up for user {user_id}: {e}", exc_info=True)
+        return False

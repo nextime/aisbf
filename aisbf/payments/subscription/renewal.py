@@ -124,6 +124,10 @@ class RenewalProcessor:
             dict: {'success': bool, 'error': str (optional)}
         """
         try:
+            from decimal import Decimal
+            from ..wallet.manager import WalletManager
+            from ..scheduler import trigger_auto_topup
+            
             # Determine amount to charge
             billing_cycle = subscription['billing_cycle']
             
@@ -140,75 +144,136 @@ class RenewalProcessor:
                 
                 if tier_row:
                     if billing_cycle == 'monthly':
-                        amount = tier_row[0]
+                        amount = Decimal(tier_row[0])
                     else:  # yearly
-                        amount = tier_row[1]
+                        amount = Decimal(tier_row[1])
                     
                     logger.info(f"Applying pending tier change for subscription {subscription['id']} to tier {subscription['pending_tier_id']}")
                 else:
                     # Fallback to current tier if pending tier not found
                     if billing_cycle == 'monthly':
-                        amount = subscription['price_monthly']
+                        amount = Decimal(subscription['price_monthly'])
                     else:
-                        amount = subscription['price_yearly']
+                        amount = Decimal(subscription['price_yearly'])
             else:
                 # Use current tier price
                 if billing_cycle == 'monthly':
-                    amount = subscription['price_monthly']
+                    amount = Decimal(subscription['price_monthly'])
                 else:  # yearly
-                    amount = subscription['price_yearly']
+                    amount = Decimal(subscription['price_yearly'])
             
-            # Get payment method
-            with self.db._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.execute("""
-                    SELECT id, user_id, type, gateway, identifier, metadata
-                    FROM payment_methods WHERE id = ?
-                """, (subscription['payment_method_id'],))
-                pm_row = cursor.fetchone()
+            user_id = subscription['user_id']
             
-            if not pm_row:
-                return {'success': False, 'error': 'Payment method not found'}
+            # Initialize wallet manager
+            wallet_manager = WalletManager(self.db.session)
+            wallet = await wallet_manager.get_wallet(user_id)
             
-            payment_method = {
-                'id': pm_row[0],
-                'user_id': pm_row[1],
-                'type': pm_row[2],
-                'gateway': pm_row[3],
-                'identifier': pm_row[4],
-                'metadata': pm_row[5]
-            }
+            # Check wallet first
+            if await wallet_manager.has_sufficient_balance(user_id, amount):
+                try:
+                    debit_result = await wallet_manager.debit_wallet(
+                        user_id=user_id,
+                        amount=amount,
+                        transaction_details={
+                            'description': f"Subscription renewal - {subscription['tier_name']} ({billing_cycle})",
+                            'metadata': {
+                                'subscription_id': subscription['id'],
+                                'billing_cycle': billing_cycle
+                            }
+                        }
+                    )
+                    logger.info(f"Wallet debit successful for subscription {subscription['id']}: {amount}")
+                    # Continue to subscription extension
+                except ValueError as e:
+                    logger.warning(f"Wallet debit failed for subscription {subscription['id']}: {e}")
+                    # Fall through to payment method
+                else:
+                    # Proceed with renewal on successful wallet charge
+                    charge_result = {'success': True, 'wallet_used': True}
+            else:
+                logger.info(f"Insufficient wallet balance for user {user_id}, checking auto top up")
+                
+                # Check and trigger auto top up
+                if wallet_manager.should_trigger_auto_topup(wallet):
+                    logger.info(f"Triggering auto top up for user {user_id} during renewal")
+                    topup_success = await trigger_auto_topup(user_id, wallet)
+                    
+                    if topup_success:
+                        logger.info(f"Auto top up successful for user {user_id}, retrying wallet debit")
+                        # Retry wallet debit after top up
+                        try:
+                            debit_result = await wallet_manager.debit_wallet(
+                                user_id=user_id,
+                                amount=amount,
+                                transaction_details={
+                                    'description': f"Subscription renewal - {subscription['tier_name']} ({billing_cycle})",
+                                    'metadata': {
+                                        'subscription_id': subscription['id'],
+                                        'billing_cycle': billing_cycle,
+                                        'auto_topup_used': True
+                                    }
+                                }
+                            )
+                            charge_result = {'success': True, 'wallet_used': True, 'auto_topup_used': True}
+                        except ValueError as e:
+                            logger.warning(f"Wallet debit still failed after auto top up: {e}")
+                            # Fall back to direct payment method
+                    else:
+                        logger.warning(f"Auto top up failed for user {user_id} during renewal")
             
-            # Extract crypto_type from identifier for crypto payments
-            if payment_method['type'] == 'crypto':
-                # For crypto, we need to determine the crypto type
-                # Check if there's a wallet for this user
+            # Fall back to direct payment method if wallet charge wasn't successful
+            if 'charge_result' not in locals() or not charge_result['success']:
+                # Get payment method
                 with self.db._get_connection() as conn:
                     cursor = conn.cursor()
                     cursor.execute("""
-                        SELECT crypto_type FROM user_crypto_wallets
-                        WHERE user_id = ?
-                        LIMIT 1
-                    """, (subscription['user_id'],))
-                    wallet_row = cursor.fetchone()
-                    if wallet_row:
-                        payment_method['crypto_type'] = wallet_row[0]
-                    else:
-                        payment_method['crypto_type'] = None
-            else:
-                payment_method['crypto_type'] = None
-            
-            # Attempt payment
-            charge_result = await self._charge_payment(
-                user_id=subscription['user_id'],
-                payment_method=payment_method,
-                amount=amount,
-                description=f"Subscription renewal - {subscription['tier_name']} ({billing_cycle})"
-            )
-            
-            if not charge_result['success']:
-                logger.warning(f"Payment failed for subscription {subscription['id']}: {charge_result.get('error')}")
-                return charge_result
+                        SELECT id, user_id, type, gateway, identifier, metadata
+                        FROM payment_methods WHERE id = ?
+                    """, (subscription['payment_method_id'],))
+                    pm_row = cursor.fetchone()
+                
+                if not pm_row:
+                    return {'success': False, 'error': 'Payment method not found'}
+                
+                payment_method = {
+                    'id': pm_row[0],
+                    'user_id': pm_row[1],
+                    'type': pm_row[2],
+                    'gateway': pm_row[3],
+                    'identifier': pm_row[4],
+                    'metadata': pm_row[5]
+                }
+                
+                # Extract crypto_type from identifier for crypto payments
+                if payment_method['type'] == 'crypto':
+                    # For crypto, we need to determine the crypto type
+                    # Check if there's a wallet for this user
+                    with self.db._get_connection() as conn:
+                        cursor = conn.cursor()
+                        cursor.execute("""
+                            SELECT crypto_type FROM user_crypto_wallets
+                            WHERE user_id = ?
+                            LIMIT 1
+                        """, (subscription['user_id'],))
+                        wallet_row = cursor.fetchone()
+                        if wallet_row:
+                            payment_method['crypto_type'] = wallet_row[0]
+                        else:
+                            payment_method['crypto_type'] = None
+                else:
+                    payment_method['crypto_type'] = None
+                
+                # Attempt payment
+                charge_result = await self._charge_payment(
+                    user_id=subscription['user_id'],
+                    payment_method=payment_method,
+                    amount=float(amount),
+                    description=f"Subscription renewal - {subscription['tier_name']} ({billing_cycle})"
+                )
+                
+                if not charge_result['success']:
+                    logger.warning(f"Payment failed for subscription {subscription['id']}: {charge_result.get('error')}")
+                    return charge_result
             
             # Payment successful - extend period
             period_end = subscription['current_period_end']
