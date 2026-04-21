@@ -108,6 +108,10 @@ function renderRotationDetails(rotationKey) {
                 <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
                 Notify Errors
             </label>
+            <small style="color: #888; font-size: 12px; display: block;">
+                When enabled, provider errors will be returned to the client instead of silently failing over to next provider.
+                Disable this for silent failover without exposing internal errors.
+            </small>
         </div>
         
         <div class="form-group">

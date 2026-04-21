@@ -9,18 +9,33 @@
             <i class="fas fa-memory me-2"></i>Prompt Cache Settings
         </h2>
 
-        <!-- Global Cache Setting -->
+        <!-- User Default Cache Setting -->
         <div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #f39c12;">
-                <i class="fas fa-globe me-2"></i>Global Cache Setting
+                <i class="fas fa-user-circle me-2"></i>User Default Cache Setting
             </h3>
             
-            <div style="background: #1a1a2e; padding: 15px; border-radius: 8px;">
+            <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
                         <h5 style="margin: 0 0 5px 0; color: #e0e0e0;">Enable Prompt Caching</h5>
-                        <p style="color: #888; margin: 0; font-size: 14px;">Enable/disable prompt caching for all providers and models</p>
+                        <p style="color: #888; margin: 0; font-size: 14px;">Enable/disable prompt caching for all your providers and models</p>
                     </div>
+                </div>
+            </div>
+            
+            <div style="background: #0f2840; padding: 15px; border-radius: 8px; border-left: 3px solid #4a9eff;">
+                <h5 style="margin: 0 0 10px 0; color: #4a9eff;">
+                    <i class="fas fa-info-circle me-2"></i>Cache Override Hierarchy
+                </h5>
+                <p style="color: #a0a0a0; margin: 0; font-size: 13px; line-height: 1.6;">
+                    Settings are applied in this priority order (most specific takes precedence):
+                    <br><strong>1. Model-level setting</strong> → Overrides everything
+                    <br><strong>2. Provider-level setting</strong> → Overrides user default
+                    <br><strong>3. User default</strong> → Applied if no specific setting exists
+                    <br><strong>Default: Enabled</strong> if no settings are configured
+                </p>
+            </div>
                     <div class="form-check form-switch">
                         <input class="form-check-input" type="checkbox" id="globalCacheToggle" onchange="setCacheSetting(null, null, this.checked)">
                         <label class="form-check-label" for="globalCacheToggle"></label>
