@@ -754,7 +754,10 @@ class BaseProviderHandler:
             self.error_tracking = {
                 "enabled": True,
                 "max_errors": 5,
-                "cooldown_seconds": 60
+                "cooldown_seconds": 60,
+                "failures": 0,
+                "last_failure": 0,
+                "disabled_until": None
             }
         else:
             self.error_tracking = config.error_tracking[provider_id]
@@ -1025,7 +1028,8 @@ class BaseProviderHandler:
             logger.debug(f"Could not parse rate limit header: {e}")
 
     def is_rate_limited(self) -> bool:
-        if self.error_tracking['disabled_until'] and self.error_tracking['disabled_until'] > time.time():
+        disabled_until = self.error_tracking.get('disabled_until')
+        if disabled_until and disabled_until > time.time():
             return True
         return False
     
@@ -1250,8 +1254,8 @@ class BaseProviderHandler:
         import logging
         logger = logging.getLogger(__name__)
         
-        was_disabled = self.error_tracking['disabled_until'] is not None
-        previous_failures = self.error_tracking['failures']
+        was_disabled = self.error_tracking.get('disabled_until') is not None
+        previous_failures = self.error_tracking.get('failures', 0)
         
         self.error_tracking['failures'] = 0
         self.error_tracking['disabled_until'] = None
