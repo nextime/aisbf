@@ -273,7 +273,11 @@ class PaymentService:
                 if method_type == 'card' and gateway == 'stripe':
                     await self.stripe_handler.delete_payment_method(user_id, payment_method_id)
                 elif method_type == 'paypal':
-                    await self.paypal_handler.cancel_billing_agreement(user_id, payment_method_id)
+                    # For PayPal Vault v3, we just delete from DB (tokens remain in PayPal vault)
+                    # For legacy billing agreements, we would cancel them
+                    # Note: PayPal Vault tokens can be revoked via their API if needed
+                    logger.info(f"Deleting PayPal payment method {payment_method_id} (gateway={gateway})")
+                    pass
                 
                 # Delete from database
                 cursor.execute(f"""
