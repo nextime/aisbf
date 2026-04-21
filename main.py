@@ -2193,6 +2193,26 @@ async def dashboard_analytics(
         to_datetime=to_datetime,
         user_filter=user_filter_int
     )
+    
+    # Get model performance (with optional filters)
+    model_performance = analytics.get_model_performance(
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter,
+        user_filter=user_filter_int,
+        from_datetime=from_datetime,
+        to_datetime=to_datetime
+    )
+    
+    # Get cost overview
+    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
+    
+    # Get recommendations
+    recommendations = analytics.get_recommendations(from_datetime, to_datetime, user_filter=user_filter_int)
+    
+    # Get optimization savings
+    optimization_savings = analytics.get_optimization_savings(from_datetime, to_datetime, user_filter=user_filter_int)
 
     # Handle Decimal values from MySQL for JSON serialization
     def decimal_default(obj):
