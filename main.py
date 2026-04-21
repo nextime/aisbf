@@ -10487,11 +10487,11 @@ async def user_list_models_by_username(request: Request, username: str):
         for rotation_id, rotation_config in rotation_handler.rotations.items():
             try:
                 all_models.append({
-                    'id': f"user-rotation/{rotation_id}",
+                    'id': f"rotation/{rotation_id}",
                     'object': 'model',
                     'created': int(time.time()),
-                    'owned_by': 'aisbf-user-rotation',
-                    'type': 'user_rotation',
+                    'owned_by': 'aisbf-rotation',
+                    'type': 'rotation',
                     'rotation_id': rotation_id,
                     'source': 'user_config'
                 })
@@ -10502,11 +10502,11 @@ async def user_list_models_by_username(request: Request, username: str):
         for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
             try:
                 all_models.append({
-                    'id': f"user-autoselect/{autoselect_id}",
+                    'id': f"autoselect/{autoselect_id}",
                     'object': 'model',
                     'created': int(time.time()),
-                    'owned_by': 'aisbf-user-autoselect',
-                    'type': 'user_autoselect',
+                    'owned_by': 'aisbf-autoselect',
+                    'type': 'autoselect',
                     'autoselect_id': autoselect_id,
                     'source': 'user_config'
                 })
@@ -10521,25 +10521,31 @@ async def user_list_models_by_username(request: Request, username: str):
     # Get user-specific handler for providers
     handler = get_user_handler('request', target_user_id)
     
-    # Add user providers
+    # Add user providers - fetch live models from each provider API
     for provider_id, provider_config in handler.user_providers.items():
         try:
-            if hasattr(provider_config, 'models') and provider_config.models:
-                for model in provider_config.models:
-                    model_id = f"{provider_id}/{model.name}"
-                    all_models.append({
-                        'id': model_id,
-                        'object': 'model',
-                        'created': int(time.time()),
-                        'owned_by': provider_id,
-                        'provider': provider_id,
-                        'type': 'user_provider',
-                        'model_name': model.name,
-                        'context_size': getattr(model, 'context_size', None),
-                        'capabilities': getattr(model, 'capabilities', []),
-                        'description': getattr(model, 'description', None),
-                        'source': 'user_config'
-                    })
+            # Get provider handler for this user provider
+            provider_handler = get_provider_handler(provider_id, user_id=target_user_id)
+            
+            # Fetch live models from provider
+            provider_models = await provider_handler.get_models()
+            
+            # Add all models from this provider
+            for model in provider_models:
+                model_id = f"{provider_id}/{model.id}"
+                all_models.append({
+                    'id': model_id,
+                    'object': 'model',
+                    'created': int(time.time()),
+                    'owned_by': provider_id,
+                    'provider': provider_id,
+                    'type': 'user_provider',
+                    'model_name': model.name,
+                    'context_size': getattr(model, 'context_size', None),
+                    'capabilities': getattr(model, 'capabilities', []),
+                    'description': getattr(model, 'description', None),
+                    'source': 'user_config'
+                })
         except Exception as e:
             logger.warning(f"Error listing models for user provider {provider_id}: {e}")
     
@@ -10548,11 +10554,11 @@ async def user_list_models_by_username(request: Request, username: str):
     for rotation_id, rotation_config in rotation_handler.rotations.items():
         try:
             all_models.append({
-                'id': f"user-rotation/{rotation_id}",
+                'id': f"rotation/{rotation_id}",
                 'object': 'model',
                 'created': int(time.time()),
-                'owned_by': 'aisbf-user-rotation',
-                'type': 'user_rotation',
+                'owned_by': 'aisbf-rotation',
+                'type': 'rotation',
                 'rotation_id': rotation_id,
                 'model_name': rotation_config.get('model_name', rotation_id),
                 'capabilities': rotation_config.get('capabilities', []),
@@ -10566,11 +10572,11 @@ async def user_list_models_by_username(request: Request, username: str):
     for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
         try:
             all_models.append({
-                'id': f"user-autoselect/{autoselect_id}",
+                'id': f"autoselect/{autoselect_id}",
                 'object': 'model',
                 'created': int(time.time()),
-                'owned_by': 'aisbf-user-autoselect',
-                'type': 'user_autoselect',
+                'owned_by': 'aisbf-autoselect',
+                'type': 'autoselect',
                 'autoselect_id': autoselect_id,
                 'model_name': autoselect_config.get('model_name', autoselect_id),
                 'description': autoselect_config.get('description'),
@@ -10686,11 +10692,11 @@ async def user_list_models(request: Request, username: str):
             for rotation_id, rotation_config in rotation_handler.rotations.items():
                 try:
                     all_models.append({
-                        'id': f"user-rotation/{rotation_id}",
+                        'id': f"rotation/{rotation_id}",
                         'object': 'model',
                         'created': int(time.time()),
-                        'owned_by': 'aisbf-user-rotation',
-                        'type': 'user_rotation',
+                        'owned_by': 'aisbf-rotation',
+                        'type': 'rotation',
                         'rotation_id': rotation_id,
                         'source': 'user_config'
                     })
@@ -10701,11 +10707,11 @@ async def user_list_models(request: Request, username: str):
             for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
                 try:
                     all_models.append({
-                        'id': f"user-autoselect/{autoselect_id}",
+                        'id': f"autoselect/{autoselect_id}",
                         'object': 'model',
                         'created': int(time.time()),
-                        'owned_by': 'aisbf-user-autoselect',
-                        'type': 'user_autoselect',
+                        'owned_by': 'aisbf-autoselect',
+                        'type': 'autoselect',
                         'autoselect_id': autoselect_id,
                         'source': 'user_config'
                     })
@@ -10753,11 +10759,11 @@ async def user_list_models(request: Request, username: str):
     for rotation_id, rotation_config in rotation_handler.rotations.items():
         try:
             all_models.append({
-                'id': f"user-rotation/{rotation_id}",
+                'id': f"rotation/{rotation_id}",
                 'object': 'model',
                 'created': int(time.time()),
-                'owned_by': 'aisbf-user-rotation',
-                'type': 'user_rotation',
+                'owned_by': 'aisbf-rotation',
+                'type': 'rotation',
                 'rotation_id': rotation_id,
                 'model_name': rotation_config.get('model_name', rotation_id),
                 'capabilities': rotation_config.get('capabilities', []),
@@ -10771,11 +10777,11 @@ async def user_list_models(request: Request, username: str):
     for autoselect_id, autoselect_config in autoselect_handler.autoselects.items():
         try:
             all_models.append({
-                'id': f"user-autoselect/{autoselect_id}",
+                'id': f"autoselect/{autoselect_id}",
                 'object': 'model',
                 'created': int(time.time()),
-                'owned_by': 'aisbf-user-autoselect',
-                'type': 'user_autoselect',
+                'owned_by': 'aisbf-autoselect',
+                'type': 'autoselect',
                 'autoselect_id': autoselect_id,
                 'model_name': autoselect_config.get('model_name', autoselect_id),
                 'description': autoselect_config.get('description'),
@@ -11376,13 +11382,13 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
     - 'rotation/name' - global rotation (admin only)
     - 'autoselect/name' - global autoselect (admin only)
     - 'user-provider/model' - user's provider
-    - 'user-rotation/name' - user's rotation
+    - 'rotation/name' - user's rotation
     - 'user-autoselect/name' - user's autoselect
     
     Example:
         curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
              -H "Content-Type: application/json" \
-             -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
+             -d '{"model": "rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
              http://localhost:17765/api/u/{username}/chat/completions
     """
     from aisbf.database import get_database
@@ -11411,7 +11417,7 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
     if not provider_id:
         raise HTTPException(
             status_code=400,
-            detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'rotations/name', 'autoselections/name', 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'"
+             detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'rotations/name', 'autoselections/name', or 'user-provider/model'"
         )
     
     body_dict = body.model_dump()
@@ -11545,7 +11551,7 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
     
     raise HTTPException(
         status_code=400,
-        detail="Model must be in format 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'. Global configurations are only available to admin users."
+         detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'. Global configurations are only available to admin users."
     )
 
 
@@ -11706,7 +11712,7 @@ async def user_list_config_models_by_username(request: Request, username: str, c
                 for provider in providers:
                     for model in provider.get('models', []):
                         all_models.append({
-                            "id": f"user-rotation/{rotation_id}/{model.get('name', '')}",
+                            "id": f"rotation/{rotation_id}/{model.get('name', '')}",
                             "name": rotation_id,
                             "object": "model",
                             "created": int(time.time()),
@@ -11765,13 +11771,13 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
     - 'rotation/name' - global rotation (admin only)
     - 'autoselect/name' - global autoselect (admin only)
     - 'user-provider/model' - user's provider
-    - 'user-rotation/name' - user's rotation
+    - 'rotation/name' - user's rotation
     - 'user-autoselect/name' - user's autoselect
     
     Example:
         curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
              -H "Content-Type: application/json" \
-             -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
+             -d '{"model": "rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
              http://localhost:17765/api/user/chat/completions
     """
     user_id = getattr(request.state, 'user_id', None)
@@ -11904,7 +11910,7 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
     
     raise HTTPException(
         status_code=400,
-        detail="Model must be in format 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'. Global configurations are only available to admin users."
+         detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'. Global configurations are only available to admin users."
     )
 
 
@@ -11972,7 +11978,7 @@ async def user_list_config_models(request: Request, username: str, config_type: 
                 for provider in providers:
                     for model in provider.get('models', []):
                         all_models.append({
-                            "id": f"user-rotation/{rotation_id}/{model.get('name', '')}",
+                            "id": f"rotation/{rotation_id}/{model.get('name', '')}",
                             "name": rotation_id,
                             "object": "model",
                             "created": int(time.time()),

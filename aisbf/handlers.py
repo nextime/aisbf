@@ -2335,12 +2335,11 @@ class RotationHandler:
         # Check for user-specific rotation config first
         if self.user_id:
             # Database user: ONLY use user-specific configs - NO global fallback
-            rotation_config = next((rot['config'] for rot in self.user_rotations if rot['rotation_id'] == rotation_id), None)
-            if rotation_config:
-                logger.info(f"Using user-specific rotation config for {rotation_id}")
-            else:
+            if rotation_id not in self.rotations:
                 logger.error(f"User rotation {rotation_id} not found - NO global fallback")
                 raise HTTPException(status_code=400, detail=f"Rotation {rotation_id} not found for this user")
+            rotation_config = self.rotations[rotation_id]
+            logger.info(f"Using user-specific rotation config for {rotation_id}")
         else:
             # Admin user: use global config
             rotation_config = self.config.get_rotation(rotation_id)
@@ -3866,8 +3865,8 @@ class AutoselectHandler:
             self._load_user_configs()
             # Override config to only use user-specific configs with NO global fallback
             self.autoselects = {}
-            for autoselect in self.user_autoselects:
-                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
+            for autoselect_id, autoselect_config in self.user_autoselects.items():
+                self.autoselects[autoselect_id] = autoselect_config
         else:
             self.user_providers = {}
             self.user_rotations = {}
@@ -3888,8 +3887,8 @@ class AutoselectHandler:
             self._load_user_configs()
             # Refresh autoselects dict after reload
             self.autoselects = {}
-            for autoselect in self.user_autoselects:
-                self.autoselects[autoselect['autoselect_id']] = autoselect['config']
+            for autoselect_id, autoselect_config in self.user_autoselects.items():
+                self.autoselects[autoselect_id] = autoselect_config
 
     def _get_skill_file_content(self) -> str:
         """Load the autoselect.md skill file content"""
