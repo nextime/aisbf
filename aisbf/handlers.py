@@ -104,8 +104,8 @@ class RequestHandler:
         """Reload user configuration from database"""
         import logging
         logger = logging.getLogger(__name__)
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         # Convert list to dictionary with id as key
         providers = db.get_user_providers(self.user_id)
@@ -1983,8 +1983,8 @@ class RotationHandler:
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         self.user_providers = db.get_user_providers(self.user_id)
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
@@ -3876,8 +3876,8 @@ class AutoselectHandler:
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         self.user_providers = db.get_user_providers(self.user_id)
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
@@ -3896,8 +3896,8 @@ class AutoselectHandler:
         if self._skill_file_content is None:
             # Check for user-specific prompt first if user_id is present
             if self.user_id is not None:
-                from .database import get_database
-                db = get_database()
+                from .database import DatabaseRegistry
+                db = DatabaseRegistry.get_config_database()
                 user_prompt = db.get_user_prompt(self.user_id, 'autoselect')
                 if user_prompt is not None:
                     self._skill_file_content = user_prompt

@@ -1318,8 +1318,8 @@ def get_analytics(db_manager=None) -> Analytics:
     
     if _analytics is None:
         if db_manager is None:
-            from .database import get_database
-            db_manager = get_database()
+            from .database import DatabaseRegistry
+            db_manager = DatabaseRegistry.get_config_database()
         
         _analytics = Analytics(db_manager)
     

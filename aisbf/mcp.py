@@ -1029,8 +1029,8 @@ class MCPServer:
             return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved to file. Restart server for changes to take effect."}
         else:
             # Database user: save to database
-            from .database import get_database
-            db = get_database()
+            from .database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
             db.save_user_autoselect(user_id, autoselect_id, autoselect_data)
             return {"status": "success", "message": f"Autoselect '{autoselect_id}' saved to database for user {user_id}."}
     
@@ -1068,8 +1068,8 @@ class MCPServer:
             return {"status": "success", "message": f"Rotation '{rotation_id}' saved to file. Restart server for changes to take effect."}
         else:
             # Database user: save to database
-            from .database import get_database
-            db = get_database()
+            from .database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
             db.save_user_rotation(user_id, rotation_id, rotation_data)
             return {"status": "success", "message": f"Rotation '{rotation_id}' saved to database for user {user_id}."}
     
@@ -1107,8 +1107,8 @@ class MCPServer:
             return {"status": "success", "message": f"Provider '{provider_id}' saved to file. Restart server for changes to take effect."}
         else:
             # Database user: save to database
-            from .database import get_database
-            db = get_database()
+            from .database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
             db.save_user_provider(user_id, provider_id, provider_data)
             return {"status": "success", "message": f"Provider '{provider_id}' saved to database for user {user_id}."}
     
@@ -1270,8 +1270,8 @@ class MCPServer:
         if not user_id:
             raise HTTPException(status_code=401, detail="User authentication required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         all_models = []
         
@@ -1333,8 +1333,8 @@ class MCPServer:
         if not user_id:
             raise HTTPException(status_code=401, detail="User authentication required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         providers = db.get_user_providers(user_id)
         providers_info = {}
@@ -1365,8 +1365,8 @@ class MCPServer:
         if not provider_id:
             raise HTTPException(status_code=400, detail="provider_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         provider = db.get_user_provider(user_id, provider_id)
         if not provider:
@@ -1389,8 +1389,8 @@ class MCPServer:
         if not provider_id or not provider_data:
             raise HTTPException(status_code=400, detail="provider_id and provider_data are required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.save_user_provider(user_id, provider_id, provider_data)
         
@@ -1405,8 +1405,8 @@ class MCPServer:
         if not provider_id:
             raise HTTPException(status_code=400, detail="provider_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.delete_user_provider(user_id, provider_id)
         
@@ -1417,8 +1417,8 @@ class MCPServer:
         if not user_id:
             raise HTTPException(status_code=401, detail="User authentication required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         rotations = db.get_user_rotations(user_id)
         rotations_info = {}
@@ -1442,8 +1442,8 @@ class MCPServer:
         if not rotation_id:
             raise HTTPException(status_code=400, detail="rotation_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         rotation = db.get_user_rotation(user_id, rotation_id)
         if not rotation:
@@ -1462,8 +1462,8 @@ class MCPServer:
         if not rotation_id or not rotation_data:
             raise HTTPException(status_code=400, detail="rotation_id and rotation_data are required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.save_user_rotation(user_id, rotation_id, rotation_data)
         
@@ -1478,8 +1478,8 @@ class MCPServer:
         if not rotation_id:
             raise HTTPException(status_code=400, detail="rotation_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.delete_user_rotation(user_id, rotation_id)
         
@@ -1490,8 +1490,8 @@ class MCPServer:
         if not user_id:
             raise HTTPException(status_code=401, detail="User authentication required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         autoselects = db.get_user_autoselects(user_id)
         autoselects_info = {}
@@ -1517,8 +1517,8 @@ class MCPServer:
         if not autoselect_id:
             raise HTTPException(status_code=400, detail="autoselect_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         autoselect = db.get_user_autoselect(user_id, autoselect_id)
         if not autoselect:
@@ -1537,8 +1537,8 @@ class MCPServer:
         if not autoselect_id or not autoselect_data:
             raise HTTPException(status_code=400, detail="autoselect_id and autoselect_data are required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.save_user_autoselect(user_id, autoselect_id, autoselect_data)
         
@@ -1553,8 +1553,8 @@ class MCPServer:
         if not autoselect_id:
             raise HTTPException(status_code=400, detail="autoselect_id is required")
         
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         
         db.delete_user_autoselect(user_id, autoselect_id)
         
@@ -1600,8 +1600,8 @@ class MCPServer:
         from main import get_user_handler
 
         # Get username for the path
-        from .database import get_database
-        db = get_database()
+        from .database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
         user = db.get_user_by_id(user_id)
         username = user['username'] if user else 'unknown'
 

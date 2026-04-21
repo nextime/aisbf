@@ -460,11 +460,11 @@ class ContextManager:
     def _load_system_prompt(self, method: str) -> str:
         """Load system prompt from markdown file"""
         from pathlib import Path
-        from .database import get_database
+from .database import DatabaseRegistry
         
         # Check for user-specific prompt first if user_id is present
         if self.user_id is not None:
-            db = get_database()
+            db = DatabaseRegistry.get_config_database()
             prompt_key = f'condensation_{method}'
             user_prompt = db.get_user_prompt(self.user_id, prompt_key)
             if user_prompt is not None:
