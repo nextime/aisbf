@@ -2823,17 +2823,35 @@ class DatabaseManager:
             settings_json = json.dumps(settings)
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             
+            logger.info(f"Attempting to save payment gateway settings to database (db_type={self.db_type})")
+            logger.info(f"Settings to save: {settings_json[:200]}...")  # Log first 200 chars
+            
             try:
                 insert_syntax = 'INSERT OR REPLACE' if self.db_type == 'sqlite' else 'REPLACE'
-                cursor.execute(f'''
+                query = f'''
                     {insert_syntax} INTO admin_settings (setting_key, setting_value, updated_at)
                     VALUES ({placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-                ''', ('payment_gateways', settings_json))
+                '''
+                logger.info(f"Executing query: {query}")
+                cursor.execute(query, ('payment_gateways', settings_json))
                 conn.commit()
-                logger.info("Payment gateway settings saved to database")
+                logger.info("Payment gateway settings saved to database successfully")
+                
+                # Verify the save
+                cursor.execute(f'''
+                    SELECT setting_value FROM admin_settings WHERE setting_key = {placeholder}
+                ''', ('payment_gateways',))
+                row = cursor.fetchone()
+                if row:
+                    logger.info(f"Verification: Settings in DB after save: {row[0][:200]}...")
+                else:
+                    logger.error("Verification failed: No payment_gateways record found after save!")
+                
                 return True
             except Exception as e:
                 logger.error(f"Error saving payment gateway settings: {e}")
+                import traceback
+                logger.error(f"Traceback: {traceback.format_exc()}")
                 return False
 
     def get_currency_settings(self) -> Dict:
