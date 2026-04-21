@@ -138,9 +138,9 @@ class ClaudeProviderHandler(BaseProviderHandler):
                      if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
                          import time
                          auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
-                    import logging
-                    logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
-                    return auth
+                     import logging
+                     logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
+                     return auth
         except Exception as e:
             logging.getLogger(__name__).warning(f"ClaudeProviderHandler: Failed to load credentials from database: {e}")
         
