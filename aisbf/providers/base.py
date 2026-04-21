@@ -1310,6 +1310,8 @@ class BaseProviderHandler:
 
     def _get_models_cache_key(self) -> str:
         """Get unified cache key for provider models list"""
+        if hasattr(self, 'user_id') and self.user_id is not None:
+            return f"provider_models:{self.provider_id}:user:{self.user_id}"
         return f"provider_models:{self.provider_id}"
 
     def _save_models_cache(self, models: List[Any]) -> None:
