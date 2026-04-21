@@ -6587,6 +6587,13 @@ async def dashboard_user_tokens(request: Request):
 
     # Get user API tokens
     user_tokens = db.get_user_api_tokens(user_id)
+    
+    # Convert datetime objects to strings for JSON serialization
+    for token in user_tokens:
+        if 'created_at' in token and token['created_at']:
+            token['created_at'] = token['created_at'].isoformat() if hasattr(token['created_at'], 'isoformat') else str(token['created_at'])
+        if 'last_used' in token and token['last_used']:
+            token['last_used'] = token['last_used'].isoformat() if hasattr(token['last_used'], 'isoformat') else str(token['last_used'])
 
     return templates.TemplateResponse(
         request=request,
