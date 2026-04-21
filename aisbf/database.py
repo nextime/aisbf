@@ -2948,6 +2948,7 @@ class DatabaseManager:
                     ''', (user_id, provider_id, model_name))
                 
                 existing = cursor.fetchone()
+                cursor.fetchall()  # Consume any remaining results to avoid "Unread result found" error
                 
                 if existing:
                     # Update existing record
