@@ -8714,10 +8714,10 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
     
     # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Provider '{provider_id}' not found. Available providers: {list(config.providers.keys())}, or use 'rotation/name' or 'autoselect/name'"
-        )
+            raise HTTPException(
+                status_code=404,
+                detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}"
+            )
     
     # Validate kiro credentials before processing request
     provider_config = config.get_provider(provider_id)
@@ -9212,10 +9212,10 @@ async def rotation_chat_completions(request: Request, body: ChatCompletionReques
     if body.model not in config.rotations:
         logger.error(f"Model '{body.model}' not found in rotations")
         logger.error(f"Available rotations: {list(config.rotations.keys())}")
-        raise HTTPException(
-            status_code=400,
-            detail=f"Model '{body.model}' not found. Available rotations: {list(config.rotations.keys())}"
-        )
+            raise HTTPException(
+                status_code=404,
+                detail=f"User rotation '{actual_model}' not found. Available: {list(handler.rotations.keys())}"
+            )
 
     logger.info(f"Model '{body.model}' found in rotations")
     logger.debug("Handling rotation request")
@@ -11487,7 +11487,7 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         
         if provider_name not in handler.user_providers:
             raise HTTPException(
-                status_code=400,
+                status_code=404,
                 detail=f"User provider '{provider_name}' not found. Available: {list(handler.user_providers.keys())}"
             )
         
@@ -11506,6 +11506,13 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         else:
             # Keep original model name if no slash
             body_dict['model'] = actual_model
+        
+        # If no model specified, return error
+        if not body_dict.get('model'):
+            raise HTTPException(
+                status_code=400,
+                detail="Model name is required in format 'provider/model' or 'model'"
+            )
         
         if body.stream:
             return await handler.handle_streaming_chat_completion(request, provider_name, body_dict)
