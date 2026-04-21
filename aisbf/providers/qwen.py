@@ -36,7 +36,7 @@ import time
 import json
 import platform
 import uuid
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from openai import AsyncOpenAI
 from ..models import Model
 from ..config import config
@@ -63,8 +63,13 @@ class QwenProviderHandler(BaseProviderHandler):
     For non-admin users, credentials are loaded from the database.
     """
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None, provider_config: Optional[Any] = None):
         super().__init__(provider_id, api_key, user_id=user_id)
+        if provider_config is not None:
+            # Use provider config passed from factory (user-specific config)
+            self.provider_config = provider_config
+        else:
+            # Fallback to global config
         
         import logging
         logger = logging.getLogger(__name__)

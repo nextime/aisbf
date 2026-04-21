@@ -24,7 +24,7 @@ import httpx
 import asyncio
 import time
 import random
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, Any
 from anthropic import Anthropic
 from ..models import Model
 from ..config import config
@@ -46,9 +46,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
     
     # NOTE: OAuth2 API uses its own model naming scheme that differs from standard Anthropic API
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None, provider_config: Optional[Any] = None):
         super().__init__(provider_id, api_key, user_id=user_id)
-        self.provider_config = config.get_provider(provider_id)
+        if provider_config is not None:
+            # Use provider config passed from factory (user-specific config)
+            self.provider_config = provider_config
+        else:
+            # Fallback to global config
+            self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config
         if isinstance(self.provider_config, dict):
