@@ -7,6 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.47] - 2026-04-21
+
+### Added
+- **Unified Wallet System**
+  - Fiat wallet per user with configurable currency
+  - Top-up support via Crypto (BTC, ETH, USDT, USDC), PayPal, Stripe
+  - Fixed amount presets: 10, 15, 20, 50, 100 + custom amounts
+  - Auto top-up with threshold triggers for Stripe
+  - Complete transaction history and audit trail
+  - Subscription renewal integration with wallet deduction
+  - Wallet API endpoints for balance, top-up, transactions
+  - Dashboard wallet management interface
+
+- **Documentation Reorganization**
+  - Moved donations to top of README for better visibility
+  - Streamlined README to focus on user essentials
+  - Comprehensive DOCUMENTATION.md with wallet system details
+  - Updated project structure and directory tree
+  - Fixed examples and removed duplications
+  - Clarified token access patterns (global vs user tokens)
+
+### Changed
+- Updated all version numbers to 0.99.47
+- Added wallet package to pyproject.toml
+
 ## [0.99.26] - 2026-04-16
 
 ### Added

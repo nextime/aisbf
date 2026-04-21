@@ -1022,6 +1022,144 @@ curl -X POST http://localhost:17765/mcp/tools/call \
   }'
 ```
 
+## Wallet API Examples
+
+### Check Wallet Balance
+
+Using cURL:
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/wallet/balance
+```
+
+Response:
+```json
+{
+  "balance": 25.50,
+  "currency": "USD",
+  "auto_topup_enabled": true,
+  "auto_topup_threshold": 10.00
+}
+```
+
+Using Python:
+```python
+import requests
+
+headers = {"Authorization": "Bearer YOUR_TOKEN"}
+response = requests.get("http://localhost:17765/api/wallet/balance", headers=headers)
+balance = response.json()
+print(f"Balance: {balance['balance']} {balance['currency']}")
+```
+
+### Top Up Wallet
+
+#### Stripe Top Up
+```bash
+curl -X POST http://localhost:17765/api/wallet/topup \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 20.00,
+    "payment_method": "stripe"
+  }'
+```
+
+#### PayPal Top Up
+```bash
+curl -X POST http://localhost:17765/api/wallet/topup \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 15.00,
+    "payment_method": "paypal"
+  }'
+```
+
+#### Crypto Top Up
+```bash
+curl -X POST http://localhost:17765/api/wallet/topup \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "amount": 50.00,
+    "payment_method": "bitcoin"
+  }'
+```
+
+### Configure Auto Top Up
+
+```bash
+curl -X POST http://localhost:17765/api/wallet/auto-topup \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "enabled": true,
+    "amount": 15.00,
+    "threshold": 5.00,
+    "payment_method_id": "pm_stripe_123456"
+  }'
+```
+
+### Transaction History
+
+```bash
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  "http://localhost:17765/api/wallet/transactions?page=1&limit=10"
+```
+
+Response:
+```json
+{
+  "transactions": [
+    {
+      "id": 123,
+      "type": "credit",
+      "amount": 10.00,
+      "description": "Stripe top-up",
+      "created_at": "2026-04-21T10:30:00Z"
+    },
+    {
+      "id": 124,
+      "type": "debit",
+      "amount": 5.99,
+      "description": "Monthly subscription renewal",
+      "created_at": "2026-04-21T11:00:00Z"
+    }
+  ],
+  "total": 45,
+  "page": 1,
+  "pages": 5
+}
+```
+
+### Wallet Integration with Chat Completions
+
+The wallet system automatically handles subscription renewals. When a subscription renewal is due:
+
+1. **Check wallet balance** first
+2. **Sufficient balance** → Deduct renewal amount → Success ✅
+3. **Insufficient balance** → Auto top-up (if enabled) → Retry deduction → Success ✅
+4. **Auto top-up fails** → Renewal fails → Grace period → Future retry ❌
+
+Example workflow:
+```bash
+# User makes a chat request
+curl -X POST http://localhost:17765/api/v1/chat/completions \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "model": "openai/gpt-4",
+    "messages": [{"role": "user", "content": "Hello!"}]
+  }'
+
+# System automatically:
+# 1. Checks subscription status
+# 2. If renewal needed, checks wallet balance
+# 3. If low, triggers auto top-up (if configured)
+# 4. Processes renewal with wallet funds
+# 5. Returns chat response
+```
+
 ## License
 
 Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
