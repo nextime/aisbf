@@ -1322,6 +1322,7 @@ async def api_token_authorization_middleware(request: Request, call_next):
         path.startswith("/dashboard") or
         path.startswith("/auth/") or
         path.startswith("/api/admin") or
+        path.startswith("/api/webhooks/") or  # Webhooks don't need auth
         path == "/favicon.ico" or
         path.startswith("/.well-known/")):
         return await call_next(request)
@@ -1402,11 +1403,12 @@ async def api_token_authorization_middleware(request: Request, call_next):
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config and server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint, dashboard routes, auth routes, admin API routes, favicon, and browser metadata
+        # Skip auth for root endpoint, dashboard routes, auth routes, admin API routes, webhooks, favicon, and browser metadata
         if (request.url.path == "/" or
             request.url.path.startswith("/dashboard") or
             request.url.path.startswith("/auth/") or
             request.url.path.startswith("/api/admin") or
+            request.url.path.startswith("/api/webhooks/") or  # Webhooks don't need auth
             request.url.path == "/favicon.ico" or
             request.url.path.startswith("/.well-known/")):
             response = await call_next(request)
