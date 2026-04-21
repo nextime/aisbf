@@ -308,9 +308,6 @@ class DatabaseManager:
         """
         logger.info(f"💾 DB.record_token_usage ENTERED: provider={provider_id}, tokens={tokens_used}, user_id={user_id}")
         try:
-            with self._get_connection() as conn:
-                cursor = conn.cursor()
-                placeholder = '?' if self.db_type == 'sqlite' else '%s'
             # Convert latency to int for storage
             latency_int = int(latency_ms) if latency_ms else 0
             logger.info(f"🔍 DB.record_token_usage FULL PARAMETERS:")
@@ -326,8 +323,11 @@ class DatabaseManager:
             logger.info(f"  completion_tokens: {completion_tokens}")
             logger.info(f"  actual_cost: {actual_cost}")
             logger.info(f"  db_type: {self.db_type}")
-            logger.info(f"  placeholder: {placeholder}")
             logger.info(f"DB.record_token_usage: About to execute SQL - provider={provider_id}, tokens={tokens_used}, success={success}")
+
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                placeholder = '?' if self.db_type == 'sqlite' else '%s'
 
             # Build dynamic INSERT based on available columns (for backward compatibility)
             base_columns = ['user_id', 'provider_id', 'model_name', 'tokens_used', 'timestamp']
@@ -364,8 +364,8 @@ class DatabaseManager:
                 cursor.execute(sql, params)
                 logger.info(f"✅ Inserted with basic column set, rows affected: {cursor.rowcount}")
 
-            conn.commit()
-            logger.info(f"✅ Successfully recorded token usage for {provider_id}/{model_name}: {tokens_used} tokens (user_id={user_id})")
+                conn.commit()
+                logger.info(f"✅ Successfully recorded token usage for {provider_id}/{model_name}: {tokens_used} tokens (user_id={user_id})")
         except Exception as e:
             logger.error(f"❌ Failed to record token usage for {provider_id}/{model_name}: {e}")
             logger.error(f"Error details - user_id={user_id}, tokens={tokens_used}, success={success}")
