@@ -745,6 +745,7 @@ class BaseProviderHandler:
         self.provider_id = provider_id
         self.api_key = api_key
         self.user_id = user_id
+        self.user_provider_config = None
         
         # Get error tracking config - use user-specific or default to global
         if user_id is not None and provider_id in config.error_tracking:

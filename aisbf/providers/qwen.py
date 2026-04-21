@@ -572,11 +572,19 @@ class QwenProviderHandler(BaseProviderHandler):
         logger.info("QwenProviderHandler: Using API token authentication, fetching from models endpoint")
 
         # Check if models are already defined in provider configuration
-        if self.provider_config.models and len(self.provider_config.models) > 0:
+        # Handle both dict (user) and object (global) config formats
+        if hasattr(self, 'user_provider_config') and self.user_provider_config is not None:
+            # User provider config (dict)
+            models = self.user_provider_config.get('models', [])
+        else:
+            # Global provider config (object)
+            models = self.provider_config.models if hasattr(self.provider_config, 'models') else []
+            
+        if models and len(models) > 0:
             # Models are defined in configuration, use those instead of fetching
             logger.info("QwenProviderHandler: Models defined in configuration, using configured models")
             models = []
-            for model_config in self.provider_config.models:
+            for model_config in models:
                 models.append(Model(
                     id=model_config.get('name', ''),
                     name=model_config.get('name', ''),
