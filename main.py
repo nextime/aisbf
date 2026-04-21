@@ -7991,7 +7991,7 @@ async def dashboard_set_default_payment_method(request: Request, method_id: int)
 
 @app.get("/dashboard/billing/add-method/paypal/oauth")
 async def dashboard_add_payment_method_paypal_oauth(request: Request):
-    """Initiate PayPal OAuth 2.0 flow"""
+    """Initiate PayPal billing agreement flow"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -8011,15 +8011,6 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
             status_code=302
         )
     
-    # Validate PayPal is configured
-    client_id = paypal_settings.get('client_id', '').strip()
-    if not client_id:
-        logger.error(f"PayPal OAuth attempted but client_id not configured (user_id={user_id})")
-        return RedirectResponse(
-            url="/dashboard/billing?error=PayPal is not properly configured",
-            status_code=302
-        )
-    
     # Check if user already has PayPal as payment method
     existing_methods = db.get_user_payment_methods(user_id)
     for method in existing_methods:
@@ -8030,60 +8021,109 @@ async def dashboard_add_payment_method_paypal_oauth(request: Request):
                 status_code=302
             )
     
-    # Generate CSRF state token
-    import secrets
-    state_token = secrets.token_hex(32)  # 64 hex characters
-    request.session['paypal_oauth_state'] = state_token
-    
-    # Determine PayPal URLs based on sandbox mode
-    is_sandbox = paypal_settings.get('sandbox', True)
-    if is_sandbox:
-        auth_base_url = "https://www.sandbox.paypal.com/signin/authorize"
-    else:
-        auth_base_url = "https://www.paypal.com/signin/authorize"
-    
-    # Construct callback URL
+    # Construct callback URLs
     base_url = str(request.base_url).rstrip('/')
-    redirect_uri = f"{base_url}/dashboard/billing/add-method/paypal/callback"
+    return_url = f"{base_url}/dashboard/billing/add-method/paypal/callback"
+    cancel_url = f"{base_url}/dashboard/billing?error=PayPal connection cancelled"
     
-    # Build PayPal authorization URL
-    from urllib.parse import urlencode
-    params = {
-        'client_id': client_id,
-        'response_type': 'code',
-        'scope': 'openid profile email',
-        'redirect_uri': redirect_uri,
-        'state': state_token
-    }
-    paypal_auth_url = f"{auth_base_url}?{urlencode(params)}"
+    # Create billing agreement token using payment service
+    result = await payment_service.initiate_paypal_billing_agreement(user_id, return_url, cancel_url)
     
-    logger.info(f"Initiating PayPal OAuth for user {user_id}, sandbox={is_sandbox}")
-    logger.info(f"PayPal OAuth client_id: {client_id}")
-    logger.info(f"PayPal OAuth redirect_uri: {redirect_uri}")
-    logger.info(f"PayPal OAuth full URL: {paypal_auth_url}")
+    if not result['success']:
+        logger.error(f"Failed to create PayPal billing agreement: {result.get('error')}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Failed to initialize PayPal connection",
+            status_code=302
+        )
     
-    return RedirectResponse(url=paypal_auth_url, status_code=302)
+    logger.info(f"Initiating PayPal billing agreement for user {user_id}")
+    
+    return RedirectResponse(url=result['approval_url'], status_code=302)
 
 @app.get("/dashboard/billing/add-method/paypal/callback")
 async def dashboard_add_payment_method_paypal_callback(request: Request):
-    """Handle PayPal OAuth 2.0 callback"""
+    """Handle PayPal billing agreement callback"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
     
-    db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
     
     # Get query parameters
-    code = request.query_params.get('code')
-    state = request.query_params.get('state')
+    token = request.query_params.get('token')
     error = request.query_params.get('error')
     
     # Handle user cancellation
     if error:
-        logger.info(f"PayPal OAuth cancelled by user {user_id}: {error}")
+        logger.info(f"PayPal billing agreement cancelled by user {user_id}: {error}")
         return RedirectResponse(
             url="/dashboard/billing?error=PayPal connection cancelled",
+            status_code=302
+        )
+    
+    # Validate billing agreement token
+    if not token:
+        logger.error(f"PayPal callback missing billing agreement token (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Invalid PayPal response",
+            status_code=302
+        )
+    
+    try:
+        # Execute the billing agreement using payment service
+        result = await payment_service.complete_paypal_billing_agreement(user_id, token)
+        
+        if not result['success']:
+            logger.error(f"Failed to execute PayPal billing agreement: {result.get('error')}")
+            return RedirectResponse(
+                url="/dashboard/billing?error=Failed to connect PayPal account",
+                status_code=302
+            )
+        
+        logger.info(f"PayPal payment method added for user {user_id} (agreement_id={result['agreement_id']})")
+        
+        return RedirectResponse(
+            url="/dashboard/billing?success=PayPal account connected successfully",
+            status_code=302
+        )
+            
+    except Exception as e:
+        logger.error(f"PayPal callback error (user_id={user_id}): {str(e)}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Failed to connect PayPal account",
+            status_code=302
+        )
+    
+    # Validate billing agreement token
+    if not token:
+        logger.error(f"PayPal callback missing billing agreement token (user_id={user_id})")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Invalid PayPal response",
+            status_code=302
+        )
+    
+    try:
+        # Execute the billing agreement using payment service
+        result = await payment_service.complete_paypal_billing_agreement(user_id, token)
+        
+        if not result['success']:
+            logger.error(f"Failed to execute PayPal billing agreement: {result.get('error')}")
+            return RedirectResponse(
+                url="/dashboard/billing?error=Failed to connect PayPal account",
+                status_code=302
+            )
+        
+        logger.info(f"PayPal payment method added for user {user_id} (agreement_id={result['agreement_id']})")
+        
+        return RedirectResponse(
+            url="/dashboard/billing?success=PayPal account connected successfully",
+            status_code=302
+        )
+            
+    except Exception as e:
+        logger.error(f"PayPal callback error (user_id={user_id}): {str(e)}")
+        return RedirectResponse(
+            url="/dashboard/billing?error=Failed to connect PayPal account",
             status_code=302
         )
     

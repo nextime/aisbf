@@ -96,6 +96,14 @@ class PaymentService:
             for wallet in wallets
         }
     
+    async def initiate_paypal_billing_agreement(self, user_id: int, return_url: str, cancel_url: str) -> dict:
+        """Initiate PayPal billing agreement"""
+        return await self.paypal_handler.create_billing_agreement(user_id, return_url, cancel_url)
+    
+    async def complete_paypal_billing_agreement(self, user_id: int, token: str) -> dict:
+        """Complete PayPal billing agreement"""
+        return await self.paypal_handler.execute_billing_agreement(user_id, token)
+    
     async def add_crypto_payment_method(self, user_id: int, crypto_type: str) -> dict:
         """Add crypto as payment method"""
         try:
