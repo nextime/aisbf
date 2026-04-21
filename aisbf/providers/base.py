@@ -1051,16 +1051,16 @@ class BaseProviderHandler:
                 
             if models:
                 for model_config in models:
-                # Handle both Pydantic objects and dictionaries
-                model_name_value = model_config.name if hasattr(model_config, 'name') else model_config.get('name')
-                if model_name_value == model:
-                    # Convert Pydantic object to dict if needed
-                    if hasattr(model_config, 'model_dump'):
-                        return model_config.model_dump()
-                    elif hasattr(model_config, 'dict'):
-                        return model_config.dict()
-                    else:
-                        return model_config
+                    # Handle both Pydantic objects and dictionaries
+                    model_name_value = model_config.name if hasattr(model_config, 'name') else model_config.get('name')
+                    if model_name_value == model:
+                        # Convert Pydantic object to dict if needed
+                        if hasattr(model_config, 'model_dump'):
+                            return model_config.model_dump()
+                        elif hasattr(model_config, 'dict'):
+                            return model_config.dict()
+                        else:
+                            return model_config
         return None
     
     def _check_token_rate_limit(self, model: str, token_count: int) -> bool:
