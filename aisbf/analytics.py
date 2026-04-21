@@ -309,8 +309,15 @@ class Analytics:
             # This gives more accurate rate limiting metrics
             if first_request and last_request and total_tokens > 0:
                 try:
-                    first_dt = datetime.fromisoformat(first_request)
-                    last_dt = datetime.fromisoformat(last_request)
+                    # Handle both string ISO formats and native datetime objects (MySQL returns datetime objects)
+                    if isinstance(first_request, datetime):
+                        first_dt = first_request
+                    else:
+                        first_dt = datetime.fromisoformat(first_request)
+                    if isinstance(last_request, datetime):
+                        last_dt = last_request
+                    else:
+                        last_dt = datetime.fromisoformat(last_request)
                     
                     # Use actual duration between first and last request
                     # Add a minimum of 1 minute to avoid division by very small numbers
@@ -320,9 +327,9 @@ class Analytics:
                     duration_days = actual_duration_seconds / 86400
                     
                     # Calculate rates based on actual usage period
-                    tpm = int(total_tokens / duration_minutes) if duration_minutes > 0 else 0
-                    tph = int(total_tokens / duration_hours) if duration_hours > 0 else 0
-                    tpd = int(total_tokens / duration_days) if duration_days > 0 else 0
+                    tpm = int(float(total_tokens) / duration_minutes) if duration_minutes > 0 else 0
+                    tph = int(float(total_tokens) / duration_hours) if duration_hours > 0 else 0
+                    tpd = int(float(total_tokens) / duration_days) if duration_days > 0 else 0
                 except Exception as e:
                     # Fallback to query window if parsing fails
                     duration_seconds = (to_datetime - from_datetime).total_seconds()
@@ -330,9 +337,9 @@ class Analytics:
                     duration_hours = duration_seconds / 3600
                     duration_days = duration_seconds / 86400
                     
-                    tpm = int(total_tokens / duration_minutes) if duration_minutes > 0 else 0
-                    tph = int(total_tokens / duration_hours) if duration_hours > 0 else 0
-                    tpd = int(total_tokens / duration_days) if duration_days > 0 else 0
+                    tpm = int(float(total_tokens) / duration_minutes) if duration_minutes > 0 else 0
+                    tph = int(float(total_tokens) / duration_hours) if duration_hours > 0 else 0
+                    tpd = int(float(total_tokens) / duration_days) if duration_days > 0 else 0
             else:
                 tpm = tph = tpd = 0
             

@@ -44,58 +44,7 @@
             </div>
         </div>
 
-        <!-- Provider-specific Settings -->
-        <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-            <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
-                <i class="fas fa-server me-2"></i>Provider-specific Settings
-            </h3>
-            
-            <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                <h5 style="margin: 0 0 15px 0; color: #e0e0e0;">Add Provider Setting</h5>
-                <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
-                    <div style="flex: 1; min-width: 200px;">
-                        <label style="color: #888; font-size: 14px;">Provider</label>
-                        <select id="providerSelect" class="form-control" style="background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;">
-                            <option value="">Select provider...</option>
-                        </select>
-                    </div>
-                    <div style="flex: 1; min-width: 200px;">
-                        <label style="color: #888; font-size: 14px;">Model (optional)</label>
-                        <input type="text" id="modelInput" class="form-control" style="background: #16213e; border: 1px solid #0f3460; color: #e0e0e0;" placeholder="Leave empty for all models">
-                    </div>
-                    <div style="flex: 0 0 auto;">
-                        <label style="color: #888; font-size: 14px;">Enable Cache</label>
-                        <div style="margin-top: 5px;">
-                            <label class="form-check-label" style="margin-right: 10px; color: #888;">No</label>
-                            <input type="checkbox" id="addProviderCacheToggle" checked>
-                            <label class="form-check-label" style="margin-left: 10px; color: #888;">Yes</label>
-                        </div>
-                    </div>
-                    <div style="flex: 0 0 auto; align-self: flex-end;">
-                        <button type="button" class="btn" style="background: #4a9eff; color: white;" onclick="addProviderSetting()">
-                            <i class="fas fa-plus me-2"></i>Add
-                        </button>
-                    </div>
-                </div>
-            </div>
 
-            <table class="table table-dark" style="margin: 0;">
-                <thead>
-                    <tr>
-                        <th>Provider</th>
-                        <th>Model</th>
-                        <th>Cache Enabled</th>
-                        <th>Updated</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="cacheSettingsTable">
-                    <tr>
-                        <td colspan="5" style="text-align: center; color: #888;">Loading...</td>
-                    </tr>
-                </tbody>
-            </table>
-        </div>
 
         <!-- Back Button -->
         <div style="margin-top: 30px;">

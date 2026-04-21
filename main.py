@@ -6703,7 +6703,7 @@ async def dashboard_user_cache_settings(request: Request):
 @app.get("/api/user/cache-settings")
 async def api_get_user_cache_settings(request: Request):
     """Get user's cache settings"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_api_auth(request)
     if auth_check:
         return auth_check
 
@@ -6728,7 +6728,7 @@ async def api_get_user_cache_settings(request: Request):
 @app.post("/api/user/cache-settings")
 async def api_set_user_cache_setting(request: Request):
     """Set user's cache setting"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_api_auth(request)
     if auth_check:
         return auth_check
 
@@ -6756,7 +6756,7 @@ async def api_set_user_cache_setting(request: Request):
 @app.delete("/api/user/cache-settings")
 async def api_delete_user_cache_setting(request: Request):
     """Delete user's cache setting"""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_api_auth(request)
     if auth_check:
         return auth_check
 
