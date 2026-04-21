@@ -505,9 +505,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         if self.provider_config:
             if isinstance(self.provider_config, dict):
-            claude_config = self.provider_config.get('claude_config')
-        else:
-            claude_config = getattr(self.provider_config, 'claude_config', None)
+                claude_config = self.provider_config.get('claude_config')
+            else:
+                claude_config = getattr(self.provider_config, 'claude_config', None)
+            
             if claude_config and isinstance(claude_config, dict):
                 cache_config['enabled'] = claude_config.get('enable_prompt_caching', False)
                 cache_config['min_messages'] = claude_config.get('cache_min_messages', 4)
@@ -520,9 +521,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         if self.provider_config:
             if isinstance(self.provider_config, dict):
-            claude_config = self.provider_config.get('claude_config')
-        else:
-            claude_config = getattr(self.provider_config, 'claude_config', None)
+                claude_config = self.provider_config.get('claude_config')
+            else:
+                claude_config = getattr(self.provider_config, 'claude_config', None)
+            
             if claude_config and isinstance(claude_config, dict):
                 fallback_models = claude_config.get('fallback_models', [])
         
