@@ -1,3 +1,4 @@
+from decimal import Decimal
 """
 Copyleft (C) 2026 Stefy Lanza <stefy@nexlab.net>
 
@@ -2228,7 +2229,12 @@ async def dashboard_analytics(
         "session": request.session,
         "is_admin": is_admin,
         "provider_stats": provider_stats,
-        "token_over_time": json.dumps(token_over_time),
+        # Handle Decimal values from MySQL for JSON serialization
+        def decimal_default(obj):
+            if isinstance(obj, Decimal):
+                return int(obj)
+            raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+        "token_over_time": json.dumps(token_over_time, default=decimal_default),
         "model_performance": model_performance,
         "cost_overview": cost_overview,
         "recommendations": recommendations,

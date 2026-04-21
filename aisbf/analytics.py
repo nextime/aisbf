@@ -23,6 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Token Usage Analytics module for AISBF.
 """
 import json
+from decimal import Decimal
 import csv
 import io
 from typing import Dict, List, Optional, Any
@@ -1113,7 +1114,13 @@ class Analytics:
             'recommendations': self.get_optimization_recommendations()
         }
         
-        return json.dumps(data, indent=2)
+        # Handle Decimal values from MySQL for JSON serialization
+        def decimal_default(obj):
+            if isinstance(obj, Decimal):
+                return float(obj)
+            raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
+        return json.dumps(data, indent=2, default=decimal_default)
     
     def export_to_csv(
         self,
