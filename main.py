@@ -1522,43 +1522,6 @@ async def auth_middleware(request: Request, call_next):
 
 
 # Global API Token Access Control Middleware
-@app.middleware("http")
-async def api_token_access_control_middleware(request: Request, call_next):
-    """Block global tokens from accessing user-specific endpoints"""
-    
-    # Only apply to API and MCP endpoints
-    if (request.url.path.startswith("/api/u/") or 
-        request.url.path.startswith("/mcp/u/") or
-        request.url.path.startswith("/api/v1/u/") or
-        request.url.path.startswith("/mcp/v1/u/")):
-        
-        is_global_token = getattr(request.state, 'is_global_token', False)
-        user_id = getattr(request.state, 'user_id', None)
-        
-        if is_global_token:
-            return JSONResponse(
-                status_code=403,
-                content={"error": "Global tokens cannot access user-specific endpoints. Use the user's own API token."}
-            )
-        
-        # Extract username from path and verify ownership
-        path_parts = request.url.path.split('/')
-        if len(path_parts) >= 4 and path_parts[2] == 'u':
-            target_username = path_parts[3]
-            
-            db = DatabaseRegistry.get_config_database()
-            authenticated_user = db.get_user_by_id(user_id)
-            
-            if not authenticated_user or authenticated_user['username'] != target_username:
-                return JSONResponse(
-                    status_code=403,
-                    content={"error": "You can only access your own user-specific endpoints."}
-                )
-    
-    response = await call_next(request)
-    return response
-
-
 # Account Tier Limit Enforcement Middleware
 @app.middleware("http")
 async def tier_limit_middleware(request: Request, call_next):
