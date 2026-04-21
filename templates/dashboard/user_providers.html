@@ -134,6 +134,124 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 {% block extra_js %}
 <script>
+// Global cache settings cache (pun intended)
+let cacheSettings = [];
+
+async function setCacheSetting(provider_id, model_name, enabled) {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                provider_id: provider_id || null,
+                model_name: model_name || null,
+                cache_enabled: enabled
+            })
+        });
+        
+        if (response.ok) {
+            showToast('Cache setting updated', 'success');
+            // Refresh cache settings
+            await loadCacheSettings();
+        } else {
+            showToast('Failed to update cache setting', 'danger');
+        }
+    } catch (error) {
+        console.error('Error updating cache setting:', error);
+        showToast('Error updating cache setting', 'danger');
+    }
+}
+
+async function loadCacheSettings() {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}');
+        const data = await response.json();
+        cacheSettings = data.settings || [];
+    } catch (error) {
+        console.error('Error loading cache settings:', error);
+    }
+}
+
+// Check if cache is enabled for a provider/model
+function isCacheEnabled(provider_id, model_name = null) {
+    // Check model-level setting first
+    if (model_name) {
+        const modelSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === model_name);
+        if (modelSetting) return modelSetting.cache_enabled;
+    }
+    
+    // Check provider-level setting
+    const providerSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === null);
+    if (providerSetting) return providerSetting.cache_enabled;
+    
+    // Check global setting
+    const globalSetting = cacheSettings.find(s => s.provider_id === null && s.model_name === null);
+    if (globalSetting) return globalSetting.cache_enabled;
+    
+    // Default: enabled
+    return true;
+}
+
+function showToast(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10000;
+        min-width: 400px;
+        padding: 20px 30px;
+        border-radius: 8px;
+        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+        font-size: 16px;
+        font-weight: 500;
+        text-align: center;
+        animation: slideDown 0.3s ease-out;
+        ${type === 'success' ? 'background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white; border: 2px solid #27ae60;' : ''}
+        ${type === 'danger' ? 'background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; border: 2px solid #e74c3c;' : ''}
+        ${type === 'warning' ? 'background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; border: 2px solid #f39c12;' : ''}
+    `;
+    
+    const icon = type === 'success' ? 'fa-check-circle' : type === 'danger' ? 'fa-times-circle' : 'fa-exclamation-triangle';
+    alertDiv.innerHTML = `<i class="fas ${icon}" style="font-size: 24px; margin-right: 10px; vertical-align: middle;"></i><span style="vertical-align: middle;">${message}</span>`;
+    
+    if (!document.getElementById('alertAnimations')) {
+        const style = document.createElement('style');
+        style.id = 'alertAnimations';
+        style.textContent = `
+            @keyframes slideDown {
+                from {
+                    opacity: 0;
+                    transform: translateX(-50%) translateY(-20px);
+                }
+                to {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
+            }
+            @keyframes slideUp {
+                from {
+                    opacity: 1;
+                    transform: translateX(-50%) translateY(0);
+                }
+                to {
+                    opacity: 0;
+                    transform: translateX(-50%) translateY(-20px);
+                }
+            }
+        `;
+        document.head.appendChild(style);
+    }
+    
+    document.body.appendChild(alertDiv);
+    
+    setTimeout(() => {
+        alertDiv.style.animation = 'slideUp 0.3s ease-out';
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 4000);
+}
+
 let providersData = {};
 let expandedProviders = new Set();
 let rawProviders = {{ user_providers_json | safe }};
@@ -759,6 +877,18 @@ function renderProviderDetails(key) {
         
         <div class="form-group">
             <label>
+                <input type="checkbox" ${provider.cache_enabled ? 'checked' : ''} onchange="setCacheSetting('${key}', null, this.checked)">
+                Enable Prompt Caching
+            </label>
+            <small style="color: #888; font-size: 12px;">
+                <strong>Provider-level cache override:</strong> Disabling this prevents the provider's native prompt 
+                caching feature from being used, even if enabled in the provider configuration. 
+                This takes priority over the global cache setting.
+            </small>
+        </div>
+        
+        <div class="form-group">
+            <label>
                 <input type="checkbox" ${provider.privacy ? 'checked' : ''} onchange="updateProvider('${key}', 'privacy', this.checked)">
                 Privacy
             </label>
@@ -900,10 +1030,78 @@ function renderModels(providerKey) {
                     Privacy
                 </label>
             </div>
+            
+            <div class="form-group">
+                <label>
+                    <input type="checkbox" ${model.cache_enabled ? 'checked' : ''} onchange="setCacheSetting('${providerKey}', '${model.name || model.id}', this.checked)">
+                    Enable Prompt Caching
+                </label>
+                <small style="color: #888; font-size: 12px;">
+                    <strong>Model-level cache override:</strong> Disabling this prevents prompt caching for this specific model.
+                    Overrides both provider-level cache setting and global cache setting.
+                </small>
+            </div>
         `;
         
         container.appendChild(modelDiv);
     });
+}
+
+async function setCacheSetting(provider_id, model_name, enabled) {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                provider_id: provider_id || null,
+                model_name: model_name || null,
+                cache_enabled: enabled
+            })
+        });
+        
+        if (response.ok) {
+            showToast('Cache setting updated', 'success');
+            // Refresh cache settings
+            await loadCacheSettings();
+        } else {
+            showToast('Failed to update cache setting', 'danger');
+        }
+    } catch (error) {
+        console.error('Error updating cache setting:', error);
+        showToast('Error updating cache setting', 'danger');
+    }
+}
+
+// Global cache settings cache (pun intended)
+let cacheSettings = [];
+async function loadCacheSettings() {
+    try {
+        const response = await fetch('{{ url_for(request, "/api/user/cache-settings") }}');
+        const data = await response.json();
+        cacheSettings = data.settings || [];
+    } catch (error) {
+        console.error('Error loading cache settings:', error);
+    }
+}
+
+// Check if cache is enabled for a provider/model
+function isCacheEnabled(provider_id, model_name = null) {
+    // Check model-level setting first
+    if (model_name) {
+        const modelSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === model_name);
+        if (modelSetting) return modelSetting.cache_enabled;
+    }
+    
+    // Check provider-level setting
+    const providerSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === null);
+    if (providerSetting) return providerSetting.cache_enabled;
+    
+    // Check global setting
+    const globalSetting = cacheSettings.find(s => s.provider_id === null && s.model_name === null);
+    if (globalSetting) return globalSetting.cache_enabled;
+    
+    // Default: enabled
+    return true;
 }
 
 function showAddProviderForm() {
@@ -1794,11 +1992,16 @@ async function saveProviders() {
 }
 
 // Initialize providers list immediately (DOM is already loaded since script is at end of body)
-console.log('Initializing providers list...');
-console.log('providersData:', Object.keys(providersData));
-console.log('Number of providers:', Object.keys(providersData).length);
-renderProvidersList();
-console.log('renderProvidersList() completed');
+async function initProviders() {
+    console.log('Initializing providers list...');
+    await loadCacheSettings();
+    console.log('providersData:', Object.keys(providersData));
+    console.log('Number of providers:', Object.keys(providersData).length);
+    renderProvidersList();
+    console.log('renderProvidersList() completed');
+}
+
+initProviders();
 
 </script>
 {% endblock %}
