@@ -2970,14 +2970,15 @@ class DatabaseManager:
             results = []
             for row in rows:
                 cache_val = row[2]
-                logger.info(f"Cache setting raw value: {cache_val}, type: {type(cache_val)}, bool: {bool(cache_val)}")
-                results.append({
+                result = {
                     'provider_id': row[0],
                     'model_name': row[1],
                     'cache_enabled': bool(cache_val) if cache_val is not None else True,
                     'created_at': row[3],
                     'updated_at': row[4]
-                })
+                }
+                logger.info(f"Cache setting: provider={row[0]}, model={row[1]}, raw_val={cache_val}, bool={bool(cache_val)}")
+                results.append(result)
             return results
     
     def delete_user_cache_setting(self, user_id: int, provider_id: str = None, model_name: str = None) -> bool:
