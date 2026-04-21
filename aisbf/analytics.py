@@ -789,13 +789,23 @@ class Analytics:
             if provider_stats['requests']['total'] == 0:
                 continue
             
-            # Get provider type from config
+            # Get provider type from config or user providers
             provider_type = 'unknown'
             try:
                 from .config import config
-                provider_config = config.get_provider(provider_id, warn=False)
-                if provider_config:
-                    provider_type = provider_config.type
+                provider_config = None
+                
+                # Check user providers first if user_filter is set (not global only)
+                if user_filter is not None and user_filter != -1:
+                    provider_config = self.db.get_user_provider(user_filter, provider_id)
+                    if provider_config:
+                        provider_type = provider_config['type']
+                
+                # Fall back to global config if not found as user provider
+                if not provider_config:
+                    provider_config = config.get_provider(provider_id, warn=False)
+                    if provider_config:
+                        provider_type = provider_config.type
             except Exception:
                 pass
             
