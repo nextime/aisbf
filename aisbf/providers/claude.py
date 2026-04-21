@@ -127,11 +127,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 if db_creds and db_creds.get('credentials'):
                     # Create auth instance with skip_initial_load=True to avoid file read
                     # Pass save callback to save credentials back to database
-                    auth = ClaudeAuth(
-                        credentials_file=credentials_file, 
-                        skip_initial_load=True,
-                        save_callback=lambda creds: self._save_auth_to_db(creds)
-                    )
+                     auth = ClaudeAuth(
+                         credentials_file=credentials_file, 
+                         skip_initial_load=True,
+                         save_callback=lambda creds: self._save_auth_to_db(creds)
+                     )
                      # Set tokens directly from database
                      auth.tokens = db_creds['credentials'].get('tokens', {})
                      # Add expires_at if missing (for existing credentials saved before fix)
