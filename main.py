@@ -2211,6 +2211,13 @@ async def dashboard_analytics(
     # Placeholder for recommendations and optimization savings (not yet implemented)
     recommendations = []
     optimization_savings = 0
+    
+    # Get date range usage summary
+    date_range_usage = None
+    if from_datetime or to_datetime:
+        start = from_datetime or (datetime.now() - timedelta(days=1))
+        end = to_datetime or datetime.now()
+        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter_int)
 
     # Handle Decimal values from MySQL for JSON serialization
     def decimal_default(obj):
