@@ -1681,20 +1681,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Add session middleware AFTER the @app.middleware decorators
-# This ensures SessionMiddleware runs before auth_middleware and tier_limit_middleware
-# Middleware execution order: last added = first executed
-app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
-
-# Add proxy headers middleware LAST so it executes FIRST
-# This ensures proxy headers are processed before any other middleware (including auth_middleware)
-app.add_middleware(ProxyHeadersMiddleware)
-
-# Add dashboard context middleware LAST so it executes FIRST
-# This ensures context variables are available to all template renders
-app.add_middleware(dashboard_context_middleware)
-
 # Dashboard context middleware - adds is_aisbf_cloud and welcome_shown to all template contexts
+@app.middleware("http")
 async def dashboard_context_middleware(request: Request, call_next):
     if request.url.path.startswith("/dashboard") and 'session' in request.scope:
         # ALWAYS set is_aisbf_cloud for ALL dashboard paths (to show footer links everywhere)
@@ -1715,6 +1703,16 @@ async def dashboard_context_middleware(request: Request, call_next):
     
     response = await call_next(request)
     return response
+
+
+# Add session middleware AFTER the @app.middleware decorators
+# This ensures SessionMiddleware runs before auth_middleware and tier_limit_middleware
+# Middleware execution order: last added = first executed
+app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
+
+# Add proxy headers middleware LAST so it executes FIRST
+# This ensures proxy headers are processed before any other middleware (including auth_middleware)
+app.add_middleware(ProxyHeadersMiddleware)
 
 # Helper function for API authentication
 async def get_current_user(request: Request) -> dict:
