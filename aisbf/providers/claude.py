@@ -853,8 +853,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         # Apply prompt caching based on user and provider settings
         cache_config = self._get_cache_config(
-            user_id=getattr(request, 'user_id', None),
-            provider_id=getattr(request, 'provider_id', None),
+            user_id=getattr(self, 'user_id', None),
+            provider_id=self.provider_id,
             model_name=model
         )
         
