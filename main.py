@@ -3859,7 +3859,7 @@ async def dashboard_index(request: Request):
             today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
             usage_stats['requests_today'] = len([
                 row for row in token_usage
-                if datetime.fromisoformat(row['timestamp']) >= today
+                if (datetime.fromisoformat(row['timestamp']) if isinstance(row['timestamp'], str) else row['timestamp']) >= today
             ])
             
             # Get user config counts
