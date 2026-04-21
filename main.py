@@ -6661,6 +6661,124 @@ async def dashboard_user_tokens_delete(request: Request, token_id: int):
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
 
+@app.get("/dashboard/user/cache-settings", response_class=HTMLResponse)
+async def dashboard_user_cache_settings(request: Request):
+    """User prompt cache settings page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
+
+    db = DatabaseRegistry.get_config_database()
+    
+    # Get all cache settings for user
+    cache_settings = db.get_all_user_cache_settings(user_id)
+    
+    # Convert datetime objects to strings
+    for setting in cache_settings:
+        if 'created_at' in setting and setting['created_at']:
+            setting['created_at'] = setting['created_at'].isoformat() if hasattr(setting['created_at'], 'isoformat') else str(setting['created_at'])
+        if 'updated_at' in setting and setting['updated_at']:
+            setting['updated_at'] = setting['updated_at'].isoformat() if hasattr(setting['updated_at'], 'isoformat') else str(setting['updated_at'])
+    
+    # Get user's providers for dropdown
+    user_providers = db.get_user_providers(user_id)
+
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/user_cache_settings.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "cache_settings": cache_settings,
+            "user_providers": user_providers,
+            "user_id": user_id
+        }
+    )
+
+@app.get("/api/user/cache-settings")
+async def api_get_user_cache_settings(request: Request):
+    """Get user's cache settings"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    db = DatabaseRegistry.get_config_database()
+    
+    provider_id = request.query_params.get('provider_id')
+    model_name = request.query_params.get('model_name')
+    
+    if provider_id or model_name:
+        # Get specific setting
+        setting = db.get_user_cache_settings(user_id, provider_id, model_name)
+        return JSONResponse(setting)
+    else:
+        # Get all settings
+        settings = db.get_all_user_cache_settings(user_id)
+        return JSONResponse({"settings": settings})
+
+@app.post("/api/user/cache-settings")
+async def api_set_user_cache_setting(request: Request):
+    """Set user's cache setting"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    try:
+        body = await request.json()
+        provider_id = body.get('provider_id')
+        model_name = body.get('model_name')
+        cache_enabled = body.get('cache_enabled', True)
+        
+        db = DatabaseRegistry.get_config_database()
+        success = db.set_user_cache_setting(user_id, cache_enabled, provider_id, model_name)
+        
+        if success:
+            return JSONResponse({"success": True, "message": "Cache setting updated"})
+        else:
+            return JSONResponse(status_code=500, content={"error": "Failed to update setting"})
+    except Exception as e:
+        logger.error(f"Error setting cache setting: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
+@app.delete("/api/user/cache-settings")
+async def api_delete_user_cache_setting(request: Request):
+    """Delete user's cache setting"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse(status_code=401, content={"error": "Not authenticated"})
+
+    try:
+        provider_id = request.query_params.get('provider_id')
+        model_name = request.query_params.get('model_name')
+        
+        db = DatabaseRegistry.get_config_database()
+        success = db.delete_user_cache_setting(user_id, provider_id, model_name)
+        
+        if success:
+            return JSONResponse({"success": True, "message": "Cache setting deleted"})
+        else:
+            return JSONResponse(status_code=500, content={"error": "Failed to delete setting"})
+    except Exception as e:
+        logger.error(f"Error deleting cache setting: {e}")
+        return JSONResponse(status_code=500, content={"error": str(e)})
+
 @app.get("/dashboard/response-cache/stats")
 async def dashboard_response_cache_stats(request: Request):
     """Get response cache statistics"""

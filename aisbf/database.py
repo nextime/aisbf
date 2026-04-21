@@ -2854,6 +2854,156 @@ class DatabaseManager:
                 logger.error(f"Traceback: {traceback.format_exc()}")
                 return False
 
+    def get_user_cache_settings(self, user_id: int, provider_id: str = None, model_name: str = None) -> Dict:
+        """
+        Get user's prompt cache settings.
+        
+        Args:
+            user_id: User ID
+            provider_id: Optional provider ID to filter by
+            model_name: Optional model name to filter by
+            
+        Returns:
+            Dict with cache settings. If specific provider/model not found, returns default enabled.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            # Build query based on filters
+            if provider_id and model_name:
+                # Check for specific provider+model setting
+                cursor.execute(f'''
+                    SELECT cache_enabled FROM user_cache_settings
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name = {placeholder}
+                ''', (user_id, provider_id, model_name))
+                row = cursor.fetchone()
+                if row:
+                    return {'cache_enabled': bool(row[0]), 'level': 'model'}
+                
+                # Fall back to provider-level setting
+                cursor.execute(f'''
+                    SELECT cache_enabled FROM user_cache_settings
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name IS NULL
+                ''', (user_id, provider_id))
+                row = cursor.fetchone()
+                if row:
+                    return {'cache_enabled': bool(row[0]), 'level': 'provider'}
+                    
+            elif provider_id:
+                # Check for provider-level setting
+                cursor.execute(f'''
+                    SELECT cache_enabled FROM user_cache_settings
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name IS NULL
+                ''', (user_id, provider_id))
+                row = cursor.fetchone()
+                if row:
+                    return {'cache_enabled': bool(row[0]), 'level': 'provider'}
+            
+            # Check for global user setting (NULL provider and model)
+            cursor.execute(f'''
+                SELECT cache_enabled FROM user_cache_settings
+                WHERE user_id = {placeholder} AND provider_id IS NULL AND model_name IS NULL
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if row:
+                return {'cache_enabled': bool(row[0]), 'level': 'global'}
+            
+            # Default: cache enabled
+            return {'cache_enabled': True, 'level': 'default'}
+    
+    def set_user_cache_setting(self, user_id: int, cache_enabled: bool, provider_id: str = None, model_name: str = None) -> bool:
+        """
+        Set user's prompt cache setting.
+        
+        Args:
+            user_id: User ID
+            cache_enabled: Whether to enable cache
+            provider_id: Optional provider ID (None = global setting)
+            model_name: Optional model name (requires provider_id)
+            
+        Returns:
+            True if successful
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                if self.db_type == 'sqlite':
+                    cursor.execute(f'''
+                        INSERT OR REPLACE INTO user_cache_settings 
+                        (user_id, provider_id, model_name, cache_enabled, updated_at)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ''', (user_id, provider_id, model_name, cache_enabled))
+                else:
+                    cursor.execute(f'''
+                        INSERT INTO user_cache_settings 
+                        (user_id, provider_id, model_name, cache_enabled, updated_at)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                        ON DUPLICATE KEY UPDATE 
+                        cache_enabled = VALUES(cache_enabled),
+                        updated_at = CURRENT_TIMESTAMP
+                    ''', (user_id, provider_id, model_name, cache_enabled))
+                
+                conn.commit()
+                logger.info(f"Set cache setting for user {user_id}, provider={provider_id}, model={model_name}, enabled={cache_enabled}")
+                return True
+            except Exception as e:
+                logger.error(f"Error setting cache setting: {e}")
+                return False
+    
+    def get_all_user_cache_settings(self, user_id: int) -> list:
+        """Get all cache settings for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            cursor.execute(f'''
+                SELECT provider_id, model_name, cache_enabled, created_at, updated_at
+                FROM user_cache_settings
+                WHERE user_id = {placeholder}
+                ORDER BY provider_id, model_name
+            ''', (user_id,))
+            
+            rows = cursor.fetchall()
+            return [{
+                'provider_id': row[0],
+                'model_name': row[1],
+                'cache_enabled': bool(row[2]),
+                'created_at': row[3],
+                'updated_at': row[4]
+            } for row in rows]
+    
+    def delete_user_cache_setting(self, user_id: int, provider_id: str = None, model_name: str = None) -> bool:
+        """Delete a user's cache setting."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            
+            try:
+                if provider_id and model_name:
+                    cursor.execute(f'''
+                        DELETE FROM user_cache_settings
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name = {placeholder}
+                    ''', (user_id, provider_id, model_name))
+                elif provider_id:
+                    cursor.execute(f'''
+                        DELETE FROM user_cache_settings
+                        WHERE user_id = {placeholder} AND provider_id = {placeholder} AND model_name IS NULL
+                    ''', (user_id, provider_id))
+                else:
+                    cursor.execute(f'''
+                        DELETE FROM user_cache_settings
+                        WHERE user_id = {placeholder} AND provider_id IS NULL AND model_name IS NULL
+                    ''', (user_id,))
+                
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Error deleting cache setting: {e}")
+                return False
+
     def get_currency_settings(self) -> Dict:
         """Get currency settings from admin_settings table."""
         with self._get_connection() as conn:
@@ -3996,6 +4146,19 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 FOREIGN KEY (tier_id) REFERENCES account_tiers(id),
                 FOREIGN KEY (subscription_id) REFERENCES user_subscriptions(id),
                 FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
+            )
+        '''),
+        ('user_cache_settings', f'''
+            CREATE TABLE user_cache_settings (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                provider_id VARCHAR(255),
+                model_name VARCHAR(255),
+                cache_enabled {boolean_type} DEFAULT 1,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, provider_id, model_name)
             )
         ''')
     ]:

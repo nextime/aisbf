@@ -501,8 +501,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
         logger.warning(f"ClaudeProviderHandler: Tool result truncated from {len(content)} to {max_chars} characters")
         return truncated, True
     
-    def _get_cache_config(self) -> Dict:
-        """Get prompt caching configuration from provider config."""
+    def _get_cache_config(self, user_id: int = None, provider_id: str = None, model_name: str = None) -> Dict:
+        """Get prompt caching configuration from provider config and user settings."""
         cache_config = {
             'enabled': False,
             'min_messages': 4,
@@ -517,6 +517,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
             if claude_config and isinstance(claude_config, dict):
                 cache_config['enabled'] = claude_config.get('enable_prompt_caching', False)
                 cache_config['min_messages'] = claude_config.get('cache_min_messages', 4)
+        
+        # Check user's cache settings (overrides provider config)
+        if user_id and cache_config['enabled']:
+            try:
+                from aisbf.database import DatabaseRegistry
+                db = DatabaseRegistry.get_config_database()
+                user_setting = db.get_user_cache_settings(user_id, provider_id, model_name)
+                if not user_setting['cache_enabled']:
+                    cache_config['enabled'] = False
+                    import logging
+                    logging.getLogger(__name__).info(f"User {user_id} disabled cache for provider={provider_id}, model={model_name}")
+            except Exception as e:
+                import logging
+                logging.getLogger(__name__).warning(f"Error checking user cache settings: {e}")
         
         return cache_config
     
@@ -836,6 +850,16 @@ class ClaudeProviderHandler(BaseProviderHandler):
         validated_messages = self._validate_messages(messages)
         
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
+        
+        # Apply prompt caching based on user and provider settings
+        cache_config = self._get_cache_config(
+            user_id=getattr(request, 'user_id', None),
+            provider_id=getattr(request, 'provider_id', None),
+            model_name=model
+        )
+        
+        if cache_config['enabled']:
+            anthropic_messages = self._apply_cache_control(anthropic_messages)
         
         # Sanitize system message to avoid Claude's unofficial client detection
         # Replace "You are Kilo," or "You are Kiro," with "You are" to prevent
