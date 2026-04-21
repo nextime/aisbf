@@ -76,7 +76,10 @@ class QwenProviderHandler(BaseProviderHandler):
         self.provider_config = config.get_provider(provider_id)
         
         # Get credentials file path from config
-        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        if isinstance(self.provider_config, dict):
+            qwen_config = self.provider_config.get('qwen_config')
+        else:
+            qwen_config = getattr(self.provider_config, 'qwen_config', None)
         credentials_file = None
         if qwen_config and isinstance(qwen_config, dict):
             credentials_file = qwen_config.get('credentials_file')
@@ -174,7 +177,10 @@ class QwenProviderHandler(BaseProviderHandler):
         logger = logging.getLogger(__name__)
 
         # Check if API key is configured (vs OAuth2)
-        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        if isinstance(self.provider_config, dict):
+            qwen_config = self.provider_config.get('qwen_config')
+        else:
+            qwen_config = getattr(self.provider_config, 'qwen_config', None)
         api_key = None
         if qwen_config and isinstance(qwen_config, dict):
             api_key = qwen_config.get('api_key')
@@ -250,7 +256,10 @@ class QwenProviderHandler(BaseProviderHandler):
         logger = logging.getLogger(__name__)
 
         # Check if API key is configured (vs OAuth2)
-        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        if isinstance(self.provider_config, dict):
+            qwen_config = self.provider_config.get('qwen_config')
+        else:
+            qwen_config = getattr(self.provider_config, 'qwen_config', None)
         api_key = None
         if qwen_config and isinstance(qwen_config, dict):
             api_key = qwen_config.get('api_key')
@@ -531,7 +540,10 @@ class QwenProviderHandler(BaseProviderHandler):
         await self.apply_rate_limit()
 
         # Check if API token is configured (vs OAuth2)
-        qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        if isinstance(self.provider_config, dict):
+            qwen_config = self.provider_config.get('qwen_config')
+        else:
+            qwen_config = getattr(self.provider_config, 'qwen_config', None)
         using_api_key = qwen_config and isinstance(qwen_config, dict) and qwen_config.get('api_key')
 
         if not using_api_key:

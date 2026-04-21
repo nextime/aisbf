@@ -44,18 +44,29 @@ class KiloProviderHandler(BaseProviderHandler):
         self.provider_config = config.get_provider(provider_id)
         
         # Unified auth config with backward compatibility
-        kilo_config = getattr(self.provider_config, 'auth_config', None)
-        if not kilo_config:
-            kilo_config = getattr(self.provider_config, 'kilo_config', None)
-        if not kilo_config:
-            kilo_config = getattr(self.provider_config, 'kiro_config', None)
+        # Handle both dict (user) and object (global) config formats
+        if isinstance(self.provider_config, dict):
+            kilo_config = self.provider_config.get('auth_config')
+            if not kilo_config:
+                kilo_config = self.provider_config.get('kilo_config')
+            if not kilo_config:
+                kilo_config = self.provider_config.get('kiro_config')
+        else:
+            kilo_config = getattr(self.provider_config, 'auth_config', None)
+            if not kilo_config:
+                kilo_config = getattr(self.provider_config, 'kilo_config', None)
+            if not kilo_config:
+                kilo_config = getattr(self.provider_config, 'kiro_config', None)
         
         self._credentials_file = None
         self._api_base = None
         self._use_api_key_auth = False
         
         # If explicit API key is provided OR provider config has API key configured, use direct API key authentication - NO OAUTH
-        configured_api_key = getattr(self.provider_config, 'api_key', None)
+        if isinstance(self.provider_config, dict):
+            configured_api_key = self.provider_config.get('api_key')
+        else:
+            configured_api_key = getattr(self.provider_config, 'api_key', None)
         if (self.api_key and self.api_key != "placeholder") or (configured_api_key and configured_api_key != "placeholder"):
             self._use_api_key_auth = True
             self.oauth2 = None
@@ -96,7 +107,10 @@ class KiloProviderHandler(BaseProviderHandler):
             
             logger.info(f"KiloProviderHandler.__init__: self.oauth2 type={type(self.oauth2)}, value={self.oauth2}")
         
-        configured_endpoint = getattr(self.provider_config, 'endpoint', None)
+        if isinstance(self.provider_config, dict):
+            configured_endpoint = self.provider_config.get('endpoint')
+        else:
+            configured_endpoint = getattr(self.provider_config, 'endpoint', None)
         if configured_endpoint:
             endpoint = configured_endpoint.rstrip('/')
             if not endpoint.endswith('/v1'):

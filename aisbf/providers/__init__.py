@@ -124,9 +124,10 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
         handler.user_id = user_id
         # Base class already handles default error tracking and rate limit for user providers
     
-    # Store user provider config on the handler for later use
+    # Set provider config to the user-specific config instead of loading from global config
     if user_id is not None and provider_config is not None:
         handler.user_provider_config = provider_config
+        handler.provider_config = provider_config
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
     logger.info(f"=== get_provider_handler END ===")
