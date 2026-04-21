@@ -2193,34 +2193,13 @@ async def dashboard_analytics(
         to_datetime=to_datetime,
         user_filter=user_filter_int
     )
-    
-    # Get model performance (with optional filters)
-    model_performance = analytics.get_model_performance(
-        provider_filter=provider_filter,
-        model_filter=model_filter,
-        rotation_filter=rotation_filter,
-        autoselect_filter=autoselect_filter,
-        user_filter=user_filter_int,
-        from_datetime=from_datetime,
-        to_datetime=to_datetime
-    )
-    
-    # Get cost overview
-    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
-    
-    # Get optimization recommendations
-    recommendations = analytics.get_optimization_recommendations(user_filter=user_filter_int, from_datetime=from_datetime, to_datetime=to_datetime)
-    
-    # Get optimization savings (placeholder - this would need to be implemented in analytics)
-    optimization_savings = None  # TODO: Implement get_optimization_savings method
-    
-    # Get date range usage summary
-    date_range_usage = None
-    if from_datetime or to_datetime:
-        start = from_datetime or (datetime.now() - timedelta(days=1))
-        end = to_datetime or datetime.now()
-        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter_int)
-    
+
+    # Handle Decimal values from MySQL for JSON serialization
+    def decimal_default(obj):
+        if isinstance(obj, Decimal):
+            return int(obj)
+        raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/analytics.html",
@@ -2229,11 +2208,6 @@ async def dashboard_analytics(
         "session": request.session,
         "is_admin": is_admin,
         "provider_stats": provider_stats,
-        # Handle Decimal values from MySQL for JSON serialization
-        def decimal_default(obj):
-            if isinstance(obj, Decimal):
-                return int(obj)
-            raise TypeError(f"Object of type {obj.__class__.__name__} is not JSON serializable")
         "token_over_time": json.dumps(token_over_time, default=decimal_default),
         "model_performance": model_performance,
         "cost_overview": cost_overview,
