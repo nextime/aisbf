@@ -1032,8 +1032,8 @@ def get_context_config_for_model(
             context_config['context_size'] = provider_config.default_context_size
         else:
             # Auto-derive from first model in provider (has context_size from dynamic fetch)
-            if provider_config.models and len(provider_config.models) > 0:
-                first_model = provider_config.models[0]
+            if models and len(models) > 0:
+                first_model = models[0]
                 # Check for context_size in the first model (from dynamic fetch)
                 if hasattr(first_model, 'context_size') and first_model.context_size:
                     context_config['context_size'] = first_model.context_size
