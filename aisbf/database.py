@@ -4091,7 +4091,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                     
                     logger.info(f"✅ Cleaned up {len(delete_ids)} duplicate cache settings for user {user_id}, kept id={keep_id}")
             
-            conn.commit()
+            # Note: conn.commit() will be called by the caller after all migrations
         else:
             logger.info("No duplicate cache settings found")
     except Exception as e:
