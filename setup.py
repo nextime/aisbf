@@ -223,6 +223,7 @@ setup(
             'templates/dashboard/billing.html',
             'templates/dashboard/add_payment_method.html',
             'templates/dashboard/paypal_connect.html',
+            'templates/dashboard/cache_settings.html',
         ]),
         # Install static files (extension and favicon)
         ('share/aisbf/static', [
