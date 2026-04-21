@@ -2,7 +2,8 @@
 Main payment service orchestrator
 """
 import logging
-from typing import Optional
+from decimal import Decimal
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -345,3 +346,51 @@ class PaymentService:
     async def process_retries(self):
         """Process payment retries (called by scheduler)"""
         await self.renewal_processor.process_retry_queue()
+
+    def get_supported_topup_amounts(self):
+        """Get configurable supported top up amounts"""
+        return [
+            Decimal('10.00'),
+            Decimal('15.00'),
+            Decimal('20.00'),
+            Decimal('50.00'),
+            Decimal('100.00')
+        ]
+
+    @property
+    def allow_custom_topup_amount(self):
+        return True
+
+    @property
+    def minimum_topup_amount(self):
+        return Decimal('5.00')
+
+    @property
+    def maximum_topup_amount(self):
+        return Decimal('500.00')
+
+    async def initiate_topup(self, user_id: int, amount: Decimal, payment_method: str, payment_method_id: int = None) -> dict:
+        """Initiate wallet top up via specified payment method"""
+        if amount < self.minimum_topup_amount:
+            raise ValueError(f"Amount below minimum: {self.minimum_topup_amount}")
+        if amount > self.maximum_topup_amount:
+            raise ValueError(f"Amount above maximum: {self.maximum_topup_amount}")
+
+        if payment_method == 'stripe':
+            return await self.stripe_handler.create_topup_intent(user_id, amount, payment_method_id)
+        elif payment_method == 'paypal':
+            return await self.paypal_handler.create_topup_order(user_id, amount)
+        elif payment_method == 'crypto':
+            return await self._get_crypto_topup_address(user_id)
+        else:
+            raise ValueError(f"Unsupported payment method: {payment_method}")
+
+    async def _get_crypto_topup_address(self, user_id: int) -> dict:
+        """Get crypto address for manual top up"""
+        addresses = await self.get_user_crypto_addresses(user_id)
+        return {
+            'success': True,
+            'payment_method': 'crypto',
+            'addresses': addresses,
+            'instructions': 'Send crypto to the address below, funds will be credited after confirmations'
+        }

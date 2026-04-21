@@ -8,6 +8,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
+from decimal import Decimal
 
 import httpx
 
@@ -313,7 +314,7 @@ class BlockchainMonitor:
     async def credit_user_wallet(self, user_id: int, crypto_type: str, amount: float, tx_id: int):
         """
         Credit user's crypto wallet with confirmed transaction amount.
-        
+
         Args:
             user_id: User ID
             crypto_type: Cryptocurrency type
@@ -326,8 +327,8 @@ class BlockchainMonitor:
         except Exception as e:
             logger.error(f"Could not convert to fiat for crediting: {e}")
             amount_fiat = 0
-        
-        # Update wallet balance
+
+        # Update crypto wallet balance
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
@@ -346,5 +347,29 @@ class BlockchainMonitor:
             """, (datetime.utcnow(), tx_id))
             
             conn.commit()
-        
+
+        # Also credit fiat wallet
+        if amount_fiat > 0:
+            from aisbf.payments.wallet.manager import WalletManager
+            from sqlalchemy.ext.asyncio import AsyncSession
+            
+            try:
+                async with AsyncSession(self.db.engine) as session:
+                    wallet_manager = WalletManager(session)
+                    await wallet_manager.credit_wallet(
+                        user_id=user_id,
+                        amount=Decimal(str(amount_fiat)),
+                        transaction_details={
+                            'payment_gateway': f'crypto_{crypto_type}',
+                            'gateway_transaction_id': f'crypto_tx_{tx_id}',
+                            'description': f'Wallet top up via {crypto_type.upper()} payment',
+                            'metadata': {'crypto_amount': amount, 'crypto_type': crypto_type, 'tx_id': tx_id}
+                        }
+                    )
+                    await session.commit()
+                
+                logger.info(f"Fiat wallet credited {amount_fiat:.2f} USD for user {user_id} from crypto payment")
+            except Exception as e:
+                logger.error(f"Error crediting fiat wallet from crypto payment: {e}")
+
         logger.info(f"Credited {amount} {crypto_type} (${amount_fiat:.2f}) to user {user_id}")

@@ -5,7 +5,8 @@ import logging
 import base64
 import time
 import httpx
-from typing import Optional
+from decimal import Decimal
+from typing import Optional, Dict, Any
 
 logger = logging.getLogger(__name__)
 
@@ -78,7 +79,7 @@ class PayPalPaymentHandler:
                                 'return_url': return_url,
                                 'cancel_url': cancel_url,
                                 'shipping_preference': 'NO_SHIPPING',
-                                'user_action': 'PAY_NOW'
+                                'user_action': 'CONTINUE'
                             }
                         }
                     }
@@ -93,6 +94,18 @@ class PayPalPaymentHandler:
                     'approval_url': data['links'][1]['href']
                 }
             else:
+                error_data = response.json() if response.headers.get('Content-Type', '').startswith('application/json') else {}
+                error_details = error_data.get('details', [])
+                
+                # Check for specific known errors
+                for detail in error_details:
+                    issue = detail.get('issue')
+                    if issue == 'NOT_ENABLED_TO_VAULT_PAYMENT_SOURCE':
+                        logger.error(f"PayPal account does not have Vault v3 Payment Tokens enabled: {response.text}")
+                        # Fall back to legacy billing agreement flow
+                        logger.info("Falling back to legacy v1 billing agreement flow")
+                        return await self.create_billing_agreement(None, return_url, cancel_url)
+                
                 logger.error(f"Failed to create setup token: {response.text}")
                 return {'success': False, 'error': response.text}
                 
@@ -410,10 +423,90 @@ class PayPalPaymentHandler:
         dispute_id = resource.get('dispute_id')
         logger.info(f"PayPal dispute resolved: {dispute_id}")
     
+    async def create_topup_order(self, user_id: int, amount: Decimal) -> dict:
+        """Create PayPal order for wallet top up"""
+        try:
+            access_token = await self.get_access_token()
+            
+            response = await self.http_client.post(
+                f"{self.base_url}/v2/checkout/orders",
+                headers={
+                    'Authorization': f'Bearer {access_token}',
+                    'Content-Type': 'application/json'
+                },
+                json={
+                    'intent': 'CAPTURE',
+                    'purchase_units': [{
+                        'amount': {
+                            'currency_code': self.config.get('currency_code', 'USD'),
+                            'value': f"{amount:.2f}"
+                        },
+                        'description': f'Wallet top up: ${amount:.2f}'
+                    }],
+                    'application_context': {
+                        'return_url': f"{self.config['base_url']}/wallet/topup/complete",
+                        'cancel_url': f"{self.config['base_url']}/wallet/topup/cancel",
+                        'shipping_preference': 'NO_SHIPPING'
+                    }
+                }
+            )
+            
+            if response.status_code == 201:
+                data = response.json()
+                approval_url = next(link['href'] for link in data['links'] if link['rel'] == 'approve')
+                
+                logger.info(f"Created PayPal top up order for user {user_id}: {data['id']}")
+                
+                return {
+                    'success': True,
+                    'order_id': data['id'],
+                    'approval_url': approval_url,
+                    'amount': amount,
+                    'payment_method': 'paypal'
+                }
+            else:
+                logger.error(f"Failed to create PayPal top up order: {response.text}")
+                return {'success': False, 'error': response.text}
+                
+        except Exception as e:
+            logger.error(f"Error creating PayPal top up order: {e}")
+            return {'success': False, 'error': str(e)}
+
+    async def _handle_order_completed(self, resource: dict):
+        """Handle completed order (Vault v3)"""
+        order_id = resource.get('id')
+        logger.info(f"PayPal order completed: {order_id}")
+        
+        # Check if this is a top up order
+        purchase_units = resource.get('purchase_units', [])
+        if purchase_units and 'Wallet top up' in purchase_units[0].get('description', ''):
+            amount = Decimal(purchase_units[0]['amount']['value'])
+            user_id = int(resource.get('custom_id', 0))
+            
+            if user_id > 0:
+                from aisbf.payments.wallet.manager import WalletManager
+                from sqlalchemy.ext.asyncio import AsyncSession
+                
+                async with AsyncSession(self.db.engine) as session:
+                    wallet_manager = WalletManager(session)
+                    await wallet_manager.credit_wallet(
+                        user_id=user_id,
+                        amount=amount,
+                        transaction_details={
+                            'payment_gateway': 'paypal',
+                            'gateway_transaction_id': order_id,
+                            'description': 'Wallet top up via PayPal',
+                            'metadata': {'order_id': order_id}
+                        }
+                    )
+                    await session.commit()
+                
+                logger.info(f"Wallet credited successfully for user {user_id}, amount {amount}")
+
     async def _handle_payment_completed(self, resource: dict):
         """Handle completed payment (legacy)"""
         logger.info(f"PayPal payment completed: {resource.get('id')}")
-    
+
     async def _handle_payment_denied(self, resource: dict):
         """Handle denied payment (legacy)"""
         logger.warning(f"PayPal payment denied: {resource.get('id')}")

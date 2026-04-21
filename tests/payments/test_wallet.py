@@ -87,3 +87,139 @@ async def test_get_or_create_user_address(db_manager, encryption_key):
     # Different user should get different address
     address3 = await wallet_manager.get_or_create_user_address(2, 'btc')
     assert address3 != address1
+
+
+@pytest.mark.anyio
+async def test_wallet_manager_get_wallet_creates_new_wallet():
+    """Test that WalletManager get_wallet creates a new wallet when none exists"""
+    from unittest.mock import AsyncMock, MagicMock
+    from decimal import Decimal
+    from aisbf.payments.wallet.manager import WalletManager
+
+    mock_session = AsyncMock()
+    mock_session.execute = AsyncMock()
+
+    # First call returns no wallet
+    mock_session.execute.side_effect = [
+        MagicMock(mappings=lambda: [None]),  # first select
+        MagicMock(mappings=lambda: [{
+            "id": 1,
+            "user_id": 123,
+            "balance": Decimal("0.00"),
+            "currency_code": "USD",
+            "auto_topup_enabled": False,
+            "auto_topup_amount": None,
+            "auto_topup_threshold": None,
+            "auto_topup_payment_method_id": None,
+            "created_at": "2026-01-01T00:00:00",
+            "updated_at": "2026-01-01T00:00:00"
+        }])
+    ]
+
+    manager = WalletManager(mock_session)
+    wallet = await manager.get_wallet(123)
+
+    assert wallet is not None
+    assert wallet["user_id"] == 123
+    assert wallet["balance"] == Decimal("0.00")
+    assert mock_session.commit.called
+
+
+@pytest.mark.asyncio
+async def test_wallet_manager_has_sufficient_balance():
+    """Test WalletManager sufficient balance check"""
+    from unittest.mock import AsyncMock
+    from decimal import Decimal
+    from aisbf.payments.wallet.manager import WalletManager
+
+    mock_session = AsyncMock()
+    manager = WalletManager(mock_session)
+
+    manager.get_wallet = AsyncMock(return_value={
+        "balance": Decimal("50.00")
+    })
+
+    assert await manager.has_sufficient_balance(123, Decimal("25.00")) is True
+    assert await manager.has_sufficient_balance(123, Decimal("50.00")) is True
+    assert await manager.has_sufficient_balance(123, Decimal("75.00")) is False
+
+
+@pytest.mark.asyncio
+async def test_wallet_manager_credit_wallet():
+    """Test WalletManager credit operation"""
+    from unittest.mock import AsyncMock, MagicMock
+    from decimal import Decimal
+    from aisbf.payments.wallet.manager import WalletManager
+
+    mock_session = AsyncMock()
+    manager = WalletManager(mock_session)
+
+    manager.get_wallet = AsyncMock(return_value={
+        "id": 1,
+        "user_id": 123,
+        "balance": Decimal("10.00")
+    })
+
+    mock_transaction = {"id": 1001, "created_at": "2026-04-21T22:00:00"}
+    mock_session.execute = AsyncMock(return_value=MagicMock(
+        mappings=lambda: [mock_transaction]
+    ))
+
+    result = await manager.credit_wallet(123, Decimal("25.00"), {
+        "description": "Test credit",
+        "payment_gateway": "stripe",
+        "gateway_transaction_id": "tx_123"
+    })
+
+    assert result["new_balance"] == Decimal("35.00")
+    assert result["transaction_id"] == 1001
+
+
+@pytest.mark.asyncio
+async def test_wallet_manager_debit_wallet_sufficient_funds():
+    """Test WalletManager debit with sufficient balance"""
+    from unittest.mock import AsyncMock, MagicMock
+    from decimal import Decimal
+    from aisbf.payments.wallet.manager import WalletManager
+
+    mock_session = AsyncMock()
+    manager = WalletManager(mock_session)
+
+    manager.get_wallet = AsyncMock(return_value={
+        "id": 1,
+        "user_id": 123,
+        "balance": Decimal("50.00")
+    })
+
+    mock_transaction = {"id": 1002, "created_at": "2026-04-21T22:00:00"}
+    mock_session.execute = AsyncMock(return_value=MagicMock(
+        mappings=lambda: [mock_transaction]
+    ))
+
+    result = await manager.debit_wallet(123, Decimal("20.00"), {
+        "description": "Test debit",
+        "payment_method_id": 5
+    })
+
+    assert result["new_balance"] == Decimal("30.00")
+
+
+@pytest.mark.asyncio
+async def test_wallet_manager_debit_wallet_insufficient_funds():
+    """Test WalletManager debit fails when balance is insufficient"""
+    from unittest.mock import AsyncMock
+    from decimal import Decimal
+    from aisbf.payments.wallet.manager import WalletManager
+    import pytest
+
+    mock_session = AsyncMock()
+    manager = WalletManager(mock_session)
+
+    manager.get_wallet = AsyncMock(return_value={
+        "id": 1,
+        "user_id": 123,
+        "balance": Decimal("10.00")
+    })
+
+    with pytest.raises(ValueError, match="Insufficient balance"):
+        await manager.debit_wallet(123, Decimal("20.00"), {})

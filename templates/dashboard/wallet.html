@@ -1,0 +1,138 @@
+{% extends "dashboard/base.html" %}
+
+{% block title %}Wallet{% endblock %}
+
+{% block content %}
+<div class="container mt-4">
+    <h1 class="mb-4">Wallet</h1>
+    
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card mb-4">
+                <div class="card-header">
+                    <h5>Balance</h5>
+                </div>
+                <div class="card-body">
+                    <h2 class="display-4">${{ wallet.balance }}</h2>
+                    <p class="text-muted">Currency: {{ wallet.currency_code }}</p>
+                    
+                    <hr>
+                    
+                    <div class="mb-3">
+                        <label class="form-label">Top Up Amount</label>
+                        <div class="btn-group w-100 mb-2" role="group">
+                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="10">$10</button>
+                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="15">$15</button>
+                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="20">$20</button>
+                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="50">$50</button>
+                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="100">$100</button>
+                        </div>
+                        <input type="number" id="custom-amount" class="form-control" placeholder="Custom amount (5-500)" step="0.01" min="5" max="500">
+                    </div>
+                    
+                    <div class="d-grid gap-2">
+                        <button id="topup-stripe" class="btn btn-primary">Top Up with Stripe</button>
+                        <button id="topup-paypal" class="btn btn-outline-primary">Top Up with PayPal</button>
+                    </div>
+                </div>
+            </div>
+            
+            <div class="card">
+                <div class="card-header">
+                    <h5>Auto Top Up Settings</h5>
+                </div>
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="auto-topup-enabled" {% if wallet.auto_topup_enabled %}checked{% endif %}>
+                        <label class="form-check-label" for="auto-topup-enabled">Enable Auto Top Up</label>
+                    </div>
+                    
+                    <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
+                        <div class="mb-3">
+                            <label class="form-label">Auto Top Up Amount</label>
+                            <input type="number" id="auto-topup-amount" class="form-control" value="{{ wallet.auto_topup_amount or '' }}" step="0.01" min="10">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Top Up When Balance Below</label>
+                            <input type="number" id="auto-topup-threshold" class="form-control" value="{{ wallet.auto_topup_threshold or '' }}" step="0.01" min="1">
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Payment Method</label>
+                            <select id="auto-topup-payment-method" class="form-select">
+                                <!-- Options populated via JS -->
+                            </select>
+                        </div>
+                        <button id="save-auto-topup" class="btn btn-primary">Save Settings</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+        
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-header">
+                    <h5>Transaction History</h5>
+                </div>
+                <div class="card-body p-0">
+                    <div class="table-responsive">
+                        <table class="table table-striped mb-0">
+                            <thead>
+                                <tr>
+                                    <th>Date</th>
+                                    <th>Type</th>
+                                    <th>Amount</th>
+                                    <th>Status</th>
+                                </tr>
+                            </thead>
+                            <tbody id="transaction-list">
+                                <!-- Populated via JS -->
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    let selectedAmount = null;
+    
+    document.querySelectorAll('.amount-btn').forEach(btn => {
+        btn.addEventListener('click', function() {
+            document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
+            this.classList.add('active');
+            selectedAmount = this.dataset.amount;
+            document.getElementById('custom-amount').value = '';
+        });
+    });
+    
+    document.getElementById('custom-amount').addEventListener('input', function() {
+        document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
+        selectedAmount = this.value;
+    });
+    
+    document.getElementById('auto-topup-enabled').addEventListener('change', function() {
+        document.getElementById('auto-topup-settings').style.display = this.checked ? 'block' : 'none';
+    });
+    
+    // Load transactions
+    fetch('/api/wallet/transactions')
+        .then(res => res.json())
+        .then(transactions => {
+            const list = document.getElementById('transaction-list');
+            transactions.forEach(tx => {
+                const row = document.createElement('tr');
+                row.innerHTML = `
+                    <td>${new Date(tx.created_at).toLocaleDateString()}</td>
+                    <td>${tx.type}</td>
+                    <td class="${tx.amount >= 0 ? 'text-success' : 'text-danger'}">${tx.amount >= 0 ? '+' : ''}$${Math.abs(tx.amount)}</td>
+                    <td><span class="badge bg-secondary">${tx.status}</span></td>
+                `;
+                list.appendChild(row);
+            });
+        });
+});
+</script>
+{% endblock %}

@@ -1952,6 +1952,10 @@ async def delete_payment_method(payment_method_id: int, request: Request):
     
     return result
 
+# Wallet API routes
+from aisbf.payments.wallet.routes import router as wallet_router
+app.include_router(wallet_router)
+
 
 @app.post("/api/webhooks/stripe")
 async def stripe_webhook(request: Request):
@@ -7969,6 +7973,25 @@ async def dashboard_subscription(request: Request):
         "currency_symbol": currency_symbol
     }
     )
+
+@app.get("/dashboard/wallet", response_class=HTMLResponse)
+async def dashboard_wallet(request: Request):
+    """User wallet dashboard page"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+    
+    from aisbf.payments.wallet.manager import WalletManager
+    wallet_manager = WalletManager(db)
+    wallet = await wallet_manager.get_wallet(user_id)
+    
+    return templates.TemplateResponse("dashboard/wallet.html", {
+        "request": request,
+        "wallet": wallet
+    })
 
 @app.get("/dashboard/billing")
 async def dashboard_billing(request: Request):
