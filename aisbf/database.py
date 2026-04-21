@@ -329,40 +329,40 @@ class DatabaseManager:
                 cursor = conn.cursor()
                 placeholder = '?' if self.db_type == 'sqlite' else '%s'
 
-            # Build dynamic INSERT based on available columns (for backward compatibility)
-            base_columns = ['user_id', 'provider_id', 'model_name', 'tokens_used', 'timestamp']
-            base_params = [user_id, provider_id, model_name, tokens_used]
+                # Build dynamic INSERT based on available columns (for backward compatibility)
+                base_columns = ['user_id', 'provider_id', 'model_name', 'tokens_used', 'timestamp']
+                base_params = [user_id, provider_id, model_name, tokens_used]
 
-            # Check for additional columns and add them if they exist
-            try:
-                # Try to insert with all columns
-                sql = f'''
-                    INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, timestamp)
-                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-                '''
-                params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id)
-                logger.info(f"🔍 Trying full INSERT with {len(params)} parameters")
-                logger.debug(f"🔍 SQL: {sql}")
-                logger.debug(f"🔍 Params: {params}")
-                cursor.execute(sql, params)
-                logger.info(f"✅ Inserted with full column set, rows affected: {cursor.rowcount}")
-            except Exception as full_insert_error:
-                logger.warning(f"⚠️ Full column insert failed: {full_insert_error}")
-                logger.warning(f"⚠️ Full insert error type: {type(full_insert_error).__name__}")
-                import traceback
-                logger.warning(f"⚠️ Full insert traceback: {traceback.format_exc()}")
-                logger.info(f"🔍 Falling back to basic insert")
-                # Fallback to basic columns only
-                sql = f'''
-                    INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, timestamp)
-                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
-                '''
-                params = (user_id, provider_id, model_name, tokens_used)
-                logger.info(f"🔍 Trying basic INSERT with {len(params)} parameters")
-                logger.debug(f"🔍 SQL: {sql}")
-                logger.debug(f"🔍 Params: {params}")
-                cursor.execute(sql, params)
-                logger.info(f"✅ Inserted with basic column set, rows affected: {cursor.rowcount}")
+                # Check for additional columns and add them if they exist
+                try:
+                    # Try to insert with all columns
+                    sql = f'''
+                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, timestamp)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    '''
+                    params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id)
+                    logger.info(f"🔍 Trying full INSERT with {len(params)} parameters")
+                    logger.debug(f"🔍 SQL: {sql}")
+                    logger.debug(f"🔍 Params: {params}")
+                    cursor.execute(sql, params)
+                    logger.info(f"✅ Inserted with full column set, rows affected: {cursor.rowcount}")
+                except Exception as full_insert_error:
+                    logger.warning(f"⚠️ Full column insert failed: {full_insert_error}")
+                    logger.warning(f"⚠️ Full insert error type: {type(full_insert_error).__name__}")
+                    import traceback
+                    logger.warning(f"⚠️ Full insert traceback: {traceback.format_exc()}")
+                    logger.info(f"🔍 Falling back to basic insert")
+                    # Fallback to basic columns only
+                    sql = f'''
+                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, timestamp)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    '''
+                    params = (user_id, provider_id, model_name, tokens_used)
+                    logger.info(f"🔍 Trying basic INSERT with {len(params)} parameters")
+                    logger.debug(f"🔍 SQL: {sql}")
+                    logger.debug(f"🔍 Params: {params}")
+                    cursor.execute(sql, params)
+                    logger.info(f"✅ Inserted with basic column set, rows affected: {cursor.rowcount}")
 
                 conn.commit()
                 logger.info(f"✅ Successfully recorded token usage for {provider_id}/{model_name}: {tokens_used} tokens (user_id={user_id})")
