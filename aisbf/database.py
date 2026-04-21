@@ -4226,8 +4226,6 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
             logger.warning(f"Migration check for {table_name} table: {e}")
 
 
-
-    conn.commit()
     logger.info("✅ All database migrations completed")
 
 # Patch the methods
