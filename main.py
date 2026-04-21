@@ -1315,16 +1315,13 @@ async def api_token_authorization_middleware(request: Request, call_next):
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
     
-    # Admin users bypass all restrictions
-    if is_admin:
-        return await call_next(request)
-    
     # --- USER-SPECIFIC ENDPOINTS (/api/u/*) ---
     if (path.startswith("/api/u/") or 
         path.startswith("/mcp/u/") or
         path.startswith("/api/v1/u/") or
         path.startswith("/mcp/v1/u/")):
         
+        # Global tokens CANNOT access user-specific endpoints
         if is_global_token:
             return JSONResponse(
                 status_code=403,
@@ -1336,10 +1333,23 @@ async def api_token_authorization_middleware(request: Request, call_next):
         if len(path_parts) >= 4 and path_parts[2] == 'u':
             target_username = path_parts[3]
             
+            # User must be authenticated with a user token
+            if not user_id:
+                return JSONResponse(
+                    status_code=401,
+                    content={"error": "Authentication required. Use a valid user API token."}
+                )
+            
             db = DatabaseRegistry.get_config_database()
             authenticated_user = db.get_user_by_id(user_id)
             
-            if not authenticated_user or authenticated_user['username'] != target_username:
+            if not authenticated_user:
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "Invalid user token."}
+                )
+            
+            if authenticated_user['username'] != target_username:
                 return JSONResponse(
                     status_code=403,
                     content={"error": "You can only access your own user-specific endpoints."}
@@ -1347,6 +1357,7 @@ async def api_token_authorization_middleware(request: Request, call_next):
     
     # --- GLOBAL ENDPOINTS (all other API paths) ---
     else:
+        # Only GLOBAL tokens can access global endpoints
         if not is_global_token:
             return JSONResponse(
                 status_code=403,
