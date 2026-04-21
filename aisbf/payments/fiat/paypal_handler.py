@@ -292,13 +292,45 @@ class PayPalPaymentHandler:
     async def handle_webhook(self, payload: dict, headers: dict) -> dict:
         """Handle PayPal webhook events"""
         try:
-            # Verify webhook signature (simplified)
+            # TODO: Verify webhook signature for security
+            # See: https://developer.paypal.com/api/rest/webhooks/
             event_type = payload.get('event_type')
+            resource = payload.get('resource', {})
             
-            if event_type == 'PAYMENT.SALE.COMPLETED':
-                await self._handle_payment_completed(payload['resource'])
+            logger.info(f"Received PayPal webhook: {event_type}")
+            
+            # Vault v3 / Payment events
+            if event_type == 'CHECKOUT.ORDER.COMPLETED':
+                await self._handle_order_completed(resource)
+            elif event_type == 'CHECKOUT.ORDER.APPROVED':
+                await self._handle_order_approved(resource)
+            elif event_type == 'PAYMENT.CAPTURE.COMPLETED':
+                await self._handle_payment_capture_completed(resource)
+            elif event_type == 'PAYMENT.CAPTURE.DENIED':
+                await self._handle_payment_capture_denied(resource)
+            elif event_type == 'PAYMENT.CAPTURE.REFUNDED':
+                await self._handle_payment_refunded(resource)
+            
+            # Legacy billing agreement events (backward compatibility)
+            elif event_type == 'PAYMENT.SALE.COMPLETED':
+                await self._handle_payment_completed(resource)
             elif event_type == 'PAYMENT.SALE.DENIED':
-                await self._handle_payment_denied(payload['resource'])
+                await self._handle_payment_denied(resource)
+            
+            # Vault token events
+            elif event_type == 'VAULT.PAYMENT-TOKEN.CREATED':
+                await self._handle_vault_token_created(resource)
+            elif event_type == 'VAULT.PAYMENT-TOKEN.DELETED':
+                await self._handle_vault_token_deleted(resource)
+            
+            # Customer disputes
+            elif event_type == 'CUSTOMER.DISPUTE.CREATED':
+                await self._handle_dispute_created(resource)
+            elif event_type == 'CUSTOMER.DISPUTE.RESOLVED':
+                await self._handle_dispute_resolved(resource)
+            
+            else:
+                logger.info(f"Unhandled PayPal webhook event: {event_type}")
             
             return {'status': 'success'}
             
@@ -306,10 +338,61 @@ class PayPalPaymentHandler:
             logger.error(f"Error handling PayPal webhook: {e}")
             return {'status': 'error', 'message': str(e)}
     
+    async def _handle_order_completed(self, resource: dict):
+        """Handle completed order (Vault v3)"""
+        order_id = resource.get('id')
+        logger.info(f"PayPal order completed: {order_id}")
+        # TODO: Update transaction status in database
+    
+    async def _handle_order_approved(self, resource: dict):
+        """Handle approved order"""
+        order_id = resource.get('id')
+        logger.info(f"PayPal order approved: {order_id}")
+    
+    async def _handle_payment_capture_completed(self, resource: dict):
+        """Handle completed payment capture"""
+        capture_id = resource.get('id')
+        logger.info(f"PayPal payment capture completed: {capture_id}")
+        # TODO: Mark subscription payment as successful
+    
+    async def _handle_payment_capture_denied(self, resource: dict):
+        """Handle denied payment capture"""
+        capture_id = resource.get('id')
+        logger.warning(f"PayPal payment capture denied: {capture_id}")
+        # TODO: Add to payment retry queue
+    
+    async def _handle_payment_refunded(self, resource: dict):
+        """Handle refunded payment"""
+        refund_id = resource.get('id')
+        logger.info(f"PayPal payment refunded: {refund_id}")
+        # TODO: Update transaction and subscription status
+    
+    async def _handle_vault_token_created(self, resource: dict):
+        """Handle vault token creation"""
+        token_id = resource.get('id')
+        logger.info(f"PayPal vault token created: {token_id}")
+    
+    async def _handle_vault_token_deleted(self, resource: dict):
+        """Handle vault token deletion"""
+        token_id = resource.get('id')
+        logger.info(f"PayPal vault token deleted: {token_id}")
+        # TODO: Mark payment method as inactive in database
+    
+    async def _handle_dispute_created(self, resource: dict):
+        """Handle dispute creation"""
+        dispute_id = resource.get('dispute_id')
+        logger.warning(f"PayPal dispute created: {dispute_id}")
+        # TODO: Send notification to admin
+    
+    async def _handle_dispute_resolved(self, resource: dict):
+        """Handle dispute resolution"""
+        dispute_id = resource.get('dispute_id')
+        logger.info(f"PayPal dispute resolved: {dispute_id}")
+    
     async def _handle_payment_completed(self, resource: dict):
-        """Handle completed payment"""
+        """Handle completed payment (legacy)"""
         logger.info(f"PayPal payment completed: {resource.get('id')}")
     
     async def _handle_payment_denied(self, resource: dict):
-        """Handle denied payment"""
+        """Handle denied payment (legacy)"""
         logger.warning(f"PayPal payment denied: {resource.get('id')}")
