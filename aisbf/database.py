@@ -166,6 +166,10 @@ class DatabaseManager:
         else:
             raise ValueError(f"Unsupported database type: {self.db_type}")
     
+    @property
+    def placeholder(self) -> str:
+        return '?' if self.db_type == 'sqlite' else '%s'
+
     async def _run_in_executor(self, func, *args):
         """Run a blocking database operation in a thread pool executor."""
         loop = asyncio.get_event_loop()

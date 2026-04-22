@@ -280,10 +280,11 @@ class PayPalPaymentHandler:
                 # Store payment method
                 with self.db._get_connection() as conn:
                     cursor = conn.cursor()
-                    cursor.execute("""
+                    ph = self.db.placeholder
+                    cursor.execute(f"""
                         INSERT INTO payment_methods
                         (user_id, type, identifier, is_default, is_active)
-                        VALUES (?, 'paypal', ?, 1, 1)
+                        VALUES ({ph}, 'paypal', {ph}, 1, 1)
                     """, (user_id, agreement_id))
                     conn.commit()
                 

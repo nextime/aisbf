@@ -182,10 +182,11 @@ class PaymentService:
             # Store payment method
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                ph = self.db.placeholder
+                cursor.execute(f"""
                     INSERT INTO payment_methods
                     (user_id, type, gateway, identifier, paypal_email, is_default, status)
-                    VALUES (?, 'paypal', 'paypal_v3', ?, ?, 1, 'active')
+                    VALUES ({ph}, 'paypal', 'paypal_v3', {ph}, {ph}, 1, 'active')
                 """, (user_id, result['payment_token_id'], result['payer_email']))
                 conn.commit()
             
