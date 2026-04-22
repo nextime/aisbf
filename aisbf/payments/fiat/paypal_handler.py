@@ -355,22 +355,36 @@ class PayPalPaymentHandler:
             return {'status': 'error', 'message': str(e)}
     
     async def _verify_webhook_signature(self, payload: dict, headers: dict) -> bool:
-        """
-        Verify PayPal webhook signature
-        
-        For production, implement proper signature verification:
-        https://developer.paypal.com/api/rest/webhooks/rest/#verify-webhook-signature
-        """
-        # For now, basic verification - in production, verify the signature properly
-        if not self.webhook_secret:
-            logger.warning("PayPal webhook_secret not configured - skipping signature verification")
+        """Verify PayPal webhook signature via PayPal's verify-webhook-signature API."""
+        webhook_id = self.webhook_secret  # stored as 'webhook_secret' in admin settings
+        if not webhook_id:
+            logger.warning("PayPal webhook_id not configured - skipping signature verification")
             return True
-        
-        # TODO: Implement proper webhook signature verification
-        # This requires calling PayPal's verify-webhook-signature endpoint
-        # with the webhook_id, transmission_id, transmission_sig, etc.
-        
-        return True
+
+        try:
+            access_token = await self.get_access_token()
+            body = {
+                "auth_algo":         headers.get("paypal-auth-algo", ""),
+                "cert_url":          headers.get("paypal-cert-url", ""),
+                "transmission_id":   headers.get("paypal-transmission-id", ""),
+                "transmission_sig":  headers.get("paypal-transmission-sig", ""),
+                "transmission_time": headers.get("paypal-transmission-time", ""),
+                "webhook_id":        webhook_id,
+                "webhook_event":     payload,
+            }
+            response = await self.http_client.post(
+                f"{self.base_url}/v1/notifications/verify-webhook-signature",
+                headers={"Authorization": f"Bearer {access_token}", "Content-Type": "application/json"},
+                json=body,
+            )
+            result = response.json()
+            verified = result.get("verification_status") == "SUCCESS"
+            if not verified:
+                logger.warning(f"PayPal webhook verification failed: {result}")
+            return verified
+        except Exception as e:
+            logger.error(f"PayPal webhook signature verification error: {e}")
+            return False
     
     async def _handle_order_completed(self, resource: dict):
         """Handle completed order (Vault v3)"""

@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-## [0.99.47] - 2026-04-21
+## [0.99.48] - 2026-04-21
 
 ### Added
 - **Unified Wallet System**
@@ -29,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Clarified token access patterns (global vs user tokens)
 
 ### Changed
-- Updated all version numbers to 0.99.47
+- Updated all version numbers to 0.99.48
 - Added wallet package to pyproject.toml
 
 ## [0.99.26] - 2026-04-16

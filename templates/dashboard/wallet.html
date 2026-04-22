@@ -283,13 +283,27 @@ document.addEventListener('DOMContentLoaded', function () {
             })
             .then(r => r.json())
             .then(data => {
-                if (data.type === 'stripe' && data.checkout_url) {
-                    window.location.href = data.checkout_url;
-                } else if (data.type === 'paypal' && data.approval_url) {
-                    window.location.href = data.approval_url;
+                this.disabled = false;
+                this.innerHTML = orig;
+                let url = null;
+                if (data.type === 'stripe' && data.checkout_url) url = data.checkout_url;
+                else if (data.type === 'paypal' && data.approval_url) url = data.approval_url;
+
+                if (url) {
+                    const popup = window.open(url, 'payment_popup', 'width=600,height=700,scrollbars=yes,resizable=yes');
+                    if (!popup) {
+                        // Blocked by browser — open in new tab
+                        window.open(url, '_blank');
+                        return;
+                    }
+                    // Poll for popup close then reload wallet page
+                    const timer = setInterval(() => {
+                        if (popup.closed) {
+                            clearInterval(timer);
+                            window.location.reload();
+                        }
+                    }, 800);
                 } else {
-                    this.disabled = false;
-                    this.innerHTML = orig;
                     showAlert(data.error || 'Failed to initiate checkout.', 'Error', '❌', 'danger');
                 }
             })
@@ -435,7 +449,8 @@ function openCryptoModal(name) {
     document.getElementById('cryptoModal').classList.add('active');
 
     // Fetch a per-user deposit address from the server
-    const amount = getAmount() || 15;
+    const customVal = parseFloat(document.getElementById('custom-amount').value);
+    const amount = customVal || selectedAmount || 15;
     fetch('/dashboard/wallet/topup', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },

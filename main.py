@@ -1363,6 +1363,7 @@ async def startup_event():
         
         payment_service = PaymentService(db_manager, payment_config)
         await payment_service.initialize()
+        app.state.payment_service = payment_service
         
         logger.info("Payment service started")
     except Exception as e:
@@ -3976,7 +3977,9 @@ async def dashboard_index(request: Request):
 
     if request.session.get('role') == 'admin':
         # Admin dashboard
-         return templates.TemplateResponse(
+        db = DatabaseRegistry.get_config_database()
+        users_count = len(db.get_users())
+        return templates.TemplateResponse(
             request=request,
             name="dashboard/index.html",
             context={
@@ -3986,7 +3989,8 @@ async def dashboard_index(request: Request):
                 "providers_count": len(config.providers) if config else 0,
                 "rotations_count": len(config.rotations) if config else 0,
                 "autoselect_count": len(config.autoselect) if config else 0,
-                "server_config": server_config or {}
+                "server_config": server_config or {},
+                "users_count": users_count,
             }
         )
     else:

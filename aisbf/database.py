@@ -4334,8 +4334,18 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Populated username, is_active and role for existing users")
                 
         else:
-            # MySQL migrations would go here
-            pass
+            # MySQL: check and add any missing columns
+            for col_name, col_def, _ in required_columns:
+                try:
+                    cursor.execute("""
+                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = %s
+                    """, (col_name,))
+                    if not cursor.fetchone():
+                        cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
+                        logger.info(f"✅ Migration: Added {col_name} column to users")
+                except Exception as col_e:
+                    logger.warning(f"Migration check for users.{col_name}: {col_e}")
     except Exception as e:
         logger.warning(f"Migration check for users table columns: {e}")
 
