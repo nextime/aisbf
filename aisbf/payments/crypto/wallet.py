@@ -144,65 +144,46 @@ class CryptoWalletManager:
             'derivation_index': index
         }
     
-    async def get_or_create_user_address(self, user_id: int, crypto_type: str) -> str:
-        """Get existing address or create new one for user"""
-        # Check if user already has address
+    async def create_payment_address(self, user_id: int, crypto_type: str, payment_id: str) -> str:
+        """Derive a fresh address for each payment request"""
+        placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             cursor.execute(f"""
-                SELECT address FROM user_crypto_addresses 
-                WHERE user_id = {placeholder} AND crypto_type = {placeholder}
-            """, (user_id, crypto_type))
-            existing = cursor.fetchone()
-        
-        if existing:
-            return existing[0]
-        
-        # Get next available index
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
-            cursor.execute(f"""
-                SELECT COALESCE(MAX(derivation_index), -1) as max_idx
+                SELECT COALESCE(MAX(derivation_index), -1)
                 FROM user_crypto_addresses
                 WHERE crypto_type = {placeholder}
             """, (crypto_type,))
-            max_index = cursor.fetchone()
-        
-        next_index = max_index[0] + 1
-        
-        # Derive new address
+            next_index = cursor.fetchone()[0] + 1
+
         address_info = self.derive_address(crypto_type, next_index)
-        
-        # Store in database
+
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
             cursor.execute(f"""
                 INSERT INTO user_crypto_addresses
-                (user_id, crypto_type, address, derivation_path, derivation_index)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            """, (
-                user_id,
-                crypto_type,
-                address_info['address'],
-                address_info['derivation_path'],
-                address_info['derivation_index']
-            ))
+                (user_id, crypto_type, address, derivation_path, derivation_index, payment_id)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+            """, (user_id, crypto_type, address_info['address'],
+                  address_info['derivation_path'], address_info['derivation_index'], payment_id))
             conn.commit()
-        
-        # Create wallet entry
+
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            insert_or_ignore = "INSERT OR IGNORE" if self.db.db_type == 'sqlite' else "INSERT"
+            on_conflict = "" if self.db.db_type == 'sqlite' else " ON CONFLICT DO NOTHING"
             cursor.execute(f"""
-                INSERT INTO user_crypto_wallets
+                {insert_or_ignore} INTO user_crypto_wallets
                 (user_id, crypto_type, balance_crypto, balance_fiat)
-                VALUES ({placeholder}, {placeholder}, 0, 0)
+                VALUES ({placeholder}, {placeholder}, 0, 0){on_conflict}
             """, (user_id, crypto_type))
             conn.commit()
-        
-        logger.info(f"Created {crypto_type} address for user {user_id}: {address_info['address']}")
-        
+
+        logger.info(f"Created {crypto_type} payment address for user {user_id} (payment {payment_id}): {address_info['address']}")
         return address_info['address']
+
+    async def get_or_create_user_address(self, user_id: int, crypto_type: str) -> str:
+        """Legacy: creates a new payment address with a generic payment_id."""
+        import uuid
+        return await self.create_payment_address(user_id, crypto_type, f"legacy-{uuid.uuid4().hex[:8]}")

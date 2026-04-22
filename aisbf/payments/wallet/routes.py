@@ -123,6 +123,13 @@ async def initiate_topup(
             metadata={"type": "wallet_topup"}
         )
         return {"order_id": order.id, "payment_method": "paypal"}
+    elif topup_data.payment_method in ("bitcoin", "ethereum", "usdt", "usdc"):
+        import uuid
+        crypto_type_map = {"bitcoin": "btc", "ethereum": "eth", "usdt": "usdt", "usdc": "usdc"}
+        crypto_type = crypto_type_map[topup_data.payment_method]
+        payment_id = uuid.uuid4().hex
+        address = await payment_service.wallet_manager.create_payment_address(user_id, crypto_type, payment_id)
+        return {"address": address, "payment_method": topup_data.payment_method, "payment_id": payment_id}
     else:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,

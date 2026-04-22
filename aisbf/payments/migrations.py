@@ -61,6 +61,7 @@ class PaymentMigrations:
             self._create_notification_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_wallet_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._add_stripe_customer_id_column(cursor)
+            self._migrate_per_payment_addresses(cursor)
             self._insert_default_data(cursor)
             
             conn.commit()
@@ -469,6 +470,71 @@ class PaymentMigrations:
             )
         ''')
     
+    def _migrate_per_payment_addresses(self, cursor):
+        """Migrate user_crypto_addresses to support per-payment addresses (drop unique user+crypto constraint, add payment_id)"""
+        try:
+            if self.db_type == 'sqlite':
+                cursor.execute("PRAGMA table_info(user_crypto_addresses)")
+                columns = [row[1] for row in cursor.fetchall()]
+                if 'payment_id' not in columns:
+                    cursor.execute("ALTER TABLE user_crypto_addresses ADD COLUMN payment_id VARCHAR(64)")
+                    logger.info("✅ Added payment_id column to user_crypto_addresses")
+                # SQLite: recreate table without UNIQUE(user_id, crypto_type) if it exists
+                # Check via index list
+                cursor.execute("PRAGMA index_list(user_crypto_addresses)")
+                indexes = cursor.fetchall()
+                has_user_crypto_unique = any(
+                    idx[2] == 1 and 'user_id' in (idx[1] or '') or 'crypto' in (idx[1] or '')
+                    for idx in indexes
+                )
+                if has_user_crypto_unique:
+                    # Recreate without the constraint
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS user_crypto_addresses_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            user_id INTEGER NOT NULL,
+                            crypto_type VARCHAR(20) NOT NULL,
+                            address VARCHAR(255) NOT NULL UNIQUE,
+                            derivation_path VARCHAR(100) NOT NULL,
+                            derivation_index INTEGER NOT NULL,
+                            payment_id VARCHAR(64),
+                            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+                            FOREIGN KEY (user_id) REFERENCES users(id)
+                        )
+                    """)
+                    cursor.execute("""
+                        INSERT INTO user_crypto_addresses_new
+                            (id, user_id, crypto_type, address, derivation_path, derivation_index, created_at)
+                        SELECT id, user_id, crypto_type, address, derivation_path, derivation_index, created_at
+                        FROM user_crypto_addresses
+                    """)
+                    cursor.execute("DROP TABLE user_crypto_addresses")
+                    cursor.execute("ALTER TABLE user_crypto_addresses_new RENAME TO user_crypto_addresses")
+                    logger.info("✅ Recreated user_crypto_addresses without UNIQUE(user_id, crypto_type)")
+            else:  # mysql
+                cursor.execute("""
+                    SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                    WHERE TABLE_NAME = 'user_crypto_addresses' AND COLUMN_NAME = 'payment_id'
+                """)
+                if not cursor.fetchone():
+                    cursor.execute("ALTER TABLE user_crypto_addresses ADD COLUMN payment_id VARCHAR(64)")
+                    logger.info("✅ Added payment_id column to user_crypto_addresses")
+                # Drop unique constraint on (user_id, crypto_type) if present
+                cursor.execute("""
+                    SELECT CONSTRAINT_NAME FROM INFORMATION_SCHEMA.TABLE_CONSTRAINTS
+                    WHERE TABLE_NAME = 'user_crypto_addresses'
+                      AND CONSTRAINT_TYPE = 'UNIQUE'
+                      AND CONSTRAINT_NAME != 'address'
+                """)
+                for row in cursor.fetchall():
+                    try:
+                        cursor.execute(f"ALTER TABLE user_crypto_addresses DROP INDEX `{row[0]}`")
+                        logger.info(f"✅ Dropped unique constraint {row[0]} from user_crypto_addresses")
+                    except Exception:
+                        pass
+        except Exception as e:
+            logger.warning(f"Migration per-payment addresses: {e}")
+
     def _add_stripe_customer_id_column(self, cursor):
         """Add Stripe customer ID column to users table"""
         try:
