@@ -73,10 +73,11 @@ class StripePaymentHandler:
             # Store payment method in database
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("""
+                ph = '?' if self.db.db_type == 'sqlite' else '%s'
+                cursor.execute(f"""
                     INSERT INTO payment_methods
                     (user_id, type, identifier, is_default, is_active)
-                    VALUES (?, 'stripe', ?, 1, 1)
+                    VALUES ({ph}, 'stripe', {ph}, 1, 1)
                 """, (user_id, payment_method.id))
                 conn.commit()
             
@@ -98,36 +99,36 @@ class StripePaymentHandler:
     
     async def _get_or_create_customer(self, user_id: int) -> str:
         """Get existing Stripe customer or create new one"""
-        # Check if customer exists in database
+        ph = '?' if self.db.db_type == 'sqlite' else '%s'
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "SELECT email, stripe_customer_id FROM users WHERE id = ?",
+                f"SELECT email, stripe_customer_id FROM users WHERE id = {ph}",
                 (user_id,)
             )
             user = cursor.fetchone()
-        
+
         if not user:
             raise ValueError(f"User {user_id} not found")
-        
+
         email = user[0]
         stripe_customer_id = user[1] if len(user) > 1 else None
-        
+
         if stripe_customer_id:
             return stripe_customer_id
-        
+
         # Create new Stripe customer
         customer = await asyncio.to_thread(
             stripe.Customer.create,
             email=email,
             metadata={'user_id': user_id}
         )
-        
+
         # Store customer ID
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute(
-                "UPDATE users SET stripe_customer_id = ? WHERE id = ?",
+                f"UPDATE users SET stripe_customer_id = {ph} WHERE id = {ph}",
                 (customer.id, user_id)
             )
             conn.commit()
