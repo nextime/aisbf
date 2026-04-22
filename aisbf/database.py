@@ -50,6 +50,40 @@ def get_db_executor():
     return _db_executor
 
 
+class _MySQLConnectionWrapper:
+    """Wrapper that gives mysql.connector connections a reliable context manager protocol.
+
+    mysql-connector-python's C extension (__enter__/__exit__) has version-dependent
+    behaviour (some versions return a cursor from __enter__, others close the connection
+    in __exit__ unexpectedly).  This wrapper always yields the raw connection and
+    handles commit/rollback/close explicitly.
+    """
+
+    def __init__(self, conn):
+        self._conn = conn
+
+    def __enter__(self):
+        return self._conn
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        if exc_type is None:
+            self._conn.commit()
+        else:
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+        # Connection is intentionally left open: cursor and conn variables in the
+        # calling function remain valid after the with-block exits (matching SQLite's
+        # context-manager behaviour).  The connection is closed by GC when the caller
+        # function returns and conn goes out of scope.
+        return False
+
+    # Forward attribute access so the wrapper can be used directly as well
+    def __getattr__(self, name):
+        return getattr(self._conn, name)
+
+
 class DatabaseManager:
     """
     Manages database for persistent tracking of context dimensions and rate limiting.
@@ -103,9 +137,9 @@ class DatabaseManager:
                     port=self.db_config['mysql_port'],
                     user=self.db_config['mysql_user'],
                     password=self.db_config['mysql_password'],
-                    database=self.db_config['mysql_database']
+                    database=self.db_config['mysql_database'],
                 )
-                return conn
+                return _MySQLConnectionWrapper(conn)
             except Exception as e:
                 logger.error(f"MySQL connection failed: {e}")
                 raise
@@ -119,27 +153,20 @@ class DatabaseManager:
 
     async def execute(self, sql: str, params: dict = None):
         """Execute SQL query and return result with mappings (compatible with AsyncSession interface)"""
+        _params = params or {}
         def _sync_execute():
             with self._get_connection() as conn:
-                cursor = conn.cursor()
-                cursor.row_factory = sqlite3.Row
-                params = params or {}
-                
-                # Safe parameter handling - use native database parameter binding
                 if self.db_type == 'sqlite':
-                    # SQLite natively supports :named parameters directly
-                    cursor.execute(sql, params)
+                    cursor = conn.cursor()
+                    cursor.row_factory = sqlite3.Row
+                    cursor.execute(sql, _params)
                 else:
-                    # For MySQL, safely convert named parameters to %s placeholders
-                    param_names = []
-                    def replace_param(match):
-                        param_names.append(match.group(1))
-                        return '%s'
+                    cursor = conn.cursor(dictionary=True)
                     import re
-                    processed_sql = re.sub(r':(\w+)', replace_param, sql)
-                    params_list = [params[name] for name in param_names]
-                    cursor.execute(processed_sql, params_list)
-                
+                    param_names = []
+                    processed_sql = re.sub(r':(\w+)', lambda m: (param_names.append(m.group(1)), '%s')[1], sql)
+                    cursor.execute(processed_sql, [_params[n] for n in param_names])
+
                 if cursor.description:
                     rows = [dict(row) for row in cursor.fetchall()]
                     # Simulate SQLAlchemy Result object with mappings() method
@@ -3328,6 +3355,7 @@ def DatabaseManager__init__(self, db_config: Optional[Dict[str, Any]] = None, da
         self.db_config = db_config
 
     self.db_type = self.db_config.get('type', 'sqlite').lower()
+    self.executor = get_db_executor()
 
     if self.db_type == 'mysql':
         # Import the module-level MYSQL_AVAILABLE flag
@@ -3542,13 +3570,18 @@ def DatabaseManager__initialize_database(self):
 #             ''')
 # 
 #     try:
-#         cursor.execute('''
-#             CREATE INDEX IF NOT EXISTS idx_model_embeddings_provider_model
-#             ON model_embeddings(provider_id, model_name)
-#         ''')
-#     except:
-#         pass
+#     # Index creation moved to separate migration
 # 
+    # Create admin settings table for system configuration
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS admin_settings (
+            id INTEGER PRIMARY KEY {auto_increment},
+            setting_key VARCHAR(255) UNIQUE NOT NULL,
+            setting_value TEXT,
+            updated_at TIMESTAMP DEFAULT {timestamp_default}
+        )
+    ''')
+
     # Create users table for multi-user management
     cursor.execute(f'''
         CREATE TABLE IF NOT EXISTS users (
@@ -3997,9 +4030,8 @@ def DatabaseManager__initialize_database(self):
         # Run configuration database migrations if this is a CONFIG database
     if self.database_type == DatabaseRegistry.TYPE_CONFIG:
         self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
-    
-    conn.commit()
-    logger.info(f"Database tables initialized successfully for {self.database_type} database")
+        conn.commit()
+        logger.info(f"Database tables initialized successfully for {self.database_type} database")
 
 
 def DatabaseManager__create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
@@ -4176,6 +4208,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                         max_autoselections INTEGER DEFAULT -1,
                         max_rotation_models INTEGER DEFAULT -1,
                         max_autoselection_models INTEGER DEFAULT -1,
+                        is_visible {boolean_type} DEFAULT 1,
                         created_at TIMESTAMP DEFAULT {timestamp_default},
                         updated_at TIMESTAMP DEFAULT {timestamp_default}
                     )
@@ -4204,6 +4237,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                         max_autoselections INTEGER DEFAULT -1,
                         max_rotation_models INTEGER DEFAULT -1,
                         max_autoselection_models INTEGER DEFAULT -1,
+                        is_visible {boolean_type} DEFAULT 1,
                         created_at TIMESTAMP DEFAULT {timestamp_default},
                         updated_at TIMESTAMP DEFAULT {timestamp_default}
                     )
@@ -4227,7 +4261,8 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 ('max_rotation_models', 'INTEGER DEFAULT -1'),
                 ('max_autoselection_models', 'INTEGER DEFAULT -1'),
                 ('is_default', f'{boolean_type} DEFAULT 0'),
-                ('is_active', f'{boolean_type} DEFAULT 1')
+                ('is_active', f'{boolean_type} DEFAULT 1'),
+                ('is_visible', f'{boolean_type} DEFAULT 1')
             ]
             col_count = 0
             for col_name, col_def in tier_columns:

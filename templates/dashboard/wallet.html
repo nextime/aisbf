@@ -1,138 +1,413 @@
-{% extends "dashboard/base.html" %}
+{% extends "base.html" %}
 
 {% block title %}Wallet{% endblock %}
 
 {% block content %}
-<div class="container mt-4">
-    <h1 class="mb-4">Wallet</h1>
-    
-    <div class="row">
-        <div class="col-md-6">
-            <div class="card mb-4">
-                <div class="card-header">
-                    <h5>Balance</h5>
-                </div>
-                <div class="card-body">
-                    <h2 class="display-4">${{ wallet.balance }}</h2>
-                    <p class="text-muted">Currency: {{ wallet.currency_code }}</p>
-                    
-                    <hr>
-                    
-                    <div class="mb-3">
-                        <label class="form-label">Top Up Amount</label>
-                        <div class="btn-group w-100 mb-2" role="group">
-                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="10">$10</button>
-                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="15">$15</button>
-                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="20">$20</button>
-                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="50">$50</button>
-                            <button type="button" class="btn btn-outline-primary amount-btn" data-amount="100">$100</button>
-                        </div>
-                        <input type="number" id="custom-amount" class="form-control" placeholder="Custom amount (5-500)" step="0.01" min="5" max="500">
-                    </div>
-                    
-                    <div class="d-grid gap-2">
-                        <button id="topup-stripe" class="btn btn-primary">Top Up with Stripe</button>
-                        <button id="topup-paypal" class="btn btn-outline-primary">Top Up with PayPal</button>
-                    </div>
-                </div>
-            </div>
-            
-            <div class="card">
-                <div class="card-header">
-                    <h5>Auto Top Up Settings</h5>
-                </div>
-                <div class="card-body">
-                    <div class="form-check form-switch mb-3">
-                        <input class="form-check-input" type="checkbox" id="auto-topup-enabled" {% if wallet.auto_topup_enabled %}checked{% endif %}>
-                        <label class="form-check-label" for="auto-topup-enabled">Enable Auto Top Up</label>
-                    </div>
-                    
-                    <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
-                        <div class="mb-3">
-                            <label class="form-label">Auto Top Up Amount</label>
-                            <input type="number" id="auto-topup-amount" class="form-control" value="{{ wallet.auto_topup_amount or '' }}" step="0.01" min="10">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Top Up When Balance Below</label>
-                            <input type="number" id="auto-topup-threshold" class="form-control" value="{{ wallet.auto_topup_threshold or '' }}" step="0.01" min="1">
-                        </div>
-                        <div class="mb-3">
-                            <label class="form-label">Payment Method</label>
-                            <select id="auto-topup-payment-method" class="form-select">
-                                <!-- Options populated via JS -->
-                            </select>
-                        </div>
-                        <button id="save-auto-topup" class="btn btn-primary">Save Settings</button>
-                    </div>
-                </div>
+<h2 style="margin-bottom: 20px;"><i class="fas fa-wallet me-2"></i>Wallet</h2>
+
+<!-- Balance Banner -->
+<div style="background: linear-gradient(135deg, #1a4a2e, #0f3460); border: 2px solid #28a745; border-radius: 8px; padding: 24px; margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 6px;">Available Balance</div>
+            <div style="font-size: 42px; font-weight: bold; color: #4ade80;">${{ "%.2f"|format(wallet.balance|float) }}</div>
+            <div style="color: #a0a0a0; font-size: 13px; margin-top: 6px;">
+                Currency: <span style="color: #e0e0e0;">{{ wallet.currency_code }}</span>
+                &nbsp;·&nbsp; Wallet ID: <span style="color: #e0e0e0; font-family: monospace;">{{ wallet.id }}</span>
             </div>
         </div>
-        
-        <div class="col-md-6">
-            <div class="card">
-                <div class="card-header">
-                    <h5>Transaction History</h5>
-                </div>
-                <div class="card-body p-0">
-                    <div class="table-responsive">
-                        <table class="table table-striped mb-0">
-                            <thead>
-                                <tr>
-                                    <th>Date</th>
-                                    <th>Type</th>
-                                    <th>Amount</th>
-                                    <th>Status</th>
-                                </tr>
-                            </thead>
-                            <tbody id="transaction-list">
-                                <!-- Populated via JS -->
-                            </tbody>
-                        </table>
-                    </div>
-                </div>
-            </div>
+        <div style="text-align: right;">
+            {% if wallet.auto_topup_enabled %}
+            <span style="background: #28a745; color: white; padding: 4px 12px; border-radius: 10px; font-size: 13px;">
+                <i class="fas fa-sync-alt me-1"></i>Auto Top-Up Active
+            </span>
+            {% else %}
+            <span style="background: #6c757d; color: white; padding: 4px 12px; border-radius: 10px; font-size: 13px;">
+                <i class="fas fa-sync-alt me-1"></i>Auto Top-Up Off
+            </span>
+            {% endif %}
         </div>
     </div>
 </div>
 
+<div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
+
+    <!-- Top Up -->
+    <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px;">
+        <h3 style="margin: 0 0 18px 0; color: #4a9eff;">
+            <i class="fas fa-plus-circle me-2"></i>Top Up Wallet
+        </h3>
+
+        {% set fiat_gateways = enabled_gateways.keys() | select('in', ['stripe', 'paypal']) | list %}
+        {% set crypto_gateways = enabled_gateways.keys() | select('in', ['bitcoin', 'ethereum', 'usdt', 'usdc']) | list %}
+
+        {% if not enabled_gateways %}
+        <div style="color: #a0a0a0; text-align: center; padding: 20px 10px;">
+            <i class="fas fa-info-circle fa-2x" style="margin-bottom: 12px; display: block; color: #4a9eff;"></i>
+            No payment methods are currently enabled.<br>
+            <span style="font-size: 13px;">Please contact the administrator to enable a payment gateway.</span>
+        </div>
+        {% else %}
+
+        {% if fiat_gateways %}
+        <div style="margin-bottom: 16px;">
+            <div style="color: #a0a0a0; font-size: 13px; margin-bottom: 8px;">Quick amounts</div>
+            <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                {% for amt in [10, 15, 20, 50, 100] %}
+                <button type="button" class="amount-btn" data-amount="{{ amt }}"
+                    style="background: #1a1a2e; border: 1px solid #4a9eff; color: #4a9eff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
+                    ${{ amt }}
+                </button>
+                {% endfor %}
+            </div>
+        </div>
+        <div style="margin-bottom: 16px;">
+            <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Custom amount</label>
+            <input type="number" id="custom-amount"
+                style="width: 100%; padding: 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                placeholder="Enter amount ($5 – $500)" step="0.01" min="5" max="500">
+        </div>
+        <div style="display: flex; flex-direction: column; gap: 10px; {% if crypto_gateways %}margin-bottom: 16px;{% endif %}">
+            {% for name in fiat_gateways %}
+            {% if name == 'stripe' %}
+            <button class="topup-fiat-btn" data-method="stripe"
+                style="background: #635bff; border: none; color: white; padding: 11px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background .15s;">
+                <i class="fab fa-cc-stripe me-2"></i>Top Up with Stripe
+            </button>
+            {% elif name == 'paypal' %}
+            <button class="topup-fiat-btn" data-method="paypal"
+                style="background: #003087; border: 1px solid #009cde; color: white; padding: 11px; border-radius: 6px; cursor: pointer; font-size: 15px; font-weight: 600; transition: background .15s;">
+                <i class="fab fa-paypal me-2"></i>Top Up with PayPal
+            </button>
+            {% endif %}
+            {% endfor %}
+        </div>
+        {% endif %}
+
+        {% if crypto_gateways %}
+        {% if fiat_gateways %}
+        <hr style="border-color: #0f3460; margin: 4px 0 14px 0;">
+        {% endif %}
+        <div style="color: #a0a0a0; font-size: 13px; margin-bottom: 10px;">
+            <i class="fas fa-coins me-1"></i>Crypto deposit — send to address below
+        </div>
+        {% for name in crypto_gateways %}
+        {% set cfg = enabled_gateways[name] %}
+        {% set address = cfg.get('wallet_address') or cfg.get('address') or '' %}
+        <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
+            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
+                <span style="color: #e0e0e0; font-weight: 600;">
+                    {% if name == 'bitcoin' %}<i class="fab fa-bitcoin me-1" style="color:#f7931a;"></i>
+                    {% elif name == 'ethereum' %}<i class="fab fa-ethereum me-1" style="color:#627eea;"></i>
+                    {% else %}<i class="fas fa-coins me-1" style="color:#26a17b;"></i>
+                    {% endif %}
+                    {{ name | upper }}
+                </span>
+                <button onclick="copyAddress('{{ address }}', this)"
+                    style="background: #4a9eff; border: none; color: white; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
+                    <i class="fas fa-copy me-1"></i>Copy
+                </button>
+            </div>
+            <div style="font-family: monospace; font-size: 12px; color: #a0a0a0; word-break: break-all; background: #0f1631; padding: 8px; border-radius: 4px;">
+                {{ address or 'Address not configured' }}
+            </div>
+            <div style="color: #6c757d; font-size: 11px; margin-top: 6px;">
+                Send {{ name | upper }} to this address. Balance will be credited after on-chain confirmation.
+            </div>
+        </div>
+        {% endfor %}
+        {% endif %}
+
+        {% endif %}
+    </div>
+
+    <!-- Auto Top-Up -->
+    <div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 20px;">
+        <h3 style="margin: 0 0 18px 0; color: #17a2b8;">
+            <i class="fas fa-sync-alt me-2"></i>Auto Top-Up Settings
+        </h3>
+
+        <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
+            <div style="position: relative; width: 48px; height: 26px; flex-shrink: 0;">
+                <input type="checkbox" id="auto-topup-enabled"
+                    {% if wallet.auto_topup_enabled %}checked{% endif %}
+                    style="opacity: 0; width: 0; height: 0; position: absolute;">
+                <label for="auto-topup-enabled" id="toggle-label"
+                    style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #6c757d; border-radius: 26px; transition: .3s;">
+                    <span id="toggle-knob" style="position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s;"></span>
+                </label>
+            </div>
+            <span style="color: #e0e0e0; font-size: 15px;">Enable Auto Top-Up</span>
+        </div>
+
+        <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
+            <div style="margin-bottom: 14px;">
+                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
+                <div style="position: relative;">
+                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #4ade80; font-weight: bold;">$</span>
+                    <input type="number" id="auto-topup-amount"
+                        style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                        value="{{ wallet.auto_topup_amount or '' }}" step="0.01" min="10">
+                </div>
+            </div>
+            <div style="margin-bottom: 14px;">
+                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Trigger when balance falls below</label>
+                <div style="position: relative;">
+                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #ffc107; font-weight: bold;">$</span>
+                    <input type="number" id="auto-topup-threshold"
+                        style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                        value="{{ wallet.auto_topup_threshold or '' }}" step="0.01" min="1">
+                </div>
+            </div>
+            <div style="margin-bottom: 18px;">
+                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Payment method</label>
+                <select id="auto-topup-payment-method"
+                    style="width: 100%; padding: 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 14px;">
+                    {% for name in enabled_gateways.keys() | select('in', ['stripe', 'paypal']) %}
+                    <option value="{{ name }}" {% if wallet.auto_topup_payment_method == name %}selected{% endif %}>
+                        {{ name | capitalize }}
+                    </option>
+                    {% endfor %}
+                </select>
+            </div>
+            <button id="save-auto-topup"
+                style="background: #17a2b8; border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .15s;">
+                <i class="fas fa-save me-2"></i>Save Settings
+            </button>
+        </div>
+
+        {% if not wallet.auto_topup_enabled %}
+        <div style="color: #a0a0a0; font-size: 13px; line-height: 1.6;">
+            Enable auto top-up to automatically reload your wallet when the balance drops below a threshold. This ensures uninterrupted API access.
+        </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Transaction History -->
+<div style="background: #16213e; border: 2px solid #6f42c1; border-radius: 8px; padding: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: #a57bff;">
+        <i class="fas fa-history me-2"></i>Transaction History
+    </h3>
+
+    <div style="overflow-x: auto;">
+        <table style="width: 100%; border-collapse: collapse;">
+            <thead>
+                <tr style="background: #0f3460; color: #e0e0e0;">
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Date</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Type</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Description</th>
+                    <th style="padding: 12px 14px; text-align: right; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Amount</th>
+                    <th style="padding: 12px 14px; text-align: center; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Status</th>
+                </tr>
+            </thead>
+            <tbody id="transaction-list">
+                <tr id="tx-loading">
+                    <td colspan="5" style="padding: 40px; text-align: center; color: #a0a0a0;">
+                        <i class="fas fa-spinner fa-spin fa-2x"></i>
+                        <div style="margin-top: 10px;">Loading transactions…</div>
+                    </td>
+                </tr>
+            </tbody>
+        </table>
+    </div>
+</div>
+{% endblock %}
+
+{% block extra_js %}
+<style>
+.amount-btn:hover, .amount-btn.active {
+    background: #4a9eff !important;
+    color: #fff !important;
+    border-color: #4a9eff !important;
+}
+.topup-fiat-btn[data-method="stripe"]:hover:not(:disabled) { background: #4f49d0 !important; }
+.topup-fiat-btn[data-method="paypal"]:hover:not(:disabled)  { background: #00256b !important; }
+#save-auto-topup:hover { background: #138496 !important; }
+#toggle-label.on     { background: #17a2b8 !important; }
+#toggle-label.on #toggle-knob { transform: translateX(22px); }
+</style>
+
 <script>
-document.addEventListener('DOMContentLoaded', function() {
+document.addEventListener('DOMContentLoaded', function () {
+
+    // ── Amount buttons ──────────────────────────────────────────
     let selectedAmount = null;
-    
+
     document.querySelectorAll('.amount-btn').forEach(btn => {
-        btn.addEventListener('click', function() {
+        btn.addEventListener('click', function () {
             document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
             this.classList.add('active');
-            selectedAmount = this.dataset.amount;
+            selectedAmount = parseFloat(this.dataset.amount);
             document.getElementById('custom-amount').value = '';
         });
     });
-    
-    document.getElementById('custom-amount').addEventListener('input', function() {
+
+    document.getElementById('custom-amount').addEventListener('input', function () {
         document.querySelectorAll('.amount-btn').forEach(b => b.classList.remove('active'));
-        selectedAmount = this.value;
+        selectedAmount = parseFloat(this.value) || null;
     });
-    
-    document.getElementById('auto-topup-enabled').addEventListener('change', function() {
-        document.getElementById('auto-topup-settings').style.display = this.checked ? 'block' : 'none';
-    });
-    
-    // Load transactions
-    fetch('/api/wallet/transactions')
-        .then(res => res.json())
-        .then(transactions => {
-            const list = document.getElementById('transaction-list');
-            transactions.forEach(tx => {
-                const row = document.createElement('tr');
-                row.innerHTML = `
-                    <td>${new Date(tx.created_at).toLocaleDateString()}</td>
-                    <td>${tx.type}</td>
-                    <td class="${tx.amount >= 0 ? 'text-success' : 'text-danger'}">${tx.amount >= 0 ? '+' : ''}$${Math.abs(tx.amount)}</td>
-                    <td><span class="badge bg-secondary">${tx.status}</span></td>
-                `;
-                list.appendChild(row);
+
+    function getAmount() {
+        const custom = parseFloat(document.getElementById('custom-amount').value);
+        return custom || selectedAmount;
+    }
+
+    // ── Fiat top-up buttons ─────────────────────────────────────
+    document.querySelectorAll('.topup-fiat-btn').forEach(btn => {
+        btn.addEventListener('click', function () {
+            const amount = getAmount();
+            if (!amount || amount < 5 || amount > 500) {
+                alert('Please select or enter an amount between $5 and $500.');
+                return;
+            }
+            const method = this.dataset.method;
+            const orig = this.innerHTML;
+            this.disabled = true;
+            this.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i>Processing…';
+            fetch('/dashboard/wallet/topup', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ amount, payment_method: method })
+            })
+            .then(r => r.json())
+            .then(data => {
+                if (data.type === 'stripe' && data.checkout_url) {
+                    window.location.href = data.checkout_url;
+                } else if (data.type === 'paypal' && data.approval_url) {
+                    window.location.href = data.approval_url;
+                } else {
+                    this.disabled = false;
+                    this.innerHTML = orig;
+                    alert(data.error || 'Failed to initiate checkout.');
+                }
+            })
+            .catch(() => {
+                this.disabled = false;
+                this.innerHTML = orig;
+                alert('Network error. Please try again.');
             });
         });
+    });
+
+    // ── Auto top-up toggle ──────────────────────────────────────
+    const toggle   = document.getElementById('auto-topup-enabled');
+    const label    = document.getElementById('toggle-label');
+    const settings = document.getElementById('auto-topup-settings');
+
+    function syncToggle() {
+        if (toggle.checked) {
+            label.classList.add('on');
+            label.style.background = '#17a2b8';
+            document.getElementById('toggle-knob').style.transform = 'translateX(22px)';
+            settings.style.display = 'block';
+        } else {
+            label.classList.remove('on');
+            label.style.background = '#6c757d';
+            document.getElementById('toggle-knob').style.transform = 'translateX(0)';
+            settings.style.display = 'none';
+        }
+    }
+    syncToggle();
+    toggle.addEventListener('change', syncToggle);
+
+    // ── Save auto top-up ────────────────────────────────────────
+    document.getElementById('save-auto-topup').addEventListener('click', function () {
+        const payload = {
+            enabled:          toggle.checked,
+            topup_amount:     parseFloat(document.getElementById('auto-topup-amount').value) || null,
+            threshold_amount: parseFloat(document.getElementById('auto-topup-threshold').value) || null,
+            payment_method:   document.getElementById('auto-topup-payment-method').value || null
+        };
+        fetch('/api/wallet/auto-topup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(payload)
+        })
+        .then(r => r.json())
+        .then(data => {
+            if (data.success) {
+                this.textContent = '✓ Saved';
+                setTimeout(() => { this.innerHTML = '<i class="fas fa-save me-2"></i>Save Settings'; }, 2000);
+            } else {
+                alert(data.error || 'Failed to save settings.');
+            }
+        })
+        .catch(() => alert('Network error. Please try again.'));
+    });
+
+    // ── Transaction history ─────────────────────────────────────
+    const typeLabels = {
+        credit:  '<span style="color:#4ade80;">&#9650; Credit</span>',
+        debit:   '<span style="color:#f87171;">&#9660; Debit</span>',
+        refund:  '<span style="color:#60a5fa;">&#8617; Refund</span>',
+        topup:   '<span style="color:#4ade80;">&#43; Top-Up</span>',
+        payment: '<span style="color:#f87171;">&#8722; Payment</span>',
+    };
+
+    const statusBadge = {
+        completed: 'background:#28a745;color:white;',
+        pending:   'background:#ffc107;color:black;',
+        failed:    'background:#dc3545;color:white;',
+        refunded:  'background:#6c757d;color:white;',
+    };
+
+    fetch('/dashboard/wallet/transactions')
+        .then(r => r.json())
+        .then(transactions => {
+            const list = document.getElementById('transaction-list');
+            document.getElementById('tx-loading').remove();
+
+            if (!transactions || transactions.length === 0) {
+                list.innerHTML = `<tr><td colspan="5" style="padding:40px;text-align:center;color:#a0a0a0;">
+                    <i class="fas fa-receipt fa-3x" style="margin-bottom:12px;display:block;"></i>
+                    No transactions yet.
+                </td></tr>`;
+                return;
+            }
+
+            transactions.forEach((tx, i) => {
+                const date = tx.created_at ? new Date(tx.created_at) : null;
+                const dateStr  = date ? date.toLocaleDateString()  : '—';
+                const timeStr  = date ? date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
+                const typeKey  = (tx.type || '').toLowerCase();
+                const typeHtml = typeLabels[typeKey] || `<span style="color:#e0e0e0;">${tx.type || '—'}</span>`;
+                const amt      = parseFloat(tx.amount) || 0;
+                const amtColor = amt >= 0 ? '#4ade80' : '#f87171';
+                const amtStr   = (amt >= 0 ? '+' : '') + '$' + Math.abs(amt).toFixed(2);
+                const status   = (tx.status || 'unknown').toLowerCase();
+                const badgeStyle = statusBadge[status] || 'background:#6c757d;color:white;';
+                const rowBg    = i % 2 === 0 ? '#1a1a2e' : '#16213e';
+
+                const row = document.createElement('tr');
+                row.style.cssText = `background:${rowBg};border-bottom:1px solid #0f3460;`;
+                row.innerHTML = `
+                    <td style="padding:12px 14px;color:#e0e0e0;">
+                        <div style="font-weight:600;">${dateStr}</div>
+                        <small style="color:#a0a0a0;">${timeStr}</small>
+                    </td>
+                    <td style="padding:12px 14px;">${typeHtml}</td>
+                    <td style="padding:12px 14px;color:#c0c0c0;font-size:13px;">${tx.description || '—'}</td>
+                    <td style="padding:12px 14px;text-align:right;font-weight:700;font-size:16px;color:${amtColor};">${amtStr}</td>
+                    <td style="padding:12px 14px;text-align:center;">
+                        <span style="${badgeStyle}padding:4px 10px;border-radius:10px;font-size:12px;white-space:nowrap;">${tx.status || 'unknown'}</span>
+                    </td>`;
+                list.appendChild(row);
+            });
+        })
+        .catch(() => {
+            document.getElementById('tx-loading').innerHTML =
+                '<td colspan="5" style="padding:30px;text-align:center;color:#f87171;">Failed to load transactions.</td>';
+        });
 });
+
+function copyAddress(addr, btn) {
+    navigator.clipboard.writeText(addr).then(() => {
+        const orig = btn.innerHTML;
+        btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
+        btn.style.background = '#28a745';
+        setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 2000);
+    }).catch(() => alert('Copy failed — please copy the address manually.'));
+}
 </script>
 {% endblock %}

@@ -494,6 +494,8 @@ app = FastAPI(
 
 # Initialize Jinja2 templates with custom globals for proxy-aware URLs
 templates = Jinja2Templates(directory="templates")
+# Add root templates directory to search path for parent template resolution
+templates.env.loader.searchpath.insert(0, "templates")
 
 # Monkey patch TemplateResponse to automatically add dashboard context variables
 original_template_response = templates.TemplateResponse
@@ -8141,9 +8143,13 @@ async def dashboard_wallet(request: Request):
         wallet_manager = WalletManager(db)
         wallet = await wallet_manager.get_wallet(user_id)
 
+        all_gateways = db.get_payment_gateway_settings()
+        enabled_gateways = {k: v for k, v in all_gateways.items() if v.get('enabled', False)}
+
         return templates.TemplateResponse("dashboard/wallet.html", {
             "request": request,
-            "wallet": wallet
+            "wallet": wallet,
+            "enabled_gateways": enabled_gateways,
         })
     except ImportError:
         return HTMLResponse("Wallet functionality not available", status_code=503)
@@ -8154,33 +8160,165 @@ async def dashboard_wallet(request: Request):
             "error": "Failed to load wallet. Please try again later."
         }, status_code=500)
 
+@app.post("/dashboard/wallet/topup")
+async def dashboard_wallet_topup(request: Request):
+    """Session-authenticated wallet top-up — supports all admin-enabled gateways."""
+    from fastapi.responses import JSONResponse
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid request body"}, status_code=400)
+
+    method = (body.get('payment_method') or '').lower()
+    amount = body.get('amount')
+
+    try:
+        amount = float(amount)
+    except (TypeError, ValueError):
+        return JSONResponse({"error": "Invalid amount"}, status_code=400)
+
+    if amount < 5 or amount > 500:
+        return JSONResponse({"error": "Amount must be between $5 and $500"}, status_code=400)
+
+    db = DatabaseRegistry.get_config_database()
+    gateways = db.get_payment_gateway_settings()
+    gw = gateways.get(method, {})
+    if not gw.get('enabled', False):
+        return JSONResponse({"error": f"Payment method '{method}' is not enabled"}, status_code=400)
+
+    # Crypto: return deposit address (manual transfer)
+    crypto_methods = {'bitcoin', 'ethereum', 'usdt', 'usdc'}
+    if method in crypto_methods:
+        address = gw.get('address', '')
+        if not address:
+            return JSONResponse({"error": "Crypto address not configured"}, status_code=503)
+        return JSONResponse({
+            "type": "crypto",
+            "method": method,
+            "address": address,
+            "amount": amount,
+            "network": gw.get('network', ''),
+            "confirmations": gw.get('confirmations', 3),
+        })
+
+    # Stripe: create checkout session
+    if method == 'stripe':
+        try:
+            payment_service = getattr(request.app.state, 'payment_service', None)
+            if payment_service and hasattr(payment_service, 'stripe_handler'):
+                from decimal import Decimal
+                intent = await payment_service.stripe_handler.create_payment_intent(
+                    user_id, Decimal(str(amount)), metadata={"type": "wallet_topup"}
+                )
+                return JSONResponse({"type": "stripe", "client_secret": intent.client_secret})
+            # Fallback: redirect to Stripe-hosted checkout via publishable key
+            import stripe
+            stripe.api_key = gw.get('secret_key', '')
+            session = stripe.checkout.Session.create(
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': 'usd',
+                        'product_data': {'name': 'Wallet Top-Up'},
+                        'unit_amount': int(amount * 100),
+                    },
+                    'quantity': 1,
+                }],
+                mode='payment',
+                success_url=str(request.base_url) + 'dashboard/wallet?topup=success',
+                cancel_url=str(request.base_url) + 'dashboard/wallet?topup=cancelled',
+                metadata={'type': 'wallet_topup', 'user_id': str(user_id)},
+            )
+            return JSONResponse({"type": "stripe", "checkout_url": session.url})
+        except Exception as e:
+            logger.error(f"Stripe top-up error: {e}")
+            return JSONResponse({"error": "Stripe checkout failed. Please try again."}, status_code=502)
+
+    # PayPal: create order
+    if method == 'paypal':
+        try:
+            payment_service = getattr(request.app.state, 'payment_service', None)
+            if payment_service and hasattr(payment_service, 'paypal_handler'):
+                from decimal import Decimal
+                order = await payment_service.paypal_handler.create_order(
+                    user_id, Decimal(str(amount)), metadata={"type": "wallet_topup"}
+                )
+                return JSONResponse({"type": "paypal", "order_id": order.id})
+            # Fallback: direct PayPal redirect
+            client_id = gw.get('client_id', '')
+            sandbox = gw.get('sandbox', True)
+            paypal_base = "https://www.sandbox.paypal.com" if sandbox else "https://www.paypal.com"
+            return JSONResponse({
+                "type": "paypal",
+                "paypal_base": paypal_base,
+                "client_id": client_id,
+                "amount": amount,
+            })
+        except Exception as e:
+            logger.error(f"PayPal top-up error: {e}")
+            return JSONResponse({"error": "PayPal checkout failed. Please try again."}, status_code=502)
+
+    return JSONResponse({"error": f"Unsupported payment method: {method}"}, status_code=400)
+
+
+@app.get("/dashboard/wallet/transactions")
+async def dashboard_wallet_transactions(request: Request, limit: int = 50, offset: int = 0):
+    """Session-authenticated wallet transaction history (used by the wallet dashboard page)."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+    try:
+        from aisbf.payments.wallet.manager import WalletManager
+        db = DatabaseRegistry.get_config_database()
+        wallet_manager = WalletManager(db)
+        transactions = await wallet_manager.get_transactions(user_id, limit=limit, offset=offset)
+        return transactions
+    except Exception as e:
+        logger.error(f"Failed to load wallet transactions: {e}")
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Failed to load transactions"}, status_code=500)
+
+
 @app.get("/dashboard/billing")
 async def dashboard_billing(request: Request):
     """User payment transaction history page"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
+
     db = DatabaseRegistry.get_config_database()
     user_id = request.session.get('user_id')
-    
+
     # Get user payment methods
     payment_methods = db.get_user_payment_methods(user_id)
-    
+
     # Get payment transactions
     transactions = db.get_user_payment_transactions(user_id)
-    
+
     # Get enabled payment gateways
     enabled_gateways = []
     gateways = db.get_payment_gateway_settings()
     for gateway, settings in gateways.items():
         if settings.get('enabled', False):
             enabled_gateways.append(gateway)
-    
+
     # Get user wallet
     currency_settings = db.get_currency_settings()
     currency_code = currency_settings.get('currency_code', 'EUR')
-    wallet = db.get_user_wallet(user_id) or {'balance': '0.00', 'currency_code': currency_code, 'auto_topup_enabled': False}
+    try:
+        from aisbf.payments.wallet.manager import WalletManager
+        wallet_manager = WalletManager(db)
+        wallet = await wallet_manager.get_wallet(user_id)
+    except Exception:
+        wallet = {'balance': '0.00', 'currency_code': currency_code, 'auto_topup_enabled': False}
 
     return templates.TemplateResponse(
         request=request,
