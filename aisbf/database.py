@@ -1898,7 +1898,7 @@ class DatabaseManager:
             conn.commit()
 
     # User API token methods
-    def create_user_api_token(self, user_id: int, token: str, description: str = None) -> int:
+    def create_user_api_token(self, user_id: int, token: str, description: str = None, scope: str = 'api') -> int:
         """
         Create a new API token for a user.
 
@@ -1906,17 +1906,20 @@ class DatabaseManager:
             user_id: User ID
             token: The token string
             description: Optional description
+            scope: Token scope - 'api' (proxy only), 'mcp' (MCP only), or 'both'
 
         Returns:
             Token ID
         """
+        if scope not in ('api', 'mcp', 'both'):
+            scope = 'api'
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                INSERT INTO user_api_tokens (user_id, token, description)
-                VALUES ({placeholder}, {placeholder}, {placeholder})
-            ''', (user_id, token, description))
+                INSERT INTO user_api_tokens (user_id, token, description, scope)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
+            ''', (user_id, token, description, scope))
             conn.commit()
             return cursor.lastrowid
 
@@ -1934,7 +1937,8 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, token, description, created_at, last_used, is_active
+                SELECT id, token, description, created_at, last_used, is_active,
+                       COALESCE(scope, 'api') as scope
                 FROM user_api_tokens
                 WHERE user_id = {placeholder}
                 ORDER BY created_at DESC
@@ -1948,7 +1952,8 @@ class DatabaseManager:
                     'description': row[2],
                     'created_at': row[3],
                     'last_used': row[4],
-                    'is_active': row[5]
+                    'is_active': row[5],
+                    'scope': row[6]
                 })
             return tokens
 
@@ -1966,7 +1971,8 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT u.id, u.username, u.role, t.id as token_id
+                SELECT u.id, u.username, u.role, t.id as token_id,
+                       COALESCE(t.scope, 'api') as scope
                 FROM users u
                 JOIN user_api_tokens t ON u.id = t.user_id
                 WHERE t.token = {placeholder} AND t.is_active = 1 AND u.is_active = 1
@@ -1978,7 +1984,8 @@ class DatabaseManager:
                     'user_id': row[0],
                     'username': row[1],
                     'role': row[2],
-                    'token_id': row[3]
+                    'token_id': row[3],
+                    'scope': row[4]
                 }
             return None
 
@@ -3382,11 +3389,7 @@ def DatabaseManager__initialize_database(self):
         cursor = conn.cursor()
 
         if self.db_type == 'sqlite':
-            # Enable WAL mode for better concurrent access
-            # WAL allows multiple readers and one writer simultaneously
             cursor.execute('PRAGMA journal_mode=WAL')
-
-            # Set busy timeout to 5 seconds for concurrent access
             cursor.execute('PRAGMA busy_timeout=5000')
             auto_increment = 'AUTOINCREMENT'
             timestamp_default = 'CURRENT_TIMESTAMP'
@@ -3396,27 +3399,7 @@ def DatabaseManager__initialize_database(self):
             timestamp_default = 'CURRENT_TIMESTAMP'
             boolean_type = 'TINYINT(1)'
 
-        # ==============================================
-        # SAFETY CHECK: NEVER CREATE USER TABLES IN CACHE DB
-        # ==============================================
         if self.database_type == DatabaseRegistry.TYPE_CONFIG:
-            # ONLY CREATE CONFIG TABLES IN CONFIG DATABASE
-            # Create context_dimensions table for tracking context usage
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS context_dimensions (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     model_name VARCHAR(255) NOT NULL,
-#                     context_size INTEGER,
-#                     condense_context INTEGER,
-#                     condense_method TEXT,
-#                     effective_context INTEGER DEFAULT 0,
-#                     last_updated TIMESTAMP DEFAULT {timestamp_default},
-#                     UNIQUE(provider_id, model_name)
-#                 )
-#             ''')
-# 
-            # Create token_usage table for tracking rate limiting
             cursor.execute(f'''
                 CREATE TABLE IF NOT EXISTS token_usage (
                     id INTEGER PRIMARY KEY {auto_increment},
@@ -3435,611 +3418,80 @@ def DatabaseManager__initialize_database(self):
                 )
             ''')
 
-            # Migration: Add missing columns to token_usage table
+            # Migration: add columns to token_usage for older databases
             try:
                 if self.db_type == 'sqlite':
                     cursor.execute("PRAGMA table_info(token_usage)")
                     columns = [row[1] for row in cursor.fetchall()]
-                    if 'prompt_tokens' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
-                        logger.info("✅ Migration: Added prompt_tokens column to token_usage")
-                    if 'completion_tokens' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
-                        logger.info("✅ Migration: Added completion_tokens column to token_usage")
-                    if 'actual_cost' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
-                        logger.info("✅ Migration: Added actual_cost column to token_usage")
-                    if 'success' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN success BOOLEAN DEFAULT 1')
-                        logger.info("✅ Migration: Added success column to token_usage")
-                    if 'latency_ms' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN latency_ms INTEGER')
-                        logger.info("✅ Migration: Added latency_ms column to token_usage")
-                    if 'error_type' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN error_type VARCHAR(255)')
-                        logger.info("✅ Migration: Added error_type column to token_usage")
-                    if 'token_id' not in columns:
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN token_id INTEGER')
-                        logger.info("✅ Migration: Added token_id column to token_usage")
-                else:  # mysql
-                    # Check for prompt_tokens column
+                    for col, defn in [
+                        ('prompt_tokens', 'INTEGER'),
+                        ('completion_tokens', 'INTEGER'),
+                        ('actual_cost', 'DECIMAL(10,6)'),
+                        ('success', 'BOOLEAN DEFAULT 1'),
+                        ('latency_ms', 'INTEGER'),
+                        ('error_type', 'VARCHAR(255)'),
+                        ('token_id', 'INTEGER'),
+                    ]:
+                        if col not in columns:
+                            cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
+                            logger.info(f"✅ Migration: Added {col} column to token_usage")
+                else:
                     cursor.execute("""
                         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'prompt_tokens'
+                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'token_usage'
                     """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN prompt_tokens INTEGER')
-                        logger.info("✅ Migration: Added prompt_tokens column to token_usage")
-
-                    # Check for completion_tokens column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'completion_tokens'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN completion_tokens INTEGER')
-                        logger.info("✅ Migration: Added completion_tokens column to token_usage")
-
-                    # Check for actual_cost column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'actual_cost'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN actual_cost DECIMAL(10,6)')
-                        logger.info("✅ Migration: Added actual_cost column to token_usage")
-
-                    # Check for success column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'success'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN success BOOLEAN DEFAULT 1')
-                        logger.info("✅ Migration: Added success column to token_usage")
-
-                    # Check for latency_ms column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'latency_ms'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN latency_ms INTEGER')
-                        logger.info("✅ Migration: Added latency_ms column to token_usage")
-
-                    # Check for error_type column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'error_type'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN error_type VARCHAR(255)')
-                        logger.info("✅ Migration: Added error_type column to token_usage")
-
-                    # Check for token_id column
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_NAME = 'token_usage' AND COLUMN_NAME = 'token_id'
-                    """)
-                    if not cursor.fetchone():
-                        cursor.execute('ALTER TABLE token_usage ADD COLUMN token_id INTEGER')
-                        logger.info("✅ Migration: Added token_id column to token_usage")
+                    existing = {row[0] for row in cursor.fetchall()}
+                    for col, defn in [
+                        ('prompt_tokens', 'INTEGER'),
+                        ('completion_tokens', 'INTEGER'),
+                        ('actual_cost', 'DECIMAL(10,6)'),
+                        ('success', 'BOOLEAN DEFAULT 1'),
+                        ('latency_ms', 'INTEGER'),
+                        ('error_type', 'VARCHAR(255)'),
+                        ('token_id', 'INTEGER'),
+                    ]:
+                        if col not in existing:
+                            cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
+                            logger.info(f"✅ Migration: Added {col} column to token_usage")
             except Exception as e:
                 logger.warning(f"Migration check for token_usage columns: {e}")
 
-#
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS admin_settings (
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    setting_key VARCHAR(255) UNIQUE NOT NULL,
+                    setting_value TEXT,
+                    updated_at TIMESTAMP DEFAULT {timestamp_default}
+                )
+            ''')
 
+            cursor.execute(f'''
+                CREATE TABLE IF NOT EXISTS users (
+                    id INTEGER PRIMARY KEY {auto_increment},
+                    username VARCHAR(255) UNIQUE NOT NULL,
+                    email VARCHAR(255) UNIQUE,
+                    display_name VARCHAR(255),
+                    password_hash VARCHAR(255) NOT NULL,
+                    role VARCHAR(50) DEFAULT 'user',
+                    created_by VARCHAR(255),
+                    created_at TIMESTAMP DEFAULT {timestamp_default},
+                    last_login TIMESTAMP NULL,
+                    is_active {boolean_type} DEFAULT 1,
+                    email_verified {boolean_type} DEFAULT 0,
+                    verification_token VARCHAR(255),
+                    verification_token_expires TIMESTAMP NULL,
+                    last_verification_email_sent TIMESTAMP NULL
+                )
+            ''')
 
-#
-# 
-# 
-            # Create indexes for better query performance
-#             try:
-#                 cursor.execute('''
-#                     CREATE INDEX IF NOT EXISTS idx_context_provider_model
-#                     ON context_dimensions(provider_id, model_name)
-#                 ''')
-#             except:
-#                 pass  # Index might already exist
-# 
-#             try:
-#                 cursor.execute('''
-#                     CREATE INDEX IF NOT EXISTS idx_token_provider_model
-#                     ON token_usage(provider_id, model_name)
-#                 ''')
-#             except:
-#                 pass
-# 
-#     try:
-#         cursor.execute('''
-#             CREATE INDEX IF NOT EXISTS idx_token_timestamp
-#             ON token_usage(timestamp)
-#         ''')
-#     except:
-#         pass
-# 
-    # Create model_embeddings table for caching vectorized model descriptions
-#     cursor.execute(f'''
-#         CREATE TABLE IF NOT EXISTS model_embeddings (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     model_name VARCHAR(255) NOT NULL,
-#                     description TEXT,
-#                     embedding TEXT,
-#                     last_updated TIMESTAMP DEFAULT {timestamp_default},
-#                     UNIQUE(provider_id, model_name)
-#                 )
-#             ''')
-# 
-#     try:
-#     # Index creation moved to separate migration
-# 
-    # Create admin settings table for system configuration
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS admin_settings (
-            id INTEGER PRIMARY KEY {auto_increment},
-            setting_key VARCHAR(255) UNIQUE NOT NULL,
-            setting_value TEXT,
-            updated_at TIMESTAMP DEFAULT {timestamp_default}
-        )
-    ''')
+            self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
 
-    # Create users table for multi-user management
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS users (
-            id INTEGER PRIMARY KEY {auto_increment},
-            username VARCHAR(255) UNIQUE NOT NULL,
-            email VARCHAR(255) UNIQUE,
-            display_name VARCHAR(255),
-            password_hash VARCHAR(255) NOT NULL,
-            role VARCHAR(50) DEFAULT 'user',
-            created_by VARCHAR(255),
-            created_at TIMESTAMP DEFAULT {timestamp_default},
-            last_login TIMESTAMP NULL,
-            is_active {boolean_type} DEFAULT 1,
-            email_verified {boolean_type} DEFAULT 0,
-            verification_token VARCHAR(255),
-            verification_token_expires TIMESTAMP NULL,
-            last_verification_email_sent TIMESTAMP NULL
-        )
-    ''')
-# 
-    # Migration: Add display_name column if it doesn't exist
-#     try:
-        # Check if display_name column exists
-#         if self.db_type == 'sqlite':
-#             cursor.execute("PRAGMA table_info(users)")
-#             columns = [row[1] for row in cursor.fetchall()]
-#         else:
-#             cursor.execute("""
-#                 SELECT COLUMN_NAME
-#                 FROM INFORMATION_SCHEMA.COLUMNS
-#                 WHERE TABLE_NAME = 'users'
-#             """)
-#             columns = [row[0] for row in cursor.fetchall()]
-# 
-#         if 'display_name' not in columns:
-#             logger.info("Adding display_name column to users table")
-#             cursor.execute("ALTER TABLE users ADD COLUMN display_name VARCHAR(255)")
-#             conn.commit()
-# 
-            # Populate display_name for existing users
-#             cursor.execute("UPDATE users SET display_name = username WHERE display_name IS NULL")
-#             conn.commit()
-#             logger.info("Migration complete: display_name column added and populated")
-#     except Exception as e:
-#         logger.warning(f"Migration warning (display_name): {e}")
-# 
-            # User-specific configuration tables for multi-user isolation - commented out to fix import
-            # cursor.execute(f'''
-            #     CREATE TABLE IF NOT EXISTS user_providers (
-            #         id INTEGER PRIMARY KEY {auto_increment},
-            #         user_id INTEGER NOT NULL,
-            #         provider_id VARCHAR(255) NOT NULL,
-            #         config TEXT NOT NULL,
-            #         created_at TIMESTAMP DEFAULT {timestamp_default},
-            #         updated_at TIMESTAMP DEFAULT {timestamp_default},
-            #         FOREIGN KEY (user_id) REFERENCES users(id),
-            #         UNIQUE(user_id, provider_id)
-            #     )
-            # ''')
-# 
-            # cursor.execute(f'''
-            #     CREATE TABLE IF NOT EXISTS user_rotations (
-            #         id INTEGER PRIMARY KEY {auto_increment},
-            #         user_id INTEGER NOT NULL,
-            #         rotation_id VARCHAR(255) NOT NULL,
-            #         config TEXT NOT NULL,
-            #         created_at TIMESTAMP DEFAULT {timestamp_default},
-            #         updated_at TIMESTAMP DEFAULT {timestamp_default},
-            #         FOREIGN KEY (user_id) REFERENCES users(id),
-            #         UNIQUE(user_id, rotation_id)
-            #     )
-            # ''')
-# 
-            # cursor.execute(f'''
-            #     CREATE TABLE IF NOT EXISTS user_autoselects (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     autoselect_id VARCHAR(255) NOT NULL,
-#                     config TEXT NOT NULL,
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                     FOREIGN KEY (user_id) REFERENCES users(id),
-#                     UNIQUE(user_id, autoselect_id)
-#                 )
-#             ''')
-# 
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS user_prompts (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     prompt_key VARCHAR(255) NOT NULL,
-#                     content TEXT NOT NULL,
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                     FOREIGN KEY (user_id) REFERENCES users(id),
-#                     UNIQUE(user_id, prompt_key)
-#                 )
-#             ''')
-# 
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS user_api_tokens (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     token VARCHAR(255) UNIQUE NOT NULL,
-#                     description TEXT,
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     last_used TIMESTAMP NULL,
-#                     is_active {boolean_type} DEFAULT 1,
-#                     FOREIGN KEY (user_id) REFERENCES users(id)
-#                 )
-#             ''')
-# 
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS user_token_usage (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     token_id INTEGER,
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     model_name VARCHAR(255) NOT NULL,
-#                     tokens_used INTEGER NOT NULL,
-#                     timestamp TIMESTAMP DEFAULT {timestamp_default},
-#                     FOREIGN KEY (user_id) REFERENCES users(id),
-#                     FOREIGN KEY (token_id) REFERENCES user_api_tokens(id)
-#                 )
-#             ''')
-# 
-            # Create user_auth_files table for storing authentication file metadata
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS user_auth_files (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     file_type VARCHAR(50) NOT NULL,
-#                     original_filename VARCHAR(255) NOT NULL,
-#                     stored_filename VARCHAR(255) NOT NULL,
-#                     file_path TEXT NOT NULL,
-#                     file_size INTEGER,
-#                     mime_type VARCHAR(100),
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                     FOREIGN KEY (user_id) REFERENCES users(id),
-#                     UNIQUE(user_id, provider_id, file_type)
-#                 )
-#             ''')
-# 
-            # Create user_oauth2_credentials table for storing OAuth2 tokens per user/provider
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS user_oauth2_credentials (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER NOT NULL,
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     auth_type VARCHAR(50) NOT NULL,
-#                     credentials TEXT NOT NULL,
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                     FOREIGN KEY (user_id) REFERENCES users(id),
-#                     UNIQUE(user_id, provider_id, auth_type)
-#                 )
-#             ''')
-#             
-            # ==============================================
-            # UNIVERSAL MIGRATIONS - RUN ON EVERY STARTUP
-            # ==============================================
-#             logger.info("Running database migrations...")
-#             
-            # Migration: Create account_tiers table if missing
-#             try:
-#                 if self.db_type == 'sqlite':
-#                     cursor.execute("PRAGMA table_info(account_tiers)")
-#                     if not cursor.fetchall():
-#                         cursor.execute(f'''
-#                             CREATE TABLE account_tiers (
-#                                 id INTEGER PRIMARY KEY {auto_increment},
-#                                 name VARCHAR(255) UNIQUE NOT NULL,
-#                                 description TEXT,
-#                                 price_monthly DECIMAL(10,2) DEFAULT 0.00,
-#                                 price_yearly DECIMAL(10,2) DEFAULT 0.00,
-#                                 is_default {boolean_type} DEFAULT 0,
-#                                 is_active {boolean_type} DEFAULT 1,
-#                                 max_requests_per_day INTEGER DEFAULT -1,
-#                                 max_requests_per_month INTEGER DEFAULT -1,
-#                                 max_providers INTEGER DEFAULT -1,
-#                                 max_rotations INTEGER DEFAULT -1,
-#                                 max_autoselections INTEGER DEFAULT -1,
-#                                 max_rotation_models INTEGER DEFAULT -1,
-#                                 max_autoselection_models INTEGER DEFAULT -1,
-#                                 created_at TIMESTAMP DEFAULT {timestamp_default},
-#                                 updated_at TIMESTAMP DEFAULT {timestamp_default}
-#                             )
-#                         ''')
-#                         conn.commit()
-#                         logger.info("✅ Migration: Created missing account_tiers table")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for account_tiers table: {e}")
-# 
-            # Migration: Add missing columns to account_tiers
-#             try:
-#                 if self.db_type == 'sqlite':
-#                     cursor.execute("PRAGMA table_info(account_tiers)")
-#                     existing_columns = [row[1] for row in cursor.fetchall()]
-#                     tier_columns = [
-#                         ('max_requests_per_day', 'INTEGER DEFAULT -1'),
-#                         ('max_requests_per_month', 'INTEGER DEFAULT -1'),
-#                         ('max_providers', 'INTEGER DEFAULT -1'),
-#                         ('max_rotations', 'INTEGER DEFAULT -1'),
-#                         ('max_autoselections', 'INTEGER DEFAULT -1'),
-#                         ('max_rotation_models', 'INTEGER DEFAULT -1'),
-#                         ('max_autoselection_models', 'INTEGER DEFAULT -1'),
-#                         ('is_default', f'{boolean_type} DEFAULT 0'),
-#                         ('is_active', f'{boolean_type} DEFAULT 1'),
-#                         ('is_visible', f'{boolean_type} DEFAULT 1')
-#                     ]
-#                     col_count = 0
-#                     for col_name, col_def in tier_columns:
-#                         if col_name not in existing_columns:
-#                             cursor.execute(f'ALTER TABLE account_tiers ADD COLUMN {col_name} {col_def}')
-#                             col_count += 1
-#                     if col_count > 0:
-#                         logger.info(f"✅ Migration: Added {col_count} missing columns to account_tiers")
-#                 else:
-                    # MySQL/MariaDB
-#                     cursor.execute("""
-#                         SELECT COLUMN_NAME 
-#                         FROM INFORMATION_SCHEMA.COLUMNS 
-#                         WHERE TABLE_NAME = 'account_tiers' 
-#                         AND TABLE_SCHEMA = DATABASE()
-#                     """)
-#                     existing_columns = [row[0] for row in cursor.fetchall()]
-#                     tier_columns = [
-#                         ('max_requests_per_day', 'INTEGER DEFAULT -1'),
-#                         ('max_requests_per_month', 'INTEGER DEFAULT -1'),
-#                         ('max_providers', 'INTEGER DEFAULT -1'),
-#                         ('max_rotations', 'INTEGER DEFAULT -1'),
-#                         ('max_autoselections', 'INTEGER DEFAULT -1'),
-#                         ('max_rotation_models', 'INTEGER DEFAULT -1'),
-#                         ('max_autoselection_models', 'INTEGER DEFAULT -1'),
-#                         ('is_default', f'{boolean_type} DEFAULT 0'),
-#                         ('is_active', f'{boolean_type} DEFAULT 1'),
-#                         ('is_visible', f'{boolean_type} DEFAULT 1')
-#                     ]
-#                     col_count = 0
-#                     for col_name, col_def in tier_columns:
-#                         if col_name not in existing_columns:
-#                             cursor.execute(f'ALTER TABLE account_tiers ADD COLUMN {col_name} {col_def}')
-#                             col_count += 1
-#                     if col_count > 0:
-#                         conn.commit()
-#                         logger.info(f"✅ Migration: Added {col_count} missing columns to account_tiers")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for account_tiers columns: {e}")
-# 
-            # Migration: Ensure default free tier exists
-#             try:
-#                 cursor.execute(f'SELECT COUNT(*) FROM account_tiers WHERE is_default = 1')
-#                 free_tier_count = cursor.fetchone()[0]
-#                 if free_tier_count == 0:
-#                     cursor.execute(f'''
-#                         INSERT INTO account_tiers
-#                         (name, description, price_monthly, price_yearly, is_default, is_active,
-#                          max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
-#                          max_autoselections, max_rotation_models, max_autoselection_models)
-#                         VALUES
-#                         ('Free Tier', 'Default free account tier with unlimited access', 0.00, 0.00, 1, 1,
-#                          -1, -1, -1, -1, -1, -1, -1)
-#                     ''')
-#                     logger.info("✅ Migration: Inserted default free tier")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for default free tier: {e}")
-# 
-            # Migration: Add tier_id column to users table
-#             try:
-#                 if self.db_type == 'sqlite':
-#                     cursor.execute("PRAGMA table_info(users)")
-#                     columns = [row[1] for row in cursor.fetchall()]
-#                     if 'tier_id' not in columns:
-#                         cursor.execute('ALTER TABLE users ADD COLUMN tier_id INTEGER DEFAULT 1')
-#                         cursor.execute('ALTER TABLE users ADD COLUMN subscription_expires TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added tier_id and subscription_expires columns to users")
-#                 else:
-#                     cursor.execute("""
-#                         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-#                         WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'tier_id'
-#                     """)
-#                     if not cursor.fetchone():
-#                         cursor.execute('ALTER TABLE users ADD COLUMN tier_id INTEGER DEFAULT 1')
-#                         cursor.execute('ALTER TABLE users ADD COLUMN subscription_expires TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added tier_id and subscription_expires columns to users")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for users.tier_id: {e}")
-#             
-            # Migration: Add password reset token columns to users table
-#             try:
-#                 if self.db_type == 'sqlite':
-#                     cursor.execute("PRAGMA table_info(users)")
-#                     columns = [row[1] for row in cursor.fetchall()]
-#                     if 'reset_password_token' not in columns:
-#                         cursor.execute('ALTER TABLE users ADD COLUMN reset_password_token VARCHAR(255)')
-#                         cursor.execute('ALTER TABLE users ADD COLUMN reset_password_token_expires TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added password reset token columns to users")
-#                 else:
-#                     cursor.execute("""
-#                         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-#                         WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'reset_password_token'
-#                     """)
-#                     if not cursor.fetchone():
-#                         cursor.execute('ALTER TABLE users ADD COLUMN reset_password_token VARCHAR(255)')
-#                         cursor.execute('ALTER TABLE users ADD COLUMN reset_password_token_expires TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added password reset token columns to users")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for users.reset_password_token: {e}")
-# 
-            # Migration: Add last_verification_email_sent column to users table
-#             try:
-#                 if self.db_type == 'sqlite':
-#                     cursor.execute("PRAGMA table_info(users)")
-#                     columns = [row[1] for row in cursor.fetchall()]
-#                     if 'last_verification_email_sent' not in columns:
-#                         cursor.execute('ALTER TABLE users ADD COLUMN last_verification_email_sent TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added last_verification_email_sent column to users")
-#                 else:
-#                     cursor.execute("""
-#                         SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-#                         WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'last_verification_email_sent'
-#                     """)
-#                     if not cursor.fetchone():
-#                         cursor.execute('ALTER TABLE users ADD COLUMN last_verification_email_sent TIMESTAMP NULL')
-#                         logger.info("✅ Migration: Added last_verification_email_sent column to users")
-#             except Exception as e:
-#                 logger.warning(f"Migration check for users.last_verification_email_sent: {e}")
-# 
-            # Migration: Create payment_methods, user_subscriptions, payment_transactions tables
-#             for table_name, create_sql in [
-#                 ('payment_methods', f'''
-#                     CREATE TABLE payment_methods (
-#                         id INTEGER PRIMARY KEY {auto_increment},
-#                         user_id INTEGER NOT NULL,
-#                         type VARCHAR(50) NOT NULL,
-#                         identifier VARCHAR(255) NOT NULL,
-#                         is_default {boolean_type} DEFAULT 0,
-#                         is_active {boolean_type} DEFAULT 1,
-#                         metadata TEXT,
-#                         created_at TIMESTAMP DEFAULT {timestamp_default},
-#                         updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                         FOREIGN KEY (user_id) REFERENCES users(id)
-#                     )
-#                 '''),
-#                 ('admin_settings', f'''
-#                     CREATE TABLE admin_settings (
-#                         id INTEGER PRIMARY KEY {auto_increment},
-#                         setting_key VARCHAR(255) UNIQUE NOT NULL,
-#                         setting_value TEXT,
-#                         updated_at TIMESTAMP DEFAULT {timestamp_default}
-#                     )
-#                 '''),
-#                 ('user_subscriptions', f'''
-#                     CREATE TABLE user_subscriptions (
-#                         id INTEGER PRIMARY KEY {auto_increment},
-#                         user_id INTEGER NOT NULL,
-#                         tier_id INTEGER NOT NULL,
-#                         status VARCHAR(50) DEFAULT 'active',
-#                         start_date TIMESTAMP DEFAULT {timestamp_default},
-#                         end_date TIMESTAMP NULL,
-#                         next_billing_date TIMESTAMP NULL,
-#                         trial_end_date TIMESTAMP NULL,
-#                         payment_method_id INTEGER,
-#                         auto_renew {boolean_type} DEFAULT 1,
-#                         created_at TIMESTAMP DEFAULT {timestamp_default},
-#                         updated_at TIMESTAMP DEFAULT {timestamp_default},
-#                         FOREIGN KEY (user_id) REFERENCES users(id),
-#                         FOREIGN KEY (tier_id) REFERENCES account_tiers(id),
-#                         FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id),
-#                         UNIQUE(user_id, tier_id)
-#                     )
-#                 '''),
-#                 ('payment_transactions', f'''
-#                     CREATE TABLE payment_transactions (
-#                         id INTEGER PRIMARY KEY {auto_increment},
-#                         user_id INTEGER NOT NULL,
-#                         tier_id INTEGER,
-#                         subscription_id INTEGER,
-#                         payment_method_id INTEGER,
-#                         amount DECIMAL(10,2) NOT NULL,
-#                         currency VARCHAR(10) DEFAULT 'USD',
-#                         status VARCHAR(50) NOT NULL,
-#                         transaction_type VARCHAR(50) NOT NULL,
-#                         external_transaction_id VARCHAR(255),
-#                         metadata TEXT,
-#                         created_at TIMESTAMP DEFAULT {timestamp_default},
-#                         completed_at TIMESTAMP NULL,
-#                         FOREIGN KEY (user_id) REFERENCES users(id),
-#                         FOREIGN KEY (tier_id) REFERENCES account_tiers(id),
-#                         FOREIGN KEY (subscription_id) REFERENCES user_subscriptions(id),
-#                         FOREIGN KEY (payment_method_id) REFERENCES payment_methods(id)
-#                     )
-#                 ''')
-#             ]:
-#                 try:
-#                     if self.db_type == 'sqlite':
-#                         cursor.execute(f"PRAGMA table_info({table_name})")
-#                         if not cursor.fetchall():
-#                             cursor.execute(create_sql)
-#                             logger.info(f"✅ Migration: Created missing {table_name} table")
-#                     else:
-#                         cursor.execute(f"""
-#                             SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
-#                             WHERE TABLE_NAME = '{table_name}'
-#                         """)
-#                         if not cursor.fetchone():
-#                             cursor.execute(create_sql)
-#                             logger.info(f"✅ Migration: Created missing {table_name} table")
-#                 except Exception as e:
-#                     logger.warning(f"Migration check for {table_name} table: {e}")
-# 
-#             conn.commit()
-#             logger.info("✅ All database migrations completed")
-#             
-#         else:
-            # CACHE DATABASE GETS MINIMAL TABLES ONLY
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS token_usage (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     user_id INTEGER,
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     model_name VARCHAR(255) NOT NULL,
-#                     tokens_used INTEGER NOT NULL,
-#                     timestamp TIMESTAMP DEFAULT {timestamp_default}
-#                 )
-#             ''')
-#             
-#             cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS context_dimensions (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     provider_id VARCHAR(255) NOT NULL,
-#                     model_name VARCHAR(255) NOT NULL,
-#                     context_size INTEGER,
-#                     condense_context INTEGER,
-#                     condense_method TEXT,
-#                     effective_context INTEGER DEFAULT 0,
-#                     last_updated TIMESTAMP DEFAULT {timestamp_default},
-#                     UNIQUE(provider_id, model_name)
-#                 )
-#             ''')
-#             
-        #     logger.info("⚠️ CACHE DATABASE: Only minimal cache tables created - NO USER TABLES")
+        else:
+            self._create_cache_tables(cursor, auto_increment, timestamp_default, boolean_type)
 
-        # Run configuration database migrations if this is a CONFIG database
-    if self.database_type == DatabaseRegistry.TYPE_CONFIG:
-        self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
         conn.commit()
         logger.info(f"Database tables initialized successfully for {self.database_type} database")
 
-
-def DatabaseManager__create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
-    """Create all permanent configuration tables (CONFIG DB ONLY) - UNUSED METHOD"""
-    # Migration code moved to _initialize_database method
-    pass  # Method disabled
 
 def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
     """Create only temporary cache tables (CACHE DB ONLY)"""
@@ -4215,7 +3667,6 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                         updated_at TIMESTAMP DEFAULT {timestamp_default}
                     )
                 ''')
-                conn.commit()
                 logger.info("✅ Migration: Created missing account_tiers table")
         else:
             cursor.execute("""
@@ -4244,28 +3695,40 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                         updated_at TIMESTAMP DEFAULT {timestamp_default}
                     )
                 ''')
-                conn.commit()
                 logger.info("✅ Migration: Created missing account_tiers table")
     except Exception as e:
         logger.warning(f"Migration check for account_tiers table: {e}")
 
     # Migration: Add missing columns to account_tiers
     try:
+        tier_columns = [
+            ('max_requests_per_day', 'INTEGER DEFAULT -1'),
+            ('max_requests_per_month', 'INTEGER DEFAULT -1'),
+            ('max_providers', 'INTEGER DEFAULT -1'),
+            ('max_rotations', 'INTEGER DEFAULT -1'),
+            ('max_autoselections', 'INTEGER DEFAULT -1'),
+            ('max_rotation_models', 'INTEGER DEFAULT -1'),
+            ('max_autoselection_models', 'INTEGER DEFAULT -1'),
+            ('is_default', f'{boolean_type} DEFAULT 0'),
+            ('is_active', f'{boolean_type} DEFAULT 1'),
+            ('is_visible', f'{boolean_type} DEFAULT 1')
+        ]
         if self.db_type == 'sqlite':
             cursor.execute("PRAGMA table_info(account_tiers)")
             existing_columns = [row[1] for row in cursor.fetchall()]
-            tier_columns = [
-                ('max_requests_per_day', 'INTEGER DEFAULT -1'),
-                ('max_requests_per_month', 'INTEGER DEFAULT -1'),
-                ('max_providers', 'INTEGER DEFAULT -1'),
-                ('max_rotations', 'INTEGER DEFAULT -1'),
-                ('max_autoselections', 'INTEGER DEFAULT -1'),
-                ('max_rotation_models', 'INTEGER DEFAULT -1'),
-                ('max_autoselection_models', 'INTEGER DEFAULT -1'),
-                ('is_default', f'{boolean_type} DEFAULT 0'),
-                ('is_active', f'{boolean_type} DEFAULT 1'),
-                ('is_visible', f'{boolean_type} DEFAULT 1')
-            ]
+            col_count = 0
+            for col_name, col_def in tier_columns:
+                if col_name not in existing_columns:
+                    cursor.execute(f'ALTER TABLE account_tiers ADD COLUMN {col_name} {col_def}')
+                    col_count += 1
+            if col_count > 0:
+                logger.info(f"✅ Migration: Added {col_count} missing columns to account_tiers")
+        else:
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'account_tiers'
+            """)
+            existing_columns = {row[0] for row in cursor.fetchall()}
             col_count = 0
             for col_name, col_def in tier_columns:
                 if col_name not in existing_columns:
@@ -4298,54 +3761,43 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
 
     # Migration: Add all missing columns to users table
     try:
+        required_columns = [
+            ('display_name', 'VARCHAR(255)'),
+            ('role', "VARCHAR(50) DEFAULT 'user'"),
+            ('created_by', 'VARCHAR(255)'),
+            ('last_login', 'TIMESTAMP NULL'),
+            ('is_active', f'{boolean_type} DEFAULT 1'),
+            ('email_verified', f'{boolean_type} DEFAULT 0'),
+            ('verification_token', 'VARCHAR(255)'),
+            ('verification_token_expires', 'TIMESTAMP NULL'),
+            ('last_verification_email_sent', 'TIMESTAMP NULL'),
+            ('tier_id', 'INTEGER DEFAULT 1'),
+            ('subscription_expires', 'TIMESTAMP NULL'),
+            ('stripe_customer_id', 'VARCHAR(100)'),
+            ('reset_password_token', 'VARCHAR(255)'),
+            ('reset_password_token_expires', 'TIMESTAMP NULL'),
+            ('profile_pic', 'TEXT'),
+        ]
         if self.db_type == 'sqlite':
             cursor.execute("PRAGMA table_info(users)")
             columns = [row[1] for row in cursor.fetchall()]
-            
-            required_columns = [
-                ('username', 'VARCHAR(255) UNIQUE', 'email'),
-                ('display_name', 'VARCHAR(255)', 'username'),
-                ('role', 'VARCHAR(50) DEFAULT \'user\'', 'password_hash'),
-                ('created_by', 'VARCHAR(255)', 'role'),
-                ('last_login', 'TIMESTAMP NULL', 'created_at'),
-                ('is_active', f'{boolean_type} DEFAULT 1', 'last_login'),
-                ('email_verified', f'{boolean_type} DEFAULT 0', 'is_active'),
-                ('verification_token', 'VARCHAR(255)', 'email_verified'),
-                ('verification_token_expires', 'TIMESTAMP NULL', 'verification_token'),
-                ('last_verification_email_sent', 'TIMESTAMP NULL', 'verification_token_expires'),
-                ('tier_id', 'INTEGER DEFAULT 1', 'updated_at'),
-                ('subscription_expires', 'TIMESTAMP NULL', 'tier_id'),
-                ('stripe_customer_id', 'VARCHAR(100)', 'subscription_expires'),
-                ('reset_password_token', 'VARCHAR(255)', 'stripe_customer_id'),
-                ('reset_password_token_expires', 'TIMESTAMP NULL', 'reset_password_token'),
-                ('profile_pic', 'TEXT', 'reset_password_token_expires')
-            ]
-            
-            for col_name, col_def, after_col in required_columns:
+            for col_name, col_def in required_columns:
                 if col_name not in columns:
                     cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
                     logger.info(f"✅ Migration: Added {col_name} column to users")
-            
-            # Set username = email for existing users
-            if 'username' in required_columns and 'username' not in columns:
-                cursor.execute('UPDATE users SET username = email WHERE username IS NULL')
-                cursor.execute('UPDATE users SET is_active = 1 WHERE is_active IS NULL')
-                cursor.execute('UPDATE users SET role = \'user\' WHERE role IS NULL')
-                logger.info("✅ Migration: Populated username, is_active and role for existing users")
-                
         else:
-            # MySQL: check and add any missing columns
-            for col_name, col_def, _ in required_columns:
-                try:
-                    cursor.execute("""
-                        SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users' AND COLUMN_NAME = %s
-                    """, (col_name,))
-                    if not cursor.fetchone():
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
+            """)
+            existing = {row[0] for row in cursor.fetchall()}
+            for col_name, col_def in required_columns:
+                if col_name not in existing:
+                    try:
                         cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
                         logger.info(f"✅ Migration: Added {col_name} column to users")
-                except Exception as col_e:
-                    logger.warning(f"Migration check for users.{col_name}: {col_e}")
+                    except Exception as col_e:
+                        logger.warning(f"Migration check for users.{col_name}: {col_e}")
     except Exception as e:
         logger.warning(f"Migration check for users table columns: {e}")
 
@@ -4437,6 +3889,149 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
         except Exception as e:
             logger.warning(f"Migration check for {table_name} table: {e}")
 
+
+    # Migration: Create user config tables (providers, rotations, autoselects, prompts, tokens, etc.)
+    for table_name, create_sql in [
+        ('user_providers', f'''
+            CREATE TABLE user_providers (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                provider_id VARCHAR(255) NOT NULL,
+                config TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, provider_id)
+            )
+        '''),
+        ('user_rotations', f'''
+            CREATE TABLE user_rotations (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                rotation_id VARCHAR(255) NOT NULL,
+                config TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, rotation_id)
+            )
+        '''),
+        ('user_autoselects', f'''
+            CREATE TABLE user_autoselects (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                autoselect_id VARCHAR(255) NOT NULL,
+                config TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, autoselect_id)
+            )
+        '''),
+        ('user_prompts', f'''
+            CREATE TABLE user_prompts (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                prompt_key VARCHAR(255) NOT NULL,
+                content TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, prompt_key)
+            )
+        '''),
+        ('user_api_tokens', f'''
+            CREATE TABLE user_api_tokens (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                token VARCHAR(255) UNIQUE NOT NULL,
+                description TEXT,
+                scope VARCHAR(10) DEFAULT 'api',
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                last_used TIMESTAMP NULL,
+                is_active {boolean_type} DEFAULT 1,
+                FOREIGN KEY (user_id) REFERENCES users(id)
+            )
+        '''),
+        ('user_token_usage', f'''
+            CREATE TABLE user_token_usage (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                token_id INTEGER,
+                provider_id VARCHAR(255) NOT NULL,
+                model_name VARCHAR(255) NOT NULL,
+                tokens_used INTEGER NOT NULL,
+                timestamp TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (token_id) REFERENCES user_api_tokens(id)
+            )
+        '''),
+        ('user_auth_files', f'''
+            CREATE TABLE user_auth_files (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                provider_id VARCHAR(255) NOT NULL,
+                file_type VARCHAR(50) NOT NULL,
+                original_filename VARCHAR(255) NOT NULL,
+                stored_filename VARCHAR(255) NOT NULL,
+                file_path TEXT NOT NULL,
+                file_size INTEGER,
+                mime_type VARCHAR(100),
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, provider_id, file_type)
+            )
+        '''),
+        ('user_oauth2_credentials', f'''
+            CREATE TABLE user_oauth2_credentials (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                provider_id VARCHAR(255) NOT NULL,
+                auth_type VARCHAR(50) NOT NULL,
+                credentials TEXT NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, provider_id, auth_type)
+            )
+        '''),
+    ]:
+        try:
+            if self.db_type == 'sqlite':
+                cursor.execute(f"PRAGMA table_info({table_name})")
+                if not cursor.fetchall():
+                    cursor.execute(create_sql)
+                    logger.info(f"✅ Migration: Created {table_name} table")
+            else:
+                cursor.execute("""
+                    SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                    WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s
+                """, (table_name,))
+                if not cursor.fetchone():
+                    cursor.execute(create_sql)
+                    logger.info(f"✅ Migration: Created {table_name} table")
+        except Exception as e:
+            logger.warning(f"Migration check for {table_name} table: {e}")
+
+    # Migration: Add scope column to user_api_tokens if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(user_api_tokens)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if 'scope' not in columns and columns:
+                cursor.execute("ALTER TABLE user_api_tokens ADD COLUMN scope VARCHAR(10) DEFAULT 'api'")
+                logger.info("✅ Migration: Added scope column to user_api_tokens")
+        else:
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_NAME = 'user_api_tokens' AND COLUMN_NAME = 'scope'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE user_api_tokens ADD COLUMN scope VARCHAR(10) DEFAULT 'api'")
+                logger.info("✅ Migration: Added scope column to user_api_tokens")
+    except Exception as e:
+        logger.warning(f"Migration check for user_api_tokens.scope: {e}")
 
     logger.info("✅ All database migrations completed")
 

@@ -350,7 +350,7 @@ document.addEventListener('DOMContentLoaded', function () {
             threshold_amount: parseFloat(document.getElementById('auto-topup-threshold').value) || null,
             payment_method:   'stripe'
         };
-        fetch('/api/wallet/auto-topup', {
+        fetch('/dashboard/wallet/auto-topup', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(payload)

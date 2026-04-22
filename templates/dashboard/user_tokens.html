@@ -276,6 +276,22 @@
                 <label>Description <span style="color:#555;">(optional)</span></label>
                 <input type="text" id="tokenDescription" placeholder="e.g. My app, Home server …">
             </div>
+            <div class="form-group">
+                <label>Scope</label>
+                <div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-top:.3rem;">
+                    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
+                        <input type="radio" name="tokenScope" value="api" checked> API only
+                        <span style="color:#555; font-size:.78rem;">(proxy requests)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
+                        <input type="radio" name="tokenScope" value="mcp"> MCP only
+                        <span style="color:#555; font-size:.78rem;">(agent tools)</span>
+                    </label>
+                    <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
+                        <input type="radio" name="tokenScope" value="both"> Both
+                    </label>
+                </div>
+            </div>
             <div class="form-actions">
                 <button class="btn btn-primary btn-sm" onclick="submitCreateToken()">Create</button>
                 <button class="btn btn-secondary btn-sm" onclick="toggleCreateForm()">Cancel</button>
@@ -309,17 +325,27 @@
             <p style="color:#a0a0a0; font-size:.88rem; margin-bottom:.75rem;">Add the token to every request in the <code style="background:#0f3460; padding:.1rem .35rem; border-radius:3px;">Authorization</code> header:</p>
             <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
 
+            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Token scopes:</p>
+            <table class="ep-table">
+                <thead><tr><th>Scope</th><th>Access</th></tr></thead>
+                <tbody>
+                    <tr><td><code style="color:#60a5fa;">api</code></td><td>Proxy API endpoints only (<code>/api/u/…</code>)</td></tr>
+                    <tr><td><code style="color:#a78bfa;">mcp</code></td><td>MCP tool endpoints only (<code>/mcp/u/…</code>)</td></tr>
+                    <tr><td><code style="color:#4ade80;">both</code></td><td>Both API and MCP endpoints</td></tr>
+                </tbody>
+            </table>
+
             <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Available endpoints:</p>
             <table class="ep-table">
-                <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                <thead><tr><th>Method</th><th>Endpoint</th><th>Scope</th><th>Description</th></tr></thead>
                 <tbody>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/models</code></td>      <td>List your models</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/providers</code></td>    <td>List your providers</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/rotations</code></td>    <td>List your rotations</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/autoselects</code></td>  <td>List your autoselects</td></tr>
-                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/api/u/{{ session.username }}/chat/completions</code></td><td>Chat using your configs</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/mcp/u/{{ session.username }}/tools</code></td>        <td>List MCP tools</td></tr>
-                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/mcp/u/{{ session.username }}/tools/call</code></td>  <td>Call MCP tools</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/models</code></td>      <td><code style="color:#60a5fa;">api</code></td><td>List your models</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/providers</code></td>    <td><code style="color:#60a5fa;">api</code></td><td>List your providers</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/rotations</code></td>    <td><code style="color:#60a5fa;">api</code></td><td>List your rotations</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/autoselects</code></td>  <td><code style="color:#60a5fa;">api</code></td><td>List your autoselects</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/api/u/{{ session.username }}/chat/completions</code></td><td><code style="color:#60a5fa;">api</code></td><td>Chat using your configs</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/mcp/u/{{ session.username }}/tools</code></td>        <td><code style="color:#a78bfa;">mcp</code></td><td>List MCP tools</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/mcp/u/{{ session.username }}/tools/call</code></td>  <td><code style="color:#a78bfa;">mcp</code></td><td>Call MCP tools</td></tr>
                 </tbody>
             </table>
 
@@ -353,7 +379,10 @@ function renderTokens() {
         return;
     }
 
-    list.innerHTML = tokens.map(t => `
+    list.innerHTML = tokens.map(t => {
+        const scopeLabel = {api: 'API', mcp: 'MCP', both: 'API+MCP'}[t.scope || 'api'] || 'API';
+        const scopeColor = {api: '#60a5fa', mcp: '#a78bfa', both: '#4ade80'}[t.scope || 'api'] || '#60a5fa';
+        return `
         <div class="token-card" id="token-${t.id}">
             <div class="token-card-top">
                 <div>
@@ -361,6 +390,7 @@ function renderTokens() {
                     <div class="token-meta">
                         <span><i class="fas fa-calendar-plus"></i> Created ${formatDate(t.created_at)}</span>
                         ${t.last_used ? `<span><i class="fas fa-clock"></i> Last used ${formatDate(t.last_used)}</span>` : ''}
+                        <span style="color:${scopeColor};"><i class="fas fa-shield-halved"></i> ${scopeLabel}</span>
                     </div>
                 </div>
                 <div class="token-actions">
@@ -377,7 +407,7 @@ function renderTokens() {
                 <button class="copy-btn" onclick="copyPartialToken(this, ${JSON.stringify(t.token)})">Copy full</button>
             </div>
         </div>
-    `).join('');
+    `}).join('');
 }
 
 function escHtml(s) {
@@ -404,8 +434,10 @@ function toggleCreateForm() {
 
 function submitCreateToken() {
     const desc = document.getElementById('tokenDescription').value.trim();
+    const scope = document.querySelector('input[name="tokenScope"]:checked')?.value || 'api';
     const formData = new FormData();
     if (desc) formData.append('description', desc);
+    formData.append('scope', scope);
 
     fetch('{{ url_for(request, "/dashboard/user/tokens") }}', {
         method: 'POST',
@@ -425,7 +457,8 @@ function submitCreateToken() {
             description: desc || null,
             created_at: new Date().toISOString(),
             last_used: null,
-            is_active: true
+            is_active: true,
+            scope: data.scope || scope
         });
         renderTokens();
     })

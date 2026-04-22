@@ -1504,6 +1504,20 @@ async def api_token_authorization_middleware(request: Request, call_next):
                         "requested_user": target_username
                     }
                 )
+            
+            # Enforce token scope
+            token_scope = getattr(request.state, 'token_scope', 'both')
+            is_mcp_path = path.startswith("/mcp/u/") or path.startswith("/mcp/v1/u/")
+            if is_mcp_path and token_scope == 'api':
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "This token does not have MCP access. Create a token with 'mcp' or 'both' scope."}
+                )
+            if not is_mcp_path and token_scope == 'mcp':
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "This token does not have API access. Create a token with 'api' or 'both' scope."}
+                )
     
     # --- GLOBAL ENDPOINTS (all other API paths) ---
     else:
@@ -1557,6 +1571,7 @@ async def auth_middleware(request: Request, call_next):
             request.state.user_id = None
             request.state.token_id = None
             request.state.is_global_token = True
+            request.state.token_scope = 'api'  # global tokens are API-scope by default
             request.state.is_admin = True  # Global tokens have admin access
         else:
             # Check user API tokens
@@ -1568,6 +1583,7 @@ async def auth_middleware(request: Request, call_next):
                 request.state.user_id = user_auth['user_id']
                 request.state.token_id = user_auth['token_id']
                 request.state.is_global_token = False
+                request.state.token_scope = user_auth.get('scope', 'api')
                 # Store user role - admin users get full access
                 request.state.is_admin = (user_auth.get('role') == 'admin')
             else:
@@ -1580,6 +1596,7 @@ async def auth_middleware(request: Request, call_next):
         request.state.user_id = None
         request.state.token_id = None
         request.state.is_global_token = False
+        request.state.token_scope = 'both'
 
     # Check for unverified email for logged in dashboard users
     # Only enforce email verification if:
@@ -6771,7 +6788,7 @@ async def dashboard_user_tokens(request: Request):
     )
 
 @app.post("/dashboard/user/tokens")
-async def dashboard_user_tokens_create(request: Request, description: str = Form("")):
+async def dashboard_user_tokens_create(request: Request, description: str = Form(""), scope: str = Form("api")):
     """Create a new user API token"""
     auth_check = require_dashboard_auth(request)
     if auth_check:
@@ -6781,6 +6798,9 @@ async def dashboard_user_tokens_create(request: Request, description: str = Form
     if not user_id:
         return JSONResponse(status_code=401, content={"error": "Not authenticated"})
 
+    if scope not in ('api', 'mcp', 'both'):
+        scope = 'api'
+
     import secrets
 
     db = DatabaseRegistry.get_config_database()
@@ -6789,11 +6809,12 @@ async def dashboard_user_tokens_create(request: Request, description: str = Form
     token = secrets.token_urlsafe(32)
 
     try:
-        token_id = db.create_user_api_token(user_id, token, description.strip() or None)
+        token_id = db.create_user_api_token(user_id, token, description.strip() or None, scope)
         return JSONResponse({
             "message": "Token created successfully",
             "token": token,
-            "token_id": token_id
+            "token_id": token_id,
+            "scope": scope
         })
     except Exception as e:
         return JSONResponse(status_code=500, content={"error": str(e)})
@@ -8318,6 +8339,29 @@ async def dashboard_wallet_transactions(request: Request, limit: int = 50, offse
         logger.error(f"Failed to load wallet transactions: {e}")
         from fastapi.responses import JSONResponse
         return JSONResponse({"error": "Failed to load transactions"}, status_code=500)
+
+
+@app.put("/dashboard/wallet/auto-topup")
+async def dashboard_wallet_auto_topup(request: Request):
+    """Session-authenticated auto-topup configuration (used by the wallet dashboard page)."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+    try:
+        body = await request.json()
+        from aisbf.payments.wallet.manager import WalletManager
+        db = DatabaseRegistry.get_config_database()
+        wallet_manager = WalletManager(db)
+        result = await wallet_manager.configure_auto_topup(user_id, body)
+        from fastapi.responses import JSONResponse
+        return JSONResponse(result)
+    except Exception as e:
+        logger.error(f"Failed to configure auto-topup: {e}")
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Failed to save settings"}, status_code=500)
 
 
 @app.get("/dashboard/billing")
