@@ -271,9 +271,43 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         #start-screen .play-btn:hover {
                             background: #ff5acc;
                         }
+                        #gameover-screen {
+                            position: absolute;
+                            background: #120d18;
+                            padding: 30px;
+                            border: 5px solid #0d0a12;
+                            box-shadow: 0 50px 50px -30px rgba(0,0,0,0.3);
+                            text-align: center;
+                            z-index: 10;
+                            border-radius: 10px;
+                        }
+                        #gameover-screen h2 {
+                            color: #ff76ff;
+                            font-size: 20px;
+                            margin-bottom: 15px;
+                            text-shadow: 0 0 10px #ff76ff;
+                        }
+                        #gameover-screen p {
+                            color: #e9eaee;
+                            font-size: 12px;
+                            margin-bottom: 20px;
+                        }
+                        #gameover-screen .play-btn {
+                            background: #ff76ff;
+                            border: none;
+                            color: #0d0a12;
+                            padding: 15px 30px;
+                            font-family: 'Press Start 2P', cursive;
+                            font-size: 14px;
+                            cursor: pointer;
+                            margin-top: 10px;
+                        }
+                        #gameover-screen .play-btn:hover {
+                            background: #ff5acc;
+                        }
                         canvas {
                             background: #09080a;
-                            border: 2px solid #0d0a12;
+                            border: 2px solid #3e3f43;
                         }
                         #score {
                             position: fixed;
@@ -299,11 +333,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                             <button class="play-btn" onclick="startGame()">Play</button>
                         </div>
                         <canvas id="game-canvas"></canvas>
+                        <div id="gameover-screen" class="hidden">
+                            <h2>🐍 Game Over 🐍</h2>
+                            <p id="gameover-score"></p>
+                            <button class="play-btn" onclick="playAgain()">Play Again</button>
+                        </div>
                     </div>
                     <script>
                         const canvas = document.getElementById('game-canvas');
                         const ctx = canvas.getContext('2d');
                         const startScreen = document.getElementById('start-screen');
+                        const gameoverScreen = document.getElementById('gameover-screen');
                         const scoreDisplay = document.getElementById('score');
                         
                         // Set canvas size
@@ -342,12 +382,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         
                         function placeFood() {
                             food = {
-                                x: Math.floor(Math.random() * (canvas.width - 20)) + 10,
-                                y: Math.floor(Math.random() * (canvas.height - 20)) + 10
+                                x: Math.floor(Math.random() * (canvas.width / 20)) * 20,
+                                y: Math.floor(Math.random() * (canvas.height / 20)) * 20
                             };
-                            // Align to grid
-                            food.x = Math.floor(food.x / 20) * 20 + 10;
-                            food.y = Math.floor(food.y / 20) * 20 + 10;
                         }
                         
                         function startGame() {
@@ -407,22 +444,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                             ctx.fillStyle = '#fac020';
                             snake.forEach((segment, i) => {
                                 ctx.fillStyle = i === 0 ? '#ffd700' : '#fac020';
-                                ctx.fillRect(segment.x - 9, segment.y - 9, 18, 18);
+                                ctx.fillRect(segment.x + 1, segment.y + 1, 18, 18);
                             });
                             
                             // Draw food
                             ctx.fillStyle = '#ee6b71';
                             ctx.beginPath();
-                            ctx.arc(food.x, food.y, 8, 0, Math.PI * 2);
+                            ctx.arc(food.x + 10, food.y + 10, 8, 0, Math.PI * 2);
                             ctx.fill();
                         }
                         
                         function gameOver() {
                             clearInterval(gameLoop);
-                            showAlert('Game Over! Score: ' + score, 'Game Over 🐍').then(() => {
-                                startScreen.classList.remove('hidden');
-                                scoreDisplay.style.display = 'none';
-                            });
+                            document.getElementById('gameover-score').textContent = 'Score: ' + score;
+                            gameoverScreen.classList.remove('hidden');
+                            scoreDisplay.style.display = 'none';
+                        }
+
+                        function playAgain() {
+                            gameoverScreen.classList.add('hidden');
+                            startScreen.classList.remove('hidden');
                         }
                         
                         // Keyboard controls
@@ -457,6 +498,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 var gameWindow = window.open('', 'SnakeGame', 'width=650,height=500');
                 gameWindow.document.write(gameHtml);
                 gameWindow.document.close();
+                gameWindow.focus();
             }
         })();
     </script>
