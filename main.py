@@ -8342,10 +8342,12 @@ async def dashboard_wallet_topup(request: Request):
             payment_service = getattr(request.app.state, 'payment_service', None)
             if payment_service and hasattr(payment_service, 'stripe_handler'):
                 from decimal import Decimal
-                intent = await payment_service.stripe_handler.create_payment_intent(
-                    user_id, Decimal(str(amount)), metadata={"type": "wallet_topup"}
+                intent = await payment_service.stripe_handler.create_topup_intent(
+                    user_id, Decimal(str(amount))
                 )
-                return JSONResponse({"type": "stripe", "client_secret": intent.client_secret})
+                if not intent.get('success'):
+                    return JSONResponse({"error": intent.get('error', 'Stripe error')}, status_code=502)
+                return JSONResponse({"type": "stripe", "client_secret": intent['client_secret']})
             # Fallback: redirect to Stripe-hosted checkout via publishable key
             import stripe
             stripe.api_key = gw.get('secret_key', '')
