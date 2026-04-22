@@ -760,6 +760,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             </div>
             
             <form id="contactForm" onsubmit="submitContactForm(event)">
+                {% if not request.session.logged_in %}
+                <div class="form-group">
+                    <label>Your Email <span style="color: var(--color-error);">*</span></label>
+                    <input type="email" id="contactEmail" required placeholder="your@email.com" style="width: 100%;">
+                </div>
+                {% endif %}
                 <div class="form-group">
                     <label>Type</label>
                     <select id="contactType" required>
@@ -838,14 +844,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             btn.textContent = 'Sending...';
             status.textContent = '';
             
+            const emailEl = document.getElementById('contactEmail');
+            const payload = {
+                type: document.getElementById('contactType').value,
+                title: document.getElementById('contactTitle').value,
+                message: document.getElementById('contactMessage').value
+            };
+            if (emailEl) payload.email = emailEl.value;
+
             fetch('/dashboard/contact', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
-                body: JSON.stringify({
-                    type: document.getElementById('contactType').value,
-                    title: document.getElementById('contactTitle').value,
-                    message: document.getElementById('contactMessage').value
-                })
+                body: JSON.stringify(payload)
             })
             .then(response => response.json())
             .then(data => {

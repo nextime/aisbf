@@ -4783,12 +4783,20 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
-            
-            # Save each rotation to database
+
             rotations = rotations_data.get('rotations', {})
+
+            # Delete rotations that are no longer present
+            existing_rotations = db.get_user_rotations(current_user_id)
+            existing_rotation_keys = {r['rotation_id'] for r in existing_rotations}
+            new_rotation_keys = set(rotations.keys())
+            for rotation_key in existing_rotation_keys - new_rotation_keys:
+                db.delete_user_rotation(current_user_id, rotation_key)
+
+            # Save each rotation to database
             for rotation_key, rotation_config in rotations.items():
                 db.save_user_rotation(current_user_id, rotation_key, rotation_config)
-            
+
             logger.info(f"Saved {len(rotations)} rotation(s) to database for user {current_user_id}")
         
         if is_config_admin:
@@ -5031,11 +5039,18 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
-            
+
+            # Delete autoselects that are no longer present
+            existing_autoselects = db.get_user_autoselects(current_user_id)
+            existing_autoselect_keys = {a['autoselect_id'] for a in existing_autoselects}
+            new_autoselect_keys = set(autoselect_data.keys())
+            for autoselect_key in existing_autoselect_keys - new_autoselect_keys:
+                db.delete_user_autoselect(current_user_id, autoselect_key)
+
             # Save each autoselect to database
             for autoselect_key, autoselect_config in autoselect_data.items():
                 db.save_user_autoselect(current_user_id, autoselect_key, autoselect_config)
-            
+
             logger.info(f"Saved {len(autoselect_data)} autoselect(s) to database for user {current_user_id}")
         
         if is_config_admin:
@@ -14506,23 +14521,29 @@ async def dashboard_qwen_auth_logout(request: Request):
 @app.post("/dashboard/contact")
 async def dashboard_contact(request: Request):
     """Handle contact form submissions"""
-    auth_check = require_dashboard_auth(request)
-    if auth_check:
-        return auth_check
-    
+    is_authenticated = not require_dashboard_auth(request)
+
     try:
         data = await request.json()
         message_type = data.get('type')
         title = data.get('title')
         message = data.get('message')
-        
+
         if not all([message_type, title, message]):
             return JSONResponse({'success': False, 'error': 'All fields are required'}, status_code=400)
-        
-        # Get user info
+
+        # Get user info — for unauthenticated users, require a reply-to email
         user_id = request.session.get('user_id')
         username = request.session.get('username', 'Unknown')
-        email = request.session.get('email', 'No email provided')
+        email = request.session.get('email')
+
+        if not is_authenticated:
+            provided_email = data.get('email', '').strip()
+            if not provided_email:
+                return JSONResponse({'success': False, 'error': 'Email is required'}, status_code=400)
+            email = provided_email
+            username = 'Guest'
+            user_id = None
         
         # Get SMTP config
         from aisbf.config import get_config
@@ -14542,7 +14563,11 @@ async def dashboard_contact(request: Request):
         msg['Subject'] = f"[AISBF Contact] {message_type.upper()}: {title}"
         msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>"
         msg['To'] = "stefy@aisbf.cloud"
+        if email:
+            msg['Reply-To'] = email
         
+        email_display = email or 'No email provided'
+
         # Create email content
         text = f"""
 Contact Form Submission:
@@ -14550,9 +14575,9 @@ Contact Form Submission:
 Type: {message_type}
 Title: {title}
 
-User ID: {user_id}
+User ID: {user_id or 'Guest (not logged in)'}
 Username: {username}
-Email: {email}
+Email: {email_display}
 
 Message:
 {message}
@@ -14565,9 +14590,9 @@ Message:
     <p><strong>Type:</strong> {message_type}</p>
     <p><strong>Title:</strong> {title}</p>
     <br>
-    <p><strong>User ID:</strong> {user_id}</p>
+    <p><strong>User ID:</strong> {user_id or 'Guest (not logged in)'}</p>
     <p><strong>Username:</strong> {username}</p>
-    <p><strong>Email:</strong> {email}</p>
+    <p><strong>Email:</strong> {email_display}</p>
     <br>
     <p><strong>Message:</strong></p>
     <pre>{message}</pre>
