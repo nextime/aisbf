@@ -289,7 +289,7 @@
 <!-- Hero -->
 <div class="hero">
     <div class="hero-avatar">
-        <img src="https://www.gravatar.com/avatar/{{ session.email|md5 if session.email else '' }}?s=128&d=identicon" alt="avatar">
+        <img src="{{ session.profile_pic if session.profile_pic else 'https://www.gravatar.com/avatar/' ~ (session.email|md5 if session.email else '') ~ '?s=128&d=identicon' }}" alt="avatar">
     </div>
     <div class="hero-text">
         <h2>Welcome back, {{ display_name }}!</h2>

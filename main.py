@@ -2581,6 +2581,7 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['email'] = user.get('email') or ''
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
+        request.session['profile_pic'] = user.get('profile_pic') or ''
         request.session['remember_me'] = remember_me
         request.session['email_verified'] = user['email_verified']
         if remember_me:
@@ -3298,9 +3299,11 @@ async def dashboard_profile_save(request: Request, username: str = Form(...), di
             profile_pic_data = f"data:{content_type};base64,{base64.b64encode(data).decode()}"
 
         db.update_user_profile(user_id, username, None, display_name if display_name else None, profile_pic_data)
-        # Update session with new username and display_name
+        # Update session with new username, display_name, and profile_pic
         request.session['username'] = username
         request.session['display_name'] = display_name or ''
+        if profile_pic_data is not None:
+            request.session['profile_pic'] = profile_pic_data
         
         return RedirectResponse(url=url_for(request, "/dashboard/profile?success=Profile updated successfully"), status_code=303)
     except Exception as e:
@@ -3702,6 +3705,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
+            request.session['profile_pic'] = existing_user.get('profile_pic') or ''
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
 
@@ -3893,6 +3897,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
+            request.session['profile_pic'] = existing_user.get('profile_pic') or ''
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
 

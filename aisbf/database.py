@@ -892,7 +892,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, email, display_name, role, is_active, email_verified
+                SELECT id, username, email, display_name, role, is_active, email_verified, profile_pic
                 FROM users
                 WHERE email = {placeholder}
             ''', (email,))
@@ -906,7 +906,8 @@ class DatabaseManager:
                     'display_name': row[3] or row[1],  # Default to username if display_name empty
                     'role': row[4],
                     'is_active': row[5],
-                    'email_verified': row[6]
+                    'email_verified': row[6],
+                    'profile_pic': row[7] or None
                 }
             return None
 
@@ -924,7 +925,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, email, display_name, role, is_active, email_verified, created_at, last_verification_email_sent
+                SELECT id, username, email, display_name, role, is_active, email_verified, created_at, last_verification_email_sent, profile_pic
                 FROM users
                 WHERE id = {placeholder}
             ''', (user_id,))
@@ -940,7 +941,8 @@ class DatabaseManager:
                     'is_active': row[5],
                     'email_verified': row[6],
                     'created_at': row[7],
-                    'last_verification_email_sent': row[8]
+                    'last_verification_email_sent': row[8],
+                    'profile_pic': row[9] or None
                 }
             return None
 
