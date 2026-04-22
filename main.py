@@ -680,16 +680,21 @@ def initialize_app(custom_config_dir=None):
 async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None) -> list:
     """Fetch models from provider API and cache them"""
     global _model_cache, _model_cache_timestamps
-    
+
+    logger.debug(f"=== FETCH_PROVIDER_MODELS START: {provider_id} ===")
     try:
         logger.debug(f"Fetching models from provider: {provider_id} (user_id: {user_id})")
+
         # Create request handler with correct user context
+        logger.debug(f"Creating RequestHandler for provider '{provider_id}' with user_id: {user_id}")
         request_handler = RequestHandler(user_id=user_id)
-        
+        logger.debug(f"RequestHandler created successfully for provider '{provider_id}'")
+
         # Create a dummy request object for the handler
+        logger.debug(f"Creating dummy request object for provider '{provider_id}'")
         from starlette.requests import Request
         from starlette.datastructures import Headers
-        
+
         scope = {
             "type": "http",
             "method": "GET",
@@ -698,19 +703,27 @@ async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None)
             "path": f"/api/{provider_id}/models",
         }
         dummy_request = Request(scope)
-        
+        logger.debug(f"Dummy request created for path: {scope['path']}")
+
         # Fetch models from provider API (use user context if available)
+        logger.debug(f"Calling handle_model_list for provider '{provider_id}'")
         models = await request_handler.handle_model_list(dummy_request, provider_id)
+        logger.debug(f"handle_model_list returned {len(models) if models else 0} models for provider '{provider_id}'")
 
         # Cache the results - separate cache for users vs global
         cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
         _model_cache[cache_key] = models
         _model_cache_timestamps[cache_key] = time.time()
-        
+
         logger.info(f"Cached {len(models)} models from provider: {provider_id}")
+        logger.debug(f"=== FETCH_PROVIDER_MODELS SUCCESS: {provider_id} ===")
         return models
     except Exception as e:
-        logger.warning(f"Failed to fetch models from provider {provider_id}: {e}")
+        logger.error(f"=== FETCH_PROVIDER_MODELS FAILED: {provider_id} ===")
+        logger.error(f"Failed to fetch models from provider {provider_id}: {e}")
+        logger.debug(f"Error type: {type(e).__name__}")
+        logger.debug(f"Error details: {str(e)}", exc_info=True)
+        logger.debug(f"=== FETCH_PROVIDER_MODELS END (FAILED): {provider_id} ===")
         return []
 
 async def refresh_model_cache():
@@ -1081,72 +1094,116 @@ async def startup_event():
     
     # Pre-fetch models at startup for providers without local model config
     # For Kilo providers, check API key, OAuth2 file credentials, and database-stored credentials
+    logger.info("=== STARTUP MODEL PRE-FETCHING ===")
     logger.info("Pre-fetching models from providers with dynamic model lists...")
     prefetch_count = 0
+    total_providers_checked = 0
+
     for provider_id, provider_config in config.providers.items():
+        total_providers_checked += 1
+        logger.debug(f"Checking provider '{provider_id}' for model pre-fetching...")
+
         if not (hasattr(provider_config, 'models') and provider_config.models):
+            logger.debug(f"Provider '{provider_id}' has no local model config, attempting pre-fetch")
+
             # For Kilo providers, check if any authentication method is available
             provider_type = getattr(provider_config, 'type', '')
             if provider_type in ('kilo', 'kilocode'):
+                logger.debug(f"Kilo provider '{provider_id}' detected, validating authentication...")
                 has_valid_auth = False
-                
+
                 # Check 1: API key
+                logger.debug(f"  Checking API key for provider '{provider_id}'...")
                 api_key = getattr(provider_config, 'api_key', None)
                 if api_key and not api_key.startswith('YOUR_'):
                     has_valid_auth = True
-                    logger.info(f"Kilo provider '{provider_id}' has API key configured, fetching models...")
-                
+                    logger.info(f"  ✓ Kilo provider '{provider_id}' has API key configured, will fetch models")
+                else:
+                    logger.debug(f"  ✗ API key not configured or placeholder for provider '{provider_id}'")
+
                 # Check 2: OAuth2 credentials file
                 if not has_valid_auth:
+                    logger.debug(f"  Checking OAuth2 credentials file for provider '{provider_id}'...")
                     try:
                         from aisbf.auth.kilo import KiloOAuth2
                         kilo_config = getattr(provider_config, 'kilo_config', None)
                         credentials_file = None
                         api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
-                        
+
                         if kilo_config and isinstance(kilo_config, dict):
                             credentials_file = kilo_config.get('credentials_file')
+                            logger.debug(f"    Credentials file from config: {credentials_file}")
                             # Override api_base from kilo_config if present
                             if 'api_base' in kilo_config and kilo_config['api_base']:
                                 api_base = kilo_config['api_base']
-                        
+                                logger.debug(f"    API base from config: {api_base}")
+
+                        logger.debug(f"    Attempting OAuth2 authentication check...")
                         oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
                         if oauth2.is_authenticated():
                             has_valid_auth = True
-                            logger.info(f"Kilo provider '{provider_id}' has valid OAuth2 credentials file, fetching models...")
+                            logger.info(f"  ✓ Kilo provider '{provider_id}' has valid OAuth2 credentials file, will fetch models")
+                        else:
+                            logger.debug(f"  ✗ OAuth2 not authenticated for provider '{provider_id}'")
                     except Exception as e:
-                        logger.debug(f"Kilo provider '{provider_id}' OAuth2 file check failed: {e}")
-                
+                        logger.warning(f"  ✗ Kilo provider '{provider_id}' OAuth2 file check failed: {e}")
+                        logger.debug(f"    OAuth2 check error details: {type(e).__name__}: {str(e)}", exc_info=True)
+
                 # Check 3: Database-stored credentials (uploaded via dashboard)
                 if not has_valid_auth:
+                    logger.debug(f"  Checking database credentials for provider '{provider_id}'...")
                     try:
                         db = DatabaseRegistry.get_config_database()
                         if db:
+                            logger.debug(f"    Database available, checking for uploaded credentials...")
                             # Check for uploaded credentials files for this provider
                             auth_files = db.get_user_auth_files(0, provider_id)  # 0 for admin/global
                             if auth_files:
+                                logger.debug(f"    Found {len(auth_files)} auth files for provider '{provider_id}'")
                                 for auth_file in auth_files:
                                     file_type = auth_file.get('file_type', '')
                                     file_path = auth_file.get('file_path', '')
+                                    logger.debug(f"      Checking auth file: type={file_type}, path={file_path}")
                                     if file_type in ('credentials', 'kilo_credentials', 'config') and file_path:
                                         if os.path.exists(file_path):
                                             has_valid_auth = True
-                                            logger.info(f"Kilo provider '{provider_id}' has uploaded credentials in database, fetching models...")
+                                            logger.info(f"  ✓ Kilo provider '{provider_id}' has uploaded credentials in database, will fetch models")
+                                            logger.debug(f"    Using credentials file: {file_path}")
                                             break
+                                        else:
+                                            logger.debug(f"    Credentials file does not exist: {file_path}")
+                            else:
+                                logger.debug(f"    No auth files found in database for provider '{provider_id}'")
+                        else:
+                            logger.debug(f"    Database not available for credentials check")
                     except Exception as e:
-                        logger.debug(f"Kilo provider '{provider_id}' database credentials check failed: {e}")
-                
+                        logger.warning(f"  ✗ Kilo provider '{provider_id}' database credentials check failed: {e}")
+                        logger.debug(f"    Database credentials check error details: {type(e).__name__}: {str(e)}", exc_info=True)
+
                 if not has_valid_auth:
-                    logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no API key, OAuth2 file, or uploaded credentials)")
+                    logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no valid authentication method found)")
+                    logger.debug(f"  Authentication methods checked: API key, OAuth2 file, database credentials")
                     continue
-            
+            else:
+                logger.debug(f"Provider '{provider_id}' is not Kilo type (type: {provider_type}), proceeding with fetch")
+
+            logger.info(f"Attempting to pre-fetch models from provider '{provider_id}'...")
             try:
                 models = await fetch_provider_models(provider_id)
                 if models:
                     prefetch_count += 1
-                    logger.info(f"Pre-fetched {len(models)} models from provider: {provider_id}")
+                    logger.info(f"✓ Successfully pre-fetched {len(models)} models from provider: {provider_id}")
+                    logger.debug(f"  Models: {[m.get('id', m.get('name', 'unknown')) for m in models[:5]]}" + (f" ... and {len(models)-5} more" if len(models) > 5 else ""))
+                else:
+                    logger.warning(f"✗ Pre-fetch returned empty model list from provider '{provider_id}'")
             except Exception as e:
-                logger.warning(f"Failed to pre-fetch models from provider {provider_id}: {e}")
+                logger.error(f"✗ Failed to pre-fetch models from provider '{provider_id}': {e}")
+                logger.debug(f"  Pre-fetch error details for '{provider_id}': {type(e).__name__}: {str(e)}", exc_info=True)
+        else:
+            logger.debug(f"Provider '{provider_id}' has local model config ({len(provider_config.models)} models), skipping pre-fetch")
+
+    logger.info(f"=== MODEL PRE-FETCHING COMPLETE ===")
+    logger.info(f"Checked {total_providers_checked} providers, successfully pre-fetched from {prefetch_count} providers")
     
     if prefetch_count > 0:
         logger.info(f"Pre-fetched models from {prefetch_count} provider(s) at startup")
@@ -1172,8 +1229,9 @@ async def startup_event():
             logger.info(f"  Type: {provider_config.type}")
             logger.info(f"  Endpoint: {provider_config.endpoint}")
             logger.info(f"  API Key Required: {provider_config.api_key_required}")
-            
-            # Check if API key is configured
+
+            # Check authentication configuration
+            provider_type = getattr(provider_config, 'type', '')
             if provider_config.api_key_required:
                 if provider_config.api_key:
                     logger.info(f"  API Key: Configured ✓")
@@ -1182,10 +1240,68 @@ async def startup_event():
                     logger.warning(f"  API Key: NOT CONFIGURED ✗")
                     logger.warning(f"  Status: WILL BE SKIPPED - API key required but not provided")
                     logger.warning(f"  Action: Add api_key to provider configuration in providers.json")
+            elif provider_type in ('kilo', 'kilocode'):
+                # Special handling for Kilo providers with multiple auth methods
+                logger.info(f"  Authentication: Multiple methods supported")
+                auth_methods = []
+
+                # Check API key
+                api_key = getattr(provider_config, 'api_key', None)
+                if api_key and not api_key.startswith('YOUR_'):
+                    auth_methods.append("API Key ✓")
+                else:
+                    auth_methods.append("API Key ✗")
+
+                # Check OAuth2 file
+                try:
+                    from aisbf.auth.kilo import KiloOAuth2
+                    kilo_config = getattr(provider_config, 'kilo_config', None)
+                    credentials_file = None
+                    if kilo_config and isinstance(kilo_config, dict):
+                        credentials_file = kilo_config.get('credentials_file')
+                    oauth2 = KiloOAuth2(credentials_file=credentials_file)
+                    if oauth2.is_authenticated():
+                        auth_methods.append("OAuth2 File ✓")
+                    else:
+                        auth_methods.append("OAuth2 File ✗")
+                except:
+                    auth_methods.append("OAuth2 File ✗ (check failed)")
+
+                # Check database credentials
+                try:
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        auth_files = db.get_user_auth_files(0, provider_id)
+                        if auth_files:
+                            has_valid_file = False
+                            for auth_file in auth_files:
+                                file_type = auth_file.get('file_type', '')
+                                file_path = auth_file.get('file_path', '')
+                                if file_type in ('credentials', 'kilo_credentials', 'config') and file_path and os.path.exists(file_path):
+                                    has_valid_file = True
+                                    break
+                            if has_valid_file:
+                                auth_methods.append("Database Credentials ✓")
+                            else:
+                                auth_methods.append("Database Credentials ✗ (files exist but invalid)")
+                        else:
+                            auth_methods.append("Database Credentials ✗ (no files)")
+                    else:
+                        auth_methods.append("Database Credentials ✗ (no database)")
+                except:
+                    auth_methods.append("Database Credentials ✗ (check failed)")
+
+                logger.info(f"  Auth Methods: {', '.join(auth_methods)}")
+
+                if any("✓" in method for method in auth_methods):
+                    logger.info(f"  Status: Ready to use (at least one auth method available)")
+                else:
+                    logger.warning(f"  Status: WILL BE SKIPPED - No valid authentication methods found")
+                    logger.warning(f"  Action: Configure API key, OAuth2 credentials file, or upload credentials via dashboard")
             else:
                 logger.info(f"  API Key: Not required")
                 logger.info(f"  Status: Ready to use")
-            
+
             # Show model count if available
             if provider_config.models:
                 logger.info(f"  Models Configured: {len(provider_config.models)}")
@@ -1194,7 +1310,7 @@ async def startup_event():
                 if len(provider_config.models) > 3:
                     logger.info(f"    ... and {len(provider_config.models) - 3} more")
             else:
-                logger.info(f"  Models Configured: None (will use provider's default models)")
+                logger.info(f"  Models Configured: None (will use provider's default models or dynamic fetching)")
         
         logger.info("")
         logger.info("=" * 80)
@@ -1223,7 +1339,7 @@ async def startup_event():
             'encryption_key': encryption_key,
             'encryption_key_source': encryption_key_source,
             'base_url': os.getenv('BASE_URL', 'http://localhost:17765'),
-            'currency_code': 'USD',
+            'currency_code': 'EUR',
             'btc_confirmations': 3,
             'eth_confirmations': 12
         }
@@ -1953,8 +2069,11 @@ async def delete_payment_method(payment_method_id: int, request: Request):
     return result
 
 # Wallet API routes
-from aisbf.payments.wallet.routes import router as wallet_router
-app.include_router(wallet_router)
+try:
+    from aisbf.payments.wallet.routes import router as wallet_router
+    app.include_router(wallet_router)
+except ImportError:
+    logger.warning("Wallet routes not available - wallet functionality disabled")
 
 
 @app.post("/api/webhooks/stripe")
@@ -7190,16 +7309,27 @@ async def api_get_crypto_prices(request: Request):
         
         # Get currency settings
         currency_settings = db.get_currency_settings()
-        currency_code = currency_settings.get('currency_code', 'USD')
+        currency_code = currency_settings.get('currency_code', 'EUR')
         
         result = {}
+        
+        # Cache for supported pairs
+        supported_pairs_cache = getattr(asyncio, '__pair_cache', {})
+        cache_expiry = getattr(asyncio, '__pair_cache_expiry', 0)
+        
+        if time.time() > cache_expiry:
+            supported_pairs_cache = {}
+            cache_expiry = time.time() + 86400  # 24 hour cache
+            setattr(asyncio, '__pair_cache', supported_pairs_cache)
+            setattr(asyncio, '__pair_cache_expiry', cache_expiry)
         
         # Fetch prices for each cryptocurrency
         for crypto_symbol, crypto_name in [('BTC', 'btc'), ('ETH', 'eth'), ('USDT', 'usdt'), ('USDC', 'usdc')]:
             prices = {}
             enabled_prices = []
+            cache_key = f"{crypto_symbol}:{currency_code}"
             
-            # Fetch from Coinbase
+            # Coinbase
             if sources.get('coinbase', False):
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
@@ -7209,63 +7339,85 @@ async def api_get_crypto_prices(request: Request):
                             price = float(data['data']['amount'])
                             prices['coinbase'] = price
                             enabled_prices.append(price)
+                            supported_pairs_cache[f"coinbase:{cache_key}"] = True
                 except Exception as e:
-                    logger.warning(f"Error fetching Coinbase {crypto_symbol} price: {e}")
+                    supported_pairs_cache[f"coinbase:{cache_key}"] = False
+                    logger.debug(f"Coinbase does not support {crypto_symbol}/{currency_code} pair: {e}")
                     prices['coinbase'] = None
             else:
                 prices['coinbase'] = None
             
-            # Fetch from Binance
+            # Binance
             if sources.get('binance', False):
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
-                        # Binance uses USDT pairs for most, but handle stablecoins differently
-                        if crypto_symbol in ['USDT', 'USDC']:
-                            symbol = f'{crypto_symbol}USDT' if crypto_symbol == 'USDC' else 'USDCUSDT'
-                        else:
-                            symbol = f'{crypto_symbol}USDT' if currency_code == 'USD' else f'{crypto_symbol}{currency_code}'
+                        # Try direct pair first
+                        symbol = f"{crypto_symbol}{currency_code}"
                         response = await client.get(f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}')
-                        if response.status_code == 200:
+                        
+                        if response.status_code != 200:
+                            # Fallback to USDT pair if direct pair not available
+                            symbol = f"{crypto_symbol}USDT"
+                            response = await client.get(f'https://api.binance.com/api/v3/ticker/price?symbol={symbol}')
+                            
+                            if response.status_code == 200:
+                                # Get USD/EUR rate if needed
+                                if currency_code != 'USD':
+                                    usd_resp = await client.get('https://api.coinbase.com/v2/prices/USD-EUR/spot')
+                                    if usd_resp.status_code == 200:
+                                        usd_eur = float(usd_resp.json()['data']['amount'])
+                                        data = response.json()
+                                        price = float(data['price']) * usd_eur
+                                        prices['binance'] = price
+                                        enabled_prices.append(price)
+                                        supported_pairs_cache[f"binance:{cache_key}"] = "usdt_fallback"
+                        else:
                             data = response.json()
                             price = float(data['price'])
                             prices['binance'] = price
                             enabled_prices.append(price)
+                            supported_pairs_cache[f"binance:{cache_key}"] = True
+                            
                 except Exception as e:
-                    logger.warning(f"Error fetching Binance {crypto_symbol} price: {e}")
+                    supported_pairs_cache[f"binance:{cache_key}"] = False
+                    logger.debug(f"Binance does not support {crypto_symbol}/{currency_code} pair: {e}")
                     prices['binance'] = None
             else:
                 prices['binance'] = None
             
-            # Fetch from Kraken
+            # Kraken
             if sources.get('kraken', False):
                 try:
                     async with httpx.AsyncClient(timeout=10.0) as client:
-                        # Kraken uses different symbols
-                        if crypto_symbol == 'BTC':
-                            pair = f'XXBTZ{currency_code}'
-                        elif crypto_symbol == 'ETH':
-                            pair = f'XETHZ{currency_code}'
-                        elif crypto_symbol == 'USDT':
-                            pair = f'USDTZ{currency_code}'
-                        elif crypto_symbol == 'USDC':
-                            pair = f'USDCZ{currency_code}'
+                        # Kraken symbols
+                        kraken_prefix = {
+                            'BTC': 'XXBT',
+                            'ETH': 'XETH',
+                            'USDT': 'USDT',
+                            'USDC': 'USDC'
+                        }.get(crypto_symbol, crypto_symbol)
                         
+                        pair = f"{kraken_prefix}Z{currency_code}"
                         response = await client.get(f'https://api.kraken.com/0/public/Ticker?pair={pair}')
+                        
                         if response.status_code == 200:
                             data = response.json()
-                            if 'result' in data and data['result']:
-                                # Get first result key
+                            if not data.get('error') and 'result' in data and data['result']:
                                 result_key = list(data['result'].keys())[0]
                                 price = float(data['result'][result_key]['c'][0])
                                 prices['kraken'] = price
                                 enabled_prices.append(price)
+                                supported_pairs_cache[f"kraken:{cache_key}"] = True
+                            else:
+                                supported_pairs_cache[f"kraken:{cache_key}"] = False
                 except Exception as e:
-                    logger.warning(f"Error fetching Kraken {crypto_symbol} price: {e}")
+                    supported_pairs_cache[f"kraken:{cache_key}"] = False
+                    logger.debug(f"Kraken does not support {crypto_symbol}/{currency_code} pair: {e}")
                     prices['kraken'] = None
             else:
                 prices['kraken'] = None
             
-            # Calculate average
+            # Calculate average only if we have valid prices
             if enabled_prices:
                 prices['average'] = sum(enabled_prices) / len(enabled_prices)
             else:
@@ -7980,18 +8132,27 @@ async def dashboard_wallet(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
-    db = DatabaseRegistry.get_config_database()
-    user_id = request.session.get('user_id')
-    
-    from aisbf.payments.wallet.manager import WalletManager
-    wallet_manager = WalletManager(db)
-    wallet = await wallet_manager.get_wallet(user_id)
-    
-    return templates.TemplateResponse("dashboard/wallet.html", {
-        "request": request,
-        "wallet": wallet
-    })
+
+    try:
+        db = DatabaseRegistry.get_config_database()
+        user_id = request.session.get('user_id')
+
+        from aisbf.payments.wallet.manager import WalletManager
+        wallet_manager = WalletManager(db)
+        wallet = await wallet_manager.get_wallet(user_id)
+
+        return templates.TemplateResponse("dashboard/wallet.html", {
+            "request": request,
+            "wallet": wallet
+        })
+    except ImportError:
+        return HTMLResponse("Wallet functionality not available", status_code=503)
+    except Exception as e:
+        logger.error(f"Failed to load wallet page: {e}")
+        return templates.TemplateResponse("dashboard/error.html", {
+            "request": request,
+            "error": "Failed to load wallet. Please try again later."
+        }, status_code=500)
 
 @app.get("/dashboard/billing")
 async def dashboard_billing(request: Request):
@@ -8016,6 +8177,11 @@ async def dashboard_billing(request: Request):
         if settings.get('enabled', False):
             enabled_gateways.append(gateway)
     
+    # Get user wallet
+    currency_settings = db.get_currency_settings()
+    currency_code = currency_settings.get('currency_code', 'EUR')
+    wallet = db.get_user_wallet(user_id) or {'balance': '0.00', 'currency_code': currency_code, 'auto_topup_enabled': False}
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/billing.html",
@@ -8024,7 +8190,8 @@ async def dashboard_billing(request: Request):
         "session": request.session,
         "payment_methods": payment_methods,
         "transactions": transactions,
-        "enabled_gateways": enabled_gateways
+        "enabled_gateways": enabled_gateways,
+        "wallet": wallet
     }
     )
 

@@ -1,7 +1,23 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">Billing & Payments</h2>
+<h2 style="margin-bottom: 20px;">Billing & Payments</h2>
+
+<!-- Wallet Balance Banner -->
+<div style="background: linear-gradient(135deg, #1a4a2e, #0f3460); border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
+        <div>
+            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Wallet Balance</div>
+            <div style="font-size: 32px; font-weight: bold; color: #4ade80;">${{ wallet.balance }}</div>
+            <div style="color: #a0a0a0; font-size: 13px; margin-top: 5px;">
+                All subscription renewals and payments are automatically charged from your wallet first.
+            </div>
+        </div>
+        <a href="{{ url_for(request, '/dashboard/wallet') }}" class="btn" style="background: #28a745;">
+            <i class="fas fa-wallet me-2"></i>Manage Wallet
+        </a>
+    </div>
+</div>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>

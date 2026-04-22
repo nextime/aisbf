@@ -6,7 +6,13 @@
 <h2 style="margin-bottom: 30px;">Add Payment Method</h2>
 
 <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 30px; margin-bottom: 20px;">
-    <p style="color: #a0a0a0; margin-bottom: 30px;">Choose a payment method to add to your account. You can use this for subscription payments and plan upgrades.</p>
+    <p style="color: #a0a0a0; margin-bottom: 10px;">Choose a payment method to add to your account.</p>
+    <div style="background: #1a1a2e; border-left: 3px solid #4ade80; padding: 15px; margin-bottom: 30px; border-radius: 4px;">
+        <p style="margin: 0; color: #e0e0e0;">
+            <i class="fas fa-info-circle me-2 text-success"></i>
+            <strong>Important:</strong> Only <strong>Credit Card (Stripe)</strong> can be used for automatic subscription renewals. All other payment methods are for wallet top-ups only.
+        </p>
+    </div>
 
     <!-- Stripe and PayPal -->
     {% if 'stripe' in enabled_gateways or 'paypal' in enabled_gateways %}

@@ -155,8 +155,8 @@
     }
   },
   "billing": {
-    "currency": "USD",
-    "currency_symbol": "$",
+    "currency": "EUR",
+    "currency_symbol": "€",
     "currency_decimals": 2,
     "payment_methods": {
       "paypal": {

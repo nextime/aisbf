@@ -153,14 +153,22 @@ check_package_upgrade() {
 
 # Function to create venv if it doesn't exist
 ensure_venv() {
+    if [ "$DEBUG" = "true" ]; then
+        echo "=== DEBUG: ensure_venv called ==="
+        echo "VENV_DIR: $VENV_DIR"
+        echo "SHARE_DIR: $SHARE_DIR"
+    fi
+
     if [ ! -d "$VENV_DIR" ]; then
         echo "Creating virtual environment at $VENV_DIR"
         # Create venv with --system-site-packages to access system-installed aisbf
+        [ "$DEBUG" = "true" ] && echo "=== DEBUG: Creating venv ==="
         python3 -m venv --system-site-packages "$VENV_DIR"
-        
+
         # Install requirements if requirements.txt exists
         if [ -f "$SHARE_DIR/requirements.txt" ]; then
             echo "Installing requirements from $SHARE_DIR/requirements.txt"
+            [ "$DEBUG" = "true" ] && echo "=== DEBUG: Installing requirements ==="
             if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
                 echo ""
                 echo "=========================================="
@@ -184,18 +192,22 @@ ensure_venv() {
                 echo ""
                 exit 1
             fi
+            [ "$DEBUG" = "true" ] && echo "=== DEBUG: Force reinstalling uvicorn ==="
             # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
             "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
         fi
-        
+
         # Save version for future upgrade detection
+        [ "$DEBUG" = "true" ] && echo "=== DEBUG: Saving version info ==="
         python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
     else
+        [ "$DEBUG" = "true" ] && echo "=== DEBUG: Venv already exists, checking for upgrades ==="
         # Check if package was upgraded via pip
         if check_package_upgrade; then
             echo "Package upgrade detected, updating venv dependencies..."
             # Only update requirements, aisbf is accessed from system site-packages
             if [ -f "$SHARE_DIR/requirements.txt" ]; then
+                [ "$DEBUG" = "true" ] && echo "=== DEBUG: Updating requirements ==="
                 if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
                     echo ""
                     echo "=========================================="
@@ -207,13 +219,17 @@ ensure_venv() {
                     echo ""
                     exit 1
                 fi
+                [ "$DEBUG" = "true" ] && echo "=== DEBUG: Force reinstalling uvicorn ==="
                 # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
                 "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             fi
             python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
             echo "Virtual environment updated successfully"
+        else
+            [ "$DEBUG" = "true" ] && echo "=== DEBUG: No package upgrade detected ==="
         fi
     fi
+    [ "$DEBUG" = "true" ] && echo "=== DEBUG: ensure_venv completed ==="
 }
 
 # Function to update venv packages (only install missing ones, no forced upgrades)
@@ -255,29 +271,65 @@ update_venv() {
 
 # Function to start the server
 start_server() {
+    echo "=== DEBUG: Starting start_server function ==="
+    echo "SHARE_DIR: $SHARE_DIR"
+    echo "VENV_DIR: $VENV_DIR"
+    echo "LOG_DIR: $LOG_DIR"
+
     # Ensure venv exists
+    echo "=== DEBUG: Ensuring venv exists ==="
     ensure_venv
-    
+    echo "=== DEBUG: Venv check complete ==="
+
     # Get host and port from config
+    echo "=== DEBUG: Getting host and port ==="
     HOST=$(get_host)
     PORT=$(get_port)
-    
+    echo "=== DEBUG: Host=$HOST, Port=$PORT ==="
+
     # Activate the virtual environment
+    echo "=== DEBUG: Activating virtual environment ==="
     source $VENV_DIR/bin/activate
-    
+    echo "=== DEBUG: Virtual environment activated ==="
+
+    # Check Python path and imports
+    echo "=== DEBUG: Checking Python environment ==="
+    echo "Python executable: $(which python3)"
+    python3 -c "import sys; print('Python version:', sys.version); print('Python path:', sys.path[:3])"
+    echo "=== DEBUG: Testing basic imports ==="
+    python3 -c "import uvicorn; print('uvicorn imported successfully')" 2>&1 || echo "ERROR: Failed to import uvicorn"
+    python3 -c "import fastapi; print('fastapi imported successfully')" 2>&1 || echo "ERROR: Failed to import fastapi"
+
     # Change to share directory where main.py is located
+    echo "=== DEBUG: Changing to share directory ==="
     cd $SHARE_DIR
-    
+    echo "=== DEBUG: Current directory: $(pwd) ==="
+    ls -la main.py 2>/dev/null || echo "WARNING: main.py not found in $SHARE_DIR"
+
     echo "Starting AISBF on $HOST:$PORT..."
-    
+
     # Check if debug mode is enabled
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
     fi
-    
+
+    # Test importing main module before starting uvicorn
+    echo "=== DEBUG: Testing main module import ==="
+    python3 -c "
+try:
+    import main
+    print('main module imported successfully')
+except Exception as e:
+    print(f'ERROR: Failed to import main module: {e}')
+    import traceback
+    traceback.print_exc()
+    exit(1)
+" 2>&1
+
     # Start the proxy server - runs in foreground
     # Use exec to replace the shell process so signals are properly handled
+    echo "=== DEBUG: Starting uvicorn ==="
     if [ "$DEBUG" = "true" ]; then
         exec uvicorn main:app --host $HOST --port $PORT --log-level debug 2>&1 | tee -a "$LOG_DIR/aisbf_stdout.log"
     else

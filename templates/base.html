@@ -504,6 +504,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %}>Analytics</a>
             {% if request.session.user_id %}
             <a href="{{ url_for(request, '/dashboard/user/tokens') }}" {% if '/user/tokens' in request.path %}class="active"{% endif %}>API Tokens</a>
+            <a href="{{ url_for(request, '/dashboard/wallet') }}" {% if '/wallet' in request.path %}class="active"{% endif %}>Wallet</a>
             {% endif %}
             {% if request.session.role == 'admin' %}
             <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
@@ -527,6 +528,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                      <a href="{{ url_for(request, '/dashboard/user/tokens') }}">API Tokens</a>
                      <a href="{{ url_for(request, '/dashboard/cache-settings') }}">Cache Settings</a>
                      <a href="{{ url_for(request, '/dashboard/subscription') }}">Subscription</a>
+                     <a href="{{ url_for(request, '/dashboard/wallet') }}">Wallet</a>
                      <a href="{{ url_for(request, '/dashboard/billing') }}">Billing</a>
                      <a href="{{ url_for(request, '/dashboard/change-password') }}">Change Password</a>
                     {% endif %}

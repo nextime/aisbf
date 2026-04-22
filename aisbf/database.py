@@ -117,6 +117,63 @@ class DatabaseManager:
         loop = asyncio.get_event_loop()
         return await loop.run_in_executor(self.executor, func, *args)
 
+    async def execute(self, sql: str, params: dict = None):
+        """Execute SQL query and return result with mappings (compatible with AsyncSession interface)"""
+        def _sync_execute():
+            with self._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.row_factory = sqlite3.Row
+                params = params or {}
+                
+                # Safe parameter handling - use native database parameter binding
+                if self.db_type == 'sqlite':
+                    # SQLite natively supports :named parameters directly
+                    cursor.execute(sql, params)
+                else:
+                    # For MySQL, safely convert named parameters to %s placeholders
+                    param_names = []
+                    def replace_param(match):
+                        param_names.append(match.group(1))
+                        return '%s'
+                    import re
+                    processed_sql = re.sub(r':(\w+)', replace_param, sql)
+                    params_list = [params[name] for name in param_names]
+                    cursor.execute(processed_sql, params_list)
+                
+                if cursor.description:
+                    rows = [dict(row) for row in cursor.fetchall()]
+                    # Simulate SQLAlchemy Result object with mappings() method
+                    class ResultWrapper:
+                        def mappings(self):
+                            class MappingsWrapper:
+                                def first(self):
+                                    return rows[0] if rows else None
+                                def all(self):
+                                    return rows
+                            return MappingsWrapper()
+                    return ResultWrapper()
+                else:
+                    class EmptyResult:
+                        def mappings(self):
+                            return []
+                    return EmptyResult()
+        
+        return await self._run_in_executor(_sync_execute)
+    
+    async def commit(self):
+        """Commit transaction (compatibility method for WalletManager)"""
+        # Transactions are auto-committed per operation in this implementation
+        pass
+    
+    def begin(self):
+        """Async context manager for transactions (compatibility)"""
+        class TransactionContext:
+            async def __aenter__(self):
+                return self
+            async def __aexit__(self, exc_type, exc_val, exc_tb):
+                pass
+        return TransactionContext()
+
 
 
     async def record_context_dimension_async(
@@ -3493,24 +3550,24 @@ def DatabaseManager__initialize_database(self):
 #         pass
 # 
     # Create users table for multi-user management
-#     cursor.execute(f'''
-#                 CREATE TABLE IF NOT EXISTS users (
-#                     id INTEGER PRIMARY KEY {auto_increment},
-#                     username VARCHAR(255) UNIQUE NOT NULL,
-#                     email VARCHAR(255) UNIQUE,
-#                     display_name VARCHAR(255),
-#                     password_hash VARCHAR(255) NOT NULL,
-#                     role VARCHAR(50) DEFAULT 'user',
-#                     created_by VARCHAR(255),
-#                     created_at TIMESTAMP DEFAULT {timestamp_default},
-#                     last_login TIMESTAMP NULL,
-#                     is_active {boolean_type} DEFAULT 1,
-#                     email_verified {boolean_type} DEFAULT 0,
-#                     verification_token VARCHAR(255),
-#                     verification_token_expires TIMESTAMP NULL,
-#                     last_verification_email_sent TIMESTAMP NULL
-#                 )
-#             ''')
+    cursor.execute(f'''
+        CREATE TABLE IF NOT EXISTS users (
+            id INTEGER PRIMARY KEY {auto_increment},
+            username VARCHAR(255) UNIQUE NOT NULL,
+            email VARCHAR(255) UNIQUE,
+            display_name VARCHAR(255),
+            password_hash VARCHAR(255) NOT NULL,
+            role VARCHAR(50) DEFAULT 'user',
+            created_by VARCHAR(255),
+            created_at TIMESTAMP DEFAULT {timestamp_default},
+            last_login TIMESTAMP NULL,
+            is_active {boolean_type} DEFAULT 1,
+            email_verified {boolean_type} DEFAULT 0,
+            verification_token VARCHAR(255),
+            verification_token_expires TIMESTAMP NULL,
+            last_verification_email_sent TIMESTAMP NULL
+        )
+    ''')
 # 
     # Migration: Add display_name column if it doesn't exist
 #     try:
@@ -3938,11 +3995,11 @@ def DatabaseManager__initialize_database(self):
         #     logger.info("⚠️ CACHE DATABASE: Only minimal cache tables created - NO USER TABLES")
 
         # Run configuration database migrations if this is a CONFIG database
-        if self.database_type == DatabaseRegistry.TYPE_CONFIG:
-            self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
-
-        conn.commit()
-        logger.info(f"Database tables initialized successfully for {self.database_type} database")
+    if self.database_type == DatabaseRegistry.TYPE_CONFIG:
+        self._run_config_migrations(cursor, auto_increment, timestamp_default, boolean_type)
+    
+    conn.commit()
+    logger.info(f"Database tables initialized successfully for {self.database_type} database")
 
 
 def DatabaseManager__create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
@@ -4200,35 +4257,49 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
     except Exception as e:
         logger.warning(f"Migration check for default free tier: {e}")
 
-    # Migration: Ensure users table exists first
-    try:
-        if self.db_type == 'sqlite':
-            cursor.execute("CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-        else:
-            cursor.execute("CREATE TABLE IF NOT EXISTS users (id INT AUTO_INCREMENT PRIMARY KEY, email VARCHAR(255) UNIQUE NOT NULL, password_hash VARCHAR(255), created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP)")
-    except Exception as e:
-        logger.warning(f"Failed to create users table: {e}")
+    # Users table is created with full schema earlier in migrations
 
-    # Migration: Add tier_id column to users table
+    # Migration: Add all missing columns to users table
     try:
         if self.db_type == 'sqlite':
             cursor.execute("PRAGMA table_info(users)")
             columns = [row[1] for row in cursor.fetchall()]
-            if 'tier_id' not in columns:
-                cursor.execute('ALTER TABLE users ADD COLUMN tier_id INTEGER DEFAULT 1')
-                cursor.execute('ALTER TABLE users ADD COLUMN subscription_expires TIMESTAMP NULL')
-                logger.info("✅ Migration: Added tier_id and subscription_expires columns to users")
+            
+            required_columns = [
+                ('username', 'VARCHAR(255) UNIQUE', 'email'),
+                ('display_name', 'VARCHAR(255)', 'username'),
+                ('role', 'VARCHAR(50) DEFAULT \'user\'', 'password_hash'),
+                ('created_by', 'VARCHAR(255)', 'role'),
+                ('last_login', 'TIMESTAMP NULL', 'created_at'),
+                ('is_active', f'{boolean_type} DEFAULT 1', 'last_login'),
+                ('email_verified', f'{boolean_type} DEFAULT 0', 'is_active'),
+                ('verification_token', 'VARCHAR(255)', 'email_verified'),
+                ('verification_token_expires', 'TIMESTAMP NULL', 'verification_token'),
+                ('last_verification_email_sent', 'TIMESTAMP NULL', 'verification_token_expires'),
+                ('tier_id', 'INTEGER DEFAULT 1', 'updated_at'),
+                ('subscription_expires', 'TIMESTAMP NULL', 'tier_id'),
+                ('stripe_customer_id', 'VARCHAR(100)', 'subscription_expires'),
+                ('reset_password_token', 'VARCHAR(255)', 'stripe_customer_id'),
+                ('reset_password_token_expires', 'TIMESTAMP NULL', 'reset_password_token')
+            ]
+            
+            for col_name, col_def, after_col in required_columns:
+                if col_name not in columns:
+                    cursor.execute(f'ALTER TABLE users ADD COLUMN {col_name} {col_def}')
+                    logger.info(f"✅ Migration: Added {col_name} column to users")
+            
+            # Set username = email for existing users
+            if 'username' in required_columns and 'username' not in columns:
+                cursor.execute('UPDATE users SET username = email WHERE username IS NULL')
+                cursor.execute('UPDATE users SET is_active = 1 WHERE is_active IS NULL')
+                cursor.execute('UPDATE users SET role = \'user\' WHERE role IS NULL')
+                logger.info("✅ Migration: Populated username, is_active and role for existing users")
+                
         else:
-            cursor.execute("""
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
-                WHERE TABLE_NAME = 'users' AND COLUMN_NAME = 'tier_id'
-            """)
-            if not cursor.fetchone():
-                cursor.execute('ALTER TABLE users ADD COLUMN tier_id INTEGER DEFAULT 1')
-                cursor.execute('ALTER TABLE users ADD COLUMN subscription_expires TIMESTAMP NULL')
-                logger.info("✅ Migration: Added tier_id and subscription_expires columns to users")
+            # MySQL migrations would go here
+            pass
     except Exception as e:
-        logger.warning(f"Migration check for users.tier_id: {e}")
+        logger.warning(f"Migration check for users table columns: {e}")
 
     # Migration: Create payment_methods, user_subscriptions, payment_transactions tables
     for table_name, create_sql in [

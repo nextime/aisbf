@@ -58,7 +58,7 @@ setup(
     url="https://git.nexlab.net/nexlab/aisbf.git",
     packages=find_packages(),
     classifiers=[
-        "Development Status :: 3 - Alpha",
+        "Development Status :: 4 - Beta",
         "Intended Audience :: Developers",
         "Topic :: Software Development :: Libraries :: Python Modules",
         "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
@@ -183,6 +183,12 @@ setup(
         ('share/aisbf/aisbf/payments/notifications', [
             'aisbf/payments/notifications/__init__.py',
             'aisbf/payments/notifications/email.py',
+        ]),
+        # aisbf.payments.wallet subpackage
+        ('share/aisbf/aisbf/payments/wallet', [
+            'aisbf/payments/wallet/__init__.py',
+            'aisbf/payments/wallet/manager.py',
+            'aisbf/payments/wallet/routes.py',
         ]),
         # Install dashboard templates
         ('share/aisbf/templates', [
