@@ -3814,7 +3814,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
             ('stripe_customer_id', 'VARCHAR(100)'),
             ('reset_password_token', 'VARCHAR(255)'),
             ('reset_password_token_expires', 'TIMESTAMP NULL'),
-            ('profile_pic', 'TEXT'),
+            ('profile_pic', 'MEDIUMTEXT'),
         ]
         if self.db_type == 'sqlite':
             cursor.execute("PRAGMA table_info(users)")
@@ -3825,10 +3825,10 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                     logger.info(f"✅ Migration: Added {col_name} column to users")
         else:
             cursor.execute("""
-                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                SELECT COLUMN_NAME, DATA_TYPE FROM INFORMATION_SCHEMA.COLUMNS
                 WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'users'
             """)
-            existing = {row[0] for row in cursor.fetchall()}
+            existing = {row[0]: row[1] for row in cursor.fetchall()}
             for col_name, col_def in required_columns:
                 if col_name not in existing:
                     try:
@@ -3836,6 +3836,13 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                         logger.info(f"✅ Migration: Added {col_name} column to users")
                     except Exception as col_e:
                         logger.warning(f"Migration check for users.{col_name}: {col_e}")
+            # Widen profile_pic from TEXT to MEDIUMTEXT if needed
+            if existing.get('profile_pic', '').lower() == 'text':
+                try:
+                    cursor.execute('ALTER TABLE users MODIFY COLUMN profile_pic MEDIUMTEXT')
+                    logger.info("✅ Migration: Widened users.profile_pic to MEDIUMTEXT")
+                except Exception as col_e:
+                    logger.warning(f"Migration: could not widen profile_pic: {col_e}")
     except Exception as e:
         logger.warning(f"Migration check for users table columns: {e}")
 
