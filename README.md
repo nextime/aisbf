@@ -55,7 +55,11 @@ Server starts on `http://127.0.0.1:17765`
 
 ## Web Dashboard
 
-Access the dashboard at `http://localhost:17765/dashboard` (default credentials: admin/admin)
+Access the dashboard at `http://localhost:17765/dashboard` (default credentials: `admin` / `admin`)
+
+> **Security — change the default password immediately.**
+> The default `admin/admin` credentials are publicly known. Open the dashboard → Settings → Change Password before exposing AISBF to any network.
+> For HTTPS deployments, set the environment variable `AISBF_HTTPS=true` to mark session cookies as Secure.
 
 The dashboard provides:
 - Provider configuration and API key management

@@ -554,7 +554,7 @@ class KiroProviderHandler(BaseProviderHandler):
                         try:
                             error_body = nexlab_response.json()
                             logging.warning(f"KiroProviderHandler: Nexlab error response: {error_body}")
-                        except:
+                        except Exception:
                             logging.warning(f"KiroProviderHandler: Nexlab error response (text): {nexlab_response.text[:200]}")
                 finally:
                     await nexlab_client.aclose()
@@ -640,7 +640,7 @@ class KiroProviderHandler(BaseProviderHandler):
                         try:
                             error_body = response.json()
                             logging.warning(f"KiroProviderHandler: Error response: {error_body}")
-                        except:
+                        except Exception:
                             logging.warning(f"KiroProviderHandler: Error response (text): {response.text[:200]}")
                         break
 

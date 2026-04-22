@@ -4,6 +4,9 @@
 
 Comprehensive debug logging has been added throughout the AISBF codebase to help understand how models and providers are selected. This guide explains what information is logged and how to use it.
 
+> **Security warning — never enable `AISBF_DEBUG=true` in production.**
+> Debug mode logs full request and response bodies, which may contain user messages, API keys, tool call results, and other sensitive data. Use debug logging only in isolated development environments.
+
 ## Recent Fixes
 
 ### Fixed: Ollama Provider Handler Initialization

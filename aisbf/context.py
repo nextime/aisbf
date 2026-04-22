@@ -91,7 +91,7 @@ class ContextManager:
                                 is_rotation = True
                                 logger = logging.getLogger(__name__)
                                 logger.info(f"Condensation model '{model_value}' is a rotation ID")
-                        except:
+                        except Exception:
                             pass  # Not a rotation, treat as direct model
                     
                     if is_rotation:

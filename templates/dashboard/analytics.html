@@ -263,6 +263,10 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
 })();
 {% endif %}
 
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 // User search autocomplete functionality
 {% if is_admin and available_users|length >= 25 %}
 (function() {
@@ -301,9 +305,9 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
         }
         
         resultsDiv.innerHTML = users.map(user => `
-            <div class="user-result-item" data-user-id="${user.id}" data-username="${user.username}" data-role="${user.role}"
+            <div class="user-result-item" data-user-id="${user.id}" data-username="${escHtml(user.username)}" data-role="${escHtml(user.role)}"
                  style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">
-                ${user.username}${user.role === 'admin' ? ' <span style="color: #60a5fa;">(admin)</span>' : ''}
+                ${escHtml(user.username)}${user.role === 'admin' ? ' <span style="color: #60a5fa;">(admin)</span>' : ''}
             </div>
         `).join('');
         resultsDiv.style.display = 'block';

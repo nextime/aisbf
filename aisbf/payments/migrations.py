@@ -177,7 +177,7 @@ class PaymentMigrations:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_crypto_tx_user ON crypto_transactions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_crypto_tx_status ON crypto_transactions(status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_user_addresses_user ON user_crypto_addresses(user_id)')
-        except:
+        except Exception:
             pass
     
     def _create_payment_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
@@ -264,7 +264,7 @@ class PaymentMigrations:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_transactions_user ON payment_transactions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_payment_retry_status ON payment_retry_queue(status, next_retry_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_api_requests_user_time ON api_requests(user_id, created_at)')
-        except:
+        except Exception:
             pass
         
         logger.info("✅ Created/verified payment tables")
@@ -299,7 +299,7 @@ class PaymentMigrations:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_status ON subscriptions(status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_subscriptions_period_end ON subscriptions(current_period_end)')
-        except:
+        except Exception:
             pass
     
     def _create_job_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
@@ -356,7 +356,7 @@ class PaymentMigrations:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_job_locks_expires ON job_locks(expires_at)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_consolidation_status ON crypto_consolidation_queue(status)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_email_queue_status ON email_notification_queue(status, next_retry_at)')
-        except:
+        except Exception:
             pass
     
     def _create_config_tables(self, cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type):
@@ -582,7 +582,7 @@ class PaymentMigrations:
                         INSERT IGNORE INTO crypto_price_sources (name, api_type, endpoint_url, api_key, priority)
                         VALUES (%s, %s, %s, %s, %s)
                     ''', (name, api_type, endpoint, api_key, priority))
-            except:
+            except Exception:
                 pass
         
         # Insert default consolidation settings (INSERT OR IGNORE = only if not exists)
@@ -605,7 +605,7 @@ class PaymentMigrations:
                         INSERT IGNORE INTO crypto_consolidation_settings (crypto_type, threshold_amount, admin_address, is_enabled)
                         VALUES (%s, %s, %s, 0)
                     ''', (crypto_type, threshold, address))
-            except:
+            except Exception:
                 pass
         
         # Insert default email notification settings (INSERT OR IGNORE = only if not exists)
@@ -633,7 +633,7 @@ class PaymentMigrations:
                         INSERT IGNORE INTO email_notification_settings (notification_type, subject_template, is_enabled)
                         VALUES (%s, %s, 1)
                     ''', (notif_type, subject))
-            except:
+            except Exception:
                 pass
         
         logger.info("✅ Default payment system data checked (existing records preserved)")
@@ -717,7 +717,7 @@ class PaymentMigrations:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_wallet ON wallet_transactions(wallet_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_user ON wallet_transactions(user_id)')
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_wallet_transactions_created ON wallet_transactions(created_at)')
-        except:
+        except Exception:
             pass
         
         logger.info("✅ Created/verified wallet system tables")

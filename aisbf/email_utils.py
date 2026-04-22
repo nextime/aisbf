@@ -34,16 +34,9 @@ logger = logging.getLogger(__name__)
 
 
 def hash_password(password: str) -> str:
-    """
-    Hash a password using SHA256.
-    
-    Args:
-        password: Plain text password
-        
-    Returns:
-        SHA256 hash of the password
-    """
-    return hashlib.sha256(password.encode()).hexdigest()
+    """Hash a password. Delegates to database._hash_password (bcrypt when available)."""
+    from aisbf.database import _hash_password
+    return _hash_password(password)
 
 
 def generate_verification_token() -> str:

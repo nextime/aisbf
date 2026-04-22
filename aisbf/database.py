@@ -23,12 +23,32 @@ Database module for persistent tracking of context dimensions and rate limiting.
 """
 import sqlite3
 import json
+import hashlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+
+try:
+    import bcrypt as _bcrypt_lib
+    _BCRYPT_AVAILABLE = True
+except ImportError:  # pragma: no cover
+    _BCRYPT_AVAILABLE = False
+
+def _hash_password(password: str) -> str:
+    """Hash a password. Uses bcrypt when available, falls back to SHA-256."""
+    if _BCRYPT_AVAILABLE:
+        return _bcrypt_lib.hashpw(password.encode(), _bcrypt_lib.gensalt()).decode()
+    return hashlib.sha256(password.encode()).hexdigest()
+
+def _verify_password(password: str, stored_hash: str) -> bool:
+    """Verify a password against a stored hash (bcrypt or legacy SHA-256)."""
+    if stored_hash.startswith("$2") and _BCRYPT_AVAILABLE:
+        return _bcrypt_lib.checkpw(password.encode(), stored_hash.encode())
+    # Legacy SHA-256 path
+    return hashlib.sha256(password.encode()).hexdigest() == stored_hash
 
 try:
     import mysql.connector as _mysql_connector
@@ -706,13 +726,16 @@ class DatabaseManager:
         }
 
     # User management methods
-    def authenticate_user(self, username: str, password_hash: str) -> Optional[Dict]:
+    def authenticate_user(self, username: str, password: str) -> Optional[Dict]:
         """
-        Authenticate a user by username and password hash.
+        Authenticate a user by username and plain-text password.
+
+        Supports bcrypt hashes and legacy SHA-256 hashes.  On a successful
+        SHA-256 match the stored hash is transparently upgraded to bcrypt.
 
         Args:
             username: Username to authenticate
-            password_hash: SHA256 hash of the password
+            password: Plain-text password
 
         Returns:
             User dict if authenticated, None otherwise
@@ -720,7 +743,7 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
-            
+
             # First check what columns exist in users table
             if self.db_type == 'sqlite':
                 cursor.execute("PRAGMA table_info(users)")
@@ -733,8 +756,8 @@ class DatabaseManager:
                     AND TABLE_SCHEMA = DATABASE()
                 """)
                 columns = [col[0] for col in cursor.fetchall()]
-            
-            select_fields = ['id', 'username', 'role', 'is_active']
+
+            select_fields = ['id', 'username', 'role', 'is_active', 'password_hash']
             if 'email' in columns:
                 select_fields.append('email')
             if 'email_verified' in columns:
@@ -743,41 +766,55 @@ class DatabaseManager:
                 select_fields.append('created_at')
             if 'last_verification_email_sent' in columns:
                 select_fields.append('last_verification_email_sent')
-            
+
             cursor.execute(f'''
                 SELECT {', '.join(select_fields)}
                 FROM users
-                WHERE username = {placeholder} AND password_hash = {placeholder} AND is_active = 1
-            ''', (username, password_hash))
+                WHERE username = {placeholder} AND is_active = 1
+            ''', (username,))
 
             row = cursor.fetchone()
-            if row:
-                result = {
-                    'id': row[0],
-                    'username': row[1],
-                    'role': row[2],
-                    'is_active': row[3],
-                    'email': None,
-                    'email_verified': True,
-                    'created_at': None,
-                    'last_verification_email_sent': None
-                }
+            if not row:
+                return None
 
-                idx = 4
-                if 'email' in columns:
-                    result['email'] = row[idx] or None
-                    idx += 1
-                if 'email_verified' in columns:
-                    result['email_verified'] = bool(row[idx]) if row[idx] is not None else True
-                    idx += 1
-                if 'created_at' in columns:
-                    result['created_at'] = row[idx] if row[idx] else None
-                    idx += 1
-                if 'last_verification_email_sent' in columns:
-                    result['last_verification_email_sent'] = row[idx] if row[idx] else None
+            stored_hash = row[4]
+            if not _verify_password(password, stored_hash):
+                return None
 
-                return result
-            return None
+            # Auto-upgrade legacy SHA-256 hash to bcrypt on successful login
+            if not stored_hash.startswith("$2") and _BCRYPT_AVAILABLE:
+                new_hash = _hash_password(password)
+                cursor.execute(
+                    f'UPDATE users SET password_hash = {placeholder} WHERE id = {placeholder}',
+                    (new_hash, row[0])
+                )
+                conn.commit()
+
+            result = {
+                'id': row[0],
+                'username': row[1],
+                'role': row[2],
+                'is_active': row[3],
+                'email': None,
+                'email_verified': True,
+                'created_at': None,
+                'last_verification_email_sent': None
+            }
+
+            idx = 5
+            if 'email' in columns:
+                result['email'] = row[idx] or None
+                idx += 1
+            if 'email_verified' in columns:
+                result['email_verified'] = bool(row[idx]) if row[idx] is not None else True
+                idx += 1
+            if 'created_at' in columns:
+                result['created_at'] = row[idx] if row[idx] else None
+                idx += 1
+            if 'last_verification_email_sent' in columns:
+                result['last_verification_email_sent'] = row[idx] if row[idx] else None
+
+            return result
 
     def get_user_by_username(self, username: str) -> Optional[Dict]:
         """
@@ -816,7 +853,7 @@ class DatabaseManager:
 
         Args:
             username: Username for the new user
-            password_hash: SHA256 hash of the password
+            password_hash: Password hash (bcrypt or SHA-256 legacy)
             role: User role ('admin' or 'user')
             created_by: Username of the creator
             email: Email address (optional)
@@ -1089,7 +1126,7 @@ class DatabaseManager:
 
         Args:
             user_id: User ID
-            password_hash: New SHA256 password hash
+            password_hash: New password hash (bcrypt or SHA-256)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
@@ -1336,7 +1373,9 @@ class DatabaseManager:
 
     def verify_user_password(self, user_id: int, password: str) -> bool:
         """
-        Verify a user's password.
+        Verify a user's plain-text password against the stored hash.
+
+        Supports bcrypt and legacy SHA-256 hashes.
 
         Args:
             user_id: User ID
@@ -1345,17 +1384,16 @@ class DatabaseManager:
         Returns:
             True if password matches, False otherwise
         """
-        import hashlib
-        password_hash = hashlib.sha256(password.encode()).hexdigest()
-        
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id FROM users
-                WHERE id = {placeholder} AND password_hash = {placeholder}
-            ''', (user_id, password_hash))
-            return cursor.fetchone() is not None
+                SELECT password_hash FROM users WHERE id = {placeholder}
+            ''', (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                return False
+            return _verify_password(password, row[0])
 
     def update_user_email(self, user_id: int, new_email: str):
         """

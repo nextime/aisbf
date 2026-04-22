@@ -213,7 +213,7 @@ class KiroAuthManager:
             username = getpass.getuser()
             unique_string = f"{hostname}-{username}-kiro-gateway"
             return hashlib.sha256(unique_string.encode()).hexdigest()
-        except:
+        except Exception:
             return hashlib.sha256(b"default-machine-fingerprint").hexdigest()
     
     async def get_access_token(self) -> str:
@@ -389,5 +389,5 @@ class KiroAuthManager:
             username = getpass.getuser()
             unique_string = f"{hostname}-{username}-kiro-gateway"
             return hashlib.sha256(unique_string.encode()).hexdigest()
-        except:
+        except Exception:
             return hashlib.sha256(b"default-machine-fingerprint").hexdigest()

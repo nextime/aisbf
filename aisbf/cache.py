@@ -22,6 +22,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import json
 import pickle
 import logging
+
+# --- safe serialisation helpers -------------------------------------------------
+# Always write JSON; fall back to pickle only for non-JSON-serialisable objects.
+# On read, detect format by attempting JSON first so legacy pickle data still works.
+
+def _cache_encode(value: any) -> bytes:
+    """Encode a cache value. Prefers JSON; falls back to pickle."""
+    try:
+        return b'\x00' + json.dumps(value, ensure_ascii=False).encode('utf-8')
+    except (TypeError, ValueError):
+        return b'\x01' + pickle.dumps(value)
+
+def _cache_decode(data: bytes) -> any:
+    """Decode a cache value encoded by _cache_encode, or legacy raw pickle bytes."""
+    if isinstance(data, memoryview):
+        data = bytes(data)
+    if not data:
+        return None
+    if data[0:1] == b'\x00':
+        return json.loads(data[1:].decode('utf-8'))
+    if data[0:1] == b'\x01':
+        return pickle.loads(data[1:])
+    # Legacy: no prefix — assume raw pickle
+    try:
+        return pickle.loads(data)
+    except Exception:
+        return json.loads(data.decode('utf-8'))
 from typing import Any, Optional, Dict, List
 from pathlib import Path
 import time
@@ -139,7 +166,7 @@ class RedisCache(CacheBackend):
         try:
             data = self.redis.get(self._make_key(key))
             if data:
-                return pickle.loads(data)
+                return _cache_decode(data)
             return None
         except Exception as e:
             logger.warning(f"Redis get error: {e}")
@@ -147,7 +174,7 @@ class RedisCache(CacheBackend):
 
     def set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
         try:
-            data = pickle.dumps(value)
+            data = _cache_encode(value)
             if ttl:
                 self.redis.setex(self._make_key(key), ttl, data)
             else:
@@ -252,8 +279,9 @@ class SQLiteCache(CacheBackend):
                         conn.commit()
                         return None
 
-                    # Deserialize the value
-                    return pickle.loads(value_str.encode('latin1'))
+                    # Decode: stored value may be bytes (new) or a latin1 string (legacy pickle)
+                    raw = value_str if isinstance(value_str, bytes) else value_str.encode('latin1')
+                    return _cache_decode(raw)
 
                 return None
         except Exception as e:
@@ -265,11 +293,9 @@ class SQLiteCache(CacheBackend):
         import time
 
         try:
-            # Serialize the value
-            value_bytes = pickle.dumps(value)
+            value_bytes = _cache_encode(value)
+            # Store as latin1 string so it fits the TEXT column used by legacy schema
             value_str = value_bytes.decode('latin1')
-
-            # Calculate TTL timestamp if provided
             ttl_timestamp = time.time() + ttl if ttl else None
 
             with sqlite3.connect(str(self.db_path)) as conn:
@@ -429,7 +455,7 @@ class MySQLCache(CacheBackend):
                     return None
 
                 # Deserialize the value
-                return pickle.loads(value_str.encode('latin1'))
+                return _cache_decode(value_str.encode('latin1'))
 
             return None
         except Exception as e:
@@ -441,7 +467,7 @@ class MySQLCache(CacheBackend):
 
         try:
             # Serialize the value
-            value_bytes = pickle.dumps(value)
+            value_bytes = _cache_encode(value)
             value_str = value_bytes.decode('latin1')
 
             # Calculate TTL timestamp if provided
@@ -528,7 +554,7 @@ class FileCache(CacheBackend):
 
         try:
             with open(cache_path, 'rb') as f:
-                return pickle.load(f)
+                return _cache_decode(f.read())
         except Exception as e:
             logger.warning(f"File cache get error for {key}: {e}")
             return None
@@ -537,7 +563,7 @@ class FileCache(CacheBackend):
         cache_path = self._get_cache_path(key)
         try:
             with open(cache_path, 'wb') as f:
-                pickle.dump(value, f)
+                f.write(_cache_encode(value))
         except Exception as e:
             logger.warning(f"File cache set error for {key}: {e}")
 
@@ -1613,7 +1639,7 @@ class ResponseCache:
             try:
                 pattern = f"{self.key_prefix}*"
                 stats['current_size'] = len(self.redis_client.keys(pattern))
-            except:
+            except Exception:
                 stats['current_size'] = 0
         elif self.backend == 'sqlite' and self.sqlite_backend:
             stats['current_size'] = self.sqlite_backend.get_size()

@@ -52,6 +52,7 @@ import argparse
 import secrets
 import hashlib
 import asyncio
+from aisbf.database import _hash_password as _db_hash_password, _verify_password as _db_verify_password
 import httpx
 import multiprocessing
 from logging.handlers import RotatingFileHandler
@@ -568,6 +569,39 @@ _session_secret = _get_or_create_session_secret()
 # Note: SessionMiddleware will be added AFTER the @app.middleware decorators
 # to ensure proper middleware execution order
 
+# SHA-256 of the factory-default "admin" password. If the stored hash still
+# matches this value the admin hasn't changed their password yet.
+_DEFAULT_ADMIN_SHA256 = '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
+
+# Dashboard paths the user may visit even when must_change_password is set
+_MUST_CHANGE_PASSWORD_WHITELIST = (
+    '/dashboard/settings',
+    '/dashboard/logout',
+    '/api/admin/settings/',
+)
+
+# --- Login rate limiter ---
+# Keyed by (ip, username); value is list of failure timestamps.
+_login_failures: dict = {}
+_LOGIN_MAX_ATTEMPTS = 10   # failures before lockout
+_LOGIN_WINDOW_SECS  = 300  # 5-minute sliding window
+_LOGIN_LOCKOUT_SECS = 600  # 10-minute lockout after max failures
+
+def _login_rate_limit_check(ip: str, username: str) -> bool:
+    """Return True (blocked) when too many recent failures exist."""
+    key = f"{ip}:{username.lower()}"
+    now = time.time()
+    attempts = [t for t in _login_failures.get(key, []) if now - t < _LOGIN_WINDOW_SECS]
+    _login_failures[key] = attempts
+    return len(attempts) >= _LOGIN_MAX_ATTEMPTS
+
+def _login_record_failure(ip: str, username: str) -> None:
+    key = f"{ip}:{username.lower()}"
+    _login_failures.setdefault(key, []).append(time.time())
+
+def _login_clear_failures(ip: str, username: str) -> None:
+    _login_failures.pop(f"{ip}:{username.lower()}", None)
+
 # These will be initialized in startup event or main() after config is loaded
 request_handler = None
 rotation_handler = None
@@ -619,6 +653,8 @@ _model_cache = {}
 _model_cache_timestamps = {}
 _cache_refresh_interval = 4 * 3600  # 4 hours in seconds
 _cache_refresh_task = None
+# Strong references to fire-and-forget tasks so the GC does not cancel them
+_background_tasks: set = set()
 
 def initialize_app(custom_config_dir=None):
     """Initialize app globals. Called by startup event or main()."""
@@ -669,13 +705,6 @@ def initialize_app(custom_config_dir=None):
             'password': '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918'
         }
     
-    # Initialize analytics with the config database
-    # NOTE: Database will be initialized later with proper config
-    # from aisbf.analytics import initialize_analytics
-    # from aisbf.database import DatabaseRegistry
-    # db = DatabaseRegistry.get_config_database()
-    # initialize_analytics(db)
-    # logger.info("Analytics module initialized")
     
     _initialized = True
     logger.info("App initialization complete")
@@ -831,7 +860,7 @@ def validate_kiro_credentials(provider_id: str, provider_config) -> bool:
                         if token_data.get('access_token') or token_data.get('refresh_token'):
                             found_token = True
                             break
-                    except:
+                    except Exception:
                         pass
             
             conn.close()
@@ -1267,7 +1296,7 @@ async def startup_event():
                         auth_methods.append("OAuth2 File ✓")
                     else:
                         auth_methods.append("OAuth2 File ✗")
-                except:
+                except Exception:
                     auth_methods.append("OAuth2 File ✗ (check failed)")
 
                 # Check database credentials
@@ -1291,7 +1320,7 @@ async def startup_event():
                             auth_methods.append("Database Credentials ✗ (no files)")
                     else:
                         auth_methods.append("Database Credentials ✗ (no database)")
-                except:
+                except Exception:
                     auth_methods.append("Database Credentials ✗ (check failed)")
 
                 logger.info(f"  Auth Methods: {', '.join(auth_methods)}")
@@ -1537,16 +1566,28 @@ async def api_token_authorization_middleware(request: Request, call_next):
 async def auth_middleware(request: Request, call_next):
     """Check API token authentication if enabled"""
     if server_config and server_config.get('auth_enabled', False):
-        # Skip auth for root endpoint, dashboard routes, auth routes, admin API routes, webhooks, favicon, and browser metadata
+        # Skip token auth for paths that use session auth or are public
         if (request.url.path == "/" or
             request.url.path.startswith("/dashboard") or
             request.url.path.startswith("/auth/") or
-            request.url.path.startswith("/api/admin") or
-            request.url.path.startswith("/api/webhooks/") or  # Webhooks don't need auth
+            request.url.path.startswith("/api/webhooks/") or
             request.url.path == "/favicon.ico" or
             request.url.path.startswith("/.well-known/")):
             response = await call_next(request)
             return response
+
+        # /api/admin/* uses session auth — allow through only when a valid admin session exists
+        if request.url.path.startswith("/api/admin"):
+            expires_at = request.session.get('expires_at')
+            session_valid = (
+                request.session.get('logged_in') and
+                request.session.get('role') == 'admin' and
+                not (expires_at and int(time.time()) > expires_at)
+            )
+            if session_valid:
+                response = await call_next(request)
+                return response
+            # No valid admin session — fall through to Bearer-token check below
 
         # Skip auth for public models endpoints (GET only)
         if request.method == "GET" and request.url.path in ["/api/models", "/api/v1/models"]:
@@ -1855,9 +1896,11 @@ async def tier_limit_middleware(request: Request, call_next):
         request.url.path.endswith("/audio/speech") or
         request.url.path.endswith("/images/generations")
     ):
-        # Increment request counters asynchronously
+        # Increment request counters asynchronously; keep a strong reference so GC cannot cancel it
         import asyncio
-        asyncio.create_task(db.increment_user_request_count(user_id))
+        _t = asyncio.create_task(db.increment_user_request_count(user_id))
+        _background_tasks.add(_t)
+        _t.add_done_callback(_background_tasks.discard)
     
     return response
 
@@ -1921,11 +1964,14 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors(), "body": body_data}
     )
 
-# CORS middleware
+# CORS middleware — wildcard origins are incompatible with allow_credentials=True
+# (browsers reject credentialed cross-origin requests to "*"). API clients
+# (curl, SDK) never send cookies, so credentials are not needed here.
+# Dashboard authentication relies on session cookies which are same-origin only.
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
-    allow_credentials=True,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -1957,7 +2003,13 @@ async def dashboard_context_middleware(request: Request, call_next):
 # Add session middleware AFTER the @app.middleware decorators
 # This ensures SessionMiddleware runs before auth_middleware and tier_limit_middleware
 # Middleware execution order: last added = first executed
-app.add_middleware(SessionMiddleware, secret_key=_session_secret, max_age=30 * 24 * 60 * 60)  # 30 days max age
+app.add_middleware(
+    SessionMiddleware,
+    secret_key=_session_secret,
+    max_age=30 * 24 * 60 * 60,  # 30 days
+    same_site="lax",            # prevents cross-site request forgery
+    https_only=os.environ.get("AISBF_HTTPS", "false").lower() == "true",
+)
 
 # Add proxy headers middleware LAST so it executes FIRST
 # This ensures proxy headers are processed before any other middleware (including auth_middleware)
@@ -2116,9 +2168,12 @@ async def paypal_webhook(request: Request):
     """Handle PayPal webhooks"""
     payload = await request.json()
     headers = dict(request.headers)
-    
+
     result = await payment_service.paypal_handler.handle_webhook(payload, headers)
-    
+
+    if result.get('status') == 'error':
+        # Return 400 so PayPal retries rather than treating the error as success
+        return JSONResponse(status_code=400, content=result)
     return result
 
 
@@ -2411,17 +2466,9 @@ async def dashboard_analytics(
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
     import logging
-    from jinja2 import Environment, FileSystemLoader, DictLoader
 
     logger = logging.getLogger(__name__)
     try:
-        # Create a completely fresh Jinja2 environment to avoid any caching issues
-        env = Environment(loader=FileSystemLoader("templates"), auto_reload=False)
-
-        # Add the required globals
-        env.globals['url_for'] = url_for
-        env.globals['get_base_url'] = get_base_url
-
         # Check if signup is enabled
         signup_enabled = False
         if config and hasattr(config, 'aisbf') and config.aisbf:
@@ -2511,21 +2558,27 @@ async def auth_logincheck(request: Request):
 @app.post("/dashboard/login")
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...), remember_me: bool = Form(False)):
     """Handle dashboard login"""
+    client_ip = request.client.host if request.client else "unknown"
 
-    # Hash the submitted password
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
+    # Rate-limit check before touching credentials
+    if _login_rate_limit_check(client_ip, username):
+        return RedirectResponse(
+            url=url_for(request, "/dashboard/login") + "?error=Too+many+failed+attempts.+Please+wait+and+try+again.",
+            status_code=303
+        )
 
-    # Try database authentication first
+    # Try database authentication first (plain password — database.py handles hashing/verification)
     db = DatabaseRegistry.get_config_database()
-    user = db.authenticate_user(username, password_hash)
+    user = db.authenticate_user(username, password)
 
     if user:
         # Database user authenticated
         logger.info(f"User authenticated: username={username}, email={user.get('email')}, user_id={user['id']}")
         request.session['logged_in'] = True
+        _login_clear_failures(client_ip, username)
         request.session['username'] = username
         request.session['display_name'] = user.get('display_name') or ''
-        request.session['email'] = user.get('email') or ''  # Ensure we get the email from user dict
+        request.session['email'] = user.get('email') or ''
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
         request.session['remember_me'] = remember_me
@@ -2579,21 +2632,28 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
     stored_username = dashboard_config.get('username', 'admin')
     stored_password_hash = dashboard_config.get('password', '8c6976e5b5410415bde908bd4dee15dfb167a9c873fc4bb8a81f6f2ab448a918')
 
-    if username == stored_username and password_hash == stored_password_hash:
+    if username == stored_username and _db_verify_password(password, stored_password_hash):
+        _login_clear_failures(client_ip, username)
         request.session['logged_in'] = True
         request.session['username'] = username
         request.session['role'] = 'admin'
         request.session['user_id'] = None  # Config admin has no user_id
         request.session['remember_me'] = remember_me
+        # Flag if still using the factory-default password so we can force a change
+        request.session['must_change_password'] = (stored_password_hash == _DEFAULT_ADMIN_SHA256)
         if remember_me:
-            # Set session to expire in 30 days for remember me
             request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
         else:
-            # For non-remember-me sessions, set expiry to 2 weeks (default session length)
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+        if request.session['must_change_password']:
+            return RedirectResponse(
+                url=url_for(request, "/dashboard/settings") + "?warning=default_password",
+                status_code=303
+            )
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
 
-    # If we reach here, authentication failed
+    # Authentication failed — record the failure for rate limiting
+    _login_record_failure(client_ip, username)
     return RedirectResponse(url=url_for(request, "/dashboard/login") + "?error=Invalid username or password", status_code=303)
 
 
@@ -3110,9 +3170,9 @@ async def dashboard_reset_password(
     try:
         db = DatabaseRegistry.get_config_database()
 
-        # Validate token
-        token_valid = db.validate_password_reset_token(email, token)
-        if not token_valid:
+        # Validate token and retrieve user
+        reset_user = db.get_user_by_reset_token(token)
+        if not reset_user or reset_user.get('email', '').lower() != email.lower():
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/login.html",
@@ -3151,12 +3211,11 @@ async def dashboard_reset_password(
                 }
             )
 
-        # Hash new password
+        # Hash new password and update; clear the token to prevent reuse
         password_hash = hash_password(password)
-
-        # Update user password and invalidate token
-        db.update_user_password(email, password_hash)
-        db.invalidate_password_reset_token(email, token)
+        user_id = reset_user['id']
+        db.update_user_password(user_id, password_hash)
+        db.clear_password_reset_token(user_id)
 
         logger.info(f"Password successfully reset for user {email}")
 
@@ -3663,7 +3722,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
 
             # Generate secure random password for OAuth users (never used for login)
             random_password = secrets.token_urlsafe(32)
-            password_hash = hashlib.sha256(random_password.encode()).hexdigest()
+            password_hash = _db_hash_password(random_password)
 
             # Generate clean username from display_name with email fallback
             google_username = db.generate_username_from_display_name(display_name, email)
@@ -3847,7 +3906,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             # New user - create account automatically (no password required)
             # Generate secure random password for OAuth users (never used for login)
             random_password = secrets.token_urlsafe(32)
-            password_hash = hashlib.sha256(random_password.encode()).hexdigest()
+            password_hash = _db_hash_password(random_password)
             
             # Generate clean username from display_name with email fallback
             github_username = db.generate_username_from_display_name(display_name, email)
@@ -3912,49 +3971,56 @@ def require_dashboard_auth(request: Request):
     """Check if user is logged in to dashboard"""
     if not request.session.get('logged_in'):
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
-    
+
     # Check if session has expired
     expires_at = request.session.get('expires_at')
     if expires_at and int(time.time()) > expires_at:
-        # Session expired
         request.session.clear()
         return RedirectResponse(url=url_for(request, "/dashboard/login"), status_code=303)
-    
-    # Extend session expiry for remember me users on each request (sliding expiration)
+
+    # Extend session expiry on each request (sliding expiration)
     if request.session.get('remember_me'):
-        # Refresh expiry to 30 days from now for remember me
         request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
     elif expires_at:
-        # For non-remember-me sessions, refresh to 2 weeks from now (sliding expiration)
         request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
-    
+
+    # Force password change if still using factory default
+    if request.session.get('must_change_password'):
+        path = request.url.path
+        if not any(path.startswith(p) for p in _MUST_CHANGE_PASSWORD_WHITELIST):
+            return RedirectResponse(
+                url=url_for(request, "/dashboard/settings") + "?warning=default_password",
+                status_code=303
+            )
+
     return None
 
 def require_api_auth(request: Request):
     """Check if user is logged in to dashboard (API version - returns JSON)"""
     if not request.session.get('logged_in'):
-        return JSONResponse(
-            status_code=401,
-            content={"error": "Authentication required"}
-        )
+        return JSONResponse(status_code=401, content={"error": "Authentication required"})
 
     # Check if session has expired
     expires_at = request.session.get('expires_at')
     if expires_at and int(time.time()) > expires_at:
-        # Session expired
         request.session.clear()
-        return JSONResponse(
-            status_code=401,
-            content={"error": "Session expired"}
-        )
+        return JSONResponse(status_code=401, content={"error": "Session expired"})
 
-    # Extend session expiry for remember me users on each request (sliding expiration)
+    # Extend session expiry on each request (sliding expiration)
     if request.session.get('remember_me'):
-        # Refresh expiry to 30 days from now for remember me
         request.session['expires_at'] = int(time.time()) + 30 * 24 * 60 * 60
     elif expires_at:
-        # For non-remember-me sessions, refresh to 2 weeks from now (sliding expiration)
         request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
+
+    # Force password change if still using factory default
+    if request.session.get('must_change_password'):
+        path = request.url.path
+        if not any(path.startswith(p) for p in _MUST_CHANGE_PASSWORD_WHITELIST):
+            return JSONResponse(
+                status_code=403,
+                content={"error": "Default password must be changed before using the API",
+                         "redirect": "/dashboard/settings?warning=default_password"}
+            )
 
     return None
 
@@ -5392,8 +5458,7 @@ async def dashboard_settings_save(
     aisbf_config['auth']['tokens'] = [t.strip() for t in auth_tokens.split('\n') if t.strip()]
     aisbf_config['dashboard']['username'] = dashboard_username
     if dashboard_password:  # Only update if provided - hash the password
-        password_hash = hashlib.sha256(dashboard_password.encode()).hexdigest()
-        aisbf_config['dashboard']['password'] = password_hash
+        aisbf_config['dashboard']['password'] = _db_hash_password(dashboard_password)
     aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
     aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
 
@@ -5528,7 +5593,11 @@ async def dashboard_settings_save(
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, 'w') as f:
         json.dump(aisbf_config, f, indent=2)
-    
+
+    # If a new dashboard password was submitted, clear the forced-change flag
+    if dashboard_password:
+        request.session.pop('must_change_password', None)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/settings.html",
@@ -5656,9 +5725,8 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
     
     db = DatabaseRegistry.get_config_database()
     
-    # Hash the password
-    password_hash = hashlib.sha256(password.encode()).hexdigest()
-    
+    password_hash = _db_hash_password(password)
+
     try:
         # Get current admin username
         admin_username = request.session.get('username', 'admin')
@@ -5690,7 +5758,7 @@ async def dashboard_users_edit(request: Request, user_id: int, username: str = F
     try:
         # Update user (only if password is provided)
         if password:
-            password_hash = hashlib.sha256(password.encode()).hexdigest()
+            password_hash = _db_hash_password(password)
             db.update_user(user_id, username, password_hash, role, is_active, username)
         else:
             db.update_user(user_id, username, None, role, is_active, username)
@@ -6347,7 +6415,7 @@ async def dashboard_provider_upload_chunk(
         try:
             for chunk_path in temp_dir.glob(f"{upload_id}.part*"):
                 chunk_path.unlink()
-        except:
+        except Exception:
             pass
         return JSONResponse(status_code=500, content={"success": False, "error": str(e)})
 
@@ -7350,7 +7418,7 @@ async def api_get_crypto_prices(request: Request):
                     FROM crypto_price_sources
                 """)
                 sources = {row[0].lower(): bool(row[1]) for row in cursor.fetchall()}
-            except:
+            except Exception:
                 # Default if table doesn't exist yet
                 sources = {'coinbase': True, 'binance': True, 'kraken': True}
         
@@ -7968,7 +8036,7 @@ async def get_payment_system_status(request: Request):
                 """)
                 balances = {row[0]: float(row[1]) for row in cursor.fetchall()}
                 total_balance_usd = sum(balances.values())
-            except:
+            except Exception:
                 balances = {}
                 total_balance_usd = 0.0
             
@@ -7979,7 +8047,7 @@ async def get_payment_system_status(request: Request):
                     WHERE status = 'pending'
                 """)
                 pending_count = cursor.fetchone()[0]
-            except:
+            except Exception:
                 pending_count = 0
             
             # Get failed payments count from payment_transactions
@@ -7989,7 +8057,7 @@ async def get_payment_system_status(request: Request):
                     WHERE status = 'failed'
                 """)
                 failed_count = cursor.fetchone()[0]
-            except:
+            except Exception:
                 failed_count = 0
         
         return JSONResponse({
@@ -8027,7 +8095,7 @@ async def get_payment_system_config(request: Request):
                     row[0].lower(): bool(row[4])
                     for row in cursor.fetchall()
                 }
-            except:
+            except Exception:
                 price_sources = {
                     'coinbase': True,
                     'binance': True,
@@ -8060,7 +8128,7 @@ async def get_payment_system_config(request: Request):
                     row[0].lower(): float(row[1])
                     for row in cursor.fetchall()
                 }
-            except:
+            except Exception:
                 consolidation = {
                     'btc': 0.01,
                     'eth': 0.1,
@@ -12901,7 +12969,7 @@ async def dashboard_oauth2_callback(
                 request.session['oauth2_user_id'] = user_id
             if provider:
                 request.session['oauth2_provider'] = provider
-        except:
+        except Exception:
             pass
         
         # Detect if this is a direct localhost callback (no extension involved)

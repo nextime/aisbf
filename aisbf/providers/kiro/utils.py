@@ -19,7 +19,7 @@ def get_machine_fingerprint() -> str:
         username = getpass.getuser()
         unique_string = f"{hostname}-{username}-kiro-gateway"
         return hashlib.sha256(unique_string.encode()).hexdigest()
-    except:
+    except Exception:
         return hashlib.sha256(b"default-machine-fingerprint").hexdigest()
 
 def generate_completion_id() -> str:

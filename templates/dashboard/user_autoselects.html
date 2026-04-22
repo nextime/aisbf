@@ -40,6 +40,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 const autoselectData = {
     config: {{ autoselect_json | safe }},
     rotations: {{ available_rotations | safe }},
@@ -70,15 +74,15 @@ function renderAutoselectList() {
         const modelCount = autoselect.available_models ? autoselect.available_models.length : 0;
         
         autoselectItem.innerHTML = `
-            <div class="autoselect-header" onclick="toggleAutoselect('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+            <div class="autoselect-header" onclick="toggleAutoselect('${escHtml(key)}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
-                    <strong style="font-size: 16px;">${autoselect.model_name || key}</strong>
+                    <strong style="font-size: 16px;">${escHtml(autoselect.model_name || key)}</strong>
                     <span style="color: #a0a0a0; font-size: 14px;">(${modelCount} available model${modelCount !== 1 ? 's' : ''})</span>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${escHtml(key)}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
             </div>
-            <div id="autoselect-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+            <div id="autoselect-details-${escHtml(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
                 <!-- Details will be rendered here -->
             </div>
         `;
@@ -135,12 +139,12 @@ function renderAutoselectDetails(autoselectKey) {
     container.innerHTML = `
         <div class="form-group">
             <label>Model Name</label>
-            <input type="text" value="${autoselect.model_name}" onchange="updateAutoselect('${autoselectKey}', 'model_name', this.value)" required>
+            <input type="text" value="${escHtml(autoselect.model_name)}" onchange="updateAutoselect('${escHtml(autoselectKey)}', 'model_name', this.value)" required>
         </div>
-        
+
         <div class="form-group">
             <label>Capabilities (comma-separated)</label>
-            <input type="text" value="${autoselect.capabilities ? autoselect.capabilities.join(', ') : ''}" onchange="updateAutoselectCapabilities('${autoselectKey}', this.value)" placeholder="e.g., t2t, reasoning, multimodal">
+            <input type="text" value="${escHtml(autoselect.capabilities ? autoselect.capabilities.join(', ') : '')}" onchange="updateAutoselectCapabilities('${escHtml(autoselectKey)}', this.value)" placeholder="e.g., t2t, reasoning, multimodal">
         </div>
         
         <div class="form-group">

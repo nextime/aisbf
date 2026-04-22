@@ -358,8 +358,8 @@ class PayPalPaymentHandler:
         """Verify PayPal webhook signature via PayPal's verify-webhook-signature API."""
         webhook_id = self.webhook_secret  # stored as 'webhook_secret' in admin settings
         if not webhook_id:
-            logger.warning("PayPal webhook_id not configured - skipping signature verification")
-            return True
+            logger.error("PayPal webhook_id not configured - rejecting webhook (configure webhook_id in payment settings)")
+            return False
 
         try:
             access_token = await self.get_access_token()
@@ -386,56 +386,159 @@ class PayPalPaymentHandler:
             logger.error(f"PayPal webhook signature verification error: {e}")
             return False
     
+    async def _credit_wallet_for_paypal(self, user_id: int, amount: Decimal,
+                                         gateway_tx_id: str, description: str) -> None:
+        """Credit the user wallet via WalletManager using the db-compatible interface."""
+        from aisbf.payments.wallet.manager import WalletManager
+        wallet_manager = WalletManager(self.db)
+        await wallet_manager.credit_wallet(
+            user_id=user_id,
+            amount=amount,
+            transaction_details={
+                'payment_gateway': 'paypal',
+                'gateway_transaction_id': gateway_tx_id,
+                'description': description,
+                'metadata': {'paypal_tx_id': gateway_tx_id},
+            }
+        )
+        logger.info(f"PayPal wallet credit: user={user_id}, amount={amount}, tx={gateway_tx_id}")
+
     async def _handle_order_completed(self, resource: dict):
-        """Handle completed order (Vault v3)"""
+        """Handle completed checkout order — credit wallet for top-up orders."""
         order_id = resource.get('id')
         logger.info(f"PayPal order completed: {order_id}")
-        # TODO: Update transaction status in database
-    
+
+        purchase_units = resource.get('purchase_units', [])
+        if not purchase_units:
+            return
+        pu = purchase_units[0]
+        description = pu.get('description', '')
+        if 'Wallet top up' not in description:
+            return
+        try:
+            amount = Decimal(pu['amount']['value'])
+            user_id = int(resource.get('custom_id', 0))
+        except (KeyError, ValueError, TypeError) as e:
+            logger.error(f"PayPal order completed: could not parse amount/user_id: {e}")
+            return
+        if user_id <= 0:
+            logger.error(f"PayPal order completed: missing custom_id on order {order_id}")
+            return
+        await self._credit_wallet_for_paypal(user_id, amount, order_id,
+                                              'Wallet top up via PayPal')
+
     async def _handle_order_approved(self, resource: dict):
-        """Handle approved order"""
+        """Handle approved order (capture pending)."""
         order_id = resource.get('id')
         logger.info(f"PayPal order approved: {order_id}")
-    
+
     async def _handle_payment_capture_completed(self, resource: dict):
-        """Handle completed payment capture"""
+        """Handle completed payment capture — credit wallet."""
         capture_id = resource.get('id')
         logger.info(f"PayPal payment capture completed: {capture_id}")
-        # TODO: Mark subscription payment as successful
-    
+        custom_id = resource.get('custom_id', '')
+        amount_obj = resource.get('amount', {})
+        try:
+            amount = Decimal(amount_obj.get('value', '0'))
+            user_id = int(custom_id) if custom_id else 0
+        except (ValueError, TypeError):
+            user_id = 0
+        if user_id > 0 and amount > 0:
+            await self._credit_wallet_for_paypal(user_id, amount, capture_id,
+                                                  'Payment capture via PayPal')
+        else:
+            logger.warning(f"PayPal capture completed but missing user_id/amount: {capture_id}")
+
     async def _handle_payment_capture_denied(self, resource: dict):
-        """Handle denied payment capture"""
+        """Handle denied payment capture — queue for retry."""
         capture_id = resource.get('id')
         logger.warning(f"PayPal payment capture denied: {capture_id}")
-        # TODO: Add to payment retry queue
-    
+        # Record failed attempt in the payment_retry_queue so the scheduler retries it
+        try:
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    INSERT INTO payment_retry_queue
+                        (gateway, gateway_transaction_id, status, next_retry_at, created_at)
+                    VALUES ({placeholder}, {placeholder}, 'pending',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, ('paypal', capture_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"PayPal: failed to queue denied capture {capture_id} for retry: {e}")
+
     async def _handle_payment_refunded(self, resource: dict):
-        """Handle refunded payment"""
+        """Handle refunded payment — debit the wallet to reverse the credit."""
         refund_id = resource.get('id')
         logger.info(f"PayPal payment refunded: {refund_id}")
-        # TODO: Update transaction and subscription status
-    
+        amount_obj = resource.get('amount', {})
+        custom_id = resource.get('custom_id', '')
+        try:
+            amount = Decimal(amount_obj.get('value', '0'))
+            user_id = int(custom_id) if custom_id else 0
+        except (ValueError, TypeError):
+            user_id = 0
+        if user_id > 0 and amount > 0:
+            try:
+                from aisbf.payments.wallet.manager import WalletManager
+                wallet_manager = WalletManager(self.db)
+                await wallet_manager.debit_wallet(
+                    user_id=user_id,
+                    amount=amount,
+                    transaction_details={
+                        'payment_gateway': 'paypal',
+                        'gateway_transaction_id': refund_id,
+                        'description': 'Refund via PayPal',
+                        'metadata': {'refund_id': refund_id},
+                    }
+                )
+                logger.info(f"PayPal refund applied: user={user_id}, amount={amount}")
+            except Exception as e:
+                logger.error(f"PayPal refund: wallet debit failed for {refund_id}: {e}")
+        else:
+            logger.warning(f"PayPal refund: cannot apply refund {refund_id} — missing user_id/amount")
+
     async def _handle_vault_token_created(self, resource: dict):
-        """Handle vault token creation"""
+        """Handle vault token creation."""
         token_id = resource.get('id')
         logger.info(f"PayPal vault token created: {token_id}")
-    
+
     async def _handle_vault_token_deleted(self, resource: dict):
-        """Handle vault token deletion"""
+        """Handle vault token deletion — deactivate matching payment method."""
         token_id = resource.get('id')
         logger.info(f"PayPal vault token deleted: {token_id}")
-        # TODO: Mark payment method as inactive in database
-    
+        try:
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    UPDATE payment_methods
+                    SET is_active = 0
+                    WHERE gateway_token = {placeholder} AND type = 'paypal'
+                """, (token_id,))
+                conn.commit()
+                if cursor.rowcount:
+                    logger.info(f"Deactivated payment method for deleted PayPal vault token {token_id}")
+        except Exception as e:
+            logger.error(f"PayPal: failed to deactivate payment method for vault token {token_id}: {e}")
+
     async def _handle_dispute_created(self, resource: dict):
-        """Handle dispute creation"""
+        """Handle dispute creation — log and alert via application logger (admin monitors logs)."""
         dispute_id = resource.get('dispute_id')
-        logger.warning(f"PayPal dispute created: {dispute_id}")
-        # TODO: Send notification to admin
-    
+        reason = resource.get('reason', 'unknown')
+        amount_obj = (resource.get('dispute_amount') or {})
+        amount = amount_obj.get('value', '?')
+        logger.error(
+            f"PAYPAL DISPUTE CREATED — id={dispute_id} reason={reason} amount={amount}. "
+            "Review at https://www.paypal.com/disputes/ and update dispute status manually."
+        )
+
     async def _handle_dispute_resolved(self, resource: dict):
-        """Handle dispute resolution"""
+        """Handle dispute resolution."""
         dispute_id = resource.get('dispute_id')
-        logger.info(f"PayPal dispute resolved: {dispute_id}")
+        outcome = resource.get('dispute_outcome', {}).get('outcome_code', 'unknown')
+        logger.info(f"PayPal dispute resolved: {dispute_id} outcome={outcome}")
     
     async def create_topup_order(self, user_id: int, amount: Decimal) -> dict:
         """Create PayPal order for wallet top up"""

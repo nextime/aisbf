@@ -1770,7 +1770,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     try:
                         error_body = response.json()
                         logging.warning(f"ClaudeProviderHandler: Error response: {error_body}")
-                    except:
+                    except Exception:
                         logging.warning(f"ClaudeProviderHandler: Error response (text): {response.text[:200]}")
             
             except Exception as api_error:
@@ -1847,7 +1847,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         try:
                             error_body = fallback_response.json()
                             logging.warning(f"ClaudeProviderHandler: Fallback error response: {error_body}")
-                        except:
+                        except Exception:
                             logging.warning(f"ClaudeProviderHandler: Fallback error response (text): {fallback_response.text[:200]}")
                 finally:
                     await fallback_client.aclose()

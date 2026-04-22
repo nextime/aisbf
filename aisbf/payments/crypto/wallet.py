@@ -145,29 +145,57 @@ class CryptoWalletManager:
         }
     
     async def create_payment_address(self, user_id: int, crypto_type: str, payment_id: str) -> str:
-        """Derive a fresh address for each payment request"""
+        """Derive a fresh on-chain address for each payment request.
+
+        Uses a single locked transaction to read MAX(derivation_index) and
+        insert the new row atomically, preventing two concurrent requests from
+        deriving the same address for different users.
+        """
         placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
 
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                SELECT COALESCE(MAX(derivation_index), -1)
-                FROM user_crypto_addresses
-                WHERE crypto_type = {placeholder}
-            """, (crypto_type,))
-            next_index = cursor.fetchone()[0] + 1
+        for attempt in range(5):
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
 
-        address_info = self.derive_address(crypto_type, next_index)
+                if self.db.db_type == 'sqlite':
+                    cursor.execute("BEGIN EXCLUSIVE")
+                else:
+                    cursor.execute("START TRANSACTION")
 
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute(f"""
-                INSERT INTO user_crypto_addresses
-                (user_id, crypto_type, address, derivation_path, derivation_index, payment_id)
-                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
-            """, (user_id, crypto_type, address_info['address'],
-                  address_info['derivation_path'], address_info['derivation_index'], payment_id))
-            conn.commit()
+                try:
+                    if self.db.db_type == 'mysql':
+                        cursor.execute(f"""
+                            SELECT COALESCE(MAX(derivation_index), -1)
+                            FROM user_crypto_addresses
+                            WHERE crypto_type = {placeholder}
+                            FOR UPDATE
+                        """, (crypto_type,))
+                    else:
+                        cursor.execute(f"""
+                            SELECT COALESCE(MAX(derivation_index), -1)
+                            FROM user_crypto_addresses
+                            WHERE crypto_type = {placeholder}
+                        """, (crypto_type,))
+                    next_index = cursor.fetchone()[0] + 1
+
+                    address_info = self.derive_address(crypto_type, next_index)
+
+                    cursor.execute(f"""
+                        INSERT INTO user_crypto_addresses
+                        (user_id, crypto_type, address, derivation_path, derivation_index, payment_id)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder})
+                    """, (user_id, crypto_type, address_info['address'],
+                          address_info['derivation_path'], address_info['derivation_index'], payment_id))
+                    conn.commit()
+                    break  # success
+                except Exception as exc:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
+                    if attempt == 4:
+                        raise
+                    logger.warning(f"crypto address derivation conflict (attempt {attempt+1}): {exc}")
 
         with self.db._get_connection() as conn:
             cursor = conn.cursor()

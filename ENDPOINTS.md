@@ -1,6 +1,6 @@
 # AISBF Endpoint Documentation
 
-Generated: 2026-04-20T20:48:14+02:00
+Generated: 2026-04-22T00:00:00+02:00
 
 ---
 
@@ -199,6 +199,10 @@ Generated: 2026-04-20T20:48:14+02:00
 | `/api/admin/scheduler/status` | GET | global admin | Scheduler status |
 | `/api/admin/scheduler/run-job` | POST | global admin | Run scheduler job manually |
 | `/api/admin/payment-system/config` | GET | global admin | Payment system configuration |
+| `/api/admin/payment-system/config/price-sources` | PUT | global admin | Update price sources configuration |
+| `/api/admin/payment-system/config/consolidation` | PUT | global admin | Update consolidation configuration |
+| `/api/admin/payment-system/config/email` | PUT | global admin | Update email configuration |
+| `/api/admin/payment-system/config/blockchain` | PUT | global admin | Update blockchain configuration |
 | `/api/admin/payment-system/status` | GET | global admin | Payment system status |
 | `/api/admin/crypto/prices` | GET | global admin | Crypto prices |
 | `/api/admin/crypto/btc-prices` | GET | global admin | BTC prices |

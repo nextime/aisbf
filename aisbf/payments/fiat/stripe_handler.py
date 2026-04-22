@@ -158,10 +158,6 @@ class StripePaymentHandler:
             logger.error(f"Error handling Stripe webhook: {e}")
             return {'status': 'error', 'message': str(e)}
     
-    async def _handle_payment_succeeded(self, payment_intent: dict):
-        """Handle successful payment"""
-        logger.info(f"Payment succeeded: {payment_intent['id']}")
-    
     async def create_topup_intent(self, user_id: int, amount: Decimal, payment_method_id: str = None) -> dict:
         """Create Stripe PaymentIntent for wallet top up"""
         try:
@@ -204,33 +200,33 @@ class StripePaymentHandler:
             return {'success': False, 'error': str(e)}
 
     async def _handle_payment_succeeded(self, payment_intent: dict):
-        """Handle successful payment"""
+        """Handle successful Stripe payment — credits user wallet for top-up intents."""
         logger.info(f"Payment succeeded: {payment_intent['id']}")
-        
+
         metadata = payment_intent.get('metadata', {})
-        if metadata.get('topup') == 'true':
+        if metadata.get('topup') != 'true':
+            return
+
+        try:
             user_id = int(metadata['user_id'])
             amount = Decimal(metadata['amount'])
-            
-            from aisbf.payments.wallet.manager import WalletManager
-            from sqlalchemy.ext.asyncio import AsyncSession
-            
-            # Create database session and wallet manager
-            async with AsyncSession(self.db.engine) as session:
-                wallet_manager = WalletManager(session)
-                await wallet_manager.credit_wallet(
-                    user_id=user_id,
-                    amount=amount,
-                    transaction_details={
-                        'payment_gateway': 'stripe',
-                        'gateway_transaction_id': payment_intent['id'],
-                        'description': 'Wallet top up via Stripe',
-                        'metadata': {'payment_intent': payment_intent['id']}
-                    }
-                )
-                await session.commit()
+        except (KeyError, ValueError) as e:
+            logger.error(f"Stripe webhook: missing/invalid metadata on {payment_intent['id']}: {e}")
+            return
 
-            logger.info(f"Wallet credited successfully for user {user_id}, amount {amount}")
+        from aisbf.payments.wallet.manager import WalletManager
+        wallet_manager = WalletManager(self.db)
+        await wallet_manager.credit_wallet(
+            user_id=user_id,
+            amount=amount,
+            transaction_details={
+                'payment_gateway': 'stripe',
+                'gateway_transaction_id': payment_intent['id'],
+                'description': 'Wallet top up via Stripe',
+                'metadata': {'payment_intent': payment_intent['id']}
+            }
+        )
+        logger.info(f"Wallet credited: user={user_id}, amount={amount}, intent={payment_intent['id']}")
 
     async def auto_charge(self, user_id: int, amount: Decimal, payment_method_id: str) -> Dict[str, Any]:
         """

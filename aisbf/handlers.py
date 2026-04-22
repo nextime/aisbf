@@ -3095,7 +3095,7 @@ class RotationHandler:
                         error_part = last_error[:json_start]
                         error_details.append(f"**Last error:** {error_part}")
                         error_details.append(f"```json\n{formatted_json}\n```")
-                    except:
+                    except Exception:
                         error_details.append(f"**Last error:**")
                         error_details.append(f"{last_error}")
                 else:
@@ -3104,7 +3104,7 @@ class RotationHandler:
             else:
                 error_details.append(f"**Last error:**")
                 error_details.append(f"{last_error}")
-        except:
+        except Exception:
             error_details.append(f"**Last error:**")
             error_details.append(f"{last_error}")
         
