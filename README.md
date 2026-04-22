@@ -96,12 +96,12 @@ curl -X POST http://localhost:17765/api/wallet/topup \
 ## Documentation
 
 For complete documentation, configuration guides, and API reference:
-- **[📚 Full Documentation](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md)** - Comprehensive user and developer guide
-- **[🔧 Installation Guide](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md#installation)** - Detailed setup instructions
-- **[⚙️ Configuration](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md#configuration)** - All configuration options
-- **[💰 Wallet System](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md#wallet-system)** - Complete wallet documentation
-- **[🔌 API Reference](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md#api-endpoints)** - Complete API documentation
-- **[🛠️ Development](https://git.nexlab.net/nexlab/aisbf/src/master/DOCUMENTATION.md#development)** - Development and deployment guides
+- **[📚 Full Documentation](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md)** - Comprehensive user and developer guide
+- **[🔧 Installation Guide](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#installation)** - Detailed setup instructions
+- **[⚙️ Configuration](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#configuration)** - All configuration options
+- **[💰 Wallet System](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#wallet-system)** - Complete wallet documentation
+- **[🔌 API Reference](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#api-endpoints)** - Complete API documentation
+- **[🛠️ Development](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#development)** - Development and deployment guides
 
 ## 🚀 Support AISBF - Your Donations Matter!
 
