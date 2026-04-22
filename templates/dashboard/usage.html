@@ -1,0 +1,321 @@
+{% extends "base.html" %}
+
+{% block title %}Usage & Quotas{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 8px;"><i class="fas fa-gauge-high me-2"></i>Usage &amp; Quotas</h2>
+<p style="color: #a0a0a0; margin-bottom: 24px; font-size: 14px;">
+    Your current plan: <strong style="color: #e0e0e0;">{{ current_tier.name if current_tier else 'Free Tier' }}</strong>
+    {% if current_tier and not current_tier.is_default %}
+    &nbsp;·&nbsp; <a href="{{ url_for(request, '/dashboard/subscription') }}" style="color:#667eea; text-decoration:none;">Manage subscription</a>
+    {% else %}
+    &nbsp;·&nbsp; <a href="{{ url_for(request, '/dashboard/pricing') }}" style="color:#4a9eff; text-decoration:none;">Upgrade plan</a>
+    {% endif %}
+</p>
+
+<div class="usage-grid">
+
+    <!-- Requests Today -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(96,165,250,.12); color:#60a5fa;"><i class="fas fa-bolt"></i></div>
+            <div>
+                <div class="usage-label">Requests Today</div>
+                <div class="usage-sublabel">Resets at midnight UTC</div>
+            </div>
+        </div>
+        {% set daily_pct = (requests_today / max_requests_per_day * 100) if max_requests_per_day and max_requests_per_day > 0 else -1 %}
+        <div class="usage-numbers">
+            <span class="usage-current">{{ "{:,}".format(requests_today) }}</span>
+            {% if max_requests_per_day == -1 %}
+            <span class="usage-limit">/ unlimited</span>
+            {% elif max_requests_per_day is not none and max_requests_per_day > 0 %}
+            <span class="usage-limit">/ {{ "{:,}".format(max_requests_per_day) }}</span>
+            {% endif %}
+        </div>
+        {% if max_requests_per_day and max_requests_per_day > 0 %}
+        <div class="progress-track">
+            <div class="progress-bar {{ 'warn' if daily_pct > 75 else '' }} {{ 'danger' if daily_pct > 90 else '' }}"
+                 style="width: {{ [daily_pct, 100]|min }}%;"></div>
+        </div>
+        <div class="progress-label">
+            {{ "%.1f"|format([daily_pct, 100]|min) }}% used
+            {% if daily_pct >= 90 %}<span class="usage-badge danger">Near limit</span>{% elif daily_pct >= 75 %}<span class="usage-badge warn">Getting close</span>{% endif %}
+        </div>
+        {% elif max_requests_per_day == -1 %}
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">Unlimited — no cap</div>
+        {% endif %}
+    </div>
+
+    <!-- Requests This Month -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(103,126,234,.12); color:#667eea;"><i class="fas fa-calendar-days"></i></div>
+            <div>
+                <div class="usage-label">Requests This Month</div>
+                <div class="usage-sublabel">Resets on the 1st of each month</div>
+            </div>
+        </div>
+        {% set monthly_pct = (requests_month / max_requests_per_month * 100) if max_requests_per_month and max_requests_per_month > 0 else -1 %}
+        <div class="usage-numbers">
+            <span class="usage-current">{{ "{:,}".format(requests_month) }}</span>
+            {% if max_requests_per_month == -1 %}
+            <span class="usage-limit">/ unlimited</span>
+            {% elif max_requests_per_month is not none and max_requests_per_month > 0 %}
+            <span class="usage-limit">/ {{ "{:,}".format(max_requests_per_month) }}</span>
+            {% endif %}
+        </div>
+        {% if max_requests_per_month and max_requests_per_month > 0 %}
+        <div class="progress-track">
+            <div class="progress-bar {{ 'warn' if monthly_pct > 75 else '' }} {{ 'danger' if monthly_pct > 90 else '' }}"
+                 style="width: {{ [monthly_pct, 100]|min }}%;"></div>
+        </div>
+        <div class="progress-label">
+            {{ "%.1f"|format([monthly_pct, 100]|min) }}% used
+            {% if monthly_pct >= 90 %}<span class="usage-badge danger">Near limit</span>{% elif monthly_pct >= 75 %}<span class="usage-badge warn">Getting close</span>{% endif %}
+        </div>
+        {% elif max_requests_per_month == -1 %}
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">Unlimited — no cap</div>
+        {% endif %}
+    </div>
+
+    <!-- Providers -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(74,222,128,.12); color:#4ade80;"><i class="fas fa-plug"></i></div>
+            <div>
+                <div class="usage-label">AI Providers</div>
+                <div class="usage-sublabel">Configured provider integrations</div>
+            </div>
+        </div>
+        {% set prov_pct = (providers_count / max_providers * 100) if max_providers and max_providers > 0 else -1 %}
+        <div class="usage-numbers">
+            <span class="usage-current">{{ providers_count }}</span>
+            {% if max_providers == -1 %}
+            <span class="usage-limit">/ unlimited</span>
+            {% elif max_providers is not none and max_providers > 0 %}
+            <span class="usage-limit">/ {{ max_providers }}</span>
+            {% endif %}
+        </div>
+        {% if max_providers and max_providers > 0 %}
+        <div class="progress-track">
+            <div class="progress-bar {{ 'warn' if prov_pct > 75 else '' }} {{ 'danger' if prov_pct > 90 else '' }}"
+                 style="width: {{ [prov_pct, 100]|min }}%;"></div>
+        </div>
+        <div class="progress-label">{{ "%.1f"|format([prov_pct, 100]|min) }}% used</div>
+        {% elif max_providers == -1 %}
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">Unlimited</div>
+        {% endif %}
+    </div>
+
+    <!-- Rotations -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(251,146,60,.12); color:#fb923c;"><i class="fas fa-rotate"></i></div>
+            <div>
+                <div class="usage-label">Rotations</div>
+                <div class="usage-sublabel">Load balancing configurations</div>
+            </div>
+        </div>
+        {% set rot_pct = (rotations_count / max_rotations * 100) if max_rotations and max_rotations > 0 else -1 %}
+        <div class="usage-numbers">
+            <span class="usage-current">{{ rotations_count }}</span>
+            {% if max_rotations == -1 %}
+            <span class="usage-limit">/ unlimited</span>
+            {% elif max_rotations is not none and max_rotations > 0 %}
+            <span class="usage-limit">/ {{ max_rotations }}</span>
+            {% endif %}
+        </div>
+        {% if max_rotations and max_rotations > 0 %}
+        <div class="progress-track">
+            <div class="progress-bar {{ 'warn' if rot_pct > 75 else '' }} {{ 'danger' if rot_pct > 90 else '' }}"
+                 style="width: {{ [rot_pct, 100]|min }}%;"></div>
+        </div>
+        <div class="progress-label">{{ "%.1f"|format([rot_pct, 100]|min) }}% used</div>
+        {% elif max_rotations == -1 %}
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">Unlimited</div>
+        {% endif %}
+    </div>
+
+    <!-- Autoselections -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(192,132,252,.12); color:#c084fc;"><i class="fas fa-wand-magic-sparkles"></i></div>
+            <div>
+                <div class="usage-label">Autoselections</div>
+                <div class="usage-sublabel">Smart routing configurations</div>
+            </div>
+        </div>
+        {% set auto_pct = (autoselects_count / max_autoselections * 100) if max_autoselections and max_autoselections > 0 else -1 %}
+        <div class="usage-numbers">
+            <span class="usage-current">{{ autoselects_count }}</span>
+            {% if max_autoselections == -1 %}
+            <span class="usage-limit">/ unlimited</span>
+            {% elif max_autoselections is not none and max_autoselections > 0 %}
+            <span class="usage-limit">/ {{ max_autoselections }}</span>
+            {% endif %}
+        </div>
+        {% if max_autoselections and max_autoselections > 0 %}
+        <div class="progress-track">
+            <div class="progress-bar {{ 'warn' if auto_pct > 75 else '' }} {{ 'danger' if auto_pct > 90 else '' }}"
+                 style="width: {{ [auto_pct, 100]|min }}%;"></div>
+        </div>
+        <div class="progress-label">{{ "%.1f"|format([auto_pct, 100]|min) }}% used</div>
+        {% elif max_autoselections == -1 %}
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">Unlimited</div>
+        {% endif %}
+    </div>
+
+    <!-- Tokens (24h) -->
+    <div class="usage-card">
+        <div class="usage-card-header">
+            <div class="usage-icon" style="background:rgba(34,211,238,.12); color:#22d3ee;"><i class="fas fa-coins"></i></div>
+            <div>
+                <div class="usage-label">Tokens (last 24h)</div>
+                <div class="usage-sublabel">Total input + output tokens</div>
+            </div>
+        </div>
+        <div class="usage-numbers">
+            <span class="usage-current">
+                {% if tokens_24h >= 1000000 %}{{ "%.1f"|format(tokens_24h / 1000000) }}M
+                {% elif tokens_24h >= 1000 %}{{ "%.1f"|format(tokens_24h / 1000) }}K
+                {% else %}{{ tokens_24h }}{% endif %}
+            </span>
+            <span class="usage-limit">/ unlimited</span>
+        </div>
+        <div class="progress-track unlimited"></div>
+        <div class="progress-label">No token cap on this plan</div>
+    </div>
+
+</div>
+
+{% if upgrade_tiers %}
+<!-- Upgrade CTA -->
+<div style="margin-top: 24px; background: linear-gradient(135deg, rgba(74,158,255,.12), rgba(103,126,234,.08)); border: 1px solid rgba(74,158,255,.4); border-radius: 10px; padding: 20px 24px; display: flex; align-items: center; justify-content: space-between; gap: 16px; flex-wrap: wrap;">
+    <div>
+        <div style="font-size: 1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 6px;">
+            <i class="fas fa-rocket" style="color:#4a9eff;"></i> Need higher limits?
+        </div>
+        <div style="color: #a0a0a0; font-size: 14px;">
+            Upgrade your plan to unlock more requests, providers, and autoselections.
+        </div>
+    </div>
+    <a href="{{ url_for(request, '/dashboard/pricing') }}"
+       style="background: linear-gradient(135deg, #4a9eff, #667eea); color: white; text-decoration: none; padding: 10px 20px; border-radius: 8px; font-weight: 600; font-size: 15px; white-space: nowrap; flex-shrink: 0;">
+        <i class="fas fa-arrow-up me-1"></i> View Plans
+    </a>
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block extra_css %}
+<style>
+.usage-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 16px;
+    margin-bottom: 0;
+}
+
+.usage-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 20px;
+    transition: border-color .2s;
+}
+.usage-card:hover { border-color: #667eea; }
+
+.usage-card-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.usage-icon {
+    width: 40px; height: 40px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.1rem;
+    flex-shrink: 0;
+}
+
+.usage-label {
+    font-size: .95rem;
+    font-weight: 600;
+    color: #e0e0e0;
+}
+.usage-sublabel {
+    font-size: .75rem;
+    color: #666;
+    margin-top: 2px;
+}
+
+.usage-numbers {
+    display: flex;
+    align-items: baseline;
+    gap: 4px;
+    margin-bottom: 10px;
+}
+.usage-current {
+    font-size: 1.8rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    line-height: 1;
+}
+.usage-limit {
+    font-size: .9rem;
+    color: #666;
+}
+
+.progress-track {
+    height: 6px;
+    background: #0f3460;
+    border-radius: 3px;
+    overflow: hidden;
+    margin-bottom: 6px;
+}
+.progress-track.unlimited {
+    background: repeating-linear-gradient(
+        90deg,
+        rgba(74,158,255,.15) 0px,
+        rgba(74,158,255,.15) 4px,
+        transparent 4px,
+        transparent 8px
+    );
+}
+.progress-bar {
+    height: 100%;
+    background: #4a9eff;
+    border-radius: 3px;
+    transition: width .6s ease;
+}
+.progress-bar.warn { background: #fbbf24; }
+.progress-bar.danger { background: #ef4444; }
+
+.progress-label {
+    font-size: .78rem;
+    color: #666;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.usage-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 10px;
+    font-size: .72rem;
+    font-weight: 600;
+}
+.usage-badge.warn { background: rgba(251,191,36,.15); color: #fbbf24; border: 1px solid rgba(251,191,36,.4); }
+.usage-badge.danger { background: rgba(239,68,68,.15); color: #ef4444; border: 1px solid rgba(239,68,68,.4); }
+</style>
+{% endblock %}

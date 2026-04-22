@@ -47,21 +47,21 @@
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
         <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
             <div style="font-size: 24px; font-weight: bold; color: #4a9eff; margin-bottom: 5px;">
-                {% if current_tier.max_requests_day == -1 %}
+                {% if current_tier.max_requests_per_day == -1 %}
                 ∞
-                {% else %}
-                {{ current_tier.max_requests_day }}
-                {% endif %}
+                {% elif current_tier.max_requests_per_day is not none %}
+                {{ "{:,}".format(current_tier.max_requests_per_day) }}
+                {% else %}∞{% endif %}
             </div>
             <div style="color: #a0a0a0; font-size: 12px;">Requests per day</div>
         </div>
         <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
             <div style="font-size: 24px; font-weight: bold; color: #4ade80; margin-bottom: 5px;">
-                {% if current_tier.max_requests_month == -1 %}
+                {% if current_tier.max_requests_per_month == -1 %}
                 ∞
-                {% else %}
-                {{ current_tier.max_requests_month }}
-                {% endif %}
+                {% elif current_tier.max_requests_per_month is not none %}
+                {{ "{:,}".format(current_tier.max_requests_per_month) }}
+                {% else %}∞{% endif %}
             </div>
             <div style="color: #a0a0a0; font-size: 12px;">Requests per month</div>
         </div>

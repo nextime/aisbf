@@ -2637,12 +2637,12 @@ class DatabaseManager:
                 SELECT t.id, t.name, t.description, t.price_monthly, t.price_yearly,
                        t.max_requests_per_day, t.max_requests_per_month, t.max_providers,
                        t.max_rotations, t.max_autoselections, t.max_rotation_models,
-                       t.max_autoselection_models
+                       t.max_autoselection_models, t.is_default, t.is_active
                 FROM users u
                 JOIN account_tiers t ON u.tier_id = t.id
                 WHERE u.id = {placeholder}
             ''', (user_id,))
-            
+
             row = cursor.fetchone()
             if row:
                 return {
@@ -2657,7 +2657,9 @@ class DatabaseManager:
                     'max_rotations': row[8],
                     'max_autoselections': row[9],
                     'max_rotation_models': row[10],
-                    'max_autoselection_models': row[11]
+                    'max_autoselection_models': row[11],
+                    'is_default': bool(row[12]),
+                    'is_active': bool(row[13]),
                 }
             return None
     

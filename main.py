@@ -4226,10 +4226,20 @@ async def dashboard_index(request: Request):
         subscription = db.get_user_subscription(user_id) if user_id else None
         current_tier = db.get_user_tier(user_id) if user_id else None
         payment_methods = db.get_user_payment_methods(user_id) if user_id else []
+        all_tiers = db.get_visible_tiers() if user_id else []
 
         # Get currency settings
         currency_settings = db.get_currency_settings()
         currency_symbol = currency_settings.get('currency_symbol', '$')
+
+        # Determine if there are higher tiers available to upgrade to
+        upgrade_tiers = []
+        if current_tier:
+            for t in all_tiers:
+                if not t.get('is_default') and t['price_monthly'] > current_tier.get('price_monthly', 0):
+                    upgrade_tiers.append(t)
+        elif all_tiers:
+            upgrade_tiers = [t for t in all_tiers if not t.get('is_default')]
 
         return templates.TemplateResponse(
         request=request,
@@ -4247,6 +4257,7 @@ async def dashboard_index(request: Request):
             "current_tier": current_tier,
             "payment_methods": payment_methods,
             "currency_symbol": currency_symbol,
+            "upgrade_tiers": upgrade_tiers,
             "display_name": (db.get_user_by_id(user_id) or {}).get('display_name') or request.session.get('username', '') if user_id else request.session.get('username', '')
         }
     )
@@ -8316,36 +8327,283 @@ async def dashboard_pricing(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
+
     db = DatabaseRegistry.get_config_database()
-    
+    user_id = request.session.get('user_id')
+
     tiers = db.get_visible_tiers()
-    current_tier = db.get_user_tier(request.session.get('user_id'))
-    
+    current_tier = db.get_user_tier(user_id)
+
+    # Mark the most expensive non-free tier as recommended if none marked
+    paid_tiers = [t for t in tiers if not t.get('is_default')]
+    if paid_tiers:
+        most_expensive = max(paid_tiers, key=lambda t: t['price_monthly'])
+        for t in tiers:
+            t['is_recommended'] = (not t.get('is_default') and t['id'] == most_expensive['id'])
+
     # Get enabled payment gateways
     enabled_gateways = []
-    db = DatabaseRegistry.get_config_database()
     gateways = db.get_payment_gateway_settings()
     for gateway, settings in gateways.items():
         if settings.get('enabled', False):
             enabled_gateways.append(gateway)
-    
+
     # Get currency settings
     currency_settings = db.get_currency_settings()
     currency_symbol = currency_settings.get('currency_symbol', '$')
-    
+
+    # Get wallet balance for display
+    wallet_balance = None
+    has_stripe_card = False
+    if user_id:
+        try:
+            from aisbf.payments.wallet.manager import WalletManager
+            wallet_manager = WalletManager(db)
+            wallet = await wallet_manager.get_wallet(user_id)
+            wallet_balance = float(wallet.get('balance', 0))
+        except Exception:
+            wallet_balance = 0.0
+        payment_methods = db.get_user_payment_methods(user_id)
+        has_stripe_card = any(m.get('type') == 'stripe' and m.get('is_active') for m in payment_methods)
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/pricing.html",
         context={
-        "request": request,
-        "session": request.session,
-        "tiers": tiers,
-        "current_tier": current_tier,
-        "enabled_gateways": enabled_gateways,
-        "currency_symbol": currency_symbol
-    }
+            "request": request,
+            "session": request.session,
+            "tiers": tiers,
+            "current_tier": current_tier,
+            "enabled_gateways": enabled_gateways,
+            "currency_symbol": currency_symbol,
+            "wallet_balance": wallet_balance,
+            "has_stripe_card": has_stripe_card,
+        }
     )
+
+
+@app.post("/dashboard/subscribe/free")
+async def dashboard_subscribe_free(request: Request):
+    """Downgrade to the free tier"""
+    from fastapi.responses import JSONResponse
+
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+
+    free_tiers = [t for t in db.get_visible_tiers() if t.get('is_default')]
+    if not free_tiers:
+        return JSONResponse({"error": "No free tier configured"}, status_code=404)
+    free_tier = free_tiers[0]
+
+    ph = db.placeholder
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE user_subscriptions SET status = 'cancelled' WHERE user_id = {ph} AND status = 'active'",
+            (user_id,)
+        )
+        conn.commit()
+    db.set_user_tier(user_id, free_tier['id'])
+    return JSONResponse({"success": True, "message": "Downgraded to free plan. Changes are effective immediately."})
+
+
+def _create_subscription_record(db, user_id: int, tier_id: int):
+    """Cancel existing active subscriptions and create a new one for the given tier."""
+    from datetime import datetime, timedelta
+    ph = db.placeholder
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            f"UPDATE user_subscriptions SET status = 'cancelled' WHERE user_id = {ph} AND status = 'active'",
+            (user_id,)
+        )
+        start_date = datetime.now()
+        end_date = start_date + timedelta(days=30)
+        cursor.execute(f"""
+            INSERT INTO user_subscriptions (user_id, tier_id, status, start_date, next_billing_date)
+            VALUES ({ph}, {ph}, 'active', {ph}, {ph})
+        """, (user_id, tier_id, start_date, end_date))
+        conn.commit()
+
+@app.post("/dashboard/subscribe/{tier_id}")
+async def dashboard_subscribe_tier(request: Request, tier_id: int):
+    """Subscribe/upgrade to a paid tier using wallet or saved Stripe card"""
+    from fastapi.responses import JSONResponse
+    from decimal import Decimal
+
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+
+    target_tier = db.get_tier_by_id(tier_id)
+    if not target_tier or not target_tier.get('is_active'):
+        return JSONResponse({"error": "Invalid or inactive plan"}, status_code=404)
+
+    current_tier = db.get_user_tier(user_id)
+    if current_tier and current_tier['id'] == tier_id:
+        return JSONResponse({"error": "You are already on this plan"}, status_code=400)
+
+    tier_price = float(target_tier['price_monthly'])
+
+    # Get wallet balance
+    from aisbf.payments.wallet.manager import WalletManager
+    wallet_manager = WalletManager(db)
+    try:
+        wallet = await wallet_manager.get_wallet(user_id)
+        wallet_balance = float(wallet.get('balance', 0))
+    except Exception:
+        wallet_balance = 0.0
+
+    if wallet_balance >= tier_price:
+        # Pay with wallet
+        try:
+            await wallet_manager.debit_wallet(user_id, Decimal(str(tier_price)), {
+                "description": f"Plan upgrade to {target_tier['name']}",
+                "payment_gateway": "wallet",
+                "gateway_transaction_id": None,
+                "payment_method_id": None,
+            })
+        except Exception as e:
+            return JSONResponse({"error": f"Failed to debit wallet: {str(e)}"}, status_code=400)
+        _create_subscription_record(db, user_id, tier_id)
+        db.set_user_tier(user_id, tier_id)
+        return JSONResponse({
+            "success": True,
+            "message": f"Upgraded to {target_tier['name']}. ${tier_price:.2f} deducted from your wallet."
+        })
+
+    # Wallet insufficient — check Stripe
+    payment_methods = db.get_user_payment_methods(user_id)
+    stripe_methods = [m for m in payment_methods if m.get('type') == 'stripe' and m.get('is_active')]
+
+    if not stripe_methods:
+        shortage = tier_price - wallet_balance
+        return JSONResponse({
+            "error": "insufficient_funds",
+            "wallet_balance": wallet_balance,
+            "required": tier_price,
+            "shortage": round(shortage, 2),
+            "message": (
+                f"Your wallet balance (${wallet_balance:.2f}) is insufficient. "
+                f"You need ${shortage:.2f} more. Top up your wallet or add a card."
+            ),
+        }, status_code=402)
+
+    # Charge the default (or first) Stripe card for the exact plan amount
+    default_method = next((m for m in stripe_methods if m.get('is_default')), stripe_methods[0])
+    if payment_service is None:
+        return JSONResponse({"error": "Payment service unavailable"}, status_code=503)
+
+    result = await payment_service.stripe_handler.auto_charge(
+        user_id,
+        Decimal(str(tier_price)),
+        default_method['identifier']
+    )
+    if not result.get('success'):
+        return JSONResponse({"error": result.get('error', 'Card charge failed')}, status_code=402)
+
+    _create_subscription_record(db, user_id, tier_id)
+    db.set_user_tier(user_id, tier_id)
+    return JSONResponse({
+        "success": True,
+        "message": f"Upgraded to {target_tier['name']}. ${tier_price:.2f} charged to your saved card."
+    })
+
+
+@app.get("/dashboard/usage", response_class=HTMLResponse)
+async def dashboard_usage(request: Request):
+    """Usage and quota page for users"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    from datetime import datetime, timedelta
+    db = DatabaseRegistry.get_config_database()
+    user_id = request.session.get('user_id')
+
+    current_tier = db.get_user_tier(user_id) if user_id else None
+    all_tiers = db.get_visible_tiers()
+
+    # Quota limits from tier
+    max_requests_per_day = current_tier.get('max_requests_per_day', -1) if current_tier else -1
+    max_requests_per_month = current_tier.get('max_requests_per_month', -1) if current_tier else -1
+    max_providers = current_tier.get('max_providers', -1) if current_tier else -1
+    max_rotations = current_tier.get('max_rotations', -1) if current_tier else -1
+    max_autoselections = current_tier.get('max_autoselections', -1) if current_tier else -1
+
+    # Actual usage
+    requests_today = 0
+    requests_month = 0
+    tokens_24h = 0
+    providers_count = 0
+    rotations_count = 0
+    autoselects_count = 0
+
+    if user_id:
+        token_usage = db.get_user_token_usage(user_id)
+        now = datetime.now()
+        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        day_ago = now - timedelta(days=1)
+
+        for row in token_usage:
+            ts = row['timestamp']
+            if isinstance(ts, str):
+                try:
+                    ts = datetime.fromisoformat(ts)
+                except Exception:
+                    continue
+            if ts >= today_start:
+                requests_today += 1
+            if ts >= month_start:
+                requests_month += 1
+            if ts >= day_ago:
+                tokens_24h += int(row.get('token_count', 0) or 0)
+
+        providers_count = len(db.get_user_providers(user_id))
+        rotations_count = len(db.get_user_rotations(user_id))
+        autoselects_count = len(db.get_user_autoselects(user_id))
+
+    upgrade_tiers = [
+        t for t in all_tiers
+        if not t.get('is_default') and (
+            current_tier is None or t['price_monthly'] > current_tier.get('price_monthly', 0)
+        )
+    ]
+
+    currency_settings = db.get_currency_settings()
+    currency_symbol = currency_settings.get('currency_symbol', '$')
+
+    return templates.TemplateResponse(
+        request=request,
+        name="dashboard/usage.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "current_tier": current_tier,
+            "max_requests_per_day": max_requests_per_day,
+            "max_requests_per_month": max_requests_per_month,
+            "max_providers": max_providers,
+            "max_rotations": max_rotations,
+            "max_autoselections": max_autoselections,
+            "requests_today": requests_today,
+            "requests_month": requests_month,
+            "tokens_24h": tokens_24h,
+            "providers_count": providers_count,
+            "rotations_count": rotations_count,
+            "autoselects_count": autoselects_count,
+            "upgrade_tiers": upgrade_tiers,
+            "currency_symbol": currency_symbol,
+        }
+    )
+
 
 @app.get("/dashboard/subscription")
 async def dashboard_subscription(request: Request):
@@ -8409,6 +8667,16 @@ async def dashboard_wallet(request: Request):
         stripe_cards = [m for m in db.get_user_payment_methods(user_id)
                         if m.get('type') == 'stripe' or m.get('gateway') == 'stripe']
 
+        # Determine if there are upgrade plans available
+        current_tier = db.get_user_tier(user_id)
+        all_tiers = db.get_visible_tiers()
+        upgrade_tiers = [
+            t for t in all_tiers
+            if not t.get('is_default') and (
+                current_tier is None or t['price_monthly'] > current_tier.get('price_monthly', 0)
+            )
+        ]
+
         return templates.TemplateResponse(
             request=request,
             name="dashboard/wallet.html",
@@ -8418,6 +8686,7 @@ async def dashboard_wallet(request: Request):
                 "enabled_gateways": enabled_gateways,
                 "currency_symbol": db.get_currency_settings().get('currency_symbol', '$'),
                 "stripe_cards": stripe_cards,
+                "upgrade_tiers": upgrade_tiers,
             }
         )
     except ImportError:

@@ -372,6 +372,11 @@
                     <span>Wallet</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
+                <a href="{{ url_for(request, '/dashboard/usage') }}" class="action-card">
+                    <i class="fas fa-gauge-high"></i>
+                    <span>Usage</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
             </div>
         </div>
     </div>
@@ -392,21 +397,46 @@
                     {% if current_tier.is_default %}
                     <span class="badge badge-free">Free Tier</span>
                     {% else %}
-                    <div class="sub-price">{{ currency_symbol }}{{ current_tier.price_monthly }}<span style="font-size:.9rem;color:#888;">/mo</span></div>
-                    <div class="sub-price-sub">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</div>
+                    <div class="sub-price">{{ currency_symbol }}{{ "%.2f"|format(current_tier.price_monthly) }}<span style="font-size:.9rem;color:#888;">/mo</span></div>
+                    {% if current_tier.price_yearly %}
+                    <div class="sub-price-sub">or {{ currency_symbol }}{{ "%.2f"|format(current_tier.price_yearly) }}/year</div>
+                    {% endif %}
                     {% endif %}
                 </div>
                 {% if subscription %}
                 <div style="text-align:right;">
                     <span class="badge badge-{{ subscription.status }}">{{ subscription.status|title }}</span>
-                    {% if subscription.expires_at %}
-                    <div class="renew-label">Renews {{ subscription.expires_at }}</div>
+                    {% if subscription.next_billing_date %}
+                    <div class="renew-label">Renews {{ subscription.next_billing_date }}</div>
                     {% endif %}
                 </div>
                 {% endif %}
             </div>
             {% if not payment_methods or payment_methods|length == 0 %}
             <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary" style="margin-top:1rem; margin-left:0; display:inline-block;">Add Payment Method</a>
+            {% endif %}
+
+            <!-- Upgrade CTA -->
+            {% if upgrade_tiers %}
+            <div style="margin-top:1rem; padding:1rem; background:linear-gradient(135deg,rgba(74,158,255,.12),rgba(103,126,234,.08)); border:1px solid rgba(74,158,255,.4); border-radius:8px;">
+                <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; flex-wrap:wrap;">
+                    <div>
+                        <div style="font-size:.9rem; font-weight:600; color:#e0e0e0; margin-bottom:.25rem;">
+                            <i class="fas fa-rocket" style="color:#4a9eff;"></i> Unlock more power
+                        </div>
+                        <div style="font-size:.8rem; color:#a0a0a0;">
+                            {% if upgrade_tiers|length == 1 %}
+                            Upgrade to <strong style="color:#4a9eff;">{{ upgrade_tiers[0].name }}</strong> for {{ currency_symbol }}{{ "%.2f"|format(upgrade_tiers[0].price_monthly) }}/mo
+                            {% else %}
+                            {{ upgrade_tiers|length }} higher plans available — more requests, more providers
+                            {% endif %}
+                        </div>
+                    </div>
+                    <a href="{{ url_for(request, '/dashboard/pricing') }}" style="background:linear-gradient(135deg,#4a9eff,#667eea); color:white; text-decoration:none; padding:.5rem 1rem; border-radius:6px; font-size:.85rem; font-weight:600; white-space:nowrap; flex-shrink:0;">
+                        <i class="fas fa-arrow-up me-1"></i> Upgrade Plan
+                    </a>
+                </div>
+            </div>
             {% endif %}
         </div>
     </div>
