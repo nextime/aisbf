@@ -130,6 +130,7 @@
         </div>
 
         <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
+            {% if stripe_cards %}
             <div style="margin-bottom: 14px;">
                 <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
                 <div style="position: relative;">
@@ -148,21 +149,26 @@
                         value="{{ wallet.auto_topup_threshold or '' }}" step="0.01" min="1">
                 </div>
             </div>
-            <div style="margin-bottom: 18px;">
-                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Payment method</label>
-                <select id="auto-topup-payment-method"
-                    style="width: 100%; padding: 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 14px;">
-                    {% for name in enabled_gateways.keys() | select('in', ['stripe', 'paypal']) %}
-                    <option value="{{ name }}" {% if wallet.auto_topup_payment_method == name %}selected{% endif %}>
-                        {{ name | capitalize }}
-                    </option>
-                    {% endfor %}
-                </select>
+            <div style="margin-bottom: 14px; color: #a0a0a0; font-size: 13px;">
+                <i class="fab fa-cc-stripe me-1"></i>
+                Charged to your default credit card:
+                {% set default_card = stripe_cards | selectattr('is_default') | first | default(stripe_cards[0]) %}
+                <strong style="color: #e0e0e0;">•••• {{ default_card.last4 or '????'  }} ({{ default_card.brand | default('Card') | capitalize }})</strong>
             </div>
             <button id="save-auto-topup"
                 style="background: #17a2b8; border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .15s;">
                 <i class="fas fa-save me-2"></i>Save Settings
             </button>
+            {% else %}
+            <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; padding: 16px; text-align: center;">
+                <p style="color: #a0a0a0; margin: 0 0 12px 0; font-size: 13px;">
+                    Auto top-up charges your saved credit card automatically.<br>You don't have a credit card on file yet.
+                </p>
+                <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn" style="font-size: 13px; padding: 8px 16px;">
+                    <i class="fab fa-cc-stripe me-2"></i>Add Credit Card
+                </a>
+            </div>
+            {% endif %}
         </div>
 
         {% if not wallet.auto_topup_enabled %}
@@ -342,7 +348,7 @@ document.addEventListener('DOMContentLoaded', function () {
             enabled:          toggle.checked,
             topup_amount:     parseFloat(document.getElementById('auto-topup-amount').value) || null,
             threshold_amount: parseFloat(document.getElementById('auto-topup-threshold').value) || null,
-            payment_method:   document.getElementById('auto-topup-payment-method').value || null
+            payment_method:   'stripe'
         };
         fetch('/api/wallet/auto-topup', {
             method: 'POST',

@@ -8171,6 +8171,10 @@ async def dashboard_wallet(request: Request):
         all_gateways = db.get_payment_gateway_settings()
         enabled_gateways = {k: v for k, v in all_gateways.items() if v.get('enabled', False)}
 
+        # Get user's saved Stripe credit cards for auto top-up
+        stripe_cards = [m for m in db.get_user_payment_methods(user_id)
+                        if m.get('type') == 'stripe' or m.get('gateway') == 'stripe']
+
         return templates.TemplateResponse(
             request=request,
             name="dashboard/wallet.html",
@@ -8179,6 +8183,7 @@ async def dashboard_wallet(request: Request):
                 "wallet": wallet,
                 "enabled_gateways": enabled_gateways,
                 "currency_symbol": db.get_currency_settings().get('currency_symbol', '$'),
+                "stripe_cards": stripe_cards,
             }
         )
     except ImportError:
@@ -8348,6 +8353,11 @@ async def dashboard_billing(request: Request):
     except Exception:
         wallet = {'balance': '0.00', 'currency_code': currency_code, 'auto_topup_enabled': False}
 
+    # Get Stripe publishable key
+    stripe_publishable_key = ""
+    if 'stripe' in gateways and gateways['stripe'].get('enabled'):
+        stripe_publishable_key = gateways['stripe'].get('publishable_key', '')
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/billing.html",
@@ -8358,7 +8368,8 @@ async def dashboard_billing(request: Request):
         "transactions": transactions,
         "enabled_gateways": enabled_gateways,
         "wallet": wallet,
-        "currency_symbol": currency_settings.get('currency_symbol', '$')
+        "currency_symbol": currency_settings.get('currency_symbol', '$'),
+        "stripe_publishable_key": stripe_publishable_key,
     }
     )
 
