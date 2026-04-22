@@ -1375,7 +1375,7 @@ class DatabaseManager:
             ''', (new_email, user_id))
             conn.commit()
 
-    def update_user_profile(self, user_id: int, username: str, email: str, display_name: str = None):
+    def update_user_profile(self, user_id: int, username: str, email: str, display_name: str = None, profile_pic: str = None):
         """
         Update user profile (username and display_name, email is read-only).
 
@@ -1384,23 +1384,25 @@ class DatabaseManager:
             username: New username
             email: Email (ignored, kept for backward compatibility)
             display_name: New display name (optional)
+            profile_pic: Base64-encoded profile picture data URL (optional)
         """
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
-            
+
+            fields = ['username = ' + placeholder]
+            params = [username]
             if display_name is not None:
-                cursor.execute(f'''
-                    UPDATE users
-                    SET username = {placeholder}, display_name = {placeholder}
-                    WHERE id = {placeholder}
-                ''', (username, display_name, user_id))
-            else:
-                cursor.execute(f'''
-                    UPDATE users
-                    SET username = {placeholder}
-                    WHERE id = {placeholder}
-                ''', (username, user_id))
+                fields.append('display_name = ' + placeholder)
+                params.append(display_name)
+            if profile_pic is not None:
+                fields.append('profile_pic = ' + placeholder)
+                params.append(profile_pic)
+            params.append(user_id)
+
+            cursor.execute(f'''
+                UPDATE users SET {', '.join(fields)} WHERE id = {placeholder}
+            ''', tuple(params))
             conn.commit()
 
     def sanitize_username(self, input_str: str) -> str:
@@ -4315,7 +4317,8 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 ('subscription_expires', 'TIMESTAMP NULL', 'tier_id'),
                 ('stripe_customer_id', 'VARCHAR(100)', 'subscription_expires'),
                 ('reset_password_token', 'VARCHAR(255)', 'stripe_customer_id'),
-                ('reset_password_token_expires', 'TIMESTAMP NULL', 'reset_password_token')
+                ('reset_password_token_expires', 'TIMESTAMP NULL', 'reset_password_token'),
+                ('profile_pic', 'TEXT', 'reset_password_token_expires')
             ]
             
             for col_name, col_def, after_col in required_columns:

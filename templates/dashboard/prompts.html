@@ -31,7 +31,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <div style="margin-bottom: 20px;">
     <label style="font-weight: 500; margin-bottom: 10px; display: block;">Select Prompt File:</label>
-    <select id="prompt-selector" onchange="switchPrompt()" style="width: 100%; padding: 10px; border: 1px solid #ddd; border-radius: 3px; font-size: 14px;">
+    <select id="prompt-selector" onchange="switchPrompt()">
         {% for prompt in prompts %}
         <option value="{{ prompt.key }}" {% if loop.first %}selected{% endif %}>{{ prompt.name }}</option>
         {% endfor %}
@@ -42,9 +42,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <input type="hidden" name="prompt_key" id="prompt_key" value="">
     
     <div class="form-group">
-        <label for="prompt_content" style="font-weight: 500; margin-bottom: 10px; display: block;">Prompt Content:</label>
-        <textarea id="prompt_content" name="prompt_content" style="width: 100%; min-height: 400px; padding: 10px; border: 1px solid #ddd; border-radius: 3px; font-family: monospace; font-size: 13px; line-height: 1.5;"></textarea>
-        <small style="color: #666; display: block; margin-top: 5px;">Edit the prompt template. Use markdown formatting as needed.</small>
+        <label for="prompt_content">Prompt Content:</label>
+        <textarea id="prompt_content" name="prompt_content" style="min-height: 400px;"></textarea>
+        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Edit the prompt template. Use markdown formatting as needed.</small>
     </div>
     
     <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -52,7 +52,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% if not is_admin %}
         <button type="button" class="btn btn-secondary" onclick="resetPrompt()">Reset to Default</button>
         {% endif %}
-        <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+        <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
 
@@ -96,33 +96,4 @@ if (prompts.length > 0) {
     document.getElementById('prompt_key').value = prompts[0].key;
 }
 </script>
-
-<style>
-.form-group {
-    margin-bottom: 20px;
-}
-
-textarea {
-    resize: vertical;
-}
-
-.btn {
-    padding: 10px 20px;
-    border: none;
-    border-radius: 3px;
-    cursor: pointer;
-    font-size: 14px;
-    text-decoration: none;
-    display: inline-block;
-}
-
-.btn-secondary {
-    background: #6c757d;
-    color: white;
-}
-
-.btn-secondary:hover {
-    background: #5a6268;
-}
-</style>
 {% endblock %}

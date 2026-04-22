@@ -18,7 +18,7 @@
     <div class="card">
         <h2>Account Information</h2>
         
-        <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}">
+        <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}" enctype="multipart/form-data">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" value="{{ session.username }}" required>
@@ -48,9 +48,22 @@
 
             <div class="form-group">
                 <label>Profile Picture</label>
-                <div style="display: flex; align-items: center; gap: 1rem;">
-                    <img src="https://www.gravatar.com/avatar/{{ session.email|md5 }}?s=96&d=identicon" alt="Current avatar" style="border-radius: 8px;">
-                    <p style="color: #a0a0a0;">Profile pictures are managed via <a href="https://gravatar.com" target="_blank">Gravatar</a> using your email address</p>
+                <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
+                    <div style="position: relative; cursor: pointer;" onclick="document.getElementById('profile_pic').click()">
+                        {% if user.profile_pic %}
+                        <img id="avatar-preview" src="{{ user.profile_pic }}" alt="Profile picture" style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
+                        {% else %}
+                        <img id="avatar-preview" src="https://www.gravatar.com/avatar/{{ session.email|md5 }}?s=96&d=identicon" alt="Profile picture" style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
+                        {% endif %}
+                        <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.45); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;" id="avatar-overlay">
+                            <span style="color: #fff; font-size: 0.8rem; text-align: center;">Change</span>
+                        </div>
+                    </div>
+                    <div>
+                        <input type="file" id="profile_pic" name="profile_pic" accept="image/*" style="display: none;" onchange="previewAvatar(this)">
+                        <button type="button" class="btn" style="background: #1a1a2e; border: 1px solid #0f3460; color: #e0e0e0;" onclick="document.getElementById('profile_pic').click()">Upload Image</button>
+                        <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Max 1 MB. JPG, PNG, GIF, WebP.</small>
+                    </div>
                 </div>
             </div>
 
@@ -106,4 +119,19 @@
     border-color: #667eea;
 }
 </style>
+
+<script>
+function previewAvatar(input) {
+    if (!input.files || !input.files[0]) return;
+    const reader = new FileReader();
+    reader.onload = e => { document.getElementById('avatar-preview').src = e.target.result; };
+    reader.readAsDataURL(input.files[0]);
+}
+const avatarWrap = document.querySelector('[onclick="document.getElementById(\'profile_pic\').click()"]');
+const overlay = document.getElementById('avatar-overlay');
+if (avatarWrap && overlay) {
+    avatarWrap.addEventListener('mouseenter', () => overlay.style.opacity = '1');
+    avatarWrap.addEventListener('mouseleave', () => overlay.style.opacity = '0');
+}
+</script>
 {% endblock %}

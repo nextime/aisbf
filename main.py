@@ -59,6 +59,7 @@ from datetime import datetime, timedelta
 from collections import defaultdict
 from pathlib import Path
 import json
+import re
 import markdown
 from urllib.parse import urljoin, urlencode
 from cryptography.fernet import Fernet
@@ -3198,7 +3199,7 @@ async def dashboard_profile(request: Request):
 
 
 @app.post("/dashboard/profile")
-async def dashboard_profile_save(request: Request, username: str = Form(...), display_name: str = Form("")):
+async def dashboard_profile_save(request: Request, username: str = Form(...), display_name: str = Form(""), profile_pic: UploadFile = File(None)):
     """Save user profile changes (username and display_name)"""
     auth_check = require_dashboard_auth(request)
     if isinstance(auth_check, RedirectResponse):
@@ -3208,7 +3209,18 @@ async def dashboard_profile_save(request: Request, username: str = Form(...), di
     db = DatabaseRegistry.get_config_database()
     
     try:
-        db.update_user_profile(user_id, username, None, display_name if display_name else None)
+        profile_pic_data = None
+        if profile_pic and profile_pic.filename:
+            content_type = profile_pic.content_type or ''
+            if not content_type.startswith('image/'):
+                return RedirectResponse(url=url_for(request, "/dashboard/profile?error=Invalid file type. Please upload an image."), status_code=303)
+            data = await profile_pic.read(1024 * 1024 + 1)  # read up to 1MB+1 to detect oversized
+            if len(data) > 1024 * 1024:
+                return RedirectResponse(url=url_for(request, "/dashboard/profile?error=Image too large. Maximum size is 1MB."), status_code=303)
+            import base64
+            profile_pic_data = f"data:{content_type};base64,{base64.b64encode(data).decode()}"
+
+        db.update_user_profile(user_id, username, None, display_name if display_name else None, profile_pic_data)
         # Update session with new username and display_name
         request.session['username'] = username
         request.session['display_name'] = display_name or ''
@@ -8205,12 +8217,18 @@ async def dashboard_wallet_topup(request: Request):
     if not gw.get('enabled', False):
         return JSONResponse({"error": f"Payment method '{method}' is not enabled"}, status_code=400)
 
-    # Crypto: return deposit address (manual transfer)
-    crypto_methods = {'bitcoin', 'ethereum', 'usdt', 'usdc'}
+    # Crypto: generate per-user HD wallet address
+    crypto_methods = {'bitcoin': 'btc', 'ethereum': 'eth', 'usdt': 'usdt', 'usdc': 'usdc'}
     if method in crypto_methods:
-        address = gw.get('address', '')
-        if not address:
-            return JSONResponse({"error": "Crypto address not configured"}, status_code=503)
+        crypto_type = crypto_methods[method]
+        ps = getattr(request.app.state, 'payment_service', None)
+        if ps is None:
+            return JSONResponse({"error": "Payment service unavailable"}, status_code=503)
+        try:
+            address = await ps.wallet_manager.get_or_create_user_address(user_id, crypto_type)
+        except Exception as e:
+            logger.error(f"Crypto address generation error: {e}")
+            return JSONResponse({"error": "Could not generate deposit address"}, status_code=503)
         return JSONResponse({
             "type": "crypto",
             "method": method,
@@ -8257,22 +8275,14 @@ async def dashboard_wallet_topup(request: Request):
     if method == 'paypal':
         try:
             payment_service = getattr(request.app.state, 'payment_service', None)
-            if payment_service and hasattr(payment_service, 'paypal_handler'):
-                from decimal import Decimal
-                order = await payment_service.paypal_handler.create_order(
-                    user_id, Decimal(str(amount)), metadata={"type": "wallet_topup"}
-                )
-                return JSONResponse({"type": "paypal", "order_id": order.id})
-            # Fallback: direct PayPal redirect
-            client_id = gw.get('client_id', '')
-            sandbox = gw.get('sandbox', True)
-            paypal_base = "https://www.sandbox.paypal.com" if sandbox else "https://www.paypal.com"
-            return JSONResponse({
-                "type": "paypal",
-                "paypal_base": paypal_base,
-                "client_id": client_id,
-                "amount": amount,
-            })
+            if not payment_service or not hasattr(payment_service, 'paypal_handler'):
+                return JSONResponse({"error": "PayPal payment service unavailable"}, status_code=503)
+            from decimal import Decimal
+            result = await payment_service.paypal_handler.create_topup_order(user_id, Decimal(str(amount)))
+            if not result.get('success'):
+                logger.error(f"PayPal top-up error: {result.get('error')}")
+                return JSONResponse({"error": "PayPal checkout failed. Please try again."}, status_code=502)
+            return JSONResponse({"type": "paypal", "approval_url": result['approval_url']})
         except Exception as e:
             logger.error(f"PayPal top-up error: {e}")
             return JSONResponse({"error": "PayPal checkout failed. Please try again."}, status_code=502)
@@ -8994,7 +9004,7 @@ async def dashboard_docs(request: Request):
             # Convert markdown to HTML with extensions for better formatting
             html_content = markdown.markdown(
                 markdown_content,
-                extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists']
+                extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists', 'toc']
             )
     else:
         html_content = "<p>Documentation file not found.</p>"
@@ -9038,6 +9048,17 @@ async def dashboard_about(request: Request):
             html_content = markdown.markdown(
                 markdown_content,
                 extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists']
+            )
+            # Rewrite DOCUMENTATION.md links to /dashboard/docs
+            html_content = re.sub(
+                r'href="DOCUMENTATION\.md#([^"]*)"',
+                r'href="/dashboard/docs#\1"',
+                html_content
+            )
+            html_content = re.sub(
+                r'href="DOCUMENTATION\.md"',
+                'href="/dashboard/docs"',
+                html_content
             )
     else:
         html_content = "<p>README file not found.</p>"

@@ -135,4 +135,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div class="markdown-content">
     {{ content|safe }}
 </div>
+<script>
+    if (location.hash) {
+        const el = document.querySelector(location.hash);
+        if (el) el.scrollIntoView();
+    }
+</script>
 {% endblock %}

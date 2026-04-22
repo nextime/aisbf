@@ -55,25 +55,21 @@ class PaymentService:
     async def get_user_crypto_addresses(self, user_id: int) -> dict:
         """Get or create crypto addresses for user"""
         addresses = {}
-        
-        # Get enabled crypto types
-        with self.db._get_connection() as conn:
-            cursor = conn.cursor()
-            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
-            cursor.execute(f"""
-                SELECT crypto_type FROM crypto_consolidation_settings
-                WHERE enabled = {placeholder}
-            """, (True,))
-            enabled_cryptos = cursor.fetchall()
-        
-        for crypto_config in enabled_cryptos:
-            crypto_type = crypto_config[0]
-            address = await self.wallet_manager.get_or_create_user_address(
-                user_id, 
-                crypto_type
-            )
-            addresses[crypto_type] = address
-        
+
+        # Get enabled crypto gateways from payment gateway settings
+        gateways = self.db.get_payment_gateway_settings()
+        crypto_types = {'bitcoin': 'btc', 'ethereum': 'eth', 'usdt': 'usdt', 'usdc': 'usdc'}
+
+        for gateway_name, crypto_type in crypto_types.items():
+            gw = gateways.get(gateway_name, {})
+            if not gw.get('enabled', False):
+                continue
+            try:
+                address = await self.wallet_manager.get_or_create_user_address(user_id, crypto_type)
+                addresses[gateway_name] = address
+            except Exception as e:
+                logger.warning(f"Could not get/create {crypto_type} address for user {user_id}: {e}")
+
         return addresses
     
     async def get_user_wallet_balances(self, user_id: int) -> dict:
