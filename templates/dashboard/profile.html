@@ -17,8 +17,8 @@
 
     <div class="card">
         <h2>Account Information</h2>
-        
-        <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}" enctype="multipart/form-data">
+
+        <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}">
             <div class="form-group">
                 <label for="username">Username</label>
                 <input type="text" id="username" name="username" value="{{ session.username }}" required>
@@ -48,21 +48,26 @@
 
             <div class="form-group">
                 <label>Profile Picture</label>
-                <div style="display: flex; align-items: center; gap: 1.5rem; flex-wrap: wrap;">
-                    <div style="position: relative; cursor: pointer;" onclick="document.getElementById('profile_pic').click()">
-                        {% if user.profile_pic %}
-                        <img id="avatar-preview" src="{{ user.profile_pic }}" alt="Profile picture" style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
-                        {% else %}
-                        <img id="avatar-preview" src="https://www.gravatar.com/avatar/{{ session.email|md5 }}?s=96&d=identicon" alt="Profile picture" style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
-                        {% endif %}
-                        <div style="position: absolute; inset: 0; background: rgba(0,0,0,0.45); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s;" id="avatar-overlay">
+                <div style="display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap;">
+                    <div style="position: relative; cursor: pointer; flex-shrink: 0;" id="avatar-wrap">
+                        <img id="avatar-preview"
+                             src="{{ user.profile_pic if user.profile_pic else 'https://www.gravatar.com/avatar/' ~ (session.email|md5 if session.email else '') ~ '?s=96&d=identicon' }}"
+                             alt="Profile picture"
+                             style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
+                        <div id="avatar-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0.45); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; pointer-events: none;">
                             <span style="color: #fff; font-size: 0.8rem; text-align: center;">Change</span>
                         </div>
                     </div>
-                    <div>
-                        <input type="file" id="profile_pic" name="profile_pic" accept="image/*" style="display: none;" onchange="previewAvatar(this)">
-                        <button type="button" class="btn" style="background: #1a1a2e; border: 1px solid #0f3460; color: #e0e0e0;" onclick="document.getElementById('profile_pic').click()">Upload Image</button>
-                        <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Max 1 MB. JPG, PNG, GIF, WebP.</small>
+                    <div style="flex: 1; min-width: 0;">
+                        <input type="file" id="profile_pic_file" accept="image/*" style="display: none;">
+                        <button type="button" id="pic-upload-btn" class="btn" style="background: #1a1a2e; border: 1px solid #0f3460; color: #e0e0e0;" onclick="document.getElementById('profile_pic_file').click()">
+                            Upload Image
+                        </button>
+                        <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Max 5 MB. JPG, PNG, GIF, WebP.</small>
+                        <div id="pic-upload-status" style="margin-top: 0.5rem; font-size: 0.85rem; display: none;"></div>
+                        <div id="pic-progress-bar" style="margin-top: 0.5rem; height: 6px; background: #0f3460; border-radius: 3px; display: none;">
+                            <div id="pic-progress-fill" style="height: 100%; background: #4a9eff; border-radius: 3px; width: 0%; transition: width 0.2s;"></div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -87,51 +92,118 @@
     border-radius: 8px;
     margin-top: 1.5rem;
 }
-
-.card h2 {
-    margin-bottom: 1.5rem;
-    color: #e0e0e0;
-}
-
-.form-group {
-    margin-bottom: 1.25rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: #e0e0e0;
-}
-
+.card h2 { margin-bottom: 1.5rem; color: #e0e0e0; }
+.form-group { margin-bottom: 1.25rem; }
+.form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #e0e0e0; }
 .form-group input {
-    width: 100%;
-    padding: 0.75rem;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    background: #1a1a2e;
-    color: #e0e0e0;
-    font-size: 1rem;
+    width: 100%; padding: 0.75rem; border: 1px solid #0f3460; border-radius: 4px;
+    background: #1a1a2e; color: #e0e0e0; font-size: 1rem;
 }
-
-.form-group input:focus {
-    outline: none;
-    border-color: #667eea;
-}
+.form-group input:focus { outline: none; border-color: #667eea; }
 </style>
 
 <script>
-function previewAvatar(input) {
-    if (!input.files || !input.files[0]) return;
+const CHUNK_SIZE = 512 * 1024; // 512 KB — same as providers
+
+const avatarWrap = document.getElementById('avatar-wrap');
+const overlay    = document.getElementById('avatar-overlay');
+avatarWrap.addEventListener('mouseenter', () => overlay.style.opacity = '1');
+avatarWrap.addEventListener('mouseleave', () => overlay.style.opacity = '0');
+avatarWrap.addEventListener('click',      () => document.getElementById('profile_pic_file').click());
+
+document.getElementById('profile_pic_file').addEventListener('change', async function () {
+    const file = this.files && this.files[0];
+    if (!file) return;
+
+    const MAX_BYTES = 5 * 1024 * 1024;
+    const statusEl  = document.getElementById('pic-upload-status');
+    const barWrap   = document.getElementById('pic-progress-bar');
+    const barFill   = document.getElementById('pic-progress-fill');
+    const btn       = document.getElementById('pic-upload-btn');
+
+    function setStatus(msg, color) {
+        statusEl.style.color = color || '#e0e0e0';
+        statusEl.textContent = msg;
+        statusEl.style.display = 'block';
+    }
+    function setProgress(pct) {
+        barWrap.style.display = 'block';
+        barFill.style.width = pct + '%';
+    }
+
+    // Client-side size check
+    if (file.size > MAX_BYTES) {
+        setStatus('Image is too large. Maximum size is 5 MB.', '#f87171');
+        this.value = '';
+        return;
+    }
+
+    // Client-side type check
+    if (!file.type.startsWith('image/')) {
+        setStatus('Invalid file type. Please upload JPG, PNG, GIF or WebP.', '#f87171');
+        this.value = '';
+        return;
+    }
+
+    // Preview immediately
     const reader = new FileReader();
     reader.onload = e => { document.getElementById('avatar-preview').src = e.target.result; };
-    reader.readAsDataURL(input.files[0]);
-}
-const avatarWrap = document.querySelector('[onclick="document.getElementById(\'profile_pic\').click()"]');
-const overlay = document.getElementById('avatar-overlay');
-if (avatarWrap && overlay) {
-    avatarWrap.addEventListener('mouseenter', () => overlay.style.opacity = '1');
-    avatarWrap.addEventListener('mouseleave', () => overlay.style.opacity = '0');
-}
+    reader.readAsDataURL(file);
+
+    btn.disabled = true;
+    setProgress(0);
+    setStatus('Uploading…', '#4a9eff');
+
+    try {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+
+        for (let i = 1; i <= totalChunks; i++) {
+            const start  = (i - 1) * CHUNK_SIZE;
+            const end    = Math.min(start + CHUNK_SIZE, file.size);
+            const chunk  = file.slice(start, end);
+            const pct    = Math.round((i / totalChunks) * 100);
+
+            setProgress(pct);
+            setStatus(`Uploading… ${pct}%`, '#4a9eff');
+
+            const fd = new FormData();
+            fd.append('file_name',     file.name);
+            fd.append('chunk_number',  i);
+            fd.append('total_chunks',  totalChunks);
+            fd.append('total_size',    file.size);
+            fd.append('file',          chunk, file.name);
+
+            const resp = await fetch('/dashboard/profile/upload-pic/chunk', {
+                method: 'POST',
+                body: fd
+            });
+
+            if (!resp.ok) {
+                let msg = 'Upload failed (server error).';
+                try { msg = (await resp.json()).error || msg; } catch (_) {}
+                throw new Error(msg);
+            }
+
+            const result = await resp.json();
+            if (!result.success) throw new Error(result.error || 'Upload failed.');
+
+            if (result.complete) {
+                setProgress(100);
+                setStatus('Profile picture updated!', '#4ade80');
+                btn.disabled = false;
+                return;
+            }
+        }
+
+        // Fallback — shouldn't reach here
+        setStatus('Upload complete.', '#4ade80');
+    } catch (err) {
+        setStatus('Upload failed: ' + err.message, '#f87171');
+        barWrap.style.display = 'none';
+    } finally {
+        btn.disabled = false;
+        this.value = '';
+    }
+});
 </script>
 {% endblock %}

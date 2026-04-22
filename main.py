@@ -3277,37 +3277,99 @@ async def dashboard_profile(request: Request):
 
 
 @app.post("/dashboard/profile")
-async def dashboard_profile_save(request: Request, username: str = Form(...), display_name: str = Form(""), profile_pic: UploadFile = File(None)):
-    """Save user profile changes (username and display_name)"""
+async def dashboard_profile_save(request: Request, username: str = Form(...), display_name: str = Form("")):
+    """Save user profile changes (username and display_name). Profile pic is handled separately via /dashboard/profile/upload-pic/chunk."""
     auth_check = require_dashboard_auth(request)
     if isinstance(auth_check, RedirectResponse):
         return auth_check
-    
+
     user_id = request.session.get('user_id')
     db = DatabaseRegistry.get_config_database()
-    
-    try:
-        profile_pic_data = None
-        if profile_pic and profile_pic.filename:
-            content_type = profile_pic.content_type or ''
-            if not content_type.startswith('image/'):
-                return RedirectResponse(url=url_for(request, "/dashboard/profile?error=Invalid file type. Please upload an image."), status_code=303)
-            data = await profile_pic.read(1024 * 1024 + 1)  # read up to 1MB+1 to detect oversized
-            if len(data) > 1024 * 1024:
-                return RedirectResponse(url=url_for(request, "/dashboard/profile?error=Image too large. Maximum size is 1MB."), status_code=303)
-            import base64
-            profile_pic_data = f"data:{content_type};base64,{base64.b64encode(data).decode()}"
 
-        db.update_user_profile(user_id, username, None, display_name if display_name else None, profile_pic_data)
-        # Update session with new username, display_name, and profile_pic
+    try:
+        db.update_user_profile(user_id, username, None, display_name if display_name else None, None)
         request.session['username'] = username
         request.session['display_name'] = display_name or ''
-        if profile_pic_data is not None:
-            request.session['profile_pic'] = profile_pic_data
-        
+
         return RedirectResponse(url=url_for(request, "/dashboard/profile?success=Profile updated successfully"), status_code=303)
     except Exception as e:
         return RedirectResponse(url=url_for(request, f"/dashboard/profile?error=Failed to update profile: {str(e)}"), status_code=303)
+
+
+_PROFILE_PIC_MAX_BYTES = 5 * 1024 * 1024  # 5 MB assembled limit
+
+@app.post("/dashboard/profile/upload-pic/chunk")
+async def dashboard_profile_pic_chunk(
+    request: Request,
+    file_name: str = Form(...),
+    chunk_number: int = Form(...),
+    total_chunks: int = Form(...),
+    total_size: int = Form(...),
+    file: UploadFile = File(...)
+):
+    """Chunked profile picture upload. Assembles chunks, validates, base64-encodes, stores in DB."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Unauthorized"}, status_code=401)
+
+    user_id = request.session.get('user_id')
+
+    if total_size > _PROFILE_PIC_MAX_BYTES:
+        return JSONResponse({"success": False, "error": f"Image too large. Maximum size is 5 MB."}, status_code=400)
+
+    content_type = file.content_type or ''
+    if not content_type.startswith('image/'):
+        # Fallback: infer from extension
+        ext = Path(file_name).suffix.lower()
+        ext_map = {'.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.png': 'image/png',
+                   '.gif': 'image/gif', '.webp': 'image/webp'}
+        content_type = ext_map.get(ext, '')
+        if not content_type:
+            return JSONResponse({"success": False, "error": "Invalid file type. Upload JPG, PNG, GIF or WebP."}, status_code=400)
+
+    import hashlib as _hl
+    upload_id = _hl.sha256(f"{user_id}:{file_name}:{total_size}".encode()).hexdigest()[:16]
+    temp_dir = Path.home() / '.aisbf' / 'temp_uploads' / 'profile_pics'
+    temp_dir.mkdir(parents=True, exist_ok=True)
+
+    chunk_data = await file.read()
+    chunk_path = temp_dir / f"{upload_id}.part{chunk_number}"
+    with open(chunk_path, 'wb') as f:
+        f.write(chunk_data)
+
+    received = list(temp_dir.glob(f"{upload_id}.part*"))
+    if len(received) < total_chunks:
+        return JSONResponse({"success": True, "complete": False, "chunk": chunk_number})
+
+    # All chunks received — assemble
+    try:
+        assembled = bytearray()
+        for i in range(1, total_chunks + 1):
+            part = temp_dir / f"{upload_id}.part{i}"
+            assembled.extend(part.read_bytes())
+            part.unlink()
+
+        if len(assembled) > _PROFILE_PIC_MAX_BYTES:
+            return JSONResponse({"success": False, "error": "Assembled image exceeds 5 MB limit."}, status_code=400)
+
+        import base64 as _b64
+        data_url = f"data:{content_type};base64,{_b64.b64encode(bytes(assembled)).decode()}"
+
+        db = DatabaseRegistry.get_config_database()
+        db.update_user_profile(user_id, request.session.get('username', ''), None, None, data_url)
+        request.session['profile_pic'] = data_url
+
+        return JSONResponse({"success": True, "complete": True})
+
+    except Exception as e:
+        logger.error(f"Profile pic assembly error for user {user_id}: {e}")
+        # Clean up any remaining parts
+        for part in temp_dir.glob(f"{upload_id}.part*"):
+            try:
+                part.unlink()
+            except Exception:
+                pass
+        return JSONResponse({"success": False, "error": "Upload failed. Please try again."}, status_code=500)
 
 
 @app.get("/dashboard/change-password", response_class=HTMLResponse)
