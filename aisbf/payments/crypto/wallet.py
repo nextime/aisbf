@@ -6,6 +6,7 @@ Each crypto type has its own encrypted master seed, from which user addresses
 are deterministically derived.
 """
 import logging
+import traceback
 from mnemonic import Mnemonic
 from bip32 import BIP32
 from cryptography.fernet import Fernet
@@ -195,17 +196,22 @@ class CryptoWalletManager:
                         pass
                     if attempt == 4:
                         raise
-                    logger.warning(f"crypto address derivation conflict (attempt {attempt+1}): {exc}")
+                    logger.warning(f"crypto address derivation conflict (attempt {attempt+1}): {exc!r}\n{traceback.format_exc()}")
 
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
-            insert_or_ignore = "INSERT OR IGNORE" if self.db.db_type == 'sqlite' else "INSERT"
-            on_conflict = "" if self.db.db_type == 'sqlite' else " ON CONFLICT DO NOTHING"
-            cursor.execute(f"""
-                {insert_or_ignore} INTO user_crypto_wallets
-                (user_id, crypto_type, balance_crypto, balance_fiat)
-                VALUES ({placeholder}, {placeholder}, 0, 0){on_conflict}
-            """, (user_id, crypto_type))
+            if self.db.db_type == 'sqlite':
+                cursor.execute(f"""
+                    INSERT OR IGNORE INTO user_crypto_wallets
+                    (user_id, crypto_type, balance_crypto, balance_fiat)
+                    VALUES ({placeholder}, {placeholder}, 0, 0)
+                """, (user_id, crypto_type))
+            else:
+                cursor.execute(f"""
+                    INSERT IGNORE INTO user_crypto_wallets
+                    (user_id, crypto_type, balance_crypto, balance_fiat)
+                    VALUES ({placeholder}, {placeholder}, 0, 0)
+                """, (user_id, crypto_type))
             conn.commit()
 
         logger.info(f"Created {crypto_type} payment address for user {user_id} (payment {payment_id}): {address_info['address']}")

@@ -8330,7 +8330,8 @@ async def dashboard_wallet_topup(request: Request):
         try:
             address = await ps.wallet_manager.get_or_create_user_address(user_id, crypto_type)
         except Exception as e:
-            logger.error(f"Crypto address generation error: {e}")
+            import traceback as _tb
+            logger.error(f"Crypto address generation error: {e!r}\n{_tb.format_exc()}")
             return JSONResponse({"error": "Could not generate deposit address"}, status_code=503)
         return JSONResponse({
             "type": "crypto",
