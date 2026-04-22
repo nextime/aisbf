@@ -523,7 +523,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% if request.session.user_id %}
             <div class="account-menu">
                 <div class="account-trigger" onclick="toggleAccountMenu()">
-                    <img src="{{ request.session.profile_pic if request.session.profile_pic else 'https://www.gravatar.com/avatar/' ~ (request.session.email|md5 if request.session.email else '') ~ '?s=48&d=identicon' }}" alt="User avatar">
+                    <img src="{{ '/dashboard/profile-pic' if request.session.has_profile_pic else 'https://www.gravatar.com/avatar/' ~ (request.session.email|md5 if request.session.email else '') ~ '?s=48&d=identicon' }}" alt="User avatar">
                     <span>Account</span>
                 </div>
                 <div class="account-dropdown" id="account-dropdown">

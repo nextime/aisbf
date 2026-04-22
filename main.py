@@ -1362,8 +1362,9 @@ async def startup_event():
         
         if not encryption_key:
             encryption_key = Fernet.generate_key().decode()
-            encryption_key_source = 'temporary'
-            logger.warning("No ENCRYPTION_KEY set in database or environment, generated temporary key")
+            encryption_key_source = 'generated'
+            db_manager.save_encryption_key(encryption_key)
+            logger.warning("No ENCRYPTION_KEY set in database or environment, generated and saved new key to database")
         else:
             logger.info(f"Loaded ENCRYPTION_KEY from {encryption_key_source}")
         
@@ -2462,6 +2463,42 @@ async def dashboard_analytics(
     }
     )
 
+@app.get("/dashboard/api/auth-check")
+async def dashboard_auth_check(request: Request):
+    """Return authentication status for OAuth popup polling."""
+    from fastapi.responses import JSONResponse
+    authenticated = bool(request.session.get('logged_in') and request.session.get('user_id'))
+    return JSONResponse({"authenticated": authenticated})
+
+
+@app.get("/dashboard/profile-pic")
+async def dashboard_profile_pic(request: Request):
+    """Serve the logged-in user's profile picture from the database."""
+    from fastapi.responses import Response
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return Response(status_code=404)
+    try:
+        db = DatabaseRegistry.get_config_database()
+        user = db.get_user_by_id(user_id)
+        pic = user.get('profile_pic') if user else None
+        if not pic:
+            return Response(status_code=404)
+        # pic is stored as a data URL: "data:<mime>;base64,<data>"
+        if pic.startswith('data:'):
+            header, b64data = pic.split(',', 1)
+            mime = header.split(':')[1].split(';')[0]
+            import base64
+            img_bytes = base64.b64decode(b64data)
+            return Response(content=img_bytes, media_type=mime,
+                            headers={"Cache-Control": "private, max-age=3600"})
+        # If it's a plain URL, redirect
+        from fastapi.responses import RedirectResponse
+        return RedirectResponse(url=pic)
+    except Exception:
+        return Response(status_code=404)
+
+
 @app.get("/dashboard/login", response_class=HTMLResponse)
 async def dashboard_login_page(request: Request):
     """Show dashboard login page"""
@@ -2581,7 +2618,7 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         request.session['email'] = user.get('email') or ''
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
-        request.session['profile_pic'] = user.get('profile_pic') or ''
+        request.session['has_profile_pic'] = bool(user.get('profile_pic'))
         request.session['remember_me'] = remember_me
         request.session['email_verified'] = user['email_verified']
         if remember_me:
@@ -3357,7 +3394,7 @@ async def dashboard_profile_pic_chunk(
 
         db = DatabaseRegistry.get_config_database()
         db.update_user_profile(user_id, request.session.get('username', ''), None, None, data_url)
-        request.session['profile_pic'] = data_url
+        request.session['has_profile_pic'] = True
 
         return JSONResponse({"success": True, "complete": True})
 
@@ -3767,7 +3804,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
             request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
-            request.session['profile_pic'] = existing_user.get('profile_pic') or ''
+            request.session['has_profile_pic'] = bool(existing_user.get('profile_pic'))
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
 
@@ -3827,21 +3864,24 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
                 <head><title>Authentication Complete</title></head>
                 <body>
                     <script>
-                        if (window.opener) {{
-                            window.opener.postMessage({{
-                                type: 'oauth2_complete',
-                                redirect_url: '{url_for(request, "/dashboard")}'
-                            }}, '*');
-                        }}
+                        var msg = {{ type: 'oauth2_complete', redirect_url: '{url_for(request, "/dashboard")}' }};
+                        try {{
+                            var bc = new BroadcastChannel('oauth2_result');
+                            bc.postMessage(msg);
+                            bc.close();
+                        }} catch(e) {{}}
+                        try {{
+                            if (window.opener) window.opener.postMessage(msg, '*');
+                        }} catch(e) {{}}
                         window.close();
                     </script>
                 </body>
                 </html>
             ''')
-        
+
         # Redirect to dashboard for regular requests
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
-        
+
     except Exception as e:
         logger.error(f"Error during email verification: {e}", exc_info=True)
         return templates.TemplateResponse(
@@ -3959,7 +3999,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
             request.session['email'] = existing_user.get('email', '')
             request.session['role'] = existing_user['role']
             request.session['user_id'] = existing_user['id']
-            request.session['profile_pic'] = existing_user.get('profile_pic') or ''
+            request.session['has_profile_pic'] = bool(existing_user.get('profile_pic'))
             request.session['email_verified'] = True  # OAuth2 users have verified emails
             request.session['expires_at'] = int(time.time()) + 14 * 24 * 60 * 60
 
@@ -4004,28 +4044,30 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
         # Cleanup session data
         request.session.pop('oauth2_github', None)
         if is_popup:
-            # Return HTML with postMessage to opener
             return HTMLResponse(content=f'''
                 <!DOCTYPE html>
                 <html>
                 <head><title>Authentication Complete</title></head>
                 <body>
                     <script>
-                        if (window.opener) {{
-                            window.opener.postMessage({{
-                                type: 'oauth2_complete',
-                                redirect_url: '{url_for(request, "/dashboard")}'
-                            }}, '*');
-                        }}
+                        var msg = {{ type: 'oauth2_complete', redirect_url: '{url_for(request, "/dashboard")}' }};
+                        try {{
+                            var bc = new BroadcastChannel('oauth2_result');
+                            bc.postMessage(msg);
+                            bc.close();
+                        }} catch(e) {{}}
+                        try {{
+                            if (window.opener) window.opener.postMessage(msg, '*');
+                        }} catch(e) {{}}
                         window.close();
                     </script>
                 </body>
                 </html>
             ''')
-        
+
         # Redirect to dashboard for regular requests
         return RedirectResponse(url=url_for(request, "/dashboard"), status_code=303)
-        
+
     except Exception as e:
         logger.error(f"GitHub OAuth2 callback failed: {e}", exc_info=True)
         return templates.TemplateResponse(
@@ -7662,6 +7704,27 @@ async def api_save_encryption_key(request: Request):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+@app.post("/api/admin/settings/crypto-seeds-reset")
+async def api_reset_crypto_seeds(request: Request):
+    """Delete all crypto master seeds so they are regenerated on next restart"""
+    auth_check = require_api_admin(request)
+    if auth_check:
+        return auth_check
+
+    try:
+        db = DatabaseRegistry.get_config_database()
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("DELETE FROM crypto_master_keys")
+            deleted = cursor.rowcount
+            conn.commit()
+        logger.warning(f"Admin reset crypto master seeds: {deleted} rows deleted")
+        return JSONResponse({"success": True, "deleted": deleted})
+    except Exception as e:
+        logger.error(f"Error resetting crypto seeds: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 # Admin configuration API endpoints
 @app.get("/api/admin/config/price-sources")
 async def get_price_sources(request: Request):
@@ -8404,37 +8467,23 @@ async def dashboard_wallet_topup(request: Request):
             "confirmations": gw.get('confirmations', 3),
         })
 
-    # Stripe: create checkout session
+    # Stripe: create checkout session (hosted redirect flow)
     if method == 'stripe':
         try:
             payment_service = getattr(request.app.state, 'payment_service', None)
-            if payment_service and hasattr(payment_service, 'stripe_handler'):
-                from decimal import Decimal
-                intent = await payment_service.stripe_handler.create_topup_intent(
-                    user_id, Decimal(str(amount))
-                )
-                if not intent.get('success'):
-                    return JSONResponse({"error": intent.get('error', 'Stripe error')}, status_code=502)
-                return JSONResponse({"type": "stripe", "client_secret": intent['client_secret']})
-            # Fallback: redirect to Stripe-hosted checkout via publishable key
-            import stripe
-            stripe.api_key = gw.get('secret_key', '')
-            session = stripe.checkout.Session.create(
-                payment_method_types=['card'],
-                line_items=[{
-                    'price_data': {
-                        'currency': 'usd',
-                        'product_data': {'name': 'Wallet Top-Up'},
-                        'unit_amount': int(amount * 100),
-                    },
-                    'quantity': 1,
-                }],
-                mode='payment',
-                success_url=str(request.base_url) + 'dashboard/wallet?topup=success',
-                cancel_url=str(request.base_url) + 'dashboard/wallet?topup=cancelled',
-                metadata={'type': 'wallet_topup', 'user_id': str(user_id)},
+            if not payment_service or not hasattr(payment_service, 'stripe_handler'):
+                return JSONResponse({"error": "Stripe payment service unavailable"}, status_code=503)
+            from decimal import Decimal
+            base = str(request.base_url).rstrip('/')
+            result = await payment_service.stripe_handler.create_topup_checkout_session(
+                user_id,
+                Decimal(str(amount)),
+                success_url=f"{base}/dashboard/wallet?topup=success",
+                cancel_url=f"{base}/dashboard/wallet?topup=cancelled",
             )
-            return JSONResponse({"type": "stripe", "checkout_url": session.url})
+            if not result.get('success'):
+                return JSONResponse({"error": result.get('error', 'Stripe error')}, status_code=502)
+            return JSONResponse({"type": "stripe", "checkout_url": result['checkout_url']})
         except Exception as e:
             logger.error(f"Stripe top-up error: {e}")
             return JSONResponse({"error": "Stripe checkout failed. Please try again."}, status_code=502)
@@ -9246,14 +9295,14 @@ async def dashboard_about(request: Request):
                 markdown_content,
                 extensions=['fenced_code', 'tables', 'nl2br', 'sane_lists']
             )
-            # Rewrite DOCUMENTATION.md links to /dashboard/docs
+            # Rewrite DOCUMENTATION.md links (relative or absolute) to /dashboard/docs
             html_content = re.sub(
-                r'href="DOCUMENTATION\.md#([^"]*)"',
+                r'href="(?:https?://[^"]*?/)?DOCUMENTATION\.md#([^"]*)"',
                 r'href="/dashboard/docs#\1"',
                 html_content
             )
             html_content = re.sub(
-                r'href="DOCUMENTATION\.md"',
+                r'href="(?:https?://[^"]*?/)?DOCUMENTATION\.md"',
                 'href="/dashboard/docs"',
                 html_content
             )

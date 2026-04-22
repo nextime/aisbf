@@ -200,6 +200,45 @@ class StripePaymentHandler:
             logger.error(f"Error creating Stripe top up intent: {e}")
             return {'success': False, 'error': str(e)}
 
+    async def create_topup_checkout_session(self, user_id: int, amount: Decimal, success_url: str, cancel_url: str) -> dict:
+        """Create a Stripe Checkout Session for wallet top-up (hosted redirect flow)."""
+        try:
+            customer_id = await self._get_or_create_customer(user_id)
+            currency = self.config.get('currency_code', 'usd').lower()
+            session = await asyncio.to_thread(
+                stripe.checkout.Session.create,
+                customer=customer_id,
+                payment_method_types=['card'],
+                line_items=[{
+                    'price_data': {
+                        'currency': currency,
+                        'product_data': {'name': 'Wallet Top-Up'},
+                        'unit_amount': int(amount * 100),
+                    },
+                    'quantity': 1,
+                }],
+                mode='payment',
+                success_url=success_url,
+                cancel_url=cancel_url,
+                metadata={
+                    'user_id': str(user_id),
+                    'topup': 'true',
+                    'amount': str(amount),
+                },
+                payment_intent_data={
+                    'metadata': {
+                        'user_id': str(user_id),
+                        'topup': 'true',
+                        'amount': str(amount),
+                    },
+                },
+            )
+            logger.info(f"Created Stripe checkout session for user {user_id}: {session.id}")
+            return {'success': True, 'checkout_url': session.url, 'session_id': session.id}
+        except Exception as e:
+            logger.error(f"Error creating Stripe checkout session: {e}")
+            return {'success': False, 'error': str(e)}
+
     async def _handle_payment_succeeded(self, payment_intent: dict):
         """Handle successful Stripe payment — credits user wallet for top-up intents."""
         logger.info(f"Payment succeeded: {payment_intent['id']}")

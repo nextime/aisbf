@@ -51,7 +51,7 @@
                 <div style="display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap;">
                     <div style="position: relative; cursor: pointer; flex-shrink: 0;" id="avatar-wrap">
                         <img id="avatar-preview"
-                             src="{{ user.profile_pic if user.profile_pic else 'https://www.gravatar.com/avatar/' ~ (session.email|md5 if session.email else '') ~ '?s=96&d=identicon' }}"
+                             src="{{ '/dashboard/profile-pic' if user.profile_pic else 'https://www.gravatar.com/avatar/' ~ (session.email|md5 if session.email else '') ~ '?s=96&d=identicon' }}"
                              alt="Profile picture"
                              style="width: 96px; height: 96px; border-radius: 8px; object-fit: cover; display: block;">
                         <div id="avatar-overlay" style="position: absolute; inset: 0; background: rgba(0,0,0,0.45); border-radius: 8px; display: flex; align-items: center; justify-content: center; opacity: 0; transition: opacity 0.2s; pointer-events: none;">

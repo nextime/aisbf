@@ -101,79 +101,70 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <script>
 // OAuth2 Popup Handling
 function openOAuthPopup(url) {
-    // Add popup parameter to URL
     const separator = url.includes('?') ? '&' : '?';
     const popupUrl = url + separator + 'popup=1';
 
-    // Calculate popup position (center screen)
-    const width = 500;
-    const height = 650;
+    const width = 500, height = 650;
     const left = (window.innerWidth / 2) - (width / 2);
     const top = (window.innerHeight / 2) - (height / 2);
 
-    // Open popup window
     const popup = window.open(
         popupUrl,
         'OAuth2 Authentication',
         `width=${width},height=${height},top=${top},left=${left},resizable=no,scrollbars=yes,status=no`
     );
-    
-    // Listen for popup messages
+
+    let done = false;
+    function onSuccess() {
+        if (done) return;
+        done = true;
+        cleanup();
+        window.location.replace('/dashboard');
+    }
+    function onError(msg) {
+        if (done) return;
+        done = true;
+        cleanup();
+        showAlert(msg || 'Authentication failed', 'Authentication Error', '❌', 'danger');
+    }
+
+    // BroadcastChannel: works even when COOP severs window.opener
+    let bc = null;
+    try {
+        bc = new BroadcastChannel('oauth2_result');
+        bc.onmessage = function(e) {
+            if (e.data && e.data.type === 'oauth2_complete') onSuccess();
+            else if (e.data && e.data.type === 'oauth2_error') onError(e.data.error);
+        };
+    } catch(e) {}
+
+    // postMessage fallback (same-origin popups where opener is available)
     const messageListener = function(event) {
-        console.log('Received OAuth message:', event.data, event.origin);
-        
-        if (event.data && event.data.type === 'oauth2_complete') {
-            console.log('OAuth complete, redirecting to:', event.data.redirect_url || '/dashboard');
-            
-            // Close popup
-            popup.close();
-            
-            // Remove listener
-            window.removeEventListener('message', messageListener);
-            
-            // Force redirect to dashboard - use relative path for reliability
-            window.location.replace('/dashboard');
-        } else if (event.data && event.data.type === 'oauth2_error') {
-            console.log('OAuth error:', event.data.error);
-            
-            // Close popup
-            popup.close();
-            
-            // Remove listener
-            window.removeEventListener('message', messageListener);
-            
-            // Show error
-            showAlert(event.data.error || 'Authentication failed', 'Authentication Error', '❌', 'danger');
-        }
+        if (!event.data) return;
+        if (event.data.type === 'oauth2_complete') onSuccess();
+        else if (event.data.type === 'oauth2_error') onError(event.data.error);
     };
-    
     window.addEventListener('message', messageListener);
-    
-    // Fallback if popup is blocked or closed manually
+
+    // Popup-closed fallback: poll auth status via API (not just any 200)
     const popupCheck = setInterval(function() {
-        if (popup.closed) {
-            clearInterval(popupCheck);
-            window.removeEventListener('message', messageListener);
-            
-            // Check if authentication was successful by trying to load dashboard
-            // Use fetch with credentials: 'same-origin' to send cookies
-            fetch('/dashboard', { 
-                method: 'GET', 
-                credentials: 'same-origin',
-                redirect: 'follow'
-            }).then(response => {
-                // If we get a 200 OK (HTML) or redirect to dashboard, auth was successful
-                if (response.ok || response.redirected) {
-                    console.log('Auth detected on popup close, redirecting to dashboard');
-                    window.location.replace('/dashboard');
-                }
-            }).catch(error => {
-                console.log('Dashboard check failed:', error);
-                // Fallback: try direct redirect anyway for authenticated users
-                window.location.replace('/dashboard');
-            });
-        }
-    }, 500);
+        let closed = false;
+        try { closed = popup.closed; } catch(e) { /* COOP blocks access */ }
+        if (!closed) return;
+        clearInterval(popupCheck);
+        if (done) return;
+        fetch('/dashboard/api/auth-check', { credentials: 'same-origin' })
+            .then(r => r.json())
+            .then(data => { if (data.authenticated) onSuccess(); })
+            .catch(() => {});
+    }, 600);
+
+    function cleanup() {
+        clearInterval(popupCheck);
+        window.removeEventListener('message', messageListener);
+        if (bc) { bc.close(); bc = null; }
+        try { popup.close(); } catch(e) {}
+    }
 }
 </script>
 </div>

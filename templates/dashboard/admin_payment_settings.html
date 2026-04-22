@@ -89,20 +89,33 @@
             
             <div style="margin-bottom: 20px;">
                 <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">
-                    Set New Encryption Key (44 characters, base64)
+                    Set New Encryption Key (44 characters, URL-safe base64)
                 </label>
-                <input type="text" id="encryptionKey" placeholder="Leave empty to auto-generate" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-family: monospace;">
+                <input type="text" id="encryptionKey" placeholder="Click Generate to create a secure key" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-family: monospace;">
                 <div style="margin-top: 10px; color: #888; font-size: 14px;">
-                    <i class="fas fa-info-circle me-2"></i>Leave empty to auto-generate a secure key. Copy and save it securely - you cannot retrieve it later.
+                    <i class="fas fa-info-circle me-2"></i>Generate a key, copy it to a safe place, then save it. You cannot retrieve it from the interface later.
                 </div>
             </div>
-            
-            <div style="display: flex; gap: 10px;">
+
+            <div id="encryptionKeyBackup" style="display:none; margin-bottom: 20px; padding: 15px; background: #2d1b00; border: 2px solid #f39c12; border-radius: 8px;">
+                <div style="color: #f39c12; font-weight: bold; margin-bottom: 8px;">
+                    <i class="fas fa-exclamation-triangle me-2"></i>Save this key now — it will not be shown again after you leave this page
+                </div>
+                <div style="font-family: monospace; font-size: 14px; color: #e0e0e0; word-break: break-all;" id="encryptionKeyBackupValue"></div>
+                <button type="button" class="btn btn-sm mt-2" onclick="copyEncryptionKey()" style="background: #f39c12; color: #000;">
+                    <i class="fas fa-copy me-1"></i>Copy to Clipboard
+                </button>
+            </div>
+
+            <div style="display: flex; gap: 10px; flex-wrap: wrap;">
                 <button type="button" class="btn" onclick="generateEncryptionKey()" style="background: #9b59b6; color: white;">
-                    <i class="fas fa-random me-2"></i>Generate Random Key
+                    <i class="fas fa-random me-2"></i>Generate New Key
                 </button>
                 <button type="button" class="btn" onclick="saveEncryptionKey()" style="background: #e74c3c; color: white;">
                     <i class="fas fa-save me-2"></i>Save Encryption Key
+                </button>
+                <button type="button" class="btn" onclick="resetCryptoSeeds()" style="background: #c0392b; color: white;">
+                    <i class="fas fa-trash me-2"></i>Reset Crypto Seeds
                 </button>
             </div>
         </div>
@@ -657,51 +670,89 @@ async function loadEncryptionKeyStatus() {
     }
 }
 
-// Generate random encryption key
+// Generate random encryption key (URL-safe base64, required by Fernet)
 function generateEncryptionKey() {
-    // Generate 32 random bytes and encode as base64 (44 characters)
     const array = new Uint8Array(32);
     crypto.getRandomValues(array);
-    const base64 = btoa(String.fromCharCode.apply(null, array));
+    // URL-safe base64: replace + with - and / with _
+    const base64 = btoa(String.fromCharCode.apply(null, array))
+        .replace(/\+/g, '-').replace(/\//g, '_');
     document.getElementById('encryptionKey').value = base64;
-    showToast('Random encryption key generated. Save it securely!', 'warning');
+    document.getElementById('encryptionKeyBackup').style.display = 'block';
+    document.getElementById('encryptionKeyBackupValue').textContent = base64;
+    showToast('Encryption key generated. Copy it now and store it safely before saving!', 'warning');
+}
+
+// Copy key to clipboard then hide it
+function copyEncryptionKey() {
+    const key = document.getElementById('encryptionKey').value.trim();
+    if (!key) return;
+    navigator.clipboard.writeText(key).then(() => {
+        showToast('Key copied to clipboard. Store it safely!', 'success');
+        document.getElementById('encryptionKeyBackup').style.display = 'none';
+        document.getElementById('encryptionKey').value = '';
+    });
 }
 
 // Save encryption key
 async function saveEncryptionKey() {
     const key = document.getElementById('encryptionKey').value.trim();
-    
+
     if (!key) {
         showToast('Please enter or generate an encryption key', 'danger');
         return;
     }
-    
+
     if (key.length !== 44) {
-        showToast('Encryption key must be 44 characters (base64 encoded)', 'danger');
+        showToast('Encryption key must be 44 characters (URL-safe base64)', 'danger');
         return;
     }
-    
+
     const ok = await showDangerConfirm('WARNING: Setting or changing the encryption key will affect all encrypted data. Are you sure?', 'Change Encryption Key');
     if (!ok) return;
-    
+
     try {
         const response = await fetch('{{ url_for(request, "/api/admin/settings/encryption-key") }}', {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({encryption_key: key})
         });
-        
+
         const result = await response.json();
-        
+
         if (response.ok && result.success) {
-            showToast('Encryption key saved successfully. Server restart required to take effect.', 'success');
-            document.getElementById('encryptionKey').value = '';
+            showToast('Encryption key saved. COPY THE KEY ABOVE before restarting the server!', 'success');
             loadEncryptionKeyStatus();
+            // Do NOT clear the field — user needs to copy it for backup
         } else {
             showToast(result.error || 'Failed to save encryption key', 'danger');
         }
     } catch (error) {
         showToast('Error saving encryption key: ' + error.message, 'danger');
+    }
+}
+
+// Reset crypto wallet seeds (delete master keys so they are regenerated with the new encryption key)
+async function resetCryptoSeeds() {
+    const ok = await showDangerConfirm(
+        'WARNING: This will delete all crypto master seeds. All existing derived addresses will be lost. Only do this after setting a new encryption key. Are you sure?',
+        'Reset Crypto Seeds'
+    );
+    if (!ok) return;
+
+    try {
+        const response = await fetch('{{ url_for(request, "/api/admin/settings/crypto-seeds-reset") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const result = await response.json();
+        if (response.ok && result.success) {
+            showToast('Crypto seeds deleted. Restart the server to generate new ones.', 'success');
+        } else {
+            showToast(result.error || 'Failed to reset crypto seeds', 'danger');
+        }
+    } catch (error) {
+        showToast('Error: ' + error.message, 'danger');
     }
 }
 
