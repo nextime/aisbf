@@ -185,13 +185,13 @@
 </style>
 
 <script>
-function confirmDeletion() {
+async function confirmDeletion() {
     const confirmation = document.getElementById('confirmation').value;
     if (confirmation !== 'DELETE') {
-        alert('Please type "DELETE" exactly to confirm account deletion.');
+        showAlert('Please type "DELETE" exactly to confirm account deletion.', 'Validation Error', '⚠️', 'warn');
         return false;
     }
-    return confirm('Are you absolutely sure? This action cannot be undone and all your data will be permanently deleted.');
+    return await showDangerConfirm('Are you absolutely sure? This action cannot be undone and all your data will be permanently deleted.', 'Delete Account');
 }
 </script>
 {% endblock %}

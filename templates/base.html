@@ -138,20 +138,21 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         });
         
         function restartServer() {
-            if (confirm('Are you sure you want to restart the server? This will disconnect all active connections.')) {
+            showConfirm('Are you sure you want to restart the server? This will disconnect all active connections.', 'Restart Server', '🔄', 'warn').then(ok => {
+                if (!ok) return;
                 fetch('{{ url_for(request, "/dashboard/restart") }}', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'}
                 })
                 .then(response => response.json())
                 .then(data => {
-                    alert(data.message + ' The page will reload in 5 seconds.');
+                    showAlert(data.message + ' The page will reload in 5 seconds.', 'Restarting');
                     setTimeout(() => window.location.reload(), 5000);
                 })
                 .catch(error => {
-                    alert('Error restarting server: ' + error);
+                    showAlert('Error restarting server: ' + error, 'Error', '❌', 'danger');
                 });
-            }
+            });
         }
         
         // Snake Game Easter Egg
@@ -418,9 +419,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         
                         function gameOver() {
                             clearInterval(gameLoop);
-                            alert('Game Over! Score: ' + score + '\nPress OK to play again.');
-                            startScreen.classList.remove('hidden');
-                            scoreDisplay.style.display = 'none';
+                            showAlert('Game Over! Score: ' + score, 'Game Over 🐍').then(() => {
+                                startScreen.classList.remove('hidden');
+                                scoreDisplay.style.display = 'none';
+                            });
                         }
                         
                         // Keyboard controls
@@ -465,6 +467,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <h1>AISBF Dashboard <span style="font-size: 0.8em; font-weight: normal; opacity: 0.7;">v{{ __version__ }}</span></h1>
             {% if request.session.logged_in %}
             <div class="header-actions">
+                {% if is_aisbf_cloud %}
+                <button onclick="openContactModal()" class="btn btn-secondary">Help</button>
+                {% endif %}
                 <a href="{{ url_for(request, '/dashboard/docs') }}" class="btn btn-secondary">Docs</a>
                 <a href="{{ url_for(request, '/dashboard/about') }}" class="btn btn-secondary">About</a>
                 <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary">License</a>
@@ -572,24 +577,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             box-shadow: 0 4px 15px rgba(245, 87, 108, 0.4);
         }
         
-        .donate-modal {
+        /* ── Shared modal backdrop ── */
+        .donate-modal, .ui-modal-backdrop {
             display: none;
             position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
+            top: 0; left: 0;
+            width: 100%; height: 100%;
             background: rgba(0,0,0,0.7);
             z-index: 1000;
             align-items: center;
             justify-content: center;
         }
-        
-        .donate-modal.active {
-            display: flex;
-        }
-        
-        .donate-modal-content {
+        .donate-modal.active, .ui-modal-backdrop.active { display: flex; }
+
+        .donate-modal-content, .ui-modal-box {
             background: #16213e;
             padding: 30px;
             border-radius: 12px;
@@ -600,14 +601,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             border: 1px solid #0f3460;
         }
         
-        .donate-modal-header {
+        .donate-modal-header, .ui-modal-header {
             display: flex;
             justify-content: space-between;
             align-items: center;
             margin-bottom: 20px;
         }
         
-        .donate-modal-header h3 {
+        .donate-modal-header h3, .ui-modal-header h3 {
             color: #f5576c;
             margin: 0;
         }
@@ -619,6 +620,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             font-size: 24px;
             cursor: pointer;
         }
+
+        /* ── ui-modal specific ── */
+        .ui-modal-body { color: #e0e0e0; line-height: 1.5; margin-bottom: 20px; }
+        .ui-modal-input {
+            width: 100%; padding: 10px;
+            border: 1px solid #0f3460; border-radius: 4px;
+            font-size: 14px; background: #1a1a2e; color: #e0e0e0;
+            margin-top: 10px;
+        }
+        .ui-modal-footer { display: flex; gap: 10px; justify-content: flex-end; }
+        .ui-modal-icon { font-size: 2em; margin-bottom: 10px; display: block; text-align: center; }
+        .ui-modal-icon.warn { color: #f39c12; }
+        .ui-modal-icon.info { color: #3b82f6; }
+        .ui-modal-icon.danger { color: #e74c3c; }
         
         .crypto-address {
             background: #0f3460;
@@ -909,6 +924,100 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         }
     </script>
     
+    <!-- Global UI Modal System -->
+    <div class="ui-modal-backdrop" id="uiModal">
+        <div class="ui-modal-box" style="max-width:420px;">
+            <div class="ui-modal-header">
+                <h3 id="uiModalTitle">Notice</h3>
+                <button class="close-modal" id="uiModalClose">&times;</button>
+            </div>
+            <div class="ui-modal-body">
+                <span id="uiModalIcon" class="ui-modal-icon" style="display:none;"></span>
+                <div id="uiModalMsg"></div>
+                <input class="ui-modal-input" id="uiModalInput" type="text" style="display:none;" placeholder="">
+            </div>
+            <div class="ui-modal-footer" id="uiModalFooter"></div>
+        </div>
+    </div>
+    <script>
+    (function(){
+        const backdrop = document.getElementById('uiModal');
+        const titleEl  = document.getElementById('uiModalTitle');
+        const iconEl   = document.getElementById('uiModalIcon');
+        const msgEl    = document.getElementById('uiModalMsg');
+        const inputEl  = document.getElementById('uiModalInput');
+        const footerEl = document.getElementById('uiModalFooter');
+        const closeBtn = document.getElementById('uiModalClose');
+        let _resolve = null;
+
+        function open(opts) {
+            titleEl.textContent = opts.title || 'Notice';
+            msgEl.textContent   = opts.message || '';
+            if (opts.icon) { iconEl.className = 'ui-modal-icon ' + (opts.iconClass||'info'); iconEl.textContent = opts.icon; iconEl.style.display='block'; }
+            else { iconEl.style.display='none'; }
+            inputEl.style.display = opts.prompt ? 'block' : 'none';
+            inputEl.value = opts.defaultValue || '';
+            inputEl.placeholder = opts.placeholder || '';
+            footerEl.innerHTML = '';
+            (opts.buttons||[]).forEach(b => {
+                const btn = document.createElement('button');
+                btn.textContent = b.label;
+                btn.className = 'btn ' + (b.cls||'btn-secondary');
+                btn.onclick = () => { close(); _resolve(b.value); };
+                footerEl.appendChild(btn);
+            });
+            backdrop.classList.add('active');
+            if (opts.prompt) setTimeout(()=>inputEl.focus(),50);
+        }
+
+        function close() { backdrop.classList.remove('active'); }
+
+        closeBtn.onclick = () => { close(); if(_resolve) _resolve(null); };
+        backdrop.addEventListener('click', e => { if(e.target===backdrop){ close(); if(_resolve) _resolve(null); } });
+
+        window.showAlert = function(message, title, icon, iconClass) {
+            return new Promise(res => {
+                _resolve = res;
+                open({ title: title||'Notice', message, icon: icon||'ℹ️', iconClass: iconClass||'info',
+                    buttons: [{label:'OK', value:true, cls:'btn'}] });
+            });
+        };
+        window.showConfirm = function(message, title, icon, iconClass) {
+            return new Promise(res => {
+                _resolve = res;
+                open({ title: title||'Confirm', message, icon: icon||'⚠️', iconClass: iconClass||'warn',
+                    buttons: [
+                        {label:'Cancel', value:false, cls:'btn-secondary'},
+                        {label:'Confirm', value:true, cls:'btn'}
+                    ] });
+            });
+        };
+        window.showDangerConfirm = function(message, title) {
+            return new Promise(res => {
+                _resolve = res;
+                open({ title: title||'Warning', message, icon:'🗑️', iconClass:'danger',
+                    buttons: [
+                        {label:'Cancel', value:false, cls:'btn-secondary'},
+                        {label:'Delete', value:true, cls:'btn btn-danger'}
+                    ] });
+            });
+        };
+        window.showPrompt = function(message, defaultValue, placeholder, title) {
+            return new Promise(res => {
+                _resolve = v => res(v === null ? null : inputEl.value || null);
+                open({ title: title||'Input', message, prompt:true, defaultValue, placeholder,
+                    buttons: [
+                        {label:'Cancel', value:null, cls:'btn-secondary'},
+                        {label:'OK', value:true, cls:'btn'}
+                    ] });
+                // OK button needs to read input value
+                const okBtn = footerEl.lastChild;
+                okBtn.onclick = () => { const v = inputEl.value.trim(); close(); res(v||null); };
+            });
+        };
+    })();
+    </script>
+
     {% block extra_js %}{% endblock %}
 </body>
 </html>

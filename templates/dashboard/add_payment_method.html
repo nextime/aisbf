@@ -140,7 +140,7 @@ document.addEventListener('DOMContentLoaded', function() {
                 if (data.success) {
                     window.location.href = '/dashboard/billing?success=' + encodeURIComponent(data.message);
                 } else {
-                    alert('Error: ' + data.error);
+                    showAlert('Error: ' + data.error, 'Error', '❌', 'danger');
                 }
             });
         });
@@ -165,7 +165,7 @@ document.addEventListener('DOMContentLoaded', function() {
             const stripeKey = '{{ stripe_publishable_key }}';
             
             if (!stripeKey) {
-                alert('Stripe is not configured. Please contact the administrator.');
+                showAlert('Stripe is not configured. Please contact the administrator.', 'Not Configured', '⚠️', 'warn');
                 return;
             }
             

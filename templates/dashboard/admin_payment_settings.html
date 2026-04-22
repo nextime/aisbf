@@ -19,6 +19,49 @@
             </div>
         </div>
 
+        <!-- Global Currency Settings -->
+        <div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #17a2b8;">
+                <i class="fas fa-dollar-sign me-2"></i>Global Currency Settings
+            </h3>
+
+            <form id="currencySettingsForm">
+                <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Code</label>
+                        <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyCode">
+                            <option value="USD">USD - US Dollar</option>
+                            <option value="EUR">EUR - Euro</option>
+                            <option value="GBP">GBP - British Pound</option>
+                            <option value="JPY">JPY - Japanese Yen</option>
+                            <option value="CAD">CAD - Canadian Dollar</option>
+                            <option value="AUD">AUD - Australian Dollar</option>
+                            <option value="CHF">CHF - Swiss Franc</option>
+                            <option value="CNY">CNY - Chinese Yuan</option>
+                            <option value="INR">INR - Indian Rupee</option>
+                            <option value="BRL">BRL - Brazilian Real</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Symbol</label>
+                        <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencySymbol" value="{{ currency_symbol }}">
+                    </div>
+                    <div>
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Decimal Places</label>
+                        <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyDecimals">
+                            <option value="0">0</option>
+                            <option value="1">1</option>
+                            <option value="2" selected>2</option>
+                            <option value="3">3</option>
+                        </select>
+                    </div>
+                </div>
+                <button type="submit" class="btn" style="background: #17a2b8; color: white;">
+                    <i class="fas fa-save me-2"></i>Save Currency Settings
+                </button>
+            </form>
+        </div>
+
         <!-- Encryption Key Configuration -->
         <div style="background: #16213e; border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #e74c3c;">
@@ -638,9 +681,8 @@ async function saveEncryptionKey() {
         return;
     }
     
-    if (!confirm('WARNING: Setting or changing the encryption key will affect all encrypted data. Are you sure?')) {
-        return;
-    }
+    const ok = await showDangerConfirm('WARNING: Setting or changing the encryption key will affect all encrypted data. Are you sure?', 'Change Encryption Key');
+    if (!ok) return;
     
     try {
         const response = await fetch('{{ url_for(request, "/api/admin/settings/encryption-key") }}', {
@@ -678,7 +720,7 @@ async function loadSystemStatus() {
         }
         
         // Update balances
-        document.getElementById('totalBalance').textContent = '$' + (data.total_balance_usd || 0).toFixed(2);
+        document.getElementById('totalBalance').textContent = '{{ currency_symbol }}' + (data.total_balance_usd || 0).toFixed(2);
         document.getElementById('pendingPayments').textContent = data.pending_payments || 0;
         document.getElementById('failedPayments').textContent = data.failed_payments || 0;
     } catch (error) {
@@ -1062,6 +1104,7 @@ document.addEventListener('DOMContentLoaded', function() {
     loadConfiguration();
     loadPaymentGateways();
     loadCryptoPrices();
+    loadCurrencySettings();
     
     // Auto-refresh crypto prices every 60 seconds
     setInterval(loadCryptoPrices, 60000);
@@ -1138,6 +1181,41 @@ function updateCryptoPrice(crypto, priceData, currencySymbol) {
         document.getElementById(`price${crypto}Average`).innerHTML = '<span style="color: #e74c3c;">No sources</span>';
     }
 }
+
+function loadCurrencySettings() {
+    fetch('{{ url_for(request, "/api/admin/settings/currency") }}')
+        .then(response => response.json())
+        .then(settings => {
+            document.getElementById('currencyCode').value = settings.currency_code;
+            document.getElementById('currencySymbol').value = settings.currency_symbol;
+            document.getElementById('currencyDecimals').value = settings.currency_decimals;
+        });
+}
+
+document.getElementById('currencySettingsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    const currencyData = {
+        currency_code: document.getElementById('currencyCode').value,
+        currency_symbol: document.getElementById('currencySymbol').value,
+        currency_decimals: parseInt(document.getElementById('currencyDecimals').value)
+    };
+
+    fetch('{{ url_for(request, "/api/admin/settings/currency") }}', {
+        method: 'POST',
+        headers: {
+            'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(currencyData)
+    })
+    .then(response => response.json())
+    .then(result => {
+        showToast('Currency settings saved successfully', 'success');
+    })
+    .catch(error => {
+        showToast('Error saving currency settings', 'danger');
+    });
+});
 
 // Refresh crypto prices manually
 function refreshCryptoPrices() {

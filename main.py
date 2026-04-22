@@ -2291,7 +2291,11 @@ async def dashboard_analytics(
         user_filter_int = current_user_id
     
     # Get all users for filter dropdown (only for admins)
-    all_users = db.get_users() if db and is_admin else []
+    raw_users = db.get_users() if db and is_admin else []
+    all_users = [
+        {k: (v.isoformat() if isinstance(v, datetime) else v) for k, v in u.items()}
+        for u in raw_users
+    ]
     
     # Get available providers, models, rotations, and autoselects for filter dropdowns
     available_providers = list(config.providers.keys()) if config else []
@@ -2379,7 +2383,8 @@ async def dashboard_analytics(
         "selected_rotation": rotation_filter,
         "selected_autoselect": autoselect_filter,
         "selected_user": user_filter,
-        "global_only": global_only
+        "global_only": global_only,
+        "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$')
     }
     )
 
@@ -2500,6 +2505,7 @@ async def dashboard_login(request: Request, username: str = Form(...), password:
         logger.info(f"User authenticated: username={username}, email={user.get('email')}, user_id={user['id']}")
         request.session['logged_in'] = True
         request.session['username'] = username
+        request.session['display_name'] = user.get('display_name') or ''
         request.session['email'] = user.get('email') or ''  # Ensure we get the email from user dict
         request.session['role'] = user['role']
         request.session['user_id'] = user['id']
@@ -3203,8 +3209,9 @@ async def dashboard_profile_save(request: Request, username: str = Form(...), di
     
     try:
         db.update_user_profile(user_id, username, None, display_name if display_name else None)
-        # Update session with new username
+        # Update session with new username and display_name
         request.session['username'] = username
+        request.session['display_name'] = display_name or ''
         
         return RedirectResponse(url=url_for(request, "/dashboard/profile?success=Profile updated successfully"), status_code=303)
     except Exception as e:
@@ -4031,7 +4038,8 @@ async def dashboard_index(request: Request):
             "subscription": subscription,
             "current_tier": current_tier,
             "payment_methods": payment_methods,
-            "currency_symbol": currency_symbol
+            "currency_symbol": currency_symbol,
+            "display_name": (db.get_user_by_id(user_id) or {}).get('display_name') or request.session.get('username', '') if user_id else request.session.get('username', '')
         }
     )
 
@@ -8047,7 +8055,8 @@ async def dashboard_admin_payment_settings(request: Request):
         name="dashboard/admin_payment_settings.html",
         context={
             "request": request,
-            "session": request.session
+            "session": request.session,
+            "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$')
         }
     )
 
@@ -8146,11 +8155,16 @@ async def dashboard_wallet(request: Request):
         all_gateways = db.get_payment_gateway_settings()
         enabled_gateways = {k: v for k, v in all_gateways.items() if v.get('enabled', False)}
 
-        return templates.TemplateResponse("dashboard/wallet.html", {
-            "request": request,
-            "wallet": wallet,
-            "enabled_gateways": enabled_gateways,
-        })
+        return templates.TemplateResponse(
+            request=request,
+            name="dashboard/wallet.html",
+            context={
+                "request": request,
+                "wallet": wallet,
+                "enabled_gateways": enabled_gateways,
+                "currency_symbol": db.get_currency_settings().get('currency_symbol', '$'),
+            }
+        )
     except ImportError:
         return HTMLResponse("Wallet functionality not available", status_code=503)
     except Exception as e:
@@ -8329,7 +8343,8 @@ async def dashboard_billing(request: Request):
         "payment_methods": payment_methods,
         "transactions": transactions,
         "enabled_gateways": enabled_gateways,
-        "wallet": wallet
+        "wallet": wallet,
+        "currency_symbol": currency_settings.get('currency_symbol', '$')
     }
     )
 

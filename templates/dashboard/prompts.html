@@ -72,9 +72,10 @@ function switchPrompt() {
     }
 }
 
-function resetPrompt() {
+async function resetPrompt() {
     if (!currentPromptKey) return;
-    if (confirm('Are you sure you want to reset this prompt to the default admin configuration?')) {
+    const ok = await showDangerConfirm('Are you sure you want to reset this prompt to the default admin configuration?', 'Reset Prompt');
+    if (ok) {
         fetch('/dashboard/prompts/reset/' + currentPromptKey, {
             method: 'POST',
             headers: {

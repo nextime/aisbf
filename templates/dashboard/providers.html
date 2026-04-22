@@ -134,7 +134,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 {% block extra_js %}
 <script>
-let providersData = {{ providers_json | safe }};
+let providersData = {{ providers_json | replace("</script>", "<\\/script>") | safe }};
 let expandedProviders = new Set();
 
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
@@ -1603,8 +1603,8 @@ async function pollKiloAuth(providerKey, deviceCode) {
     // This function is no longer needed as polling is handled in authenticateKilo
 }
 
-function removeProvider(key) {
-    if (confirm(`Remove provider "${key}"?`)) {
+async function removeProvider(key) {
+    if (await showDangerConfirm(`Remove provider "${key}"?`, 'Remove Provider')) {
         delete providersData[key];
         expandedProviders.delete(key);
         renderProvidersList();
@@ -1684,8 +1684,8 @@ function addModel(key) {
     renderModels(key);
 }
 
-function removeModel(providerKey, index) {
-    if (confirm('Remove this model?')) {
+async function removeModel(providerKey, index) {
+    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
         providersData[providerKey].models.splice(index, 1);
         renderModels(providerKey);
     }
@@ -1696,12 +1696,12 @@ async function confirmAddProvider() {
     const type = document.getElementById('new-provider-type').value;
 
     if (!key) {
-        alert('Please enter a provider key');
+        showAlert('Please enter a provider key', 'Missing Key', '⚠️', 'warn');
         return;
     }
 
     if (providersData[key]) {
-        alert('Provider key already exists');
+        showAlert('Provider key already exists', 'Duplicate Key', '⚠️', 'warn');
         return;
     }
 
@@ -1836,10 +1836,10 @@ async function saveProviders() {
         if (response.ok) {
             window.location.href = '/dashboard/providers?success=1';
         } else {
-            alert('Error saving configuration');
+            showAlert('Error saving configuration', 'Error', '❌', 'danger');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 

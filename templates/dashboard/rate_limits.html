@@ -169,9 +169,8 @@ async function loadRateLimits() {
 }
 
 async function resetRateLimiter(providerId) {
-    if (!confirm(`Reset rate limiter for ${providerId}?`)) {
-        return;
-    }
+    const ok = await showConfirm(`Reset rate limiter for ${providerId}?`, 'Reset Rate Limiter');
+    if (!ok) return;
     
     try {
         const response = await fetch(`/dashboard/rate-limits/${providerId}/reset`, {
@@ -180,20 +179,19 @@ async function resetRateLimiter(providerId) {
         const data = await response.json();
         
         if (data.success) {
-            alert(data.message);
+            showAlert(data.message, 'Done', '✅', 'info');
             loadRateLimits();
         } else {
-            alert('Error: ' + data.error);
+            showAlert('Error: ' + data.error, 'Error', '❌', 'danger');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 
 async function clearAllRateLimiters() {
-    if (!confirm('Reset all rate limiters? This will clear all learned rate limits.')) {
-        return;
-    }
+    const ok = await showDangerConfirm('Reset all rate limiters? This will clear all learned rate limits.', 'Reset All');
+    if (!ok) return;
     
     const content = document.getElementById('rate-limits-content');
     const providerIds = [];
@@ -213,10 +211,10 @@ async function clearAllRateLimiters() {
             }
         }
         
-        alert('All rate limiters reset successfully');
+        showAlert('All rate limiters reset successfully', 'Done', '✅', 'info');
         loadRateLimits();
     } catch (error) {
-        alert('Error: ' + error.message);
+        showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 

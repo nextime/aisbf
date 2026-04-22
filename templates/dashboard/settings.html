@@ -19,7 +19,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}Settings - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">Server Settings</h2>
+<style>
+.settings-tabs { display: flex; flex-wrap: wrap; gap: 4px; margin-bottom: 28px; border-bottom: 2px solid #0f3460; padding-bottom: 0; }
+.settings-tab { padding: 10px 18px; cursor: pointer; border-radius: 6px 6px 0 0; color: #a0a0a0; font-size: .9em; border: 1px solid transparent; border-bottom: none; margin-bottom: -2px; transition: background .15s, color .15s; }
+.settings-tab:hover { background: #0f3460; color: #e0e0e0; }
+.settings-tab.active { background: #16213e; color: #e94560; border-color: #0f3460; border-bottom-color: #16213e; font-weight: 600; }
+.settings-section { display: none; }
+.settings-section.active { display: block; }
+.section-title { font-size: 1.1em; font-weight: 600; color: #e94560; margin: 0 0 20px; padding-bottom: 8px; border-bottom: 1px solid #0f3460; }
+</style>
+
+<div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
+    <h2 style="margin:0;">Server Settings</h2>
+</div>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -29,8 +41,26 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+<div class="settings-tabs">
+    <div class="settings-tab active" onclick="switchTab('server')"><i class="fas fa-server"></i> Server</div>
+    <div class="settings-tab" onclick="switchTab('auth')"><i class="fas fa-key"></i> Auth &amp; MCP</div>
+    <div class="settings-tab" onclick="switchTab('dashboard')"><i class="fas fa-tachometer-alt"></i> Dashboard</div>
+    <div class="settings-tab" onclick="switchTab('models')"><i class="fas fa-brain"></i> Models</div>
+    <div class="settings-tab" onclick="switchTab('database')"><i class="fas fa-database"></i> Database</div>
+    <div class="settings-tab" onclick="switchTab('cache')"><i class="fas fa-bolt"></i> Cache</div>
+    <div class="settings-tab" onclick="switchTab('classification')"><i class="fas fa-filter"></i> Classification</div>
+    <div class="settings-tab" onclick="switchTab('tor')"><i class="fas fa-user-secret"></i> TOR</div>
+    <div class="settings-tab" onclick="switchTab('signup')"><i class="fas fa-user-plus"></i> Signup</div>
+    <div class="settings-tab" onclick="switchTab('oauth2')"><i class="fab fa-openid"></i> OAuth2</div>
+    <div class="settings-tab" onclick="switchTab('smtp')"><i class="fas fa-envelope"></i> SMTP</div>
+    <div class="settings-tab" onclick="switchTab('batching')"><i class="fas fa-layer-group"></i> Batching</div>
+    <div class="settings-tab" onclick="switchTab('ratelimit')"><i class="fas fa-tachometer-alt"></i> Rate Limiting</div>
+    <div class="settings-tab" onclick="switchTab('admin')"><i class="fas fa-shield-alt"></i> Admin</div>
+</div>
+
 <form method="POST">
-    <h3 style="margin-bottom: 20px;">Server Configuration</h3>
+    <div class="settings-section active" id="tab-server">
+    <div class="section-title"><i class="fas fa-server"></i> Server Configuration</div>
     
     <div class="form-group">
         <label for="host">Host</label>
@@ -69,8 +99,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <small style="color: #666; display: block; margin-top: 5px;">Path to SSL private key file. Leave empty to use default (~/.aisbf/key.pem). Auto-generated with certificate.</small>
         </div>
     </div>
+    </div><!-- /tab-server -->
     
-    <h3 style="margin: 30px 0 20px;">Authentication</h3>
+    <div class="settings-section" id="tab-auth">
+    <div class="section-title"><i class="fas fa-key"></i> Authentication</div>
     
     <div class="form-group">
         <label>
@@ -84,7 +116,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <textarea id="auth_tokens" name="auth_tokens" style="min-height: 100px;">{{ '\n'.join(config.auth.tokens) }}</textarea>
     </div>
     
-    <h3 style="margin: 30px 0 20px;">MCP Server</h3>
+    <div class="section-title" style="margin-top:28px;"><i class="fas fa-network-wired"></i> MCP Server</div>
     
     <div class="form-group">
         <label>
@@ -105,8 +137,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <textarea id="fullconfig_tokens" name="fullconfig_tokens" style="min-height: 80px;" placeholder="Tokens for full configuration access">{{ '\n'.join(config.mcp.fullconfig_tokens) if config.mcp.fullconfig_tokens else '' }}</textarea>
         <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to full system configuration + standard APIs</small>
     </div>
+    </div><!-- /tab-auth -->
     
-    <h3 style="margin: 30px 0 20px;">Dashboard</h3>
+    <div class="settings-section" id="tab-dashboard">
+    <div class="section-title"><i class="fas fa-tachometer-alt"></i> Dashboard</div>
     
     <div class="form-group">
         <label for="dashboard_username">Dashboard Username</label>
@@ -117,8 +151,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <label for="dashboard_password">Dashboard Password</label>
         <input type="password" id="dashboard_password" name="dashboard_password" placeholder="Leave blank to keep current">
     </div>
+    </div><!-- /tab-dashboard -->
     
-    <h3 style="margin: 30px 0 20px;">Internal Models</h3>
+    <div class="settings-section" id="tab-models">
+    <div class="section-title"><i class="fas fa-brain"></i> Internal Models</div>
     
     <div class="form-group">
         <label for="condensation_model_id">Condensation Model ID</label>
@@ -149,8 +185,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <input type="text" id="semantic_vectorization" name="semantic_vectorization" value="{{ config.internal_model.semantic_vectorization or 'sentence-transformers/all-MiniLM-L6-v2' }}" required>
         <small style="color: #666; display: block; margin-top: 5px;">Model used for semantic embedding and vectorization</small>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">Database Configuration</h3>
+    </div><!-- /tab-models -->
+
+    <div class="settings-section" id="tab-database">
+    <div class="section-title"><i class="fas fa-database"></i> Database Configuration</div>
 
     <div class="form-group">
         <label for="database_type">Database Type</label>
@@ -200,8 +238,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database name</small>
         </div>
     </div>
+    </div><!-- /tab-database -->
 
-    <h3 style="margin: 30px 0 20px;">Cache Configuration</h3>
+    <div class="settings-section" id="tab-cache">
+    <div class="section-title"><i class="fas fa-bolt"></i> Cache Configuration</div>
 
     <div class="form-group">
         <label for="cache_type">Cache Type</label>
@@ -287,7 +327,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
 
-    <h3 style="margin: 30px 0 20px;">Response Cache Configuration</h3>
+    <h3 style="margin: 24px 0 16px; font-size:1em; color:#a0a0a0; border-bottom: 1px solid #0f3460; padding-bottom:8px;">Response Cache Configuration</h3>
     
     <div class="form-group">
         <label>
@@ -381,7 +421,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
 
-    <h3 style="margin: 30px 0 20px;">Response Cache Statistics</h3>
+    <h3 style="margin: 24px 0 16px; font-size:1em; color:#a0a0a0; border-bottom: 1px solid #0f3460; padding-bottom:8px;">Response Cache</h3>
     
     <div id="cache-stats" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
@@ -422,7 +462,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
     </div>
 
-    <h3 style="margin: 30px 0 20px;">Content Classification</h3>
+    </div><!-- /tab-cache -->
+
+    <div class="settings-section" id="tab-classification">
+    <div class="section-title"><i class="fas fa-filter"></i> Content Classification</div>
 
     <div class="form-group">
         <label>
@@ -447,8 +490,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Enable semantic content classification using the configured model</small>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">TOR Hidden Service</h3>
+    </div><!-- /tab-classification -->
+
+    <div class="settings-section" id="tab-tor">
+    <div class="section-title"><i class="fas fa-user-secret"></i> TOR Hidden Service</div>
     
     <div id="tor-status" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
@@ -562,8 +607,10 @@ brew services restart tor   # macOS</code></pre>
             <small style="color: #666; display: block; margin-top: 5px;">TOR SOCKS proxy port (default: 9050)</small>
         </div>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">User Signup</h3>
+    </div><!-- /tab-tor -->
+
+    <div class="settings-section" id="tab-signup">
+    <div class="section-title"><i class="fas fa-user-plus"></i> User Signup</div>
     
     <div class="form-group">
         <label>
@@ -588,10 +635,12 @@ brew services restart tor   # macOS</code></pre>
                min="1" max="168">
         <small style="color: #666; display: block; margin-top: 5px;">How long verification links remain valid (1-168 hours)</small>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">OAuth2 Authentication</h3>
+    </div><!-- /tab-signup -->
 
-    <h4 style="margin: 25px 0 15px;">Google OAuth2</h4>
+    <div class="settings-section" id="tab-oauth2">
+    <div class="section-title"><i class="fab fa-openid"></i> OAuth2 Authentication</div>
+
+    <div class="section-title" style="font-size:.95em; margin-top:0;"><i class="fab fa-google"></i> Google OAuth2</div>
     
     <div class="form-group">
         <label>
@@ -610,7 +659,7 @@ brew services restart tor   # macOS</code></pre>
         <input type="password" id="oauth2_google_client_secret" name="oauth2_google_client_secret" value="{{ config.oauth2.google.client_secret if config.oauth2 and config.oauth2.google else '' }}" placeholder="Client Secret from Google Cloud Console">
     </div>
 
-    <h4 style="margin: 25px 0 15px;">GitHub OAuth2</h4>
+    <h4 style="margin: 25px 0 15px; color:#a0a0a0;">GitHub OAuth2</h4>
     
     <div class="form-group">
         <label>
@@ -628,8 +677,10 @@ brew services restart tor   # macOS</code></pre>
         <label for="oauth2_github_client_secret">GitHub Client Secret</label>
         <input type="password" id="oauth2_github_client_secret" name="oauth2_github_client_secret" value="{{ config.oauth2.github.client_secret if config.oauth2 and config.oauth2.github else '' }}" placeholder="Client Secret from GitHub Developer Settings">
     </div>
+    </div><!-- /tab-oauth2 -->
 
-    <h3 style="margin: 30px 0 20px;">SMTP Email Configuration</h3>
+    <div class="settings-section" id="tab-smtp">
+    <div class="section-title"><i class="fas fa-envelope"></i> SMTP Email Configuration</div>
     
     <div class="form-group">
         <label>
@@ -700,8 +751,10 @@ brew services restart tor   # macOS</code></pre>
         <input type="email" id="smtp_test_email" name="smtp_test_email" placeholder="Email address to send test to" style="flex: 1;">
         <button type="button" onclick="testSMTP()" class="btn btn-secondary">Send Test Email</button>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">Request Batching</h3>
+    </div><!-- /tab-smtp -->
+
+    <div class="settings-section" id="tab-batching">
+    <div class="section-title"><i class="fas fa-layer-group"></i> Request Batching</div>
     
     <div class="form-group">
         <label>
@@ -748,8 +801,10 @@ brew services restart tor   # macOS</code></pre>
         <label for="batching_anthropic_max_batch_size">Anthropic Max Batch Size</label>
         <input type="number" id="batching_anthropic_max_batch_size" name="batching_anthropic_max_batch_size" value="{{ config.batching.provider_settings.anthropic.max_batch_size if config.batching and config.batching.provider_settings and config.batching.provider_settings.anthropic else 5 }}" min="1">
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">Adaptive Rate Limiting</h3>
+    </div><!-- /tab-batching -->
+
+    <div class="settings-section" id="tab-ratelimit">
+    <div class="section-title"><i class="fas fa-tachometer-alt"></i> Adaptive Rate Limiting</div>
     
     <div class="form-group">
         <label>
@@ -818,8 +873,10 @@ brew services restart tor   # macOS</code></pre>
         <input type="number" id="adaptive_consecutive_successes" name="adaptive_consecutive_successes" value="{{ config.adaptive_rate_limiting.consecutive_successes_for_recovery if config.adaptive_rate_limiting else 10 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Number of successful requests before increasing rate limit (default: 10)</small>
     </div>
-    
-    <h3 style="margin: 30px 0 20px;">Admin Password</h3>
+    </div><!-- /tab-ratelimit -->
+
+    <div class="settings-section" id="tab-admin">
+    <div class="section-title"><i class="fas fa-shield-alt"></i> Admin Password</div>
     
     <div class="form-group">
         <label for="new_admin_password">New Admin Password</label>
@@ -832,8 +889,9 @@ brew services restart tor   # macOS</code></pre>
         <input type="password" id="confirm_admin_password" name="confirm_admin_password" placeholder="Confirm new password">
         <small style="color: #666; display: block; margin-top: 5px;">Re-enter the new password to confirm</small>
     </div>
-    
-    <div style="display: flex; gap: 10px; margin-top: 30px;">
+    </div><!-- /tab-admin -->
+
+    <div style="display: flex; gap: 10px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #0f3460;">
         <button type="submit" class="btn">Save Settings</button>
         <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
         <button type="button" onclick="testSMTP()" class="btn btn-secondary" style="margin-left: auto;">Test SMTP</button>
@@ -841,6 +899,13 @@ brew services restart tor   # macOS</code></pre>
 </form>
 
 <script>
+function switchTab(name) {
+    document.querySelectorAll('.settings-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
+    document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
+    document.getElementById('tab-' + name).classList.add('active');
+}
+
 async function testSMTP() {
     const host = document.getElementById('smtp_host').value;
     const port = document.getElementById('smtp_port').value;
@@ -849,18 +914,17 @@ async function testSMTP() {
     const testEmail = document.getElementById('smtp_test_email').value;
     
     if (!host || !port || !fromEmail) {
-        alert('Please fill in SMTP host, port, and from email before testing');
+        showAlert('Please fill in SMTP host, port, and from email before testing', 'Missing Fields', '⚠️', 'warn');
         return;
     }
     
     if (!testEmail) {
-        alert('Please enter a test recipient email address');
+        showAlert('Please enter a test recipient email address', 'Missing Fields', '⚠️', 'warn');
         return;
     }
     
-    if (!confirm(`This will send a test email to ${testEmail}. Continue?`)) {
-        return;
-    }
+    const ok = await showConfirm(`This will send a test email to ${testEmail}. Continue?`, 'Send Test Email');
+    if (!ok) return;
     
     try {
         const response = await fetch('{{ url_for(request, "/dashboard/test-smtp") }}', {
@@ -882,12 +946,12 @@ async function testSMTP() {
         const data = await response.json();
         
         if (data.success) {
-            alert('Test email sent successfully! Check your inbox.');
+            showAlert('Test email sent successfully! Check your inbox.', 'Success', '✅', 'info');
         } else {
-            alert('Failed to send test email: ' + (data.error || 'Unknown error'));
+            showAlert('Failed to send test email: ' + (data.error || 'Unknown error'), 'Error', '❌', 'danger');
         }
     } catch (error) {
-        alert('Error testing SMTP: ' + error.message);
+        showAlert('Error testing SMTP: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 </script>
@@ -973,24 +1037,25 @@ function toggleResponseCacheFields() {
 
 function createPersistentService() {
     const dirInput = document.getElementById('tor_hidden_service_dir');
-    // Use absolute path instead of ~ since torrc doesn't expand it
     const defaultDir = '/home/{{ os.environ.get("USER", "yourusername") }}/.aisbf/tor_hidden_service';
     
     if (dirInput.value && dirInput.value.trim() !== '') {
-        if (!confirm('This will replace the current directory path. Continue?')) {
-            return;
-        }
+        showConfirm('This will replace the current directory path. Continue?', 'Replace Path').then(ok => {
+            if (!ok) return;
+            dirInput.value = defaultDir;
+            dirInput.focus();
+            updateTorrcExample();
+            dirInput.style.backgroundColor = '#1a4d2e';
+            setTimeout(() => { dirInput.style.backgroundColor = ''; }, 500);
+        });
+        return;
     }
     
     dirInput.value = defaultDir;
     dirInput.focus();
     updateTorrcExample();
-    
-    // Visual feedback
     dirInput.style.backgroundColor = '#1a4d2e';
-    setTimeout(() => {
-        dirInput.style.backgroundColor = '';
-    }, 500);
+    setTimeout(() => { dirInput.style.backgroundColor = ''; }, 500);
 }
 
 function toggleTorrcExample(type) {
@@ -1103,9 +1168,8 @@ async function refreshCacheStats() {
 }
 
 async function clearResponseCache() {
-    if (!confirm('Are you sure you want to clear the response cache? This will remove all cached responses.')) {
-        return;
-    }
+    const ok = await showDangerConfirm('Are you sure you want to clear the response cache? This will remove all cached responses.', 'Clear Cache');
+    if (!ok) return;
     
     try {
         const response = await fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
@@ -1114,14 +1178,13 @@ async function clearResponseCache() {
         const data = await response.json();
         
         if (data.success) {
-            alert('Response cache cleared successfully');
+            showAlert('Response cache cleared successfully', 'Done', '✅', 'info');
             refreshCacheStats();
         } else {
-            alert('Failed to clear cache: ' + (data.error || 'Unknown error'));
+            showAlert('Failed to clear cache: ' + (data.error || 'Unknown error'), 'Error', '❌', 'danger');
         }
     } catch (error) {
-        console.error('Error clearing cache:', error);
-        alert('Error clearing cache: ' + error.message);
+        showAlert('Error clearing cache: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 </script>

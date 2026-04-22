@@ -122,29 +122,24 @@ function refreshStats() {
     location.reload();
 }
 
-function clearCache() {
-    if (!confirm('Are you sure you want to clear the entire response cache? This action cannot be undone.')) {
-        return;
-    }
+async function clearCache() {
+    const ok = await showDangerConfirm('Are you sure you want to clear the entire response cache? This action cannot be undone.', 'Clear Cache');
+    if (!ok) return;
     
-    fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    })
-    .then(response => response.json())
-    .then(data => {
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/response-cache/clear") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        });
+        const data = await response.json();
         if (data.success) {
-            alert('Cache cleared successfully!');
-            location.reload();
+            showAlert('Cache cleared successfully!', 'Done', '✅', 'info').then(() => location.reload());
         } else {
-            alert('Error clearing cache: ' + (data.error || 'Unknown error'));
+            showAlert('Error clearing cache: ' + (data.error || 'Unknown error'), 'Error', '❌', 'danger');
         }
-    })
-    .catch(error => {
-        alert('Error clearing cache: ' + error);
-    });
+    } catch (error) {
+        showAlert('Error clearing cache: ' + error, 'Error', '❌', 'danger');
+    }
 }
 </script>
 

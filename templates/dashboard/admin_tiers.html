@@ -69,49 +69,6 @@
     </div>
 </div>
 
-<!-- Global Currency Settings -->
-<div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #17a2b8;">
-        <i class="fas fa-dollar-sign me-2"></i>Global Currency Settings
-    </h3>
-
-    <form id="currencySettingsForm">
-        <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Code</label>
-                <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyCode">
-                    <option value="USD">USD - US Dollar</option>
-                    <option value="EUR">EUR - Euro</option>
-                    <option value="GBP">GBP - British Pound</option>
-                    <option value="JPY">JPY - Japanese Yen</option>
-                    <option value="CAD">CAD - Canadian Dollar</option>
-                    <option value="AUD">AUD - Australian Dollar</option>
-                    <option value="CHF">CHF - Swiss Franc</option>
-                    <option value="CNY">CNY - Chinese Yuan</option>
-                    <option value="INR">INR - Indian Rupee</option>
-                    <option value="BRL">BRL - Brazilian Real</option>
-                </select>
-            </div>
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Symbol</label>
-                <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencySymbol" value="$">
-            </div>
-            <div>
-                <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Decimal Places</label>
-                <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyDecimals">
-                    <option value="0">0</option>
-                    <option value="1">1</option>
-                    <option value="2" selected>2</option>
-                    <option value="3">3</option>
-                </select>
-            </div>
-        </div>
-        <button type="submit" class="btn" style="background: #17a2b8; color: white;">
-            <i class="fas fa-save me-2"></i>Save Currency Settings
-        </button>
-    </form>
-</div>
-
 
 <!-- Create/Edit Tier Modal -->
 <div class="modal fade" id="tierModal" tabindex="-1" aria-labelledby="tierModalLabel" aria-hidden="true" style="display: none;">
@@ -229,7 +186,6 @@
 <script>
 document.addEventListener('DOMContentLoaded', function() {
     try {
-        loadCurrencySettings();
     } catch (error) {
         console.error('Error initializing page:', error);
     }
@@ -403,15 +359,15 @@ function closeTierModal() {
     document.getElementById('tierModal').style.display = 'none';
 }
 
-function deleteTier(tierId) {
-    if (confirm('Are you sure you want to delete this tier? Users on this tier will be moved to the default free tier.')) {
+async function deleteTier(tierId) {
+    const ok = await showDangerConfirm('Are you sure you want to delete this tier? Users on this tier will be moved to the default free tier.', 'Delete Tier');
+    if (ok) {
         fetch('{{ url_for(request, "/api/admin/tiers") }}/' + tierId, {
             method: 'DELETE'
         })
         .then(response => response.json())
         .then(result => {
             showToast('Tier deleted successfully', 'success');
-            // Reload page to reflect changes
             window.location.reload();
         })
         .catch(error => {
@@ -420,40 +376,6 @@ function deleteTier(tierId) {
     }
 }
 
-function loadCurrencySettings() {
-    fetch('{{ url_for(request, "/api/admin/settings/currency") }}')
-        .then(response => response.json())
-        .then(settings => {
-            document.getElementById('currencyCode').value = settings.currency_code;
-            document.getElementById('currencySymbol').value = settings.currency_symbol;
-            document.getElementById('currencyDecimals').value = settings.currency_decimals;
-        });
-}
-
-document.getElementById('currencySettingsForm').addEventListener('submit', function(e) {
-    e.preventDefault();
-    
-    const currencyData = {
-        currency_code: document.getElementById('currencyCode').value,
-        currency_symbol: document.getElementById('currencySymbol').value,
-        currency_decimals: parseInt(document.getElementById('currencyDecimals').value)
-    };
-    
-    fetch('{{ url_for(request, "/api/admin/settings/currency") }}', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(currencyData)
-    })
-    .then(response => response.json())
-    .then(result => {
-        showToast('Currency settings saved successfully', 'success');
-    })
-    .catch(error => {
-        showToast('Error saving currency settings', 'danger');
-    });
-});
 
 
 function showToast(message, type) {

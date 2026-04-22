@@ -99,7 +99,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </span>
         {% if date_range_usage %}
         <span style="margin-left: 20px; color: #a0a0a0;">
-            | Total: {{ format_tokens(date_range_usage.total_tokens) }} tokens | Estimated Cost: ${{ "%.2f"|format(date_range_usage.estimated_cost) }}
+            | Total: {{ format_tokens(date_range_usage.total_tokens) }} tokens | Estimated Cost: {{ currency_symbol }}{{ "%.2f"|format(date_range_usage.estimated_cost) }}
         </span>
         {% endif %}
     </div>
@@ -494,7 +494,7 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
             {% if total_requests > 0 %}
                 {% set weighted_sum = namespace(value=0) %}
                 {% for provider in provider_stats %}
-                    {% set weighted_sum.value = weighted_sum.value + (provider.avg_latency_ms * provider.requests.total) %}
+                    {% set weighted_sum.value = weighted_sum.value + (provider.avg_latency_ms | float * provider.requests.total) %}
                 {% endfor %}
                 {% set avg_latency = weighted_sum.value / total_requests %}
                 {% if avg_latency > 1000 %}{{ "%.1f"|format(avg_latency / 1000) }}s{% else %}{{ "%.0f"|format(avg_latency) }}ms{% endif %}
@@ -521,7 +521,7 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
         <h4 style="font-size: 14px; margin-bottom: 10px;">
             {% if from_date or to_date %}Selected Period Cost{% else %}Today's Estimated Cost{% endif %}
         </h4>
-        <p style="font-size: 28px; font-weight: bold;">${{ "%.2f"|format(cost_overview.total_estimated_cost_today) }}</p>
+        <p style="font-size: 28px; font-weight: bold;">{{ currency_symbol }}{{ "%.2f"|format(cost_overview.total_estimated_cost_today) }}</p>
         {% if cost_overview.date_range %}
         <small style="color: rgba(255,255,255,0.8);">
             {{ cost_overview.date_range.start[:10] }} to {{ cost_overview.date_range.end[:10] }}

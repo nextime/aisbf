@@ -2,24 +2,20 @@
 
 A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, and AI-assisted model selection to optimize AI service usage across multiple providers.
 
-## 🚀 Support AISBF - Your Donations Matter!
+---
 
-The project includes multiple donation options to support its development:
+## 🌐 Try AISBF Now — No Installation Required!
 
-### Ethereum Donation
-ETH to `0xdA6dAb526515b5cb556d20269207D43fcc760E51`
+> **[➡️ Launch AISBF at https://aisbf.cloud](https://aisbf.cloud)**
+>
+> The fully hosted service is free to use. Just open your browser and start routing AI requests across all supported providers — no setup, no configuration, no API keys needed to get started.
 
-### PayPal Donation
-https://paypal.me/nexlab
-
-### Bitcoin Donation
-Address: `bc1qcpt2uutqkz4456j5r78rjm3gwq03h5fpwmcc5u`
-
-## Try AISBF
-
-Try AISBF live at [https://aisbf.cloud](https://aisbf.cloud) or via TOR at [http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion](http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion) - no installation required!
+Also available via TOR for privacy-first access:
+[http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion](http://aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion)
 
 ![AISBF Dashboard](https://git.nexlab.net/nexlab/aisbf/raw/master/screenshot.png)
+
+---
 
 ## Key Features
 
@@ -102,6 +98,19 @@ For complete documentation, configuration guides, and API reference:
 - **[💰 Wallet System](DOCUMENTATION.md#wallet-system)** - Complete wallet documentation
 - **[🔌 API Reference](DOCUMENTATION.md#api-endpoints)** - Complete API documentation
 - **[🛠️ Development](DOCUMENTATION.md#development)** - Development and deployment guides
+
+## 🚀 Support AISBF - Your Donations Matter!
+
+The project includes multiple donation options to support its development:
+
+### Ethereum Donation
+ETH to `0xdA6dAb526515b5cb556d20269207D43fcc760E51`
+
+### PayPal Donation
+https://paypal.me/nexlab
+
+### Bitcoin Donation
+Address: `bc1qcpt2uutqkz4456j5r78rjm3gwq03h5fpwmcc5u`
 
 ## Author
 

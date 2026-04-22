@@ -143,7 +143,7 @@ function openOAuthPopup(url) {
             window.removeEventListener('message', messageListener);
             
             // Show error
-            alert(event.data.error || 'Authentication failed');
+            showAlert(event.data.error || 'Authentication failed', 'Authentication Error', '❌', 'danger');
         }
     };
     

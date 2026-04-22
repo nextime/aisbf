@@ -216,8 +216,9 @@
 
 {% block extra_js %}
 <script>
-function subscribeToTier(tierId) {
-    if (confirm('Are you sure you want to upgrade to this tier?')) {
+async function subscribeToTier(tierId) {
+    const ok = await showConfirm('Are you sure you want to upgrade to this tier?', 'Upgrade Plan');
+    if (ok) {
         fetch(url_for(`/api/subscribe/${tierId}`), {
             method: 'POST',
             headers: {
@@ -241,8 +242,9 @@ function subscribeToTier(tierId) {
     }
 }
 
-function downgradeToFree() {
-    if (confirm('Are you sure you want to downgrade to the free tier? Your current subscription will remain active until the end of the billing period.')) {
+async function downgradeToFree() {
+    const ok = await showConfirm('Are you sure you want to downgrade to the free tier? Your current subscription will remain active until the end of the billing period.', 'Downgrade Plan');
+    if (ok) {
         fetch(url_for('/api/subscribe/free'), {
             method: 'POST',
             headers: {

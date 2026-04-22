@@ -1,128 +1,339 @@
 {% extends "base.html" %}
 
-{% block title %}My API Tokens - AISBF{% endblock %}
+{% block title %}API Tokens - AISBF{% endblock %}
 
 {% block content %}
-<div class="container">
-    <h1>My API Tokens</h1>
-    <p>Manage your personal API tokens for accessing the AISBF API</p>
+<style>
+/* ── Page header ──────────────────────────────────────────── */
+.page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 1rem;
+}
+.page-header h2 {
+    font-size: 1.35rem;
+    font-weight: 700;
+    color: #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+}
+.page-header h2 i { color: #667eea; }
+.page-header p { color: #888; font-size: .9rem; margin-top: .2rem; }
 
-    {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
-    {% endif %}
+/* ── Section card ─────────────────────────────────────────── */
+.section-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 1.5rem;
+}
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .85rem 1.25rem;
+    border-bottom: 1px solid #0f3460;
+    background: rgba(15,52,96,.3);
+}
+.section-header h3 {
+    font-size: .95rem;
+    font-weight: 600;
+    color: #e0e0e0;
+    display: flex;
+    align-items: center;
+    gap: .5rem;
+}
+.section-header h3 i { color: #667eea; font-size: .85rem; }
+.section-body { padding: 1.25rem; }
 
-    {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endif %}
+/* ── Token card ───────────────────────────────────────────── */
+.token-list { display: flex; flex-direction: column; gap: .85rem; }
+.token-card {
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 8px;
+    padding: 1rem 1.25rem;
+    transition: border-color .2s;
+}
+.token-card:hover { border-color: #334477; }
+.token-card-top {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: .75rem;
+}
+.token-name {
+    font-size: 1rem;
+    font-weight: 600;
+    color: #e0e0e0;
+    margin-bottom: .2rem;
+}
+.token-meta {
+    font-size: .8rem;
+    color: #666;
+    display: flex;
+    gap: 1rem;
+    flex-wrap: wrap;
+}
+.token-meta span { display: flex; align-items: center; gap: .3rem; }
+.token-meta i { color: #445; font-size: .75rem; }
 
-    <!-- API Documentation -->
-    <div class="card">
-        <h2>🔌 How to Use Your Token</h2>
-        <p>Include your API token in the <code>Authorization</code> header when making requests:</p>
-        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>Authorization: Bearer YOUR_API_TOKEN</code></pre>
-        
-        <h3>Available Endpoints:</h3>
-        <table class="endpoints-table">
-            <thead>
-                <tr>
-                    <th>Method</th>
-                    <th>Endpoint</th>
-                    <th>Description</th>
-                </tr>
-            </thead>
-            <tbody>
-                <tr>
-                    <td><code class="method GET">GET</code></td>
-                    <td><code>/api/u/{{ session.username }}/models</code></td>
-                    <td>List your models</td>
-                </tr>
-                <tr>
-                    <td><code class="method GET">GET</code></td>
-                    <td><code>/api/u/{{ session.username }}/providers</code></td>
-                    <td>List your providers</td>
-                </tr>
-                <tr>
-                    <td><code class="method GET">GET</code></td>
-                    <td><code>/api/u/{{ session.username }}/rotations</code></td>
-                    <td>List your rotations</td>
-                </tr>
-                <tr>
-                    <td><code class="method GET">GET</code></td>
-                    <td><code>/api/u/{{ session.username }}/autoselects</code></td>
-                    <td>List your autoselects</td>
-                </tr>
-                <tr>
-                    <td><code class="method POST">POST</code></td>
-                    <td><code>/api/u/{{ session.username }}/chat/completions</code></td>
-                    <td>Chat using your configs</td>
-                </tr>
-                <tr>
-                    <td><code class="method GET">GET</code></td>
-                    <td><code>/mcp/u/{{ session.username }}/tools</code></td>
-                    <td>List MCP tools</td>
-                </tr>
-                <tr>
-                    <td><code class="method POST">POST</code></td>
-                    <td><code>/mcp/u/{{ session.username }}/tools/call</code></td>
-                    <td>Call MCP tools</td>
-                </tr>
-            </tbody>
-        </table>
-        
-        <h3>Example curl commands:</h3>
-        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code># List your models
-curl -H "Authorization: Bearer YOUR_TOKEN" {{ request.base_url }}api/u/{{ session.username }}/models
+.token-actions { display: flex; align-items: center; gap: .6rem; flex-shrink: 0; }
 
-# List your providers
-curl -H "Authorization: Bearer YOUR_TOKEN" {{ request.base_url }}api/u/{{ session.username }}/providers
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: .3rem;
+    padding: .25rem .7rem;
+    border-radius: 20px;
+    font-size: .75rem;
+    font-weight: 600;
+}
+.status-pill::before {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: currentColor;
+}
+.status-active   { background: rgba(74,222,128,.12); color: #4ade80; }
+.status-inactive { background: rgba(239,68,68,.12);  color: #ef4444; }
+
+.btn-sm {
+    padding: .35rem .8rem !important;
+    font-size: .8rem !important;
+    margin-left: 0 !important;
+}
+
+/* token value row */
+.token-value-row {
+    display: flex;
+    align-items: center;
+    gap: .6rem;
+    background: #0f1c33;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: .55rem .85rem;
+    font-family: monospace;
+    font-size: .85rem;
+    color: #a0a0a0;
+}
+.token-value-text { flex: 1; word-break: break-all; }
+.copy-btn {
+    background: rgba(103,126,234,.15);
+    border: 1px solid rgba(103,126,234,.3);
+    color: #667eea;
+    border-radius: 5px;
+    padding: .3rem .65rem;
+    font-size: .75rem;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background .2s;
+    flex-shrink: 0;
+}
+.copy-btn:hover { background: rgba(103,126,234,.3); }
+.copy-btn.copied { background: rgba(74,222,128,.2); color: #4ade80; border-color: rgba(74,222,128,.4); }
+
+/* ── Empty state ──────────────────────────────────────────── */
+.empty-state {
+    text-align: center;
+    padding: 3rem 1rem;
+    color: #555;
+}
+.empty-state i {
+    font-size: 3rem;
+    margin-bottom: 1rem;
+    display: block;
+    color: #2a3a5e;
+}
+.empty-state p { font-size: .9rem; margin-bottom: 1.25rem; }
+
+/* ── Create token form (inline) ───────────────────────────── */
+.create-form-area {
+    display: none;
+    background: #1a1a2e;
+    border: 1px solid #667eea;
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-top: 1rem;
+}
+.create-form-area.visible { display: block; }
+.create-form-area .form-group { margin-bottom: 1rem; }
+.create-form-area label { font-size: .85rem; color: #a0a0a0; margin-bottom: .4rem; display: block; }
+.create-form-area input[type="text"] {
+    width: 100%;
+    padding: .6rem .85rem;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    background: #0f1c33;
+    color: #e0e0e0;
+    font-size: .9rem;
+}
+.create-form-area input:focus {
+    outline: none;
+    border-color: #667eea;
+}
+.form-actions { display: flex; gap: .6rem; margin-top: .5rem; }
+
+/* new token reveal */
+.new-token-reveal {
+    display: none;
+    background: rgba(74,222,128,.07);
+    border: 1px solid rgba(74,222,128,.3);
+    border-radius: 8px;
+    padding: 1.25rem;
+    margin-top: 1rem;
+}
+.new-token-reveal.visible { display: block; }
+.new-token-reveal h4 { color: #4ade80; font-size: .95rem; margin-bottom: .5rem; }
+.new-token-reveal .warn { color: #fbbf24; font-size: .83rem; margin: .6rem 0; }
+.new-token-reveal .warn i { margin-right: .3rem; }
+
+/* ── API docs section ─────────────────────────────────────── */
+.docs-toggle {
+    cursor: pointer;
+    user-select: none;
+}
+.docs-body { display: none; }
+.docs-body.visible { display: block; }
+.caret { display: inline-block; transition: transform .2s; }
+.docs-toggle.open .caret { transform: rotate(180deg); }
+
+.ep-table { width: 100%; border-collapse: collapse; margin: .75rem 0; }
+.ep-table th {
+    font-size: .75rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #555;
+    border-bottom: 1px solid #0f3460;
+    padding: .5rem .75rem;
+    text-align: left;
+}
+.ep-table td {
+    padding: .6rem .75rem;
+    font-size: .85rem;
+    color: #c0c0c0;
+    border-bottom: 1px solid rgba(15,52,96,.4);
+}
+.ep-table tr:last-child td { border-bottom: none; }
+.method-badge {
+    display: inline-block;
+    font-size: .7rem;
+    font-weight: 700;
+    padding: .2rem .5rem;
+    border-radius: 4px;
+}
+.method-GET  { background: rgba(74,222,128,.18); color: #4ade80; }
+.method-POST { background: rgba(96,165,250,.18); color: #60a5fa; }
+.code-block {
+    background: #0f1c33;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: .85rem 1rem;
+    font-family: monospace;
+    font-size: .82rem;
+    color: #c0c0c0;
+    overflow-x: auto;
+    margin: .75rem 0 0;
+    white-space: pre;
+}
+</style>
+
+{% if success %}
+<div class="alert alert-success" style="margin-bottom:1.25rem;">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:1.25rem;">{{ error }}</div>
+{% endif %}
+
+<!-- Page header -->
+<div class="page-header">
+    <div>
+        <h2><i class="fas fa-key"></i> API Tokens</h2>
+        <p>Generate tokens to authenticate requests to your personal API endpoints.</p>
+    </div>
+</div>
+
+<!-- Token list -->
+<div class="section-card">
+    <div class="section-header">
+        <h3><i class="fas fa-list"></i> Your Tokens</h3>
+        <button class="btn btn-primary btn-sm" onclick="toggleCreateForm()">
+            <i class="fas fa-plus"></i> New Token
+        </button>
+    </div>
+    <div class="section-body">
+
+        <!-- Create form (inline, hidden by default) -->
+        <div class="create-form-area" id="createFormArea">
+            <div class="form-group">
+                <label>Description <span style="color:#555;">(optional)</span></label>
+                <input type="text" id="tokenDescription" placeholder="e.g. My app, Home server …">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-primary btn-sm" onclick="submitCreateToken()">Create</button>
+                <button class="btn btn-secondary btn-sm" onclick="toggleCreateForm()">Cancel</button>
+            </div>
+        </div>
+
+        <!-- New token reveal -->
+        <div class="new-token-reveal" id="newTokenReveal">
+            <h4><i class="fas fa-circle-check"></i> Token created successfully</h4>
+            <div class="token-value-row" style="margin:.6rem 0;">
+                <span class="token-value-text" id="newTokenValue"></span>
+                <button class="copy-btn" onclick="copyNewToken()">Copy</button>
+            </div>
+            <p class="warn"><i class="fas fa-triangle-exclamation"></i> Copy this token now — it won't be shown again.</p>
+            <button class="btn btn-secondary btn-sm" style="margin-top:.5rem;" onclick="dismissReveal()">Done</button>
+        </div>
+
+        <!-- Token list -->
+        <div class="token-list" id="tokenList" style="margin-top:1rem;"></div>
+    </div>
+</div>
+
+<!-- API Docs (collapsible) -->
+<div class="section-card">
+    <div class="section-header docs-toggle" id="docsToggle" onclick="toggleDocs()">
+        <h3><i class="fas fa-book-open"></i> How to use your token</h3>
+        <span style="color:#667eea; font-size:.82rem;">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
+    </div>
+    <div class="docs-body" id="docsBody">
+        <div class="section-body">
+            <p style="color:#a0a0a0; font-size:.88rem; margin-bottom:.75rem;">Add the token to every request in the <code style="background:#0f3460; padding:.1rem .35rem; border-radius:3px;">Authorization</code> header:</p>
+            <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
+
+            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Available endpoints:</p>
+            <table class="ep-table">
+                <thead><tr><th>Method</th><th>Endpoint</th><th>Description</th></tr></thead>
+                <tbody>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/models</code></td>      <td>List your models</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/providers</code></td>    <td>List your providers</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/rotations</code></td>    <td>List your rotations</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/autoselects</code></td>  <td>List your autoselects</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/api/u/{{ session.username }}/chat/completions</code></td><td>Chat using your configs</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/mcp/u/{{ session.username }}/tools</code></td>        <td>List MCP tools</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/mcp/u/{{ session.username }}/tools/call</code></td>  <td>Call MCP tools</td></tr>
+                </tbody>
+            </table>
+
+            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Example curl commands:</p>
+            <div class="code-block"># List your models
+curl -H "Authorization: Bearer YOUR_TOKEN" \
+  {{ request.base_url }}api/u/{{ session.username }}/models
 
 # Send a chat request
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
+curl -X POST \
+  -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
-  -d '{"model": "user-rotation/myrotation", "messages": [{"role": "user", "content": "Hello"}]}' \
-  {{ request.base_url }}api/u/{{ session.username }}/chat/completions</code></pre>
-    </div>
-
-    <div class="card">
-        <h2>API Tokens</h2>
-        <div id="tokens-list">
-            <!-- Tokens will be loaded here -->
-        </div>
-        <button class="btn btn-primary" onclick="createToken()">Create New Token</button>
-    </div>
-
-    <!-- Modal for creating tokens -->
-    <div id="token-modal" class="modal" style="display: none;">
-        <div class="modal-content">
-            <div class="modal-header">
-                <h3>Create New API Token</h3>
-                <button class="close-btn" onclick="closeModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="token-creation-form">
-                    <form id="create-token-form">
-                        <div class="form-group">
-                            <label for="token-description">Description (optional):</label>
-                            <input type="text" id="token-description" placeholder="e.g., My application token">
-                        </div>
-                        <div class="form-actions">
-                            <button type="submit" class="btn btn-primary">Create Token</button>
-                            <button type="button" class="btn btn-secondary" onclick="closeModal()">Cancel</button>
-                        </div>
-                    </form>
-                </div>
-                <div id="token-result" style="display: none;">
-                    <div class="alert alert-success">
-                        <h4>Token Created Successfully!</h4>
-                        <p><strong>Token:</strong> <code id="created-token"></code></p>
-                        <p class="warning-text">⚠️ <strong>Important:</strong> Copy this token now. You won't be able to see it again!</p>
-                        <div class="form-actions">
-                            <button type="button" class="btn btn-primary" onclick="copyToken()">Copy Token</button>
-                            <button type="button" class="btn btn-secondary" onclick="closeModal()">Close</button>
-                        </div>
-                    </div>
-                </div>
-            </div>
+  -d '{"model":"user-rotation/myrotation","messages":[{"role":"user","content":"Hello"}]}' \
+  {{ request.base_url }}api/u/{{ session.username }}/chat/completions</div>
         </div>
     </div>
 </div>
@@ -130,336 +341,156 @@ curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
 <script>
 let tokens = {{ user_tokens | tojson }};
 
+/* ── Render tokens ──────────────────────────────────────── */
 function renderTokens() {
-    const container = document.getElementById('tokens-list');
-    container.innerHTML = '';
-
+    const list = document.getElementById('tokenList');
     if (tokens.length === 0) {
-        container.innerHTML = '<p class="empty-state">No API tokens created yet. Click "Create New Token" to get started.</p>';
+        list.innerHTML = `
+            <div class="empty-state">
+                <i class="fas fa-key"></i>
+                <p>No API tokens yet.<br>Create one to start using the API.</p>
+            </div>`;
         return;
     }
 
-    tokens.forEach((token) => {
-        const div = document.createElement('div');
-        div.className = 'token-item';
-        div.innerHTML = `
-            <div class="token-header">
-                <div class="token-info">
-                    <h4>${token.description || 'No description'}</h4>
-                    <p class="token-meta">
-                        Created: ${new Date(token.created_at).toLocaleString()}
-                        ${token.last_used ? `| Last used: ${new Date(token.last_used).toLocaleString()}` : ''}
-                    </p>
+    list.innerHTML = tokens.map(t => `
+        <div class="token-card" id="token-${t.id}">
+            <div class="token-card-top">
+                <div>
+                    <div class="token-name">${escHtml(t.description || 'Unnamed token')}</div>
+                    <div class="token-meta">
+                        <span><i class="fas fa-calendar-plus"></i> Created ${formatDate(t.created_at)}</span>
+                        ${t.last_used ? `<span><i class="fas fa-clock"></i> Last used ${formatDate(t.last_used)}</span>` : ''}
+                    </div>
                 </div>
                 <div class="token-actions">
-                    <span class="token-status ${token.is_active ? 'active' : 'inactive'}">
-                        ${token.is_active ? 'Active' : 'Inactive'}
+                    <span class="status-pill ${t.is_active ? 'status-active' : 'status-inactive'}">
+                        ${t.is_active ? 'Active' : 'Inactive'}
                     </span>
-                    <button class="btn btn-danger btn-sm" onclick="deleteToken(${token.id})">Delete</button>
+                    <button class="btn btn-danger btn-sm" onclick="deleteToken(${t.id})">
+                        <i class="fas fa-trash"></i>
+                    </button>
                 </div>
             </div>
-            <div class="token-details">
-                <p><strong>Token ID:</strong> ${token.id}</p>
-                <p><strong>Token:</strong> ${token.token.substring(0, 20)}...</p>
+            <div class="token-value-row">
+                <span class="token-value-text">${escHtml(t.token.substring(0, 24))}…</span>
+                <button class="copy-btn" onclick="copyPartialToken(this, ${JSON.stringify(t.token)})">Copy full</button>
             </div>
-        `;
-        container.appendChild(div);
-    });
+        </div>
+    `).join('');
 }
 
-function createToken() {
-    document.getElementById('token-creation-form').style.display = 'block';
-    document.getElementById('token-result').style.display = 'none';
-    document.getElementById('create-token-form').reset();
-    document.getElementById('token-modal').style.display = 'block';
+function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
 }
 
-function closeModal() {
-    document.getElementById('token-modal').style.display = 'none';
+function formatDate(iso) {
+    if (!iso) return '';
+    return new Date(iso).toLocaleString(undefined, {dateStyle:'medium', timeStyle:'short'});
 }
 
-function deleteToken(tokenId) {
-    if (!confirm('Are you sure you want to delete this API token? This action cannot be undone and will immediately revoke access.')) return;
-
-    fetch('{{ url_for(request, "/dashboard/user/tokens") }}/' + tokenId, {
-        method: 'DELETE',
-        headers: {
-            'Content-Type': 'application/json'
-        }
-    }).then(response => {
-        if (response.ok) {
-            location.reload();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Failed to delete token');
-            });
-        }
-    }).catch(error => {
-        alert('Error: ' + error.message);
-    });
-}
-
-function copyToken() {
-    const tokenElement = document.getElementById('created-token');
-    const token = tokenElement.textContent;
-
-    navigator.clipboard.writeText(token).then(() => {
-        alert('Token copied to clipboard!');
-    }).catch(() => {
-        // Fallback for older browsers
-        const textArea = document.createElement('textarea');
-        textArea.value = token;
-        document.body.appendChild(textArea);
-        textArea.select();
-        document.execCommand('copy');
-        document.body.removeChild(textArea);
-        alert('Token copied to clipboard!');
-    });
-}
-
-// Handle form submission
-document.getElementById('create-token-form').addEventListener('submit', function(e) {
-    e.preventDefault();
-
-    const description = document.getElementById('token-description').value.trim();
-
-    const formData = new FormData();
-    if (description) {
-        formData.append('description', description);
+/* ── Create form ──────────────────────────────────────────── */
+function toggleCreateForm() {
+    const area = document.getElementById('createFormArea');
+    const reveal = document.getElementById('newTokenReveal');
+    area.classList.toggle('visible');
+    if (!area.classList.contains('visible')) {
+        document.getElementById('tokenDescription').value = '';
+        reveal.classList.remove('visible');
     }
+}
+
+function submitCreateToken() {
+    const desc = document.getElementById('tokenDescription').value.trim();
+    const formData = new FormData();
+    if (desc) formData.append('description', desc);
 
     fetch('{{ url_for(request, "/dashboard/user/tokens") }}', {
         method: 'POST',
         body: formData
-    }).then(response => {
-        if (response.ok) {
-            return response.json();
-        } else {
-            return response.json().then(data => {
-                throw new Error(data.error || 'Failed to create token');
-            });
-        }
-    }).then(data => {
-        // Show the created token
-        document.getElementById('created-token').textContent = data.token;
-        document.getElementById('token-creation-form').style.display = 'none';
-        document.getElementById('token-result').style.display = 'block';
+    })
+    .then(r => r.ok ? r.json() : r.json().then(d => Promise.reject(d.error || 'Failed')))
+    .then(data => {
+        document.getElementById('createFormArea').classList.remove('visible');
+        document.getElementById('tokenDescription').value = '';
 
-        // Refresh the token list
+        document.getElementById('newTokenValue').textContent = data.token;
+        document.getElementById('newTokenReveal').classList.add('visible');
+
         tokens.push({
             id: data.token_id,
             token: data.token,
-            description: description || null,
+            description: desc || null,
             created_at: new Date().toISOString(),
             last_used: null,
             is_active: true
         });
         renderTokens();
-    }).catch(error => {
-        alert('Error: ' + error.message);
+    })
+    .catch(err => showAlert('Error: ' + err, 'Error', '❌', 'danger'));
+}
+
+function dismissReveal() {
+    document.getElementById('newTokenReveal').classList.remove('visible');
+}
+
+/* ── Copy helpers ─────────────────────────────────────────── */
+function copyNewToken() {
+    const token = document.getElementById('newTokenValue').textContent;
+    copyToClipboard(token, document.querySelector('#newTokenReveal .copy-btn'));
+}
+
+function copyPartialToken(btn, fullToken) {
+    copyToClipboard(fullToken, btn);
+}
+
+function copyToClipboard(text, btn) {
+    navigator.clipboard.writeText(text).then(() => {
+        if (btn) {
+            const orig = btn.textContent;
+            btn.textContent = 'Copied!';
+            btn.classList.add('copied');
+            setTimeout(() => { btn.textContent = orig; btn.classList.remove('copied'); }, 1800);
+        }
+    }).catch(() => {
+        const ta = document.createElement('textarea');
+        ta.value = text;
+        ta.style.cssText = 'position:fixed;opacity:0;';
+        document.body.appendChild(ta);
+        ta.select();
+        try { document.execCommand('copy'); } catch(e) {}
+        document.body.removeChild(ta);
     });
-});
+}
+
+/* ── Delete ───────────────────────────────────────────────── */
+async function deleteToken(id) {
+    const ok = await showDangerConfirm('Delete this API token? This will immediately revoke access and cannot be undone.', 'Delete Token');
+    if (!ok) return;
+
+    fetch('{{ url_for(request, "/dashboard/user/tokens") }}/' + id, {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => {
+        if (r.ok) {
+            tokens = tokens.filter(t => t.id !== id);
+            renderTokens();
+        } else {
+            return r.json().then(d => Promise.reject(d.error || 'Failed'));
+        }
+    })
+    .catch(err => showAlert('Error: ' + err, 'Error', '❌', 'danger'));
+}
+
+/* ── Docs toggle ──────────────────────────────────────────── */
+function toggleDocs() {
+    document.getElementById('docsToggle').classList.toggle('open');
+    document.getElementById('docsBody').classList.toggle('visible');
+}
 
 renderTokens();
 </script>
-
-<style>
-.token-item {
-    background: #1a1a2e;
-    padding: 1rem;
-    margin: 1rem 0;
-    border-radius: 8px;
-    border: 1px solid #0f3460;
-}
-
-.token-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 1rem;
-}
-
-.token-info h4 {
-    margin: 0 0 0.5rem 0;
-    color: #e0e0e0;
-}
-
-.token-meta {
-    color: #a0a0a0;
-    font-size: 0.9rem;
-    margin: 0;
-}
-
-.token-actions {
-    display: flex;
-    align-items: center;
-    gap: 0.5rem;
-}
-
-.token-status {
-    padding: 0.25rem 0.5rem;
-    border-radius: 4px;
-    font-size: 0.8rem;
-    font-weight: 500;
-}
-
-.token-status.active {
-    background: #28a745;
-    color: white;
-}
-
-.token-status.inactive {
-    background: #dc3545;
-    color: white;
-}
-
-.token-details {
-    background: #16213e;
-    padding: 1rem;
-    border-radius: 4px;
-    font-family: monospace;
-    font-size: 0.9rem;
-}
-
-.token-details p {
-    margin: 0.5rem 0;
-    word-break: break-all;
-}
-
-.empty-state {
-    text-align: center;
-    color: #a0a0a0;
-    padding: 2rem;
-}
-
-.modal {
-    position: fixed;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    z-index: 1000;
-}
-
-.modal-content {
-    background: #1a1a2e;
-    border-radius: 8px;
-    width: 90%;
-    max-width: 500px;
-    max-height: 80vh;
-    overflow-y: auto;
-}
-
-.modal-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 1rem;
-    border-bottom: 1px solid #0f3460;
-}
-
-.modal-header h3 {
-    margin: 0;
-}
-
-.close-btn {
-    background: none;
-    border: none;
-    color: #e0e0e0;
-    font-size: 1.5rem;
-    cursor: pointer;
-    padding: 0;
-    width: 30px;
-    height: 30px;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-}
-
-.modal-body {
-    padding: 1rem;
-}
-
-.form-group {
-    margin-bottom: 1rem;
-}
-
-.form-group label {
-    display: block;
-    margin-bottom: 0.5rem;
-    font-weight: 500;
-    color: #e0e0e0;
-}
-
-.form-group input[type="text"] {
-    width: 100%;
-    padding: 0.5rem;
-    border: 1px solid #0f3460;
-    border-radius: 4px;
-    background: #16213e;
-    color: #e0e0e0;
-    font-size: 14px;
-}
-
-.form-actions {
-    display: flex;
-    gap: 0.5rem;
-    justify-content: flex-end;
-    margin-top: 1rem;
-}
-
-.warning-text {
-    color: #ffc107;
-    font-weight: 500;
-}
-
-#created-token {
-    background: #0f3460;
-    padding: 0.5rem;
-    border-radius: 4px;
-    font-family: monospace;
-    word-break: break-all;
-}
-
-/* API Endpoints Table */
-.endpoints-table {
-    width: 100%;
-    margin: 1rem 0;
-    border-collapse: collapse;
-}
-
-.endpoints-table th,
-.endpoints-table td {
-    padding: 0.75rem;
-    text-align: left;
-    border-bottom: 1px solid #333;
-}
-
-.endpoints-table th {
-    background: #1a1a2e;
-    font-weight: bold;
-}
-
-.endpoints-table .method {
-    display: inline-block;
-    padding: 0.2rem 0.5rem;
-    border-radius: 3px;
-    font-weight: bold;
-    font-size: 0.75rem;
-}
-
-.endpoints-table .method.GET {
-    background: #28a745;
-    color: white;
-}
-
-.endpoints-table .method.POST {
-    background: #007bff;
-    color: white;
-}
-</style>
 {% endblock %}

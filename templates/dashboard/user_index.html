@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block title %}User Dashboard - AISBF{% endblock %}
+{% block title %}Dashboard - AISBF{% endblock %}
 
 {% macro format_tokens(value) %}
 {% if value is none or value == 0 %}0{% else %}
@@ -18,453 +18,550 @@
 {% endmacro %}
 
 {% block content %}
-<div class="container">
-    <h1>User Dashboard</h1>
-    <p>Welcome, {{ session.username }}!</p>
-
-    {% if success %}
-    <div class="alert alert-success">{{ success }}</div>
-    {% endif %}
-
-    {% if error %}
-    <div class="alert alert-error">{{ error }}</div>
-    {% endif %}
-
-    <!-- API Documentation Section -->
-    <div class="card">
-        <h2>🔌 Your API Endpoints</h2>
-        <p>Use your API token to access your personal configurations. Include the token in the Authorization header:</p>
-        <pre style="background: #1a1a2e; padding: 1rem; border-radius: 4px; overflow-x: auto;"><code>Authorization: Bearer YOUR_API_TOKEN</code></pre>
-        
-        <div class="api-endpoints">
-            <h3>Your Models</h3>
-            <div class="endpoint">
-                <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/models</code>
-                <p>List all models from your providers, rotations, and autoselects</p>
-            </div>
-            
-            <h3>Your Providers</h3>
-            <div class="endpoint">
-                <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/providers</code>
-                <p>List all your configured providers</p>
-            </div>
-            
-            <h3>Your Rotations</h3>
-            <div class="endpoint">
-                <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/rotations</code>
-                <p>List all your configured rotations</p>
-            </div>
-            
-            <h3>Your Autoselects</h3>
-            <div class="endpoint">
-                <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/autoselects</code>
-                <p>List all your configured autoselects</p>
-            </div>
-            
-            <h3>Your Chat Completions</h3>
-            <div class="endpoint">
-                <code class="method POST">POST</code>
-                <code class="url">{{ get_base_url(request) }}/api/u/{{ session.username }}/chat/completions</code>
-                <p>Send chat requests using your configurations</p>
-                <p class="example">Example model formats:</p>
-                <ul>
-                    <li><code>user-provider/myprovider/mymodel</code></li>
-                    <li><code>user-rotation/myrotation</code></li>
-                    <li><code>user-autoselect/myautoselect</code></li>
-                </ul>
-            </div>
-            
-            <h3>MCP Tools</h3>
-            <div class="endpoint">
-                <code class="method GET">GET</code>
-                <code class="url">{{ get_base_url(request) }}/mcp/u/{{ session.username }}/tools</code>
-                <p>List available MCP tools for your configurations</p>
-            </div>
-            <div class="endpoint">
-                <code class="method POST">POST</code>
-                <code class="url">{{ get_base_url(request) }}/mcp/u/{{ session.username }}/tools/call</code>
-                <p>Call MCP tools to manage your configurations</p>
-            </div>
-        </div>
-        
-        {% if session.role == 'admin' %}
-        <div class="admin-notice">
-            <h4>⚡ Admin Access</h4>
-            <p>As an admin user, you also have access to global configurations (providers, rotations, autoselects configured by the admin) in addition to your own user configurations.</p>
-            <p class="example">Admin model formats:</p>
-            <ul>
-                <li><code>provider/model</code> - global provider</li>
-                <li><code>rotation/myrotation</code> - global rotation</li>
-                <li><code>autoselect/myautoselect</code> - global autoselect</li>
-            </ul>
-        </div>
-        {% endif %}
-        
-        <p class="note">⚠️ Note: Your API token is required for all these endpoints. Manage your tokens in the <a href="{{ url_for(request, '/dashboard/user/tokens') }}">API Tokens</a> section.</p>
-    </div>
-
-    <!-- Usage Statistics -->
-    <div class="card">
-        <h2>Usage Statistics</h2>
-        <div class="stats-grid">
-            <div class="stat-item">
-                <h3>Total Tokens Used</h3>
-                <p class="stat-value">{{ format_tokens(usage_stats.total_tokens|default(0)) }}</p>
-            </div>
-            <div class="stat-item">
-                <h3>Requests Today</h3>
-                <p class="stat-value">{{ usage_stats.requests_today|default(0) }}</p>
-            </div>
-            <div class="stat-item">
-                <h3>Active Providers</h3>
-                <p class="stat-value">{{ providers_count|default(0) }}</p>
-            </div>
-            <div class="stat-item">
-                <h3>Active Rotations</h3>
-                <p class="stat-value">{{ rotations_count|default(0) }}</p>
-            </div>
-        </div>
-    </div>
-
-    <!-- Quick Actions -->
-    <div class="card">
-        <h2>Quick Actions</h2>
-        <div class="button-group">
-            <a href="{{ url_for(request, '/dashboard/user/providers') }}" class="btn btn-primary">Manage Providers</a>
-            <a href="{{ url_for(request, '/dashboard/user/rotations') }}" class="btn btn-primary">Manage Rotations</a>
-            <a href="{{ url_for(request, '/dashboard/user/autoselect') }}" class="btn btn-primary">Manage Autoselect</a>
-            <a href="{{ url_for(request, '/dashboard/user/tokens') }}" class="btn btn-primary">API Tokens</a>
-        </div>
-    </div>
-
-    <!-- Recent Activity -->
-    <div class="card">
-        <h2>Recent Activity</h2>
-        <table class="table">
-            <thead>
-                <tr>
-                    <th>Timestamp</th>
-                    <th>Provider</th>
-                    <th>Model</th>
-                    <th>Tokens</th>
-                </tr>
-            </thead>
-            <tbody>
-                {% if recent_activity %}
-                    {% for activity in recent_activity %}
-                    <tr>
-                        <td>{{ activity.timestamp }}</td>
-                        <td>{{ activity.provider_id }}</td>
-                        <td>{{ activity.model }}</td>
-                        <td>{{ activity.token_count }}</td>
-                    </tr>
-                    {% endfor %}
-                {% else %}
-                    <tr>
-                        <td colspan="4" style="text-align: center;">No recent activity</td>
-                    </tr>
-                {% endif %}
-            </tbody>
-        </table>
-    </div>
-
-    <!-- Subscription Status -->
-    {% if current_tier %}
-    <div class="card">
-        <h2>Subscription</h2>
-        <div class="subscription-info">
-            <div class="plan-info">
-                <h3>{{ current_tier.name }}</h3>
-                {% if current_tier.is_default %}
-                <span class="free-tier-badge">Free Tier</span>
-                {% else %}
-                <div class="plan-price">
-                    <span class="price">{{ currency_symbol }}{{ current_tier.price_monthly }}/month</span>
-                    <span class="price-secondary">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</span>
-                </div>
-                {% endif %}
-            </div>
-
-            {% if subscription %}
-            <div class="subscription-details">
-                <div class="subscription-status">
-                    <span class="status-badge status-{{ subscription.status }}">{{ subscription.status|title }}</span>
-                    {% if subscription.expires_at %}
-                    <span class="renewal-date">Renews: {{ subscription.expires_at }}</span>
-                    {% endif %}
-                </div>
-            </div>
-            {% endif %}
-
-            {% if not payment_methods or payment_methods|length == 0 %}
-            <div class="payment-method-section">
-                <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary">Add Payment Method</a>
-            </div>
-            {% endif %}
-        </div>
-    </div>
-    {% endif %}
-</div>
-
 <style>
-.stats-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-    gap: 1rem;
-    margin-top: 1rem;
-}
-
-.stat-item {
-    background: #1a1a2e;
-    padding: 1.5rem;
-    border-radius: 8px;
-    text-align: center;
-}
-
-.stat-item h3 {
-    font-size: 0.9rem;
-    color: #888;
-    margin-bottom: 0.5rem;
-}
-
-.stat-value {
-    font-size: 2rem;
-    font-weight: bold;
-    color: #16213e;
-}
-
-.button-group {
+/* ── Hero ──────────────────────────────────────────────────── */
+.hero {
     display: flex;
+    align-items: center;
+    gap: 1.5rem;
+    padding: 1.5rem 2rem;
+    background: linear-gradient(135deg, #0f3460 0%, #16213e 60%, #1a1a2e 100%);
+    border-radius: 12px;
+    margin-bottom: 1.75rem;
+    border: 1px solid #0f3460;
+    position: relative;
+    overflow: hidden;
+}
+.hero::before {
+    content: '';
+    position: absolute;
+    top: -60px; right: -60px;
+    width: 200px; height: 200px;
+    background: radial-gradient(circle, rgba(103,126,234,.18) 0%, transparent 70%);
+    pointer-events: none;
+}
+.hero-avatar img {
+    width: 64px; height: 64px;
+    border-radius: 50%;
+    border: 3px solid #667eea;
+    box-shadow: 0 0 16px rgba(103,126,234,.4);
+}
+.hero-text h2 { font-size: 1.5rem; font-weight: 700; color: #e0e0e0; margin-bottom: .25rem; }
+.hero-text p  { color: #a0a0a0; font-size: .9rem; }
+.hero-badge {
+    margin-left: auto;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    padding: .35rem .9rem;
+    border-radius: 20px;
+    font-size: .8rem;
+    font-weight: 600;
+    white-space: nowrap;
+}
+
+/* ── Stat cards ─────────────────────────────────────────────── */
+.stats-row {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
     gap: 1rem;
-    flex-wrap: wrap;
-    margin-top: 1rem;
+    margin-bottom: 1.75rem;
 }
-
-.table {
-    width: 100%;
-    margin-top: 1rem;
-    border-collapse: collapse;
+.stat-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    transition: border-color .2s;
 }
-
-.table th,
-.table td {
-    padding: 0.75rem;
-    text-align: left;
-    border-bottom: 1px solid #333;
+.stat-card:hover { border-color: #667eea; }
+.stat-icon {
+    width: 44px; height: 44px;
+    border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
 }
+.stat-icon.purple { background: rgba(103,126,234,.15); color: #667eea; }
+.stat-icon.green  { background: rgba(74,222,128,.12);  color: #4ade80; }
+.stat-icon.blue   { background: rgba(96,165,250,.12);  color: #60a5fa; }
+.stat-icon.orange { background: rgba(251,146,60,.12);  color: #fb923c; }
+.stat-label { font-size: .78rem; color: #888; margin-bottom: .25rem; }
+.stat-value { font-size: 1.6rem; font-weight: 700; color: #e0e0e0; line-height: 1; }
 
-.table th {
-    background: #1a1a2e;
-    font-weight: bold;
+/* ── Two-column layout ──────────────────────────────────────── */
+.dashboard-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 1.5rem;
+    margin-bottom: 1.75rem;
 }
+@media (max-width: 900px) { .dashboard-grid { grid-template-columns: 1fr; } }
 
-.table tbody tr:hover {
-    background: #1a1a2e;
+/* ── Section card ───────────────────────────────────────────── */
+.section-card {
+    background: #16213e;
+    border: 1px solid #0f3460;
+    border-radius: 10px;
+    overflow: hidden;
 }
-
-/* API Endpoints Section */
-.api-endpoints {
-    margin-top: 1rem;
+.section-card.full-width { grid-column: 1 / -1; }
+.section-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: .9rem 1.25rem;
+    border-bottom: 1px solid #0f3460;
+    background: rgba(15,52,96,.3);
 }
-
-.api-endpoints h3 {
-    margin-top: 1.5rem;
+.section-header h3 {
+    font-size: 1rem;
+    font-weight: 600;
     color: #e0e0e0;
-    font-size: 1.1rem;
+    display: flex; align-items: center; gap: .5rem;
 }
+.section-header h3 i { color: #667eea; font-size: .9rem; }
+.section-body { padding: 1.25rem; }
 
-.endpoint {
-    background: #0f3460;
-    padding: 1rem;
-    margin: 0.5rem 0;
-    border-radius: 4px;
-    border-left: 3px solid #667eea;
+/* ── Quick actions ──────────────────────────────────────────── */
+.actions-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: .75rem;
 }
-
-.endpoint .method {
-    display: inline-block;
-    padding: 0.25rem 0.5rem;
-    border-radius: 3px;
-    font-weight: bold;
-    font-size: 0.8rem;
-    margin-right: 0.5rem;
-}
-
-.endpoint .method.GET {
-    background: #28a745;
-    color: white;
-}
-
-.endpoint .method.POST {
-    background: #007bff;
-    color: white;
-}
-
-.endpoint .url {
-    color: #e0e0e0;
-    font-family: monospace;
-}
-
-.endpoint p {
-    margin: 0.5rem 0 0 0;
-    color: #a0a0a0;
-    font-size: 0.9rem;
-}
-
-.endpoint .example {
-    color: #667eea;
-}
-
-.endpoint ul {
-    margin: 0.5rem 0 0 0;
-    padding-left: 1.5rem;
-    color: #a0a0a0;
-}
-
-.endpoint code {
+.action-card {
+    display: flex;
+    align-items: center;
+    gap: .75rem;
+    padding: .85rem 1rem;
     background: #1a1a2e;
-    padding: 0.2rem 0.4rem;
-    border-radius: 3px;
-    font-size: 0.9rem;
-}
-
-.note {
-    margin-top: 1rem;
-    padding: 1rem;
-    background: #1a1a2e;
-    border-radius: 4px;
-    color: #a0a0a0;
-}
-
-.note a {
-    color: #667eea;
-}
-
-.admin-notice {
-    margin-top: 1.5rem;
-    padding: 1rem;
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    border: 1px solid #0f3460;
     border-radius: 8px;
-    color: white;
+    text-decoration: none;
+    color: #e0e0e0;
+    transition: border-color .2s, background .2s, transform .15s;
 }
-
-.admin-notice h4 {
-    margin: 0 0 0.5rem 0;
-    color: white;
+.action-card:hover {
+    border-color: #667eea;
+    background: rgba(103,126,234,.08);
+    transform: translateY(-1px);
 }
+.action-card i { font-size: 1.1rem; color: #667eea; width: 20px; text-align: center; }
+.action-card span { font-size: .9rem; font-weight: 500; }
+.action-card .arrow { margin-left: auto; color: #444; font-size: .75rem; }
 
-.admin-notice p {
-    margin: 0.5rem 0;
-    color: white;
-}
-
-.admin-notice .example {
-    color: #ffd700;
-}
-
-.admin-notice ul {
-    margin: 0.5rem 0 0 0;
-    padding-left: 1.5rem;
-}
-
-.admin-notice code {
-    background: rgba(0,0,0,0.3);
-    padding: 0.2rem 0.4rem;
-    border-radius: 3px;
-}
-
-/* Subscription Section */
-.subscription-info {
+/* ── Subscription card ──────────────────────────────────────── */
+.sub-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    flex-wrap: wrap;
     gap: 1rem;
+    flex-wrap: wrap;
 }
-
-.plan-info h3 {
-    margin: 0 0 0.5rem 0;
-    color: #e0e0e0;
+.sub-plan h4 { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: .3rem; }
+.badge {
+    display: inline-block;
+    padding: .25rem .7rem;
+    border-radius: 12px;
+    font-size: .75rem;
+    font-weight: 600;
 }
+.badge-free    { background: rgba(74,222,128,.15); color: #4ade80; border: 1px solid #4ade80; }
+.badge-active  { background: rgba(74,222,128,.15); color: #4ade80; border: 1px solid #4ade80; }
+.badge-canceled{ background: rgba(255,193,7,.15);  color: #ffc107; border: 1px solid #ffc107; }
+.badge-expired { background: rgba(239,68,68,.15);  color: #ef4444; border: 1px solid #ef4444; }
+.sub-price { font-size: 1.4rem; font-weight: 700; color: #4ade80; }
+.sub-price-sub { font-size: .8rem; color: #888; }
+.renew-label { font-size: .8rem; color: #888; margin-top: .25rem; }
 
-.free-tier-badge {
-    background: #28a745;
-    color: white;
-    padding: 4px 12px;
-    border-radius: 15px;
-    font-size: 12px;
-    font-weight: bold;
+/* ── Activity table ─────────────────────────────────────────── */
+.activity-table { width: 100%; border-collapse: collapse; }
+.activity-table th {
+    padding: .6rem .9rem;
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #666;
+    border-bottom: 1px solid #0f3460;
+    text-align: left;
 }
-
-.plan-price {
-    margin-top: 0.5rem;
+.activity-table td {
+    padding: .7rem .9rem;
+    font-size: .88rem;
+    color: #c0c0c0;
+    border-bottom: 1px solid rgba(15,52,96,.5);
 }
+.activity-table tr:last-child td { border-bottom: none; }
+.activity-table tr:hover td { background: rgba(15,52,96,.25); }
+.activity-table .mono { font-family: monospace; font-size: .82rem; }
+.empty-row td { text-align: center; color: #555; padding: 2rem; }
 
-.price {
-    font-size: 1.5rem;
-    font-weight: bold;
-    color: #4ade80;
+/* ── API Endpoints section ──────────────────────────────────── */
+.endpoints-toggle {
+    cursor: pointer;
+    user-select: none;
 }
+.endpoints-toggle .caret { transition: transform .2s; display: inline-block; }
+.endpoints-toggle.open .caret { transform: rotate(180deg); }
+.endpoints-body { display: none; }
+.endpoints-body.visible { display: block; }
 
-.price-secondary {
-    color: #a0a0a0;
-    font-size: 0.9rem;
-    margin-left: 0.5rem;
+.ep-group { margin-bottom: 1rem; }
+.ep-group-title {
+    font-size: .78rem;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #667eea;
+    margin-bottom: .4rem;
+    font-weight: 600;
 }
-
-.subscription-details {
-    text-align: center;
-}
-
-.subscription-status {
+.ep-row {
     display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
+    align-items: flex-start;
+    gap: .75rem;
+    background: #1a1a2e;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: .6rem .9rem;
+    margin-bottom: .4rem;
+}
+.ep-row + .ep-row { border-top: none; border-radius: 0; margin-top: -1px; }
+.ep-row:first-child { border-radius: 6px 6px 0 0; }
+.ep-row:last-child  { border-radius: 0 0 6px 6px; }
+.ep-row:only-child  { border-radius: 6px; }
+.method-badge {
+    font-size: .7rem;
+    font-weight: 700;
+    padding: .2rem .5rem;
+    border-radius: 4px;
+    flex-shrink: 0;
+    margin-top: .05rem;
+}
+.method-GET  { background: rgba(74,222,128,.18); color: #4ade80; }
+.method-POST { background: rgba(96,165,250,.18); color: #60a5fa; }
+.ep-url { font-family: monospace; font-size: .82rem; color: #c0c0c0; word-break: break-all; }
+.ep-desc { font-size: .8rem; color: #666; margin-top: .15rem; }
+
+.code-block {
+    background: #0f1c33;
+    border: 1px solid #0f3460;
+    border-radius: 6px;
+    padding: .9rem 1rem;
+    font-family: monospace;
+    font-size: .82rem;
+    color: #c0c0c0;
+    overflow-x: auto;
+    margin: .75rem 0 0;
 }
 
-.status-badge {
-    padding: 4px 12px;
-    border-radius: 15px;
-    font-size: 12px;
-    font-weight: bold;
-}
-
-.status-active {
-    background: #28a745;
-    color: white;
-}
-
-.status-canceled {
-    background: #ffc107;
-    color: black;
-}
-
-.status-expired,
-.status-suspended {
-    background: #dc3545;
-    color: white;
-}
-
-.renewal-date {
-    color: #a0a0a0;
-    font-size: 0.9rem;
-}
-
-.payment-method-section {
-    text-align: center;
+.admin-banner {
+    background: linear-gradient(135deg, rgba(103,126,234,.2) 0%, rgba(118,75,162,.2) 100%);
+    border: 1px solid rgba(103,126,234,.4);
+    border-radius: 8px;
+    padding: 1rem;
     margin-top: 1rem;
 }
+.admin-banner h4 { color: #a78bfa; margin-bottom: .4rem; font-size: .9rem; }
+.admin-banner p  { color: #c0c0c0; font-size: .85rem; margin: .25rem 0; }
+.admin-banner code { background: rgba(0,0,0,.3); padding: .15rem .4rem; border-radius: 3px; font-size: .8rem; }
 
-@media (max-width: 768px) {
-    .subscription-info {
-        flex-direction: column;
-        text-align: center;
-    }
+.tip-box {
+    background: rgba(15,52,96,.5);
+    border-left: 3px solid #667eea;
+    border-radius: 0 6px 6px 0;
+    padding: .7rem 1rem;
+    font-size: .85rem;
+    color: #a0a0a0;
+    margin-top: .75rem;
 }
+.tip-box a { color: #667eea; }
 </style>
+
+{% if success %}
+<div class="alert alert-success" style="margin-bottom:1.25rem;">{{ success }}</div>
+{% endif %}
+{% if error %}
+<div class="alert alert-error" style="margin-bottom:1.25rem;">{{ error }}</div>
+{% endif %}
+
+<!-- Hero -->
+<div class="hero">
+    <div class="hero-avatar">
+        <img src="https://www.gravatar.com/avatar/{{ session.email|md5 if session.email else '' }}?s=128&d=identicon" alt="avatar">
+    </div>
+    <div class="hero-text">
+        <h2>Welcome back, {{ display_name }}!</h2>
+        <p>Manage your AI configurations, track usage, and access your personal API endpoints.</p>
+    </div>
+    {% if session.role == 'admin' %}
+    <div class="hero-badge">Admin</div>
+    {% endif %}
+</div>
+
+<!-- Stats row -->
+<div class="stats-row">
+    <div class="stat-card">
+        <div class="stat-icon purple"><i class="fas fa-coins"></i></div>
+        <div>
+            <div class="stat-label">Total Tokens</div>
+            <div class="stat-value">{{ format_tokens(usage_stats.total_tokens|default(0)) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon green"><i class="fas fa-bolt"></i></div>
+        <div>
+            <div class="stat-label">Requests Today</div>
+            <div class="stat-value">{{ usage_stats.requests_today|default(0) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon blue"><i class="fas fa-plug"></i></div>
+        <div>
+            <div class="stat-label">Active Providers</div>
+            <div class="stat-value">{{ providers_count|default(0) }}</div>
+        </div>
+    </div>
+    <div class="stat-card">
+        <div class="stat-icon orange"><i class="fas fa-rotate"></i></div>
+        <div>
+            <div class="stat-label">Active Rotations</div>
+            <div class="stat-value">{{ rotations_count|default(0) }}</div>
+        </div>
+    </div>
+</div>
+
+<!-- Main grid -->
+<div class="dashboard-grid">
+
+    <!-- Quick Actions -->
+    <div class="section-card">
+        <div class="section-header">
+            <h3><i class="fas fa-grid-2"></i> Quick Actions</h3>
+        </div>
+        <div class="section-body">
+            <div class="actions-grid">
+                <a href="{{ url_for(request, '/dashboard/user/providers') }}" class="action-card">
+                    <i class="fas fa-plug"></i>
+                    <span>Providers</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+                <a href="{{ url_for(request, '/dashboard/user/rotations') }}" class="action-card">
+                    <i class="fas fa-rotate"></i>
+                    <span>Rotations</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+                <a href="{{ url_for(request, '/dashboard/user/autoselect') }}" class="action-card">
+                    <i class="fas fa-wand-magic-sparkles"></i>
+                    <span>Autoselect</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+                <a href="{{ url_for(request, '/dashboard/user/tokens') }}" class="action-card">
+                    <i class="fas fa-key"></i>
+                    <span>API Tokens</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+                <a href="{{ url_for(request, '/dashboard/analytics') }}" class="action-card">
+                    <i class="fas fa-chart-line"></i>
+                    <span>Analytics</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+                <a href="{{ url_for(request, '/dashboard/wallet') }}" class="action-card">
+                    <i class="fas fa-wallet"></i>
+                    <span>Wallet</span>
+                    <i class="fas fa-chevron-right arrow"></i>
+                </a>
+            </div>
+        </div>
+    </div>
+
+    <!-- Subscription -->
+    {% if current_tier %}
+    <div class="section-card">
+        <div class="section-header">
+            <h3><i class="fas fa-crown"></i> Subscription</h3>
+            {% if not current_tier.is_default %}
+            <a href="{{ url_for(request, '/dashboard/subscription') }}" style="font-size:.8rem; color:#667eea; text-decoration:none;">Manage</a>
+            {% endif %}
+        </div>
+        <div class="section-body">
+            <div class="sub-row">
+                <div class="sub-plan">
+                    <h4>{{ current_tier.name }}</h4>
+                    {% if current_tier.is_default %}
+                    <span class="badge badge-free">Free Tier</span>
+                    {% else %}
+                    <div class="sub-price">{{ currency_symbol }}{{ current_tier.price_monthly }}<span style="font-size:.9rem;color:#888;">/mo</span></div>
+                    <div class="sub-price-sub">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</div>
+                    {% endif %}
+                </div>
+                {% if subscription %}
+                <div style="text-align:right;">
+                    <span class="badge badge-{{ subscription.status }}">{{ subscription.status|title }}</span>
+                    {% if subscription.expires_at %}
+                    <div class="renew-label">Renews {{ subscription.expires_at }}</div>
+                    {% endif %}
+                </div>
+                {% endif %}
+            </div>
+            {% if not payment_methods or payment_methods|length == 0 %}
+            <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary" style="margin-top:1rem; margin-left:0; display:inline-block;">Add Payment Method</a>
+            {% endif %}
+        </div>
+    </div>
+    {% endif %}
+
+    <!-- Recent Activity -->
+    <div class="section-card full-width">
+        <div class="section-header">
+            <h3><i class="fas fa-clock-rotate-left"></i> Recent Activity</h3>
+        </div>
+        <div class="section-body" style="padding:0;">
+            <table class="activity-table">
+                <thead>
+                    <tr>
+                        <th>Timestamp</th>
+                        <th>Provider</th>
+                        <th>Model</th>
+                        <th>Tokens</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% if recent_activity %}
+                        {% for activity in recent_activity %}
+                        <tr>
+                            <td class="mono">{{ activity.timestamp }}</td>
+                            <td>{{ activity.provider_id }}</td>
+                            <td class="mono">{{ activity.model }}</td>
+                            <td>{{ activity.token_count }}</td>
+                        </tr>
+                        {% endfor %}
+                    {% else %}
+                        <tr class="empty-row"><td colspan="4">No recent activity yet. Make your first API request to see usage here.</td></tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+
+    <!-- API Endpoints (collapsible) -->
+    <div class="section-card full-width">
+        <div class="section-header endpoints-toggle" id="epToggle" onclick="toggleEndpoints()">
+            <h3><i class="fas fa-code"></i> Your API Endpoints</h3>
+            <span style="color:#667eea; font-size:.85rem;">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
+        </div>
+        <div class="endpoints-body" id="epBody">
+            <div class="section-body">
+                <p style="color:#a0a0a0; font-size:.9rem; margin-bottom:1rem;">
+                    Include your API token in the <code style="background:#0f3460; padding:.15rem .4rem; border-radius:3px;">Authorization</code> header:
+                </p>
+                <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:1.25rem;">
+                    <div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">Models</div>
+                            <div class="ep-row">
+                                <span class="method-badge method-GET">GET</span>
+                                <div>
+                                    <div class="ep-url">/api/u/{{ session.username }}/models</div>
+                                    <div class="ep-desc">List all your models</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">Providers</div>
+                            <div class="ep-row">
+                                <span class="method-badge method-GET">GET</span>
+                                <div>
+                                    <div class="ep-url">/api/u/{{ session.username }}/providers</div>
+                                    <div class="ep-desc">List your configured providers</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">Rotations &amp; Autoselect</div>
+                            <div class="ep-row">
+                                <span class="method-badge method-GET">GET</span>
+                                <div>
+                                    <div class="ep-url">/api/u/{{ session.username }}/rotations</div>
+                                    <div class="ep-desc">List your rotations</div>
+                                </div>
+                            </div>
+                            <div class="ep-row">
+                                <span class="method-badge method-GET">GET</span>
+                                <div>
+                                    <div class="ep-url">/api/u/{{ session.username }}/autoselects</div>
+                                    <div class="ep-desc">List your autoselects</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">Chat Completions</div>
+                            <div class="ep-row">
+                                <span class="method-badge method-POST">POST</span>
+                                <div>
+                                    <div class="ep-url">/api/u/{{ session.username }}/chat/completions</div>
+                                    <div class="ep-desc">Send chat requests using your configs</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">MCP Tools</div>
+                            <div class="ep-row">
+                                <span class="method-badge method-GET">GET</span>
+                                <div>
+                                    <div class="ep-url">/mcp/u/{{ session.username }}/tools</div>
+                                    <div class="ep-desc">List MCP tools</div>
+                                </div>
+                            </div>
+                            <div class="ep-row">
+                                <span class="method-badge method-POST">POST</span>
+                                <div>
+                                    <div class="ep-url">/mcp/u/{{ session.username }}/tools/call</div>
+                                    <div class="ep-desc">Call MCP tools</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="ep-group">
+                            <div class="ep-group-title">Model format examples</div>
+                            <div style="background:#1a1a2e; border:1px solid #0f3460; border-radius:6px; padding:.75rem 1rem; font-family:monospace; font-size:.82rem; color:#a0a0a0; line-height:1.6;">
+                                user-provider/<em>myprovider</em>/<em>mymodel</em><br>
+                                user-rotation/<em>myrotation</em><br>
+                                user-autoselect/<em>myautoselect</em>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                {% if session.role == 'admin' %}
+                <div class="admin-banner">
+                    <h4><i class="fas fa-shield-halved"></i> Admin Access</h4>
+                    <p>As an admin you also access global configurations via shorter model formats:</p>
+                    <p><code>provider/model</code> &nbsp;&bull;&nbsp; <code>rotation/myrotation</code> &nbsp;&bull;&nbsp; <code>autoselect/myautoselect</code></p>
+                </div>
+                {% endif %}
+
+                <div class="tip-box">
+                    <i class="fas fa-circle-info" style="color:#667eea;"></i>
+                    &nbsp;Your API token is required for all endpoints.
+                    <a href="{{ url_for(request, '/dashboard/user/tokens') }}">Manage your tokens &rarr;</a>
+                </div>
+            </div>
+        </div>
+    </div>
+
+</div>
+
+<script>
+function toggleEndpoints() {
+    const toggle = document.getElementById('epToggle');
+    const body   = document.getElementById('epBody');
+    toggle.classList.toggle('open');
+    body.classList.toggle('visible');
+}
+</script>
 {% endblock %}

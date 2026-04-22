@@ -10,7 +10,7 @@
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div>
             <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 6px;">Available Balance</div>
-            <div style="font-size: 42px; font-weight: bold; color: #4ade80;">${{ "%.2f"|format(wallet.balance|float) }}</div>
+            <div style="font-size: 42px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ "%.2f"|format(wallet.balance|float) }}</div>
             <div style="color: #a0a0a0; font-size: 13px; margin-top: 6px;">
                 Currency: <span style="color: #e0e0e0;">{{ wallet.currency_code }}</span>
                 &nbsp;·&nbsp; Wallet ID: <span style="color: #e0e0e0; font-family: monospace;">{{ wallet.id }}</span>
@@ -56,7 +56,7 @@
                 {% for amt in [10, 15, 20, 50, 100] %}
                 <button type="button" class="amount-btn" data-amount="{{ amt }}"
                     style="background: #1a1a2e; border: 1px solid #4a9eff; color: #4a9eff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
-                    ${{ amt }}
+                    {{ currency_symbol }}{{ amt }}
                 </button>
                 {% endfor %}
             </div>
@@ -65,7 +65,7 @@
             <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Custom amount</label>
             <input type="number" id="custom-amount"
                 style="width: 100%; padding: 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
-                placeholder="Enter amount ($5 – $500)" step="0.01" min="5" max="500">
+                placeholder="Enter amount ({{ currency_symbol }}5 – {{ currency_symbol }}500)" step="0.01" min="5" max="500">
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px; {% if crypto_gateways %}margin-bottom: 16px;{% endif %}">
             {% for name in fiat_gateways %}
@@ -89,33 +89,23 @@
         <hr style="border-color: #0f3460; margin: 4px 0 14px 0;">
         {% endif %}
         <div style="color: #a0a0a0; font-size: 13px; margin-bottom: 10px;">
-            <i class="fas fa-coins me-1"></i>Crypto deposit — send to address below
+            <i class="fas fa-coins me-1"></i>Crypto deposit
         </div>
+        <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         {% for name in crypto_gateways %}
         {% set cfg = enabled_gateways[name] %}
         {% set address = cfg.get('wallet_address') or cfg.get('address') or '' %}
-        <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; padding: 12px; margin-bottom: 10px;">
-            <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px;">
-                <span style="color: #e0e0e0; font-weight: 600;">
-                    {% if name == 'bitcoin' %}<i class="fab fa-bitcoin me-1" style="color:#f7931a;"></i>
-                    {% elif name == 'ethereum' %}<i class="fab fa-ethereum me-1" style="color:#627eea;"></i>
-                    {% else %}<i class="fas fa-coins me-1" style="color:#26a17b;"></i>
-                    {% endif %}
-                    {{ name | upper }}
-                </span>
-                <button onclick="copyAddress('{{ address }}', this)"
-                    style="background: #4a9eff; border: none; color: white; padding: 5px 12px; border-radius: 4px; cursor: pointer; font-size: 12px;">
-                    <i class="fas fa-copy me-1"></i>Copy
-                </button>
-            </div>
-            <div style="font-family: monospace; font-size: 12px; color: #a0a0a0; word-break: break-all; background: #0f1631; padding: 8px; border-radius: 4px;">
-                {{ address or 'Address not configured' }}
-            </div>
-            <div style="color: #6c757d; font-size: 11px; margin-top: 6px;">
-                Send {{ name | upper }} to this address. Balance will be credited after on-chain confirmation.
-            </div>
-        </div>
+        <button onclick="openCryptoModal('{{ name }}','{{ address }}')"
+            style="background:#1a1a2e; border:1px solid #0f3460; color:#e0e0e0; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; transition:border-color .15s;"
+            onmouseover="this.style.borderColor='#4a9eff'" onmouseout="this.style.borderColor='#0f3460'">
+            {% if name == 'bitcoin' %}<i class="fab fa-bitcoin" style="color:#f7931a;"></i>
+            {% elif name == 'ethereum' %}<i class="fab fa-ethereum" style="color:#627eea;"></i>
+            {% else %}<i class="fas fa-coins" style="color:#26a17b;"></i>
+            {% endif %}
+            {{ name | upper }}
+        </button>
         {% endfor %}
+        </div>
         {% endif %}
 
         {% endif %}
@@ -144,7 +134,7 @@
             <div style="margin-bottom: 14px;">
                 <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
                 <div style="position: relative;">
-                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #4ade80; font-weight: bold;">$</span>
+                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #4ade80; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-amount"
                         style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
                         value="{{ wallet.auto_topup_amount or '' }}" step="0.01" min="10">
@@ -153,7 +143,7 @@
             <div style="margin-bottom: 14px;">
                 <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Trigger when balance falls below</label>
                 <div style="position: relative;">
-                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #ffc107; font-weight: bold;">$</span>
+                    <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #ffc107; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-threshold"
                         style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
                         value="{{ wallet.auto_topup_threshold or '' }}" step="0.01" min="1">
@@ -212,6 +202,27 @@
         </table>
     </div>
 </div>
+<!-- Crypto deposit modal -->
+<div class="ui-modal-backdrop" id="cryptoModal" style="z-index:1100;">
+    <div class="ui-modal-box" style="max-width:420px;">
+        <div class="ui-modal-header">
+            <h3 id="cryptoModalTitle">Deposit</h3>
+            <button class="close-modal" onclick="closeCryptoModal()">&times;</button>
+        </div>
+        <div style="text-align:center; padding: 0 0 16px;">
+            <div id="cryptoQR" style="margin: 0 auto 16px; width:200px; height:200px; background:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center;">
+                <i class="fas fa-spinner fa-spin fa-2x" style="color:#0f3460;"></i>
+            </div>
+            <div style="color:#a0a0a0; font-size:12px; margin-bottom:6px;">Send to this address:</div>
+            <div id="cryptoAddress" style="font-family:monospace; font-size:12px; color:#e0e0e0; word-break:break-all; background:#0f1631; padding:10px; border-radius:6px; margin-bottom:12px;"></div>
+            <button onclick="copyCryptoAddress()"
+                style="background:#4a9eff; border:none; color:white; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">
+                <i class="fas fa-copy me-1"></i>Copy Address
+            </button>
+            <div style="color:#6c757d; font-size:11px; margin-top:12px;">Balance credited after on-chain confirmation.</div>
+        </div>
+    </div>
+</div>
 {% endblock %}
 
 {% block extra_js %}
@@ -258,7 +269,7 @@ document.addEventListener('DOMContentLoaded', function () {
         btn.addEventListener('click', function () {
             const amount = getAmount();
             if (!amount || amount < 5 || amount > 500) {
-                alert('Please select or enter an amount between $5 and $500.');
+                showAlert('Please select or enter an amount between {{ currency_symbol }}5 and {{ currency_symbol }}500.', 'Invalid Amount', '⚠️', 'warn');
                 return;
             }
             const method = this.dataset.method;
@@ -279,13 +290,13 @@ document.addEventListener('DOMContentLoaded', function () {
                 } else {
                     this.disabled = false;
                     this.innerHTML = orig;
-                    alert(data.error || 'Failed to initiate checkout.');
+                    showAlert(data.error || 'Failed to initiate checkout.', 'Error', '❌', 'danger');
                 }
             })
             .catch(() => {
                 this.disabled = false;
                 this.innerHTML = orig;
-                alert('Network error. Please try again.');
+                showAlert('Network error. Please try again.', 'Error', '❌', 'danger');
             });
         });
     });
@@ -330,10 +341,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 this.textContent = '✓ Saved';
                 setTimeout(() => { this.innerHTML = '<i class="fas fa-save me-2"></i>Save Settings'; }, 2000);
             } else {
-                alert(data.error || 'Failed to save settings.');
+                showAlert(data.error || 'Failed to save settings.', 'Error', '❌', 'danger');
             }
         })
-        .catch(() => alert('Network error. Please try again.'));
+        .catch(() => showAlert('Network error. Please try again.', 'Error', '❌', 'danger'));
     });
 
     // ── Transaction history ─────────────────────────────────────
@@ -407,7 +418,44 @@ function copyAddress(addr, btn) {
         btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
         btn.style.background = '#28a745';
         setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 2000);
-    }).catch(() => alert('Copy failed — please copy the address manually.'));
+    }).catch(() => showAlert('Copy failed — please copy the address manually.', 'Copy Failed', '⚠️', 'warn'));
 }
+
+let _cryptoAddr = '';
+
+function openCryptoModal(name, address) {
+    const icons = { bitcoin: '₿ Bitcoin (BTC)', ethereum: 'Ξ Ethereum (ETH)', usdt: '₮ USDT', usdc: '◎ USDC' };
+    document.getElementById('cryptoModalTitle').textContent = icons[name] || name.toUpperCase();
+    document.getElementById('cryptoAddress').textContent = address || 'Address not configured';
+    _cryptoAddr = address;
+
+    const qrEl = document.getElementById('cryptoQR');
+    qrEl.innerHTML = '<i class="fas fa-spinner fa-spin fa-2x" style="color:#0f3460;"></i>';
+
+    document.getElementById('cryptoModal').classList.add('active');
+
+    if (address) {
+        const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(address)}&bgcolor=ffffff&color=000000&margin=8`;
+        const img = new Image();
+        img.onload = () => { qrEl.innerHTML = ''; qrEl.appendChild(img); };
+        img.onerror = () => { qrEl.innerHTML = '<span style="color:#888;font-size:12px;">QR unavailable</span>'; };
+        img.src = qrUrl;
+        img.style.cssText = 'width:200px;height:200px;border-radius:8px;';
+    }
+}
+
+function closeCryptoModal() {
+    document.getElementById('cryptoModal').classList.remove('active');
+}
+
+function copyCryptoAddress() {
+    navigator.clipboard.writeText(_cryptoAddr)
+        .then(() => showAlert('Address copied to clipboard!', 'Copied', '✅', 'info'))
+        .catch(() => showAlert('Copy failed — please copy manually.', 'Copy Failed', '⚠️', 'warn'));
+}
+
+document.getElementById('cryptoModal').addEventListener('click', e => {
+    if (e.target === document.getElementById('cryptoModal')) closeCryptoModal();
+});
 </script>
 {% endblock %}

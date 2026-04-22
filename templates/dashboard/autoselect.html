@@ -315,14 +315,14 @@ function renderAutoselectModels(autoselectKey) {
     });
 }
 
-function addAutoselect() {
-    const key = prompt('Enter autoselect key (e.g., "autoselect", "smart-select"):');
+async function addAutoselect() {
+    const key = await showPrompt('Enter autoselect key (e.g., "autoselect", "smart-select"):', '', 'e.g. autoselect', 'Add Autoselect');
     if (!key) {
         return;
     }
     
     if (autoselectConfig[key]) {
-        alert('Autoselect key already exists');
+        showAlert('Autoselect key already exists', 'Duplicate Key', '⚠️', 'warn');
         return;
     }
     
@@ -338,8 +338,8 @@ function addAutoselect() {
     renderAutoselectList();
 }
 
-function removeAutoselect(key) {
-    if (confirm(`Remove autoselect "${key}"?`)) {
+async function removeAutoselect(key) {
+    if (await showDangerConfirm(`Remove autoselect "${key}"?`, 'Remove Autoselect')) {
         delete autoselectConfig[key];
         expandedAutoselects.delete(key);
         renderAutoselectList();
@@ -375,8 +375,8 @@ function addAutoselectModel(autoselectKey) {
     renderAutoselectModels(autoselectKey);
 }
 
-function removeAutoselectModel(autoselectKey, index) {
-    if (confirm('Remove this model?')) {
+async function removeAutoselectModel(autoselectKey, index) {
+    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
         autoselectConfig[autoselectKey].available_models.splice(index, 1);
         renderAutoselectModels(autoselectKey);
     }
@@ -399,10 +399,10 @@ async function saveAutoselect() {
         if (response.ok) {
             window.location.href = autoselectData.successUrl;
         } else {
-            alert('Error saving configuration');
+            showAlert('Error saving configuration', 'Error', '❌', 'danger');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 

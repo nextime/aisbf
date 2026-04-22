@@ -259,10 +259,11 @@ function renderRotationModels(rotationKey, providerIndex) {
     });
 }
 
-function addRotation() {
-    const key = prompt('Enter rotation key (e.g., "coding", "general"):');
-    if (!key || rotationsConfig.rotations[key]) {
-        alert('Invalid or duplicate rotation key');
+async function addRotation() {
+    const key = await showPrompt('Enter rotation key (e.g., "coding", "general"):', '', 'rotation-key', 'Add Rotation');
+    if (!key) return;
+    if (rotationsConfig.rotations[key]) {
+        showAlert('Rotation key already exists', 'Duplicate Key', '⚠️', 'warn');
         return;
     }
     
@@ -281,8 +282,8 @@ function addRotation() {
     renderRotationsList();
 }
 
-function removeRotation(key) {
-    if (confirm(`Remove rotation "${key}"?`)) {
+async function removeRotation(key) {
+    if (await showDangerConfirm(`Remove rotation "${key}"?`, 'Remove Rotation')) {
         delete rotationsConfig.rotations[key];
         expandedRotations.delete(key);
         renderRotationsList();
@@ -318,8 +319,8 @@ function addRotationProvider(rotationKey) {
     renderRotationProviders(rotationKey);
 }
 
-function removeRotationProvider(rotationKey, providerIndex) {
-    if (confirm('Remove this provider?')) {
+async function removeRotationProvider(rotationKey, providerIndex) {
+    if (await showDangerConfirm('Remove this provider?', 'Remove Provider')) {
         rotationsConfig.rotations[rotationKey].providers.splice(providerIndex, 1);
         renderRotationProviders(rotationKey);
     }
@@ -344,8 +345,8 @@ function addRotationModel(rotationKey, providerIndex) {
     renderRotationModels(rotationKey, providerIndex);
 }
 
-function removeRotationModel(rotationKey, providerIndex, modelIndex) {
-    if (confirm('Remove this model?')) {
+async function removeRotationModel(rotationKey, providerIndex, modelIndex) {
+    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
         rotationsConfig.rotations[rotationKey].providers[providerIndex].models.splice(modelIndex, 1);
         renderRotationModels(rotationKey, providerIndex);
     }
@@ -384,10 +385,10 @@ async function saveRotations() {
         if (response.ok) {
             window.location.href = rotationsData.successUrl;
         } else {
-            alert('Error saving configuration');
+            showAlert('Error saving configuration', 'Error', '❌', 'danger');
         }
     } catch (error) {
-        alert('Error: ' + error.message);
+        showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
     }
 }
 
