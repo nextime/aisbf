@@ -582,6 +582,60 @@ _MUST_CHANGE_PASSWORD_WHITELIST = (
 
 # --- Login rate limiter ---
 # Keyed by (ip, username); value is list of failure timestamps.
+def _get_admin_notifications_config() -> dict:
+    """Return the dashboard.notifications dict from config, with all defaults."""
+    defaults = {
+        'new_user_signup': False,
+        'payment_received': False,
+        'tier_upgrade': False,
+        'tier_downgrade': False,
+        'subscription_expired': False,
+        'subscription_renewed': False,
+        'wallet_topup': False,
+        'user_deleted_account': False,
+    }
+    try:
+        if config and config.aisbf and hasattr(config.aisbf, 'dashboard') and config.aisbf.dashboard:
+            d = config.aisbf.dashboard
+            notif = getattr(d, 'notifications', None)
+            if notif:
+                notif_dict = notif if isinstance(notif, dict) else vars(notif)
+                defaults.update({k: bool(v) for k, v in notif_dict.items() if k in defaults})
+    except Exception:
+        pass
+    return defaults
+
+
+def _get_admin_email() -> str:
+    """Return the admin email from dashboard config, or empty string."""
+    try:
+        if config and config.aisbf and hasattr(config.aisbf, 'dashboard') and config.aisbf.dashboard:
+            return getattr(config.aisbf.dashboard, 'email', '') or ''
+    except Exception:
+        pass
+    return ''
+
+
+def _send_admin_notification_email(event_key: str, subject: str, body_html: str):
+    """Send an email to the admin if that notification type is enabled and email is configured."""
+    try:
+        notif_cfg = _get_admin_notifications_config()
+        if not notif_cfg.get(event_key, False):
+            return
+        admin_email = _get_admin_email()
+        if not admin_email:
+            return
+        smtp_cfg = None
+        if config and config.aisbf and hasattr(config.aisbf, 'smtp'):
+            smtp_cfg = config.aisbf.smtp
+        if not smtp_cfg or not getattr(smtp_cfg, 'enabled', False):
+            return
+        from aisbf.email_utils import send_simple_email
+        send_simple_email(admin_email, subject, body_html, smtp_cfg)
+    except Exception as e:
+        logger.warning(f"_send_admin_notification_email({event_key}): {e}")
+
+
 _login_failures: dict = {}
 _LOGIN_MAX_ATTEMPTS = 10   # failures before lockout
 _LOGIN_WINDOW_SECS  = 300  # 5-minute sliding window
@@ -2853,6 +2907,14 @@ async def dashboard_signup(
         # Create user
         user_id = db.create_user(username=username, password_hash=password_hash, role='user', email=email, email_verified=False)
 
+        # Notify admin about new signup
+        _send_admin_notification_email(
+            'new_user_signup',
+            f"New user signup: {username}",
+            f"<h2>New User Signup</h2><p>A new user has registered on your AISBF instance.</p>"
+            f"<ul><li><b>Username:</b> {username}</li><li><b>Email:</b> {email or '(none)'}</li></ul>"
+        )
+
         # Set verification token
         expires_at = datetime.now() + timedelta(hours=24)
         db.set_verification_token(user_id, verification_token, expires_at)
@@ -3674,12 +3736,21 @@ async def dashboard_delete_account_confirm(request: Request, password: str = For
         if not db.verify_user_password(user_id, password):
             return RedirectResponse(url=url_for(request, "/dashboard/delete-account?error=Incorrect password"), status_code=303)
         
+        username = request.session.get('username', f'user #{user_id}')
+
         # Delete user (this will cascade delete all related data)
         db.delete_user(user_id)
-        
+
+        # Notify admin
+        _send_admin_notification_email(
+            'user_deleted_account',
+            f"User deleted account: {username}",
+            f"<h2>User Deleted Account</h2><p>User <b>{username}</b> (ID {user_id}) has deleted their account.</p>"
+        )
+
         # Clear session
         request.session.clear()
-        
+
         return RedirectResponse(url=url_for(request, "/dashboard/login?message=Account deleted successfully"), status_code=303)
     except Exception as e:
         logger.error(f"Account deletion error: {e}")
@@ -5570,7 +5641,18 @@ async def dashboard_settings_save(
    oauth2_github_enabled: bool = Form(False),
    oauth2_github_client_id: str = Form(""),
    oauth2_github_client_secret: str = Form(""),
-   smtp_enabled: bool = Form(False)
+   smtp_enabled: bool = Form(False),
+   dashboard_email: str = Form(""),
+   admin_notify_new_user_signup: bool = Form(False),
+   admin_notify_payment_received: bool = Form(False),
+   admin_notify_tier_upgrade: bool = Form(False),
+   admin_notify_tier_downgrade: bool = Form(False),
+   admin_notify_subscription_expired: bool = Form(False),
+   admin_notify_subscription_renewed: bool = Form(False),
+   admin_notify_wallet_topup: bool = Form(False),
+   admin_notify_user_deleted_account: bool = Form(False),
+   new_admin_password: str = Form(""),
+   confirm_admin_password: str = Form("")
 ):
     """Save server settings"""
     auth_check = require_admin(request)
@@ -5722,7 +5804,32 @@ async def dashboard_settings_save(
     elif 'client_secret' not in aisbf_config['oauth2']['github']:
         aisbf_config['oauth2']['github']['client_secret'] = ""
     aisbf_config['oauth2']['github']['scopes'] = ["user:email", "read:user"]
-    
+
+    # Update admin email and notification preferences
+    if 'dashboard' not in aisbf_config:
+        aisbf_config['dashboard'] = {}
+    if dashboard_email:
+        aisbf_config['dashboard']['email'] = dashboard_email
+    elif 'email' not in aisbf_config['dashboard']:
+        aisbf_config['dashboard']['email'] = ""
+    if 'notifications' not in aisbf_config['dashboard']:
+        aisbf_config['dashboard']['notifications'] = {}
+    aisbf_config['dashboard']['notifications']['new_user_signup'] = admin_notify_new_user_signup
+    aisbf_config['dashboard']['notifications']['payment_received'] = admin_notify_payment_received
+    aisbf_config['dashboard']['notifications']['tier_upgrade'] = admin_notify_tier_upgrade
+    aisbf_config['dashboard']['notifications']['tier_downgrade'] = admin_notify_tier_downgrade
+    aisbf_config['dashboard']['notifications']['subscription_expired'] = admin_notify_subscription_expired
+    aisbf_config['dashboard']['notifications']['subscription_renewed'] = admin_notify_subscription_renewed
+    aisbf_config['dashboard']['notifications']['wallet_topup'] = admin_notify_wallet_topup
+    aisbf_config['dashboard']['notifications']['user_deleted_account'] = admin_notify_user_deleted_account
+
+    # Handle new_admin_password from the Admin tab (distinct from dashboard_password in Dashboard tab)
+    if new_admin_password:
+        if new_admin_password == confirm_admin_password:
+            aisbf_config['dashboard']['password'] = _db_hash_password(new_admin_password)
+            request.session.pop('must_change_password', None)
+        # silently ignore mismatch — UI should validate
+
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6045,6 +6152,90 @@ async def dashboard_users_bulk(request: Request):
     except Exception as e:
         logger.error(f"Bulk operation error: {e}")
         return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+@app.post("/dashboard/api/admin/notifications/send")
+async def admin_send_notification(request: Request):
+    """Admin sends an in-app notification to selected users."""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+    db = DatabaseRegistry.get_config_database()
+    try:
+        body = await request.json()
+        user_ids = body.get('user_ids', [])
+        title = (body.get('title') or '').strip()
+        message = (body.get('message') or '').strip()
+        if not user_ids or not title or not message:
+            return JSONResponse({"success": False, "error": "user_ids, title and message are required"}, status_code=400)
+        if not isinstance(user_ids, list) or not all(isinstance(uid, int) for uid in user_ids):
+            return JSONResponse({"success": False, "error": "user_ids must be a list of integers"}, status_code=400)
+        sent = 0
+        for uid in user_ids:
+            try:
+                db.create_notification(uid, title, message, 'admin_message')
+                sent += 1
+            except Exception:
+                pass
+        return JSONResponse({"success": True, "sent": sent})
+    except Exception as e:
+        logger.error(f"admin_send_notification: {e}")
+        return JSONResponse({"success": False, "error": "Internal server error"}, status_code=500)
+
+
+@app.get("/dashboard/api/notifications")
+async def get_notifications(request: Request):
+    """Return in-app notifications for the current user."""
+    if not request.session.get('logged_in') or not request.session.get('user_id'):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user_id = request.session['user_id']
+    db = DatabaseRegistry.get_config_database()
+    notifications = db.get_user_notifications(user_id, limit=50)
+    return JSONResponse({"notifications": notifications})
+
+
+@app.get("/dashboard/api/notifications/count")
+async def get_notification_count(request: Request):
+    """Return unread notification count for the current user."""
+    if not request.session.get('logged_in') or not request.session.get('user_id'):
+        return JSONResponse({"count": 0})
+    user_id = request.session['user_id']
+    db = DatabaseRegistry.get_config_database()
+    count = db.get_unread_notification_count(user_id)
+    return JSONResponse({"count": count})
+
+
+@app.post("/dashboard/api/notifications/{notification_id}/read")
+async def mark_notification_read(request: Request, notification_id: int):
+    """Mark a single notification as read."""
+    if not request.session.get('logged_in') or not request.session.get('user_id'):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user_id = request.session['user_id']
+    db = DatabaseRegistry.get_config_database()
+    db.mark_notification_read(notification_id, user_id)
+    return JSONResponse({"success": True})
+
+
+@app.post("/dashboard/api/notifications/read-all")
+async def mark_all_notifications_read(request: Request):
+    """Mark all notifications as read for the current user."""
+    if not request.session.get('logged_in') or not request.session.get('user_id'):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user_id = request.session['user_id']
+    db = DatabaseRegistry.get_config_database()
+    db.mark_all_notifications_read(user_id)
+    return JSONResponse({"success": True})
+
+
+@app.delete("/dashboard/api/notifications/{notification_id}")
+async def delete_notification(request: Request, notification_id: int):
+    """Delete a notification for the current user."""
+    if not request.session.get('logged_in') or not request.session.get('user_id'):
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    user_id = request.session['user_id']
+    db = DatabaseRegistry.get_config_database()
+    db.delete_notification(notification_id, user_id)
+    return JSONResponse({"success": True})
+
 
 @app.post("/dashboard/restart")
 async def dashboard_restart(request: Request):

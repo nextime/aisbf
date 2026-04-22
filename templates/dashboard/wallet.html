@@ -398,13 +398,17 @@ document.addEventListener('DOMContentLoaded', function () {
         refunded:  'background:#6c757d;color:white;',
     };
 
+    const txLoading = document.getElementById('tx-loading');
     fetch('/dashboard/wallet/transactions')
-        .then(r => r.json())
+        .then(r => {
+            if (!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        })
         .then(transactions => {
             const list = document.getElementById('transaction-list');
-            document.getElementById('tx-loading').remove();
+            if (txLoading && txLoading.parentNode) txLoading.remove();
 
-            if (!transactions || transactions.length === 0) {
+            if (!Array.isArray(transactions) || transactions.length === 0) {
                 list.innerHTML = `<tr><td colspan="5" style="padding:40px;text-align:center;color:#a0a0a0;">
                     <i class="fas fa-receipt fa-3x" style="margin-bottom:12px;display:block;"></i>
                     No transactions yet.
@@ -442,8 +446,10 @@ document.addEventListener('DOMContentLoaded', function () {
             });
         })
         .catch(() => {
-            document.getElementById('tx-loading').innerHTML =
-                '<td colspan="5" style="padding:30px;text-align:center;color:#f87171;">Failed to load transactions.</td>';
+            const list = document.getElementById('transaction-list');
+            if (txLoading && txLoading.parentNode) txLoading.remove();
+            if (list) list.innerHTML =
+                '<tr><td colspan="5" style="padding:30px;text-align:center;color:#f87171;">Failed to load transactions.</td></tr>';
         });
 });
 

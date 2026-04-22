@@ -418,8 +418,48 @@ class EmailNotificationService:
             
             conn.commit()
     
+    def _notify_admin(self, event_key: str, subject: str, body_html: str):
+        """Send an email to the admin if that event type is enabled in config."""
+        try:
+            import json
+            from pathlib import Path
+            config_path = Path.home() / '.aisbf' / 'aisbf.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent.parent.parent / 'config' / 'aisbf.json'
+            if not config_path.exists():
+                return
+            with open(config_path) as f:
+                cfg = json.load(f)
+            dashboard = cfg.get('dashboard', {})
+            admin_email = dashboard.get('email', '')
+            if not admin_email:
+                return
+            notifications = dashboard.get('notifications', {})
+            if not notifications.get(event_key, False):
+                return
+            smtp = cfg.get('smtp', {})
+            if not smtp.get('enabled', False) or not smtp.get('host'):
+                return
+            from aisbf.email_utils import send_simple_email
+
+            class _SmtpCfg:
+                pass
+
+            smtp_cfg = _SmtpCfg()
+            smtp_cfg.host = smtp.get('host', '')
+            smtp_cfg.port = smtp.get('port', 587)
+            smtp_cfg.username = smtp.get('username', '')
+            smtp_cfg.password = smtp.get('password', '')
+            smtp_cfg.use_tls = smtp.get('use_tls', True)
+            smtp_cfg.use_ssl = smtp.get('use_ssl', False)
+            smtp_cfg.from_email = smtp.get('from_email', '')
+            smtp_cfg.from_name = smtp.get('from_name', 'AISBF')
+            send_simple_email(admin_email, subject, body_html, smtp_cfg)
+        except Exception as e:
+            logger.warning(f"Admin notification ({event_key}): {e}")
+
     # Convenience methods for common notifications
-    
+
     async def notify_payment_success(self, user_id: int, amount: float, currency: str):
         """Send payment success notification"""
         await self.send_notification(
@@ -431,7 +471,12 @@ class EmailNotificationService:
                 'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
         )
-    
+        self._notify_admin(
+            'payment_received',
+            f"Payment received: {amount} {currency}",
+            f"<h2>Payment Received</h2><p>User ID {user_id} completed a payment of <b>{amount} {currency}</b>.</p>"
+        )
+
     async def notify_payment_failed(self, user_id: int, amount: float, currency: str, reason: str):
         """Send payment failed notification"""
         await self.send_notification(
@@ -444,7 +489,7 @@ class EmailNotificationService:
                 'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
         )
-    
+
     async def notify_subscription_upgraded(self, user_id: int, old_tier: str, new_tier: str):
         """Send subscription upgraded notification"""
         await self.send_notification(
@@ -456,7 +501,12 @@ class EmailNotificationService:
                 'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
         )
-    
+        self._notify_admin(
+            'tier_upgrade',
+            f"Subscription upgraded: {old_tier} → {new_tier}",
+            f"<h2>Subscription Upgraded</h2><p>User ID {user_id} upgraded from <b>{old_tier}</b> to <b>{new_tier}</b>.</p>"
+        )
+
     async def notify_subscription_downgraded(self, user_id: int, old_tier: str, new_tier: str):
         """Send subscription downgraded notification"""
         await self.send_notification(
@@ -468,7 +518,12 @@ class EmailNotificationService:
                 'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
         )
-    
+        self._notify_admin(
+            'tier_downgrade',
+            f"Subscription downgraded: {old_tier} → {new_tier}",
+            f"<h2>Subscription Downgraded</h2><p>User ID {user_id} downgraded from <b>{old_tier}</b> to <b>{new_tier}</b>.</p>"
+        )
+
     async def notify_subscription_cancelled(self, user_id: int, tier: str, end_date: str):
         """Send subscription cancelled notification"""
         await self.send_notification(
@@ -479,4 +534,26 @@ class EmailNotificationService:
                 'end_date': end_date,
                 'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             }
+        )
+        self._notify_admin(
+            'subscription_expired',
+            f"Subscription expired/cancelled: {tier}",
+            f"<h2>Subscription Cancelled</h2><p>User ID {user_id} subscription <b>{tier}</b> was cancelled (expires {end_date}).</p>"
+        )
+
+    async def notify_subscription_renewed(self, user_id: int, tier: str, new_end_date: str):
+        """Send subscription renewed notification"""
+        await self.send_notification(
+            user_id,
+            self.SUBSCRIPTION_RENEWED,
+            {
+                'tier': tier,
+                'new_end_date': new_end_date,
+                'date': datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            }
+        )
+        self._notify_admin(
+            'subscription_renewed',
+            f"Subscription renewed: {tier}",
+            f"<h2>Subscription Renewed</h2><p>User ID {user_id} renewed <b>{tier}</b> subscription (next renewal: {new_end_date}).</p>"
         )

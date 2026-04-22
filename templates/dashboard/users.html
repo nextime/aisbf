@@ -107,6 +107,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <button id="bulk-enable" class="btn">Enable Selected</button>
             <button id="bulk-disable" class="btn">Disable Selected</button>
             <button id="bulk-delete" class="btn btn-danger">Delete Selected</button>
+            <button id="bulk-notify" class="btn btn-secondary" style="background:#7c3aed;"><i class="fas fa-bell"></i> Send Notification</button>
             <button id="bulk-clear" class="btn btn-secondary">Clear Selection</button>
         </div>
     </div>
@@ -965,4 +966,89 @@ input:-webkit-autofill:active {
     -webkit-text-fill-color: #e0e0e0 !important;
 }
 </style>
+
+<!-- Send Notification Modal -->
+<div id="notify-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
+    <div style="background:#16213e; padding:30px; border-radius:8px; width:90%; max-width:520px; border:1px solid #0f3460;">
+        <h3 style="margin-bottom:20px;"><i class="fas fa-bell" style="color:#a78bfa;"></i> Send Notification</h3>
+        <p id="notify-target-label" style="color:#a0a0a0; margin-bottom:16px; font-size:13px;"></p>
+        <div class="form-group">
+            <label for="notify-title">Title</label>
+            <input type="text" id="notify-title" maxlength="200" placeholder="Notification title"
+                   style="background:#1a1a2e; color:#e0e0e0; border:1px solid #0f3460; padding:8px; border-radius:3px; width:100%;">
+        </div>
+        <div class="form-group">
+            <label for="notify-message">Message</label>
+            <textarea id="notify-message" rows="4" placeholder="Notification message…"
+                      style="background:#1a1a2e; color:#e0e0e0; border:1px solid #0f3460; padding:8px; border-radius:3px; width:100%; resize:vertical;"></textarea>
+        </div>
+        <div style="display:flex; gap:10px; margin-top:10px;">
+            <button class="btn" onclick="submitNotification()"><i class="fas fa-paper-plane"></i> Send</button>
+            <button class="btn btn-secondary" onclick="closeNotifyModal()">Cancel</button>
+        </div>
+        <div id="notify-status" style="margin-top:12px;"></div>
+    </div>
+</div>
+
+<script>
+let _notifyUserIds = [];
+
+function openNotifyModal(userIds) {
+    _notifyUserIds = userIds;
+    document.getElementById('notify-title').value = '';
+    document.getElementById('notify-message').value = '';
+    document.getElementById('notify-status').innerHTML = '';
+    document.getElementById('notify-target-label').textContent =
+        `Sending to ${userIds.length} user${userIds.length !== 1 ? 's' : ''}.`;
+    const modal = document.getElementById('notify-modal');
+    modal.style.display = 'flex';
+}
+
+function closeNotifyModal() {
+    document.getElementById('notify-modal').style.display = 'none';
+}
+
+async function submitNotification() {
+    const title = document.getElementById('notify-title').value.trim();
+    const message = document.getElementById('notify-message').value.trim();
+    const statusEl = document.getElementById('notify-status');
+    if (!title || !message) {
+        statusEl.innerHTML = '<div class="alert alert-error">Title and message are required.</div>';
+        return;
+    }
+    try {
+        const res = await fetch('/dashboard/api/admin/notifications/send', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({user_ids: _notifyUserIds, title, message})
+        });
+        const data = await res.json();
+        if (data.success) {
+            statusEl.innerHTML = `<div class="alert alert-success">Sent to ${data.sent} user(s).</div>`;
+            setTimeout(closeNotifyModal, 1500);
+        } else {
+            statusEl.innerHTML = `<div class="alert alert-error">${data.error || 'Failed to send.'}</div>`;
+        }
+    } catch (e) {
+        statusEl.innerHTML = '<div class="alert alert-error">Network error.</div>';
+    }
+}
+
+document.getElementById('notify-modal').addEventListener('click', function(e) {
+    if (e.target === this) closeNotifyModal();
+});
+
+// Wire "Send Notification" bulk button
+document.addEventListener('DOMContentLoaded', function() {
+    const notifyBtn = document.getElementById('bulk-notify');
+    if (notifyBtn) {
+        notifyBtn.addEventListener('click', function() {
+            const checked = Array.from(document.querySelectorAll('.user-checkbox:checked'))
+                                 .map(cb => parseInt(cb.value));
+            if (!checked.length) return;
+            openNotifyModal(checked);
+        });
+    }
+});
+</script>
 {% endblock %}

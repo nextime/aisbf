@@ -64,6 +64,32 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .nav .account-dropdown a:first-child { border-radius: 8px 8px 0 0; }
         .nav .account-dropdown a:last-child { border-radius: 0 0 8px 8px; }
         .nav .account-dropdown a:hover { background: #0f3460; color: #e0e0e0; }
+
+        /* Notification bell */
+        .notif-bell { position: relative; display: flex; align-items: center; padding: 6px 10px; border-radius: 4px; cursor: pointer; color: #a0a0a0; user-select: none; }
+        .notif-bell:hover { background: #0f3460; color: #e0e0e0; }
+        .notif-badge { position: absolute; top: 2px; right: 2px; background: #e94560; color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; line-height: 16px; text-align: center; padding: 0 3px; display: none; }
+        .notif-dropdown { position: absolute; top: 100%; right: 0; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; min-width: 320px; max-width: 360px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); margin-top: 8px; z-index: 200; display: none; }
+        .notif-dropdown.active { display: block; }
+        .notif-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #0f3460; }
+        .notif-header span { font-weight: 600; color: #e0e0e0; font-size: 13px; }
+        .notif-header button { background: none; border: none; color: #60a5fa; font-size: 12px; cursor: pointer; padding: 0; }
+        .notif-header button:hover { color: #93c5fd; }
+        .notif-list { max-height: 340px; overflow-y: auto; }
+        .notif-item { padding: 12px 16px; border-bottom: 1px solid #0f3460; cursor: pointer; transition: background .15s; display: flex; gap: 10px; align-items: flex-start; }
+        .notif-item:hover { background: #0f3460; }
+        .notif-item.unread { border-left: 3px solid #e94560; }
+        .notif-item.read { border-left: 3px solid transparent; opacity: .75; }
+        .notif-item-body { flex: 1; min-width: 0; }
+        .notif-item-title { font-size: 13px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .notif-item-msg { font-size: 12px; color: #a0a0a0; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .notif-item-time { font-size: 11px; color: #666; margin-top: 4px; }
+        .notif-item-del { color: #666; font-size: 14px; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+        .notif-item-del:hover { color: #f87171; background: rgba(239,68,68,.15); }
+        .notif-empty { padding: 24px 16px; text-align: center; color: #666; font-size: 13px; }
+        .notif-footer { padding: 10px 16px; border-top: 1px solid #0f3460; text-align: center; }
+        .notif-footer a { color: #60a5fa; font-size: 12px; text-decoration: none; }
+        .notif-footer a:hover { color: #93c5fd; }
         
         /* Rainbow Upgrade Button */
         .upgrade-button {
@@ -128,11 +154,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             dropdown.classList.toggle('active');
         }
         
-        // Close dropdown when clicking outside
+        // Close account dropdown when clicking outside
         document.addEventListener('click', function(event) {
-            const accountMenu = document.querySelector('.account-menu');
             const dropdown = document.getElementById('account-dropdown');
-            if (accountMenu && dropdown && !accountMenu.contains(event.target)) {
+            if (!dropdown) return;
+            const accountMenu = dropdown.closest('.account-menu');
+            if (accountMenu && !accountMenu.contains(event.target)) {
                 dropdown.classList.remove('active');
             }
         });
@@ -502,6 +529,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             }
         })();
     </script>
+    {% block extra_css %}{% endblock %}
 </head>
 <body>
     <div class="header">
@@ -564,6 +592,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/pricing') }}" class="upgrade-button rainbow-text">✨ Upgrade! ✨</a>
             {% endif %}
             {% if request.session.user_id %}
+            <!-- Notification Bell -->
+            <div class="notif-menu-wrap" id="notif-menu" style="position:relative; display:flex; align-items:center; margin-left:0;">
+                <div class="notif-bell" id="notif-bell" onclick="toggleNotifDropdown(event)" title="Notifications">
+                    <i class="fas fa-bell"></i>
+                    <span class="notif-badge" id="notif-badge"></span>
+                </div>
+                <div class="notif-dropdown" id="notif-dropdown">
+                    <div class="notif-header">
+                        <span>Notifications</span>
+                        <button onclick="markAllNotifRead(event)">Mark all as read</button>
+                    </div>
+                    <div class="notif-list" id="notif-list">
+                        <div class="notif-empty">Loading…</div>
+                    </div>
+                    <div class="notif-footer">
+                        <a href="#" onclick="loadNotifications(); return false;">Refresh</a>
+                    </div>
+                </div>
+            </div>
             <div class="account-menu">
                 <div class="account-trigger" onclick="toggleAccountMenu()">
                     <img src="{{ '/dashboard/profile-pic' if request.session.has_profile_pic else 'https://www.gravatar.com/avatar/' ~ (request.session.email|md5 if request.session.email else '') ~ '?s=48&d=identicon' }}" alt="User avatar">
@@ -1073,5 +1120,129 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </script>
 
     {% block extra_js %}{% endblock %}
+
+    {% if request.session.user_id %}
+    <script>
+    (function() {
+        let _notifData = [];
+        let _pollInterval = null;
+
+        function fmtTime(ts) {
+            if (!ts) return '';
+            const d = new Date(ts.replace(' ', 'T') + 'Z');
+            const now = new Date();
+            const diff = Math.floor((now - d) / 1000);
+            if (diff < 60) return 'just now';
+            if (diff < 3600) return Math.floor(diff/60) + 'm ago';
+            if (diff < 86400) return Math.floor(diff/3600) + 'h ago';
+            return Math.floor(diff/86400) + 'd ago';
+        }
+
+        function renderNotifications(items) {
+            const list = document.getElementById('notif-list');
+            if (!items.length) {
+                list.innerHTML = '<div class="notif-empty"><i class="fas fa-check-circle" style="color:#4ade80;"></i> No notifications</div>';
+                return;
+            }
+            list.innerHTML = items.map(n => `
+                <div class="notif-item ${n.is_read ? 'read' : 'unread'}" data-id="${n.id}" onclick="readNotif(${n.id}, this)">
+                    <div class="notif-item-body">
+                        <div class="notif-item-title">${escHtml(n.title)}</div>
+                        <div class="notif-item-msg">${escHtml(n.message)}</div>
+                        <div class="notif-item-time">${fmtTime(n.created_at)}</div>
+                    </div>
+                    <span class="notif-item-del" title="Delete" onclick="delNotif(event, ${n.id})"><i class="fas fa-times"></i></span>
+                </div>
+            `).join('');
+        }
+
+        function escHtml(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+        }
+
+        function updateBadge(count) {
+            const badge = document.getElementById('notif-badge');
+            if (!badge) return;
+            if (count > 0) {
+                badge.textContent = count > 99 ? '99+' : count;
+                badge.style.display = 'block';
+            } else {
+                badge.style.display = 'none';
+            }
+        }
+
+        window.loadNotifications = async function() {
+            try {
+                const r = await fetch('/dashboard/api/notifications');
+                const data = await r.json();
+                _notifData = data.notifications || [];
+                renderNotifications(_notifData);
+                updateBadge(_notifData.filter(n => !n.is_read).length);
+            } catch(e) {}
+        };
+
+        window.toggleNotifDropdown = function(e) {
+            e.stopPropagation();
+            const dd = document.getElementById('notif-dropdown');
+            const isOpen = dd.classList.contains('active');
+            // Close account dropdown if open
+            document.getElementById('account-dropdown')?.classList.remove('active');
+            dd.classList.toggle('active');
+            if (!isOpen) loadNotifications();
+        };
+
+        window.readNotif = async function(id, el) {
+            if (!el.classList.contains('unread')) return;
+            el.classList.replace('unread', 'read');
+            try {
+                await fetch('/dashboard/api/notifications/' + id + '/read', {method:'POST'});
+                const unread = document.querySelectorAll('.notif-item.unread').length;
+                updateBadge(unread);
+            } catch(e) {}
+        };
+
+        window.delNotif = async function(e, id) {
+            e.stopPropagation();
+            const item = document.querySelector('.notif-item[data-id="' + id + '"]');
+            if (item) item.remove();
+            try {
+                await fetch('/dashboard/api/notifications/' + id, {method:'DELETE'});
+                const remaining = document.querySelectorAll('.notif-item').length;
+                if (!remaining) renderNotifications([]);
+                const unread = document.querySelectorAll('.notif-item.unread').length;
+                updateBadge(unread);
+            } catch(e) {}
+        };
+
+        window.markAllNotifRead = async function(e) {
+            e.stopPropagation();
+            document.querySelectorAll('.notif-item.unread').forEach(el => el.classList.replace('unread', 'read'));
+            updateBadge(0);
+            try { await fetch('/dashboard/api/notifications/read-all', {method:'POST'}); } catch(e) {}
+        };
+
+        // Close notification dropdown when clicking outside
+        document.addEventListener('click', function(ev) {
+            const menu = document.getElementById('notif-menu');
+            const dd = document.getElementById('notif-dropdown');
+            if (menu && dd && !menu.contains(ev.target)) {
+                dd.classList.remove('active');
+            }
+        });
+
+        // Poll unread count every 60 seconds
+        async function pollCount() {
+            try {
+                const r = await fetch('/dashboard/api/notifications/count');
+                const data = await r.json();
+                updateBadge(data.count || 0);
+            } catch(e) {}
+        }
+
+        pollCount();
+        _pollInterval = setInterval(pollCount, 60000);
+    })();
+    </script>
+    {% endif %}
 </body>
 </html>

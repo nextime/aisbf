@@ -439,3 +439,35 @@ AISBF Team
         logger.error(f"Exception sending test email to {to_email}: {e}")
         logger.error(f"Traceback: {traceback.format_exc()}")
         return False
+
+
+def send_simple_email(to_email: str, subject: str, body_html: str, smtp_config) -> bool:
+    """Send a simple HTML email. Returns True on success."""
+    if not smtp_config or not getattr(smtp_config, 'host', None) or not getattr(smtp_config, 'from_email', None):
+        logger.warning("send_simple_email: SMTP not configured, skipping")
+        return False
+    try:
+        msg = MIMEMultipart('alternative')
+        msg['Subject'] = subject
+        msg['From'] = f"{smtp_config.from_name} <{smtp_config.from_email}>" if getattr(smtp_config, 'from_name', None) else smtp_config.from_email
+        msg['To'] = to_email
+        msg.attach(MIMEText(body_html, 'html'))
+
+        if getattr(smtp_config, 'use_ssl', False):
+            with smtplib.SMTP_SSL(smtp_config.host, smtp_config.port) as server:
+                if getattr(smtp_config, 'username', None) and getattr(smtp_config, 'password', None):
+                    server.login(smtp_config.username, smtp_config.password)
+                server.send_message(msg)
+        else:
+            with smtplib.SMTP(smtp_config.host, smtp_config.port) as server:
+                server.ehlo()
+                if getattr(smtp_config, 'use_tls', True):
+                    server.starttls()
+                    server.ehlo()
+                if getattr(smtp_config, 'username', None) and getattr(smtp_config, 'password', None):
+                    server.login(smtp_config.username, smtp_config.password)
+                server.send_message(msg)
+        return True
+    except Exception as e:
+        logger.error(f"send_simple_email error: {e}")
+        return False

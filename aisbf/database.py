@@ -1328,6 +1328,7 @@ class DatabaseManager:
             cursor.execute(f'DELETE FROM user_autoselects WHERE user_id = {placeholder}', (user_id,))
             cursor.execute(f'DELETE FROM user_api_tokens WHERE user_id = {placeholder}', (user_id,))
             cursor.execute(f'DELETE FROM user_token_usage WHERE user_id = {placeholder}', (user_id,))
+            cursor.execute(f'DELETE FROM user_notifications WHERE user_id = {placeholder}', (user_id,))
             # Delete the user
             cursor.execute(f'DELETE FROM users WHERE id = {placeholder}', (user_id,))
             conn.commit()
@@ -1376,6 +1377,95 @@ class DatabaseManager:
             query = f"UPDATE users SET {', '.join(updates)} WHERE id = {placeholder}"
             cursor.execute(query, params)
             conn.commit()
+
+    def create_notification(self, user_id: int, title: str, message: str, notification_type: str = 'message') -> int:
+        """Create a notification for a user. Returns the new notification id."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                INSERT INTO user_notifications (user_id, title, message, notification_type)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
+            ''', (user_id, title, message, notification_type))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_user_notifications(self, user_id: int, limit: int = 50, unread_only: bool = False) -> List[Dict]:
+        """Return notifications for a user, newest first."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where = f'user_id = {placeholder}'
+            params: list = [user_id]
+            if unread_only:
+                where += f' AND is_read = 0'
+            cursor.execute(f'''
+                SELECT id, title, message, notification_type, is_read, created_at
+                FROM user_notifications
+                WHERE {where}
+                ORDER BY created_at DESC
+                LIMIT {placeholder}
+            ''', params + [limit])
+            rows = cursor.fetchall()
+            return [
+                {
+                    'id': r[0],
+                    'title': r[1],
+                    'message': r[2],
+                    'notification_type': r[3],
+                    'is_read': bool(r[4]),
+                    'created_at': str(r[5]),
+                }
+                for r in rows
+            ]
+
+    def get_unread_notification_count(self, user_id: int) -> int:
+        """Return count of unread notifications for a user."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT COUNT(*) FROM user_notifications
+                WHERE user_id = {placeholder} AND is_read = 0
+            ''', (user_id,))
+            row = cursor.fetchone()
+            return row[0] if row else 0
+
+    def mark_notification_read(self, notification_id: int, user_id: int) -> bool:
+        """Mark a single notification as read. Returns True if updated."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                UPDATE user_notifications SET is_read = 1
+                WHERE id = {placeholder} AND user_id = {placeholder}
+            ''', (notification_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def mark_all_notifications_read(self, user_id: int) -> int:
+        """Mark all notifications as read for a user. Returns count updated."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                UPDATE user_notifications SET is_read = 1
+                WHERE user_id = {placeholder} AND is_read = 0
+            ''', (user_id,))
+            conn.commit()
+            return cursor.rowcount
+
+    def delete_notification(self, notification_id: int, user_id: int) -> bool:
+        """Delete a notification. Returns True if deleted."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                DELETE FROM user_notifications
+                WHERE id = {placeholder} AND user_id = {placeholder}
+            ''', (notification_id, user_id))
+            conn.commit()
+            return cursor.rowcount > 0
 
     def verify_user_password(self, user_id: int, password: str) -> bool:
         """
@@ -4085,6 +4175,46 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Added scope column to user_api_tokens")
     except Exception as e:
         logger.warning(f"Migration check for user_api_tokens.scope: {e}")
+
+    # Migration: Create user_notifications table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(user_notifications)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE user_notifications (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        message TEXT NOT NULL,
+                        notification_type VARCHAR(50) DEFAULT 'message',
+                        is_read {boolean_type} DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT {timestamp_default},
+                        FOREIGN KEY (user_id) REFERENCES users(id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_notifications table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_notifications'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE user_notifications (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER NOT NULL,
+                        title VARCHAR(255) NOT NULL,
+                        message TEXT NOT NULL,
+                        notification_type VARCHAR(50) DEFAULT 'message',
+                        is_read {boolean_type} DEFAULT 0,
+                        created_at TIMESTAMP DEFAULT {timestamp_default},
+                        FOREIGN KEY (user_id) REFERENCES users(id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_notifications table")
+    except Exception as e:
+        logger.warning(f"Migration check for user_notifications table: {e}")
 
     logger.info("✅ All database migrations completed")
 

@@ -876,18 +876,74 @@ brew services restart tor   # macOS</code></pre>
     </div><!-- /tab-ratelimit -->
 
     <div class="settings-section" id="tab-admin">
-    <div class="section-title"><i class="fas fa-shield-alt"></i> Admin Password</div>
-    
+    <div class="section-title"><i class="fas fa-shield-alt"></i> Admin Account &amp; Notifications</div>
+
     <div class="form-group">
         <label for="new_admin_password">New Admin Password</label>
         <input type="password" id="new_admin_password" name="new_admin_password" placeholder="Leave blank to keep current password">
         <small style="color: #666; display: block; margin-top: 5px;">Enter a new password to change the admin dashboard password</small>
     </div>
-    
+
     <div class="form-group">
         <label for="confirm_admin_password">Confirm New Admin Password</label>
         <input type="password" id="confirm_admin_password" name="confirm_admin_password" placeholder="Confirm new password">
         <small style="color: #666; display: block; margin-top: 5px;">Re-enter the new password to confirm</small>
+    </div>
+
+    <div class="form-group">
+        <label for="dashboard_email">Admin Email Address</label>
+        <input type="email" id="dashboard_email" name="dashboard_email"
+               value="{{ config.dashboard.email if config.dashboard and config.dashboard.email else '' }}"
+               placeholder="admin@example.com">
+        <small style="color: #666; display: block; margin-top: 5px;">Email address to receive admin notifications. Requires SMTP to be configured and enabled.</small>
+    </div>
+
+    <div class="section-title" style="margin-top: 24px;"><i class="fas fa-bell"></i> Admin Email Notifications</div>
+    <small style="color: #666; display: block; margin-bottom: 16px;">Select which events trigger an email to the admin. SMTP must be enabled and an admin email must be set above.</small>
+
+    {% set notif = config.dashboard.notifications if config.dashboard and config.dashboard.notifications else {} %}
+
+    <div style="display: grid; grid-template-columns: repeat(auto-fill, minmax(280px, 1fr)); gap: 12px;">
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_new_user_signup"
+                   {% if notif.new_user_signup %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-user-plus" style="color:#4ade80;"></i> New user self-registered</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_payment_received"
+                   {% if notif.payment_received %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-credit-card" style="color:#60a5fa;"></i> Payment received</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_tier_upgrade"
+                   {% if notif.tier_upgrade %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-arrow-up" style="color:#f59e0b;"></i> Subscription upgrade</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_tier_downgrade"
+                   {% if notif.tier_downgrade %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-arrow-down" style="color:#f87171;"></i> Subscription downgrade</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_subscription_expired"
+                   {% if notif.subscription_expired %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-calendar-times" style="color:#f87171;"></i> Subscription expired / cancelled</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_subscription_renewed"
+                   {% if notif.subscription_renewed %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-sync" style="color:#4ade80;"></i> Subscription renewed</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_wallet_topup"
+                   {% if notif.wallet_topup %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-wallet" style="color:#a78bfa;"></i> Wallet top-up</span>
+        </label>
+        <label style="display:flex; align-items:center; gap:10px; cursor:pointer; background:#0f3460; padding:12px; border-radius:6px;">
+            <input type="checkbox" name="admin_notify_user_deleted_account"
+                   {% if notif.user_deleted_account %}checked{% endif %} style="width:auto;">
+            <span><i class="fas fa-user-slash" style="color:#f87171;"></i> User deleted their account</span>
+        </label>
     </div>
     </div><!-- /tab-admin -->
 
@@ -905,6 +961,17 @@ function switchTab(name) {
     document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
 }
+
+// Validate admin password match before form submit
+document.querySelector('form').addEventListener('submit', function(e) {
+    const np = document.getElementById('new_admin_password').value;
+    const cp = document.getElementById('confirm_admin_password').value;
+    if (np && np !== cp) {
+        e.preventDefault();
+        switchTab('admin');
+        showAlert('Admin passwords do not match. Please re-enter.', 'Password Mismatch', '⚠️', 'warn');
+    }
+});
 
 async function testSMTP() {
     const host = document.getElementById('smtp_host').value;
