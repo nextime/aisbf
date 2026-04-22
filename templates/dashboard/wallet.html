@@ -245,10 +245,11 @@
 </style>
 
 <script>
+let selectedAmount = 15;
+
 document.addEventListener('DOMContentLoaded', function () {
 
     // ── Amount buttons ──────────────────────────────────────────
-    let selectedAmount = 15;
 
     document.querySelectorAll('.amount-btn').forEach(btn => {
         if (parseFloat(btn.dataset.amount) === selectedAmount) btn.classList.add('active');
