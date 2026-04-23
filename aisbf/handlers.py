@@ -595,7 +595,7 @@ class RequestHandler:
                                 }], model_name)
                             else:
                                 # Fallback to estimation if no content
-                                max_tokens = request_data.get('max_tokens', 0)
+                                max_tokens = request_data.get('max_tokens') or 0
                                 if max_tokens > 0:
                                     completion_tokens = min(max_tokens, estimated_prompt_tokens * 2)
                                 else:
@@ -1182,10 +1182,13 @@ class RequestHandler:
                                 logger.debug(f"Async chunk type: {type(chunk)}")
                                 logger.debug(f"Async chunk: {chunk}")
                                 
-                                # For async generators, chunks might be bytes (SSE format)
+                                # For async generators, chunks might be bytes or pre-formatted SSE strings
                                 if isinstance(chunk, bytes):
                                     logger.debug(f"Yielding raw bytes chunk: {len(chunk)} bytes")
                                     yield chunk
+                                elif isinstance(chunk, str):
+                                    # Already SSE-formatted (e.g. "data: {...}\n\n") — pass through directly
+                                    yield chunk.encode('utf-8')
                                 else:
                                     # Fallback: treat as dict and serialize
                                     chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
@@ -2967,12 +2970,12 @@ class RotationHandler:
                                     estimated_prompt_tokens = count_messages_tokens(messages, model_name)
                                     
                                     # More realistic completion estimate
-                                    max_tokens = request_data.get('max_tokens', 0)
+                                    max_tokens = request_data.get('max_tokens') or 0
                                     if max_tokens > 0:
                                         estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
                                     else:
                                         estimated_completion = max(estimated_prompt_tokens, 50)
-                                    
+
                                     total_tokens = estimated_prompt_tokens + estimated_completion
                                     prompt_tokens = estimated_prompt_tokens
                                     completion_tokens = estimated_completion
@@ -3636,11 +3639,12 @@ class RotationHandler:
                                     logger.debug(f"Async chunk type: {type(chunk)}")
                                     logger.debug(f"Async chunk: {chunk}")
 
-                                    # For Kiro, chunks are already properly formatted SSE bytes
-                                    # Just pass them through directly
+                                    # For Kiro/Claude CLI, chunks may be pre-formatted SSE bytes or strings
                                     if isinstance(chunk, bytes):
                                         logger.debug(f"Yielding raw bytes chunk: {len(chunk)} bytes")
                                         yield chunk
+                                    elif isinstance(chunk, str):
+                                        yield chunk.encode('utf-8')
                                     else:
                                         # Fallback: treat as dict and serialize
                                         chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
@@ -4464,12 +4468,12 @@ class AutoselectHandler:
                         estimated_prompt_tokens = count_messages_tokens(messages, model_name)
                         
                         # More realistic completion estimate
-                        max_tokens = request_data.get('max_tokens', 0)
+                        max_tokens = request_data.get('max_tokens') or 0
                         if max_tokens > 0:
                             estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
                         else:
                             estimated_completion = max(estimated_prompt_tokens, 50)
-                        
+
                         total_tokens = estimated_prompt_tokens + estimated_completion
                         prompt_tokens = estimated_prompt_tokens
                         completion_tokens = estimated_completion

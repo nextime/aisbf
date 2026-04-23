@@ -360,11 +360,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 logger.warning(f"ClaudeCliMode: failed to load credentials: {exc}")
             return None
 
-    def _messages_to_cli_prompt(self, messages: List[Dict]) -> str:
+    def _messages_to_cli_prompt(self, messages: List[Dict],
+                                 tools: Optional[List[Dict]] = None) -> str:
         """
-        Convert an OpenAI-style messages list to a flat text prompt for the
-        claude CLI.  System messages are included as a prefix; no Anthropic
-        system-prompt injection is needed in CLI mode.
+        Convert an OpenAI-style messages list (plus optional tool definitions)
+        to a flat text prompt for the claude CLI sent via stdin.
+        System messages and tool definitions are included as a prefix.
         """
         system_parts: List[str] = []
         turn_parts: List[str] = []
@@ -373,15 +374,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
             role = msg.get('role', '')
             content = msg.get('content', '')
 
-            # Normalise content to str
             if isinstance(content, list):
-                text_fragments = []
+                fragments = []
                 for block in content:
                     if isinstance(block, dict) and block.get('type') == 'text':
-                        text_fragments.append(block.get('text', ''))
+                        fragments.append(block.get('text', ''))
                     elif isinstance(block, str):
-                        text_fragments.append(block)
-                content = '\n'.join(text_fragments)
+                        fragments.append(block)
+                content = '\n'.join(fragments)
             elif not isinstance(content, str):
                 content = str(content)
 
@@ -392,11 +392,154 @@ class ClaudeProviderHandler(BaseProviderHandler):
             elif role == 'assistant':
                 turn_parts.append(f'Assistant: {content}')
 
+        if tools:
+            tools_json = json.dumps(tools, ensure_ascii=False)
+            system_parts.append(
+                f'Available tools (respond with tool_use blocks as needed):\n{tools_json}'
+            )
+
         parts: List[str] = []
         if system_parts:
             parts.append('[System Instructions: ' + '\n'.join(system_parts) + ']')
         parts.extend(turn_parts)
         return '\n\n'.join(parts)
+
+    async def _cli_discover_models(self, config_dir: str) -> List['Model']:
+        """
+        Ask the claude CLI which models it supports using --output-format json.
+        Returns a list of Model objects parsed from the JSON result.
+        The single-object JSON output format (not stream-json) is used here
+        because it carries a `modelUsage` map with real contextWindow metadata,
+        and the `result` text lists all models Claude knows about.
+        """
+        import re
+        logger = _logging.getLogger(__name__)
+
+        env = os.environ.copy()
+        env['CLAUDE_CONFIG_DIR'] = config_dir
+        env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
+
+        prompt = (
+            "Which models are you compatible with? "
+            "Give me only a JSON list without any other comment or word "
+            "except for the list of the model IDs."
+        )
+        cmd = [
+            'claude', '-p', prompt,
+            '--output-format', 'json',
+            '--dangerously-skip-permissions',
+            '--no-session-persistence',
+        ]
+
+        logger.info(
+            "ClaudeCliMode: model discovery subprocess\n"
+            f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
+            + ' '.join(cmd)
+        )
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=env,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(), timeout=60.0
+            )
+        except asyncio.TimeoutError:
+            logger.error("ClaudeCliMode: model discovery subprocess timed out")
+            process.kill()
+            await process.wait()
+            return []
+
+        if stderr_bytes:
+            logger.debug(
+                f"ClaudeCliMode: discovery stderr:\n"
+                f"{stderr_bytes.decode('utf-8', errors='replace')[:2000]}"
+            )
+
+        stdout_str = stdout_bytes.decode('utf-8', errors='replace').strip()
+        logger.debug(f"ClaudeCliMode: discovery raw output: {stdout_str[:1000]}")
+
+        if not stdout_str:
+            logger.warning("ClaudeCliMode: model discovery returned empty output")
+            return []
+
+        try:
+            data = json.loads(stdout_str)
+        except json.JSONDecodeError as e:
+            logger.warning(f"ClaudeCliMode: model discovery JSON parse error: {e}")
+            return []
+
+        if data.get('is_error') or data.get('subtype') != 'success':
+            logger.warning(
+                f"ClaudeCliMode: model discovery error: {data.get('result', '')[:200]}"
+            )
+            return []
+
+        # modelUsage keys → real metadata (contextWindow, maxOutputTokens)
+        # Note: only models actually invoked in this call appear here; haiku is
+        # used for internal routing so it shows up even though we didn't ask for it.
+        model_usage: dict = data.get('modelUsage', {})
+
+        # result text contains the JSON list we asked for, possibly wrapped in
+        # a markdown code fence like ```json\n[...]\n```
+        result_text: str = data.get('result', '')
+        logger.info(f"ClaudeCliMode: discovery result: {result_text!r}")
+
+        # Parse the JSON array from result (strip code fences if present)
+        json_match = re.search(r'\[[\s\S]*?\]', result_text)
+        result_ids: set = set()
+        if json_match:
+            try:
+                parsed = json.loads(json_match.group())
+                if isinstance(parsed, list):
+                    result_ids = {m for m in parsed if isinstance(m, str) and m.startswith('claude-')}
+            except json.JSONDecodeError:
+                pass
+
+        # Fall back to regex scan of the result text if JSON parse failed
+        if not result_ids:
+            result_ids = set(re.findall(r'claude-[a-z0-9][a-z0-9.\-]*[a-z0-9]', result_text))
+
+        logger.info(f"ClaudeCliMode: model IDs from result: {sorted(result_ids)}")
+        logger.info(f"ClaudeCliMode: model IDs from modelUsage: {sorted(model_usage.keys())}")
+
+        # Known context window overrides — avoids a costly second prompt.
+        # modelUsage carries real values for models used in this call; for the
+        # rest we apply these known constants rather than querying Claude again.
+        _known_context: dict = {
+            'claude-opus-4-7': 1000000,
+        }
+
+        # Union: result_ids is the authoritative list; modelUsage adds metadata
+        all_ids = result_ids | set(model_usage.keys())
+        if not all_ids:
+            return []
+
+        models = []
+        for mid in sorted(all_ids):
+            usage_meta = model_usage.get(mid, {})
+            context_size = (
+                usage_meta.get('contextWindow')
+                or _known_context.get(mid)
+                or 200000
+            )
+            max_output = usage_meta.get('maxOutputTokens')
+            m = Model(
+                id=mid,
+                name=mid,
+                provider_id=self.provider_id,
+                context_size=context_size,
+                context_length=context_size,
+            )
+            if max_output:
+                m.max_output_tokens = max_output
+            models.append(m)
+
+        return models
 
     async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str):
         """
@@ -412,9 +555,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
         env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
 
         cmd = [
+            'stdbuf', '-oL',
             'claude', '-p',
             '--input-format', 'stream-json',
             '--output-format', 'stream-json',
+            '--include-partial-messages',
             '--tools', '',
             '--dangerously-skip-permissions',
             '--no-session-persistence',
@@ -423,7 +568,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
         if clean_model:
             cmd += ['--model', clean_model]
 
-        logger.info(f"ClaudeCliMode: launching subprocess model={clean_model} dir={config_dir}")
+        stdin_payload: Dict = {
+            'type': 'user_message',
+            'content': [{'type': 'text', 'text': prompt}],
+        }
+
+        input_msg = json.dumps(stdin_payload) + '\n'
+
+        # Log a shell-replicable command for debugging
+        cmd_str = ' '.join(cmd)
+        logger.info(
+            f"ClaudeCliMode: launching subprocess model={clean_model} dir={config_dir}\n"
+            f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
+            f"{cmd_str} <<'EOF'\n{input_msg.strip()}\nEOF"
+        )
 
         process = await asyncio.create_subprocess_exec(
             *cmd,
@@ -433,11 +591,6 @@ class ClaudeProviderHandler(BaseProviderHandler):
             stderr=asyncio.subprocess.PIPE,
         )
 
-        # Send the prompt as a stream-json user_message then close stdin
-        input_msg = json.dumps({
-            'type': 'user_message',
-            'content': [{'type': 'text', 'text': prompt}],
-        }) + '\n'
         process.stdin.write(input_msg.encode())
         await process.stdin.drain()
         process.stdin.close()
@@ -445,6 +598,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
         completion_id = f'chatcmpl-cli-{int(time.time())}'
         created_time = int(time.time())
         first_chunk = True
+
+        # State for accumulating tool_use blocks
+        # { block_index: {"id": ..., "name": ..., "arguments": ""} }
+        tool_blocks: dict = {}
+        tool_header_sent: set = set()
+        cli_prev_text_len: int = 0
 
         try:
             while True:
@@ -461,15 +620,31 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 if not line_str:
                     continue
 
+                logger.debug(f"ClaudeCliMode: raw event: {line_str}")
+
                 try:
                     data = json.loads(line_str)
                 except json.JSONDecodeError:
+                    logger.debug(f"ClaudeCliMode: non-JSON line: {line_str}")
                     continue
 
                 event_type = data.get('type')
 
-                if event_type == 'content_block_delta':
+                if event_type == 'content_block_start':
+                    cb = data.get('content_block', {})
+                    if cb.get('type') == 'tool_use':
+                        idx = data.get('index', 0)
+                        tool_blocks[idx] = {
+                            'id': cb.get('id', f'call_{idx}'),
+                            'name': cb.get('name', ''),
+                            'arguments': '',
+                        }
+                        logger.debug(f"ClaudeCliMode: tool_use block started idx={idx} name={cb.get('name')}")
+
+                elif event_type == 'content_block_delta':
                     delta = data.get('delta', {})
+                    idx = data.get('index', 0)
+
                     if delta.get('type') == 'text_delta':
                         text = delta.get('text', '')
                         if not text:
@@ -481,19 +656,83 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
                         yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]})}\n\n'
 
-                elif event_type in ('message_stop', 'result'):
-                    logger.debug(f"ClaudeCliMode: received {event_type}, closing stream")
+                    elif delta.get('type') == 'input_json_delta' and idx in tool_blocks:
+                        partial = delta.get('partial_json', '')
+                        tool_blocks[idx]['arguments'] += partial
+
+                        # Emit streaming tool_calls delta
+                        if idx not in tool_header_sent:
+                            tool_header_sent.add(idx)
+                            if first_chunk:
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": None, "tool_calls": [{"index": idx, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
+                                first_chunk = False
+                            else:
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": idx, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
+
+                        if partial:
+                            yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": idx, "function": {"arguments": partial}}]}, "finish_reason": None}]})}\n\n'
+
+                elif event_type == 'assistant':
+                    # Claude CLI stream-json format: partial or final assistant message
+                    msg = data.get('message', {})
+                    last_text = ''
+                    for block in msg.get('content', []):
+                        if not isinstance(block, dict):
+                            continue
+                        btype = block.get('type')
+                        if btype == 'text':
+                            last_text += block.get('text', '')
+                        elif btype == 'tool_use':
+                            # Tool call in assistant event — register and emit if not yet seen
+                            tc_id = block.get('id', f'call_{len(tool_blocks)}')
+                            if tc_id not in tool_header_sent:
+                                tool_header_sent.add(tc_id)
+                                idx = len(tool_blocks)
+                                tool_blocks[idx] = {
+                                    'id': tc_id,
+                                    'name': block.get('name', ''),
+                                    'arguments': json.dumps(block.get('input', {}), ensure_ascii=False),
+                                }
+                                role_delta = {'role': 'assistant', 'content': None} if first_chunk else {}
+                                first_chunk = False
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {**role_delta, "tool_calls": [{"index": idx, "id": tc_id, "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": tool_blocks[idx]["arguments"]}}]}, "finish_reason": None}]})}\n\n'
+                    if last_text:
+                        # Content is cumulative; emit only new characters
+                        new_text = last_text[cli_prev_text_len:]
+                        cli_prev_text_len = len(last_text)
+                        if new_text:
+                            if first_chunk:
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})}\n\n'
+                                first_chunk = False
+                            yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"content": new_text}, "finish_reason": None}]})}\n\n'
+
+                elif event_type == 'result':
+                    result_text = data.get('result', '')
+                    logger.debug(f"ClaudeCliMode: result event, is_error={data.get('is_error')}, text_len={len(result_text)}")
+                    # Only emit via result if we haven't already streamed content via other events
+                    if result_text and first_chunk:
+                        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})}\n\n'
+                        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"content": result_text}, "finish_reason": None}]})}\n\n'
+                        first_chunk = False
                     break
+
+                elif event_type == 'message_stop':
+                    logger.debug("ClaudeCliMode: received message_stop")
+                    break
+
+                else:
+                    logger.debug(f"ClaudeCliMode: unhandled event type={event_type}")
 
         except Exception as exc:
             logger.error(f"ClaudeCliMode: streaming error: {exc}", exc_info=True)
+        finally:
             try:
                 stderr_bytes = await asyncio.wait_for(process.stderr.read(), timeout=2.0)
                 if stderr_bytes:
-                    logger.error(f"ClaudeCliMode: stderr: {stderr_bytes.decode('utf-8', errors='replace')[:500]}")
+                    decoded = stderr_bytes.decode('utf-8', errors='replace')
+                    logger.debug(f"ClaudeCliMode: stderr:\n{decoded[:2000]}")
             except Exception:
                 pass
-        finally:
             try:
                 process.terminate()
                 await asyncio.wait_for(process.wait(), timeout=5.0)
@@ -503,40 +742,86 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 except Exception:
                     pass
 
-        # Final stop + DONE
-        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})}\n\n'
+        finish_reason = 'tool_calls' if tool_blocks else 'stop'
+        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]})}\n\n'
         yield 'data: [DONE]\n\n'
 
-    async def _handle_cli_request(self, prompt: str, model: str, config_dir: str) -> dict:
-        """Non-streaming CLI request – collects the full response text."""
-        accumulated: List[str] = []
-
-        async for chunk_str in self._handle_cli_streaming_request(prompt, model, config_dir):
-            if chunk_str.startswith('data: ') and '[DONE]' not in chunk_str:
-                try:
-                    data = json.loads(chunk_str[6:])
-                    choices = data.get('choices', [])
-                    if choices:
-                        text = choices[0].get('delta', {}).get('content', '')
-                        if text:
-                            accumulated.append(text)
-                except json.JSONDecodeError:
-                    pass
-
+    async def _handle_cli_request(self, prompt: str, model: str, config_dir: str,
+                                   tools: Optional[List[Dict]] = None) -> dict:
+        """Non-streaming CLI request using --output-format json with prompt via stdin."""
+        logger = _logging.getLogger(__name__)
         clean_model = model.split('/')[-1] if '/' in model else model
-        full_text = ''.join(accumulated)
+
+        env = os.environ.copy()
+        env['CLAUDE_CONFIG_DIR'] = config_dir
+        env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
+
+        cmd = [
+            'claude', '-p',
+            '--output-format', 'json',
+            '--dangerously-skip-permissions',
+            '--no-session-persistence',
+        ]
+        if tools:
+            cmd += ['--tools', json.dumps(tools, ensure_ascii=False)]
+        if clean_model:
+            cmd += ['--model', clean_model]
+
+        logger.info(
+            f"ClaudeCliMode: non-streaming subprocess model={clean_model} dir={config_dir}\n"
+            f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
+            + ' '.join(cmd) + f" <<'EOF'\n{prompt[:200]}...\nEOF"
+        )
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        try:
+            stdout_bytes, stderr_bytes = await asyncio.wait_for(
+                process.communicate(input=prompt.encode()), timeout=120.0
+            )
+        except asyncio.TimeoutError:
+            logger.error("ClaudeCliMode: non-streaming subprocess timed out")
+            process.kill()
+            await process.wait()
+            return {
+                'id': f'chatcmpl-cli-{int(time.time())}',
+                'object': 'chat.completion',
+                'created': int(time.time()),
+                'model': f'{self.provider_id}/{clean_model}',
+                'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'Request timed out.'}, 'finish_reason': 'stop'}],
+                'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            }
+
+        if stderr_bytes:
+            logger.debug(f"ClaudeCliMode: stderr:\n{stderr_bytes.decode('utf-8', errors='replace')[:2000]}")
+
+        stdout_str = stdout_bytes.decode('utf-8', errors='replace').strip()
+        logger.debug(f"ClaudeCliMode: raw output: {stdout_str[:500]}")
+
+        result_text = ''
+        try:
+            data = json.loads(stdout_str)
+            if data.get('is_error'):
+                logger.warning(f"ClaudeCliMode: CLI returned error: {data.get('result', '')[:200]}")
+            result_text = data.get('result', '')
+        except json.JSONDecodeError:
+            result_text = stdout_str
+
         return {
             'id': f'chatcmpl-cli-{int(time.time())}',
             'object': 'chat.completion',
             'created': int(time.time()),
             'model': f'{self.provider_id}/{clean_model}',
-            'choices': [{
-                'index': 0,
-                'message': {'role': 'assistant', 'content': full_text},
-                'finish_reason': 'stop',
-            }],
+            'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': result_text}, 'finish_reason': 'stop'}],
             'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
         }
+
 
     def _init_session_identifiers(self):
         """Initialize persistent session identifiers (device_id, account_uuid, session_id)."""
@@ -1229,14 +1514,15 @@ class ClaudeProviderHandler(BaseProviderHandler):
             cli_creds = self._get_cli_credentials()
             if cli_creds is not None:
                 logger.info(f"ClaudeProviderHandler: using CLI subprocess mode for model {model}")
-                prompt = self._messages_to_cli_prompt(messages)
+                anthropic_tools = self._convert_tools_to_anthropic(tools) if tools else None
+                prompt = self._messages_to_cli_prompt(messages, tools=anthropic_tools)
                 config_dir = await ClaudeCliSessionManager.get_config_dir(
                     self.user_id, self.provider_id, cli_creds
                 )
                 if stream:
                     return self._handle_cli_streaming_request(prompt, model, config_dir)
                 else:
-                    return await self._handle_cli_request(prompt, model, config_dir)
+                    return await self._handle_cli_request(prompt, model, config_dir, tools=anthropic_tools)
         # ── Fall through to HTTP API mode ────────────────────────────────
 
         logger.info(f"ClaudeProviderHandler: Handling request for model {model} (Direct HTTP mode)")
@@ -2110,6 +2396,31 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 return cached_models
 
             await self.apply_rate_limit()
+
+            # [0/3] CLI subprocess model discovery
+            import aisbf.cli_mode as cli_mode_mod
+            if cli_mode_mod.CLAUDE_CLI_MODE:
+                cli_creds = self._get_cli_credentials()
+                if cli_creds is not None:
+                    try:
+                        logging.info("ClaudeProviderHandler: [0/3] CLI subprocess model discovery...")
+                        config_dir = await ClaudeCliSessionManager.get_config_dir(
+                            self.user_id, self.provider_id, cli_creds
+                        )
+                        cli_models = await self._cli_discover_models(config_dir)
+                        if cli_models:
+                            self._save_models_cache(cli_models)
+                            logging.info(
+                                f"ClaudeProviderHandler: ✓ CLI discovery returned {len(cli_models)} models"
+                            )
+                            return cli_models
+                        logging.warning(
+                            "ClaudeProviderHandler: CLI discovery returned no models, falling through"
+                        )
+                    except Exception as cli_disc_err:
+                        logging.warning(
+                            f"ClaudeProviderHandler: CLI model discovery failed: {cli_disc_err}"
+                        )
 
             try:
                 logging.info("ClaudeProviderHandler: [1/3] Attempting primary API endpoint...")

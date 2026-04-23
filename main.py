@@ -578,6 +578,11 @@ _MUST_CHANGE_PASSWORD_WHITELIST = (
     '/dashboard/settings',
     '/dashboard/logout',
     '/api/admin/settings/',
+    '/dashboard/tor/status',
+    '/dashboard/response-cache/stats',
+    '/dashboard/response-cache/clear',
+    '/dashboard/test-smtp',
+    '/dashboard/restart',
 )
 
 # --- Login rate limiter ---
@@ -1546,10 +1551,14 @@ async def api_token_authorization_middleware(request: Request, call_next):
     if request.method == "GET" and path in ["/api/models", "/api/v1/models"]:
         return await call_next(request)
     
+    # If authentication is globally disabled, skip all token scope checks
+    if not (server_config and server_config.get('auth_enabled', False)):
+        return await call_next(request)
+
     is_global_token = getattr(request.state, 'is_global_token', False)
     user_id = getattr(request.state, 'user_id', None)
     is_admin = getattr(request.state, 'is_admin', False)
-    
+
     # Debug logging
     logger.info(f"API Token Auth: path={path}, is_global_token={is_global_token}, user_id={user_id}")
     
@@ -5578,6 +5587,7 @@ async def dashboard_settings(request: Request):
             'fullconfig_tokens': []
         }
     
+    warning = request.query_params.get('warning')
     return templates.TemplateResponse(
         request=request,
         name="dashboard/settings.html",
@@ -5586,7 +5596,8 @@ async def dashboard_settings(request: Request):
         "session": request.session,
         "__version__": __version__,
         "config": aisbf_config,
-        "os": os
+        "os": os,
+        "warning": warning,
     }
     )
 
@@ -5599,7 +5610,6 @@ async def dashboard_settings_save(
    auth_enabled: bool = Form(False),
    auth_tokens: str = Form(""),
    dashboard_username: str = Form(...),
-   dashboard_password: str = Form(""),
    condensation_model_id: str = Form(...),
    autoselect_model_id: str = Form(...),
    database_type: str = Form("sqlite"),
@@ -5691,8 +5701,6 @@ async def dashboard_settings_save(
     aisbf_config['auth']['enabled'] = auth_enabled
     aisbf_config['auth']['tokens'] = [t.strip() for t in auth_tokens.split('\n') if t.strip()]
     aisbf_config['dashboard']['username'] = dashboard_username
-    if dashboard_password:  # Only update if provided - hash the password
-        aisbf_config['dashboard']['password'] = _db_hash_password(dashboard_password)
     aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
     aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
 
@@ -5840,12 +5848,10 @@ async def dashboard_settings_save(
     aisbf_config['dashboard']['notifications']['wallet_topup'] = admin_notify_wallet_topup
     aisbf_config['dashboard']['notifications']['user_deleted_account'] = admin_notify_user_deleted_account
 
-    # Handle new_admin_password from the Admin tab (distinct from dashboard_password in Dashboard tab)
     if new_admin_password:
         if new_admin_password == confirm_admin_password:
             aisbf_config['dashboard']['password'] = _db_hash_password(new_admin_password)
             request.session.pop('must_change_password', None)
-        # silently ignore mismatch — UI should validate
 
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
@@ -5853,9 +5859,9 @@ async def dashboard_settings_save(
     with open(config_path, 'w') as f:
         json.dump(aisbf_config, f, indent=2)
 
-    # If a new dashboard password was submitted, clear the forced-change flag
-    if dashboard_password:
-        request.session.pop('must_change_password', None)
+    # Reload dashboard credentials in memory so the new username/password takes effect immediately
+    if server_config is not None:
+        server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
 
     return templates.TemplateResponse(
         request=request,
@@ -10055,10 +10061,10 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
     
     # PATH 1: Direct provider model (format: {provider}/{model})
     if provider_id not in config.providers:
-            raise HTTPException(
-                status_code=404,
-                detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}"
-            )
+        raise HTTPException(
+            status_code=404,
+            detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
+        )
     
     # Validate kiro credentials before processing request
     provider_config = config.get_provider(provider_id)

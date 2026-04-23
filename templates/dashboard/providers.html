@@ -551,10 +551,18 @@ function renderProviderDetails(key) {
                 ${CLAUDE_CLI_MODE ? `
                 <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #1e3a5f;">
                     <h5 style="margin: 0 0 8px 0; color: #4ade80;">Claude CLI Mode Active</h5>
-                    <small style="color: #4ade80; display: block; margin-bottom: 14px;">
+                    <small style="color: #4ade80; display: block; margin-bottom: 8px;">
                         The claude CLI was detected at startup. When enabled, requests are piped
                         through the local claude binary instead of the HTTP API.
                     </small>
+                    <div style="background: #3a2a00; border: 1px solid #f59e0b; border-radius: 6px; padding: 10px 14px; margin-bottom: 14px;">
+                        <span style="color: #f59e0b; font-weight: 600;">⚠ Experimental:</span>
+                        <span style="color: #fcd34d; font-size: 0.85em;">
+                            CLI mode is experimental. Tool calling (function calling) does not yet work reliably —
+                            the CLI subprocess may refuse or mishandle tool definitions. Use with simple
+                            (non-tool) requests only until this is resolved.
+                        </span>
+                    </div>
 
                     <div class="form-group" style="margin-bottom: 16px;">
                         <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">

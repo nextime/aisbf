@@ -3651,20 +3651,6 @@ def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp
         )
     ''')
     
-    cursor.execute(f'''
-        CREATE TABLE IF NOT EXISTS context_dimensions (
-            id INTEGER PRIMARY KEY {auto_increment},
-            provider_id VARCHAR(255) NOT NULL,
-            model_name VARCHAR(255) NOT NULL,
-            context_size INTEGER,
-            condense_context INTEGER,
-            condense_method TEXT,
-            effective_context INTEGER DEFAULT 0,
-            last_updated TIMESTAMP DEFAULT {timestamp_default},
-            UNIQUE(provider_id, model_name)
-        )
-    ''')
-    
     logger.info("⚠️ CACHE DATABASE: Only minimal cache tables created - NO USER TABLES")
 
 
@@ -4215,6 +4201,48 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created user_notifications table")
     except Exception as e:
         logger.warning(f"Migration check for user_notifications table: {e}")
+
+    # Migration: Create context_dimensions table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(context_dimensions)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE context_dimensions (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        provider_id VARCHAR(255) NOT NULL,
+                        model_name VARCHAR(255) NOT NULL,
+                        context_size INTEGER,
+                        condense_context INTEGER,
+                        condense_method TEXT,
+                        effective_context INTEGER DEFAULT 0,
+                        last_updated TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(provider_id, model_name)
+                    )
+                ''')
+                logger.info("✅ Migration: Created context_dimensions table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'context_dimensions'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE context_dimensions (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        provider_id VARCHAR(255) NOT NULL,
+                        model_name VARCHAR(255) NOT NULL,
+                        context_size INTEGER,
+                        condense_context INTEGER,
+                        condense_method TEXT,
+                        effective_context INTEGER DEFAULT 0,
+                        last_updated TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(provider_id, model_name)
+                    )
+                ''')
+                logger.info("✅ Migration: Created context_dimensions table")
+    except Exception as e:
+        logger.warning(f"Migration check for context_dimensions table: {e}")
 
     logger.info("✅ All database migrations completed")
 

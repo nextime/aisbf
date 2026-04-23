@@ -41,10 +41,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div class="alert alert-error">{{ error }}</div>
 {% endif %}
 
+{% if warning == 'default_password' %}
+<div style="background:#b71c1c; border:2px solid #e53935; color:#fff; padding:16px 20px; border-radius:6px; margin-bottom:20px; display:flex; align-items:flex-start; gap:12px;">
+    <span style="font-size:1.4em; line-height:1;">&#9888;</span>
+    <div>
+        <strong>Security Warning: Default password in use.</strong><br>
+        You are logged in with the factory-default <code style="background:rgba(0,0,0,.3);padding:1px 5px;border-radius:3px;">admin / admin</code> credentials.
+        Please change your password immediately using the <strong>Admin</strong> tab below before using AISBF.
+    </div>
+</div>
+{% endif %}
+
 <div class="settings-tabs">
     <div class="settings-tab active" onclick="switchTab('server')"><i class="fas fa-server"></i> Server</div>
     <div class="settings-tab" onclick="switchTab('auth')"><i class="fas fa-key"></i> Auth &amp; MCP</div>
-    <div class="settings-tab" onclick="switchTab('dashboard')"><i class="fas fa-tachometer-alt"></i> Dashboard</div>
     <div class="settings-tab" onclick="switchTab('models')"><i class="fas fa-brain"></i> Models</div>
     <div class="settings-tab" onclick="switchTab('database')"><i class="fas fa-database"></i> Database</div>
     <div class="settings-tab" onclick="switchTab('cache')"><i class="fas fa-bolt"></i> Cache</div>
@@ -138,20 +148,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to full system configuration + standard APIs</small>
     </div>
     </div><!-- /tab-auth -->
-    
-    <div class="settings-section" id="tab-dashboard">
-    <div class="section-title"><i class="fas fa-tachometer-alt"></i> Dashboard</div>
-    
-    <div class="form-group">
-        <label for="dashboard_username">Dashboard Username</label>
-        <input type="text" id="dashboard_username" name="dashboard_username" value="{{ config.dashboard.username }}" required>
-    </div>
-    
-    <div class="form-group">
-        <label for="dashboard_password">Dashboard Password</label>
-        <input type="password" id="dashboard_password" name="dashboard_password" placeholder="Leave blank to keep current">
-    </div>
-    </div><!-- /tab-dashboard -->
     
     <div class="settings-section" id="tab-models">
     <div class="section-title"><i class="fas fa-brain"></i> Internal Models</div>
@@ -879,15 +875,18 @@ brew services restart tor   # macOS</code></pre>
     <div class="section-title"><i class="fas fa-shield-alt"></i> Admin Account &amp; Notifications</div>
 
     <div class="form-group">
-        <label for="new_admin_password">New Admin Password</label>
-        <input type="password" id="new_admin_password" name="new_admin_password" placeholder="Leave blank to keep current password">
-        <small style="color: #666; display: block; margin-top: 5px;">Enter a new password to change the admin dashboard password</small>
+        <label for="dashboard_username">Admin Username</label>
+        <input type="text" id="dashboard_username" name="dashboard_username" value="{{ config.dashboard.username }}" required>
     </div>
 
     <div class="form-group">
-        <label for="confirm_admin_password">Confirm New Admin Password</label>
+        <label for="new_admin_password">New Password</label>
+        <input type="password" id="new_admin_password" name="new_admin_password" placeholder="Leave blank to keep current password">
+    </div>
+
+    <div class="form-group">
+        <label for="confirm_admin_password">Confirm New Password</label>
         <input type="password" id="confirm_admin_password" name="confirm_admin_password" placeholder="Confirm new password">
-        <small style="color: #666; display: block; margin-top: 5px;">Re-enter the new password to confirm</small>
     </div>
 
     <div class="form-group">
@@ -1194,13 +1193,12 @@ async function checkTorStatus() {
 // Check TOR status on page load
 document.addEventListener('DOMContentLoaded', function() {
     checkTorStatus();
-    // Refresh status every 30 seconds
     setInterval(checkTorStatus, 30000);
-    
-    // Load cache statistics
     refreshCacheStats();
-    // Refresh cache stats every 10 seconds
     setInterval(refreshCacheStats, 10000);
+    {% if warning == 'default_password' %}
+    switchTab('admin');
+    {% endif %}
 });
 
 async function refreshCacheStats() {
