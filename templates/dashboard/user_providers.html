@@ -206,13 +206,8 @@ function showToast(message, type) {
         transform: translateX(-50%);
         z-index: 10000;
         min-width: 400px;
+        max-width: calc(100vw - 16px);
         padding: 20px 30px;
-        border-radius: 8px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        font-size: 16px;
-        font-weight: 500;
-        text-align: center;
-        animation: slideDown 0.3s ease-out;
         ${type === 'success' ? 'background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white; border: 2px solid #27ae60;' : ''}
         ${type === 'danger' ? 'background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; border: 2px solid #e74c3c;' : ''}
         ${type === 'warning' ? 'background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; border: 2px solid #f39c12;' : ''}
