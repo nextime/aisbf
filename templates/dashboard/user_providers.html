@@ -79,11 +79,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 </div>
 
-<div id="providers-list" style="margin-bottom: 20px;">
+<div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
+    <input type="text" id="providers-search" placeholder="Search providers by key or name..."
+           oninput="providerSearchFilter = this.value; currentProviderPage = 0; renderProvidersList();"
+           style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+    <span id="providers-count" style="color:#a0a0a0;font-size:13px;white-space:nowrap;"></span>
+</div>
+
+<div id="providers-list" style="margin-bottom: 10px;">
     <!-- Provider list will be rendered here -->
 </div>
 
-<button type="button" class="btn" id="add-provider-btn" onclick="showAddProviderForm()" style="margin-top: 20px;">Add Provider</button>
+<div id="providers-pagination" style="margin-bottom: 20px;"></div>
+
+<button type="button" class="btn" id="add-provider-btn" onclick="showAddProviderForm()" style="margin-top: 10px;">Add Provider</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
     <button type="button" class="btn" onclick="saveProviders()">Save Configuration</button>
     <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
@@ -252,8 +261,22 @@ function showToast(message, type) {
     }, 4000);
 }
 
+function escHtmlAttr(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+async function apiCall(method, url, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    return r.json();
+}
+
 let providersData = {};
 let expandedProviders = new Set();
+let currentProviderPage = 0;
+const PROVIDERS_PAGE_SIZE = 10;
+let providerSearchFilter = '';
 let rawProviders = {{ user_providers_json | replace("</script>", "<\\/script>") | safe }};
 
 // Convert user providers format to the format expected by the UI
@@ -397,46 +420,84 @@ async function uploadCodexFile(providerKey, file) {
 }
 
 function renderProvidersList() {
-    console.log('=== renderProvidersList START ===');
     const container = document.getElementById('providers-list');
-    console.log('Container element:', container);
-    
-    if (!container) {
-        console.error('ERROR: providers-list container not found!');
-        return;
-    }
-    
+    if (!container) return;
+
+    const allKeys = Object.keys(providersData);
+    const filteredKeys = providerSearchFilter
+        ? allKeys.filter(k => k.toLowerCase().includes(providerSearchFilter.toLowerCase()) ||
+                              (providersData[k].name || '').toLowerCase().includes(providerSearchFilter.toLowerCase()))
+        : allKeys;
+
+    const total = filteredKeys.length;
+    const totalPages = Math.max(1, Math.ceil(total / PROVIDERS_PAGE_SIZE));
+    if (currentProviderPage >= totalPages) currentProviderPage = totalPages - 1;
+
+    const pageKeys = filteredKeys.slice(currentProviderPage * PROVIDERS_PAGE_SIZE, (currentProviderPage + 1) * PROVIDERS_PAGE_SIZE);
+
+    const countEl = document.getElementById('providers-count');
+    if (countEl) countEl.textContent = `${total} provider${total !== 1 ? 's' : ''}`;
+
     container.innerHTML = '';
-    console.log('Cleared container, processing', Object.keys(providersData).length, 'providers');
-    
-    Object.entries(providersData).forEach(([key, provider]) => {
-        console.log('Processing provider:', key);
-        const providerItem = document.createElement('div');
-        providerItem.className = 'provider-item';
-        providerItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
-        
-        const isExpanded = expandedProviders.has(key);
-        
-        providerItem.innerHTML = `
-            <div class="provider-header" onclick="toggleProvider('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
-                    <strong style="font-size: 16px;">${key}</strong>
-                    <span style="color: #a0a0a0; font-size: 14px;">(${provider.name || key})</span>
+    if (pageKeys.length === 0) {
+        container.innerHTML = '<p style="color:#a0a0a0;">No providers found.</p>';
+    } else {
+        pageKeys.forEach(key => {
+            const provider = providersData[key];
+            const providerItem = document.createElement('div');
+            providerItem.className = 'provider-item';
+            providerItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+
+            const isExpanded = expandedProviders.has(key);
+            const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
+            providerItem.innerHTML = `
+                <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
+                        <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
+                        <span style="color: #a0a0a0; font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
+                    </div>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
-            </div>
-            <div id="provider-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
-                <!-- Details will be rendered here -->
-            </div>
-        `;
-        
-        container.appendChild(providerItem);
-        
-        if (isExpanded) {
-            renderProviderDetails(key);
+                <div id="provider-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+                </div>
+            `;
+
+            container.appendChild(providerItem);
+
+            if (isExpanded) {
+                renderProviderDetails(key);
+            }
+        });
+    }
+
+    const paginationEl = document.getElementById('providers-pagination');
+    if (paginationEl) {
+        if (totalPages <= 1) {
+            paginationEl.innerHTML = '';
+        } else {
+            let btns = '';
+            btns += `<button class="btn btn-secondary" onclick="goToProviderPage(${currentProviderPage - 1})" ${currentProviderPage === 0 ? 'disabled' : ''} style="padding:5px 12px;">← Prev</button>`;
+            const start = Math.max(0, currentProviderPage - 2);
+            const end = Math.min(totalPages - 1, currentProviderPage + 2);
+            for (let p = start; p <= end; p++) {
+                btns += `<button class="btn ${p === currentProviderPage ? '' : 'btn-secondary'}" onclick="goToProviderPage(${p})" style="padding:5px 10px;min-width:36px;">${p + 1}</button>`;
+            }
+            btns += `<button class="btn btn-secondary" onclick="goToProviderPage(${currentProviderPage + 1})" ${currentProviderPage >= totalPages - 1 ? 'disabled' : ''} style="padding:5px 12px;">Next →</button>`;
+            paginationEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
+                ${btns}
+                <span style="color:#a0a0a0;font-size:13px;margin-left:8px;">Page ${currentProviderPage + 1} of ${totalPages}</span>
+            </div>`;
         }
-    });
+    }
+}
+
+function goToProviderPage(page) {
+    currentProviderPage = page;
+    expandedProviders.clear();
+    renderProvidersList();
+    window.scrollTo(0, 0);
 }
 
 function toggleProvider(key) {
@@ -444,6 +505,13 @@ function toggleProvider(key) {
         expandedProviders.delete(key);
     } else {
         expandedProviders.add(key);
+        const allKeys = Object.keys(providersData);
+        const filteredKeys = providerSearchFilter
+            ? allKeys.filter(k => k.toLowerCase().includes(providerSearchFilter.toLowerCase()) ||
+                                  (providersData[k].name || '').toLowerCase().includes(providerSearchFilter.toLowerCase()))
+            : allKeys;
+        const idx = filteredKeys.indexOf(key);
+        if (idx >= 0) currentProviderPage = Math.floor(idx / PROVIDERS_PAGE_SIZE);
     }
     renderProvidersList();
 }
@@ -451,6 +519,7 @@ function toggleProvider(key) {
 function renderProviderDetails(key) {
     const container = document.getElementById(`provider-details-${key}`);
     const provider = providersData[key];
+    const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const isKiroProvider = provider.type === 'kiro';
     const isClaudeProvider = provider.type === 'claude';
     const isKiloProvider = provider.type === 'kilocode';
@@ -1020,8 +1089,13 @@ function renderProviderDetails(key) {
             <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">Add Model Manually</button>
         </div>
         <div id="get-models-status-${key}" style="margin-top: 10px;"></div>
+
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn" onclick="saveProvider('${safeKey}')" style="background: #22c55e;">Save This Provider</button>
+            <span id="save-status-${key}" style="font-size: 13px; color: #a0a0a0;"></span>
+        </div>
     `;
-    
+
     renderModels(key);
 }
 
@@ -1776,8 +1850,36 @@ async function pollKiloAuth(providerKey, deviceCode) {
     // This function is no longer needed as polling is handled in authenticateKilo
 }
 
+async function saveProvider(key) {
+    const statusEl = document.getElementById(`save-status-${key}`);
+    if (statusEl) statusEl.textContent = 'Saving…';
+    try {
+        const result = await apiCall('POST', '/dashboard/api/provider', {
+            provider_id: key,
+            config: providersData[key]
+        });
+        if (result.success) {
+            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+        } else {
+            if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
+        }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#f87171'; }
+    }
+}
+
 async function removeProvider(key) {
     if (await showDangerConfirm(`Remove provider "${key}"?`, 'Remove Provider')) {
+        try {
+            const result = await apiCall('DELETE', '/dashboard/api/provider/' + encodeURIComponent(key));
+            if (!result.success) {
+                showAlert('Error removing provider: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
+                return;
+            }
+        } catch (e) {
+            showAlert('Error removing provider: ' + e.message, 'Error', '❌', 'danger');
+            return;
+        }
         delete providersData[key];
         expandedProviders.delete(key);
         renderProvidersList();
@@ -1916,9 +2018,23 @@ async function confirmAddProvider() {
         };
     }
 
-    // Add to expanded providers so it automatically expands
+    try {
+        const result = await apiCall('POST', '/dashboard/api/provider', {
+            provider_id: key,
+            config: providersData[key]
+        });
+        if (!result.success) {
+            showAlert('Error creating provider: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
+            delete providersData[key];
+            return;
+        }
+    } catch (e) {
+        showAlert('Error creating provider: ' + e.message, 'Error', '❌', 'danger');
+        delete providersData[key];
+        return;
+    }
+
     expandedProviders.add(key);
-    
     cancelAddProvider();
     renderProvidersList();
 }
@@ -2009,14 +2125,9 @@ async function saveProviders() {
     }
 }
 
-// Initialize providers list immediately (DOM is already loaded since script is at end of body)
 async function initProviders() {
-    console.log('Initializing providers list...');
     await loadCacheSettings();
-    console.log('providersData:', Object.keys(providersData));
-    console.log('Number of providers:', Object.keys(providersData).length);
     renderProvidersList();
-    console.log('renderProvidersList() completed');
 }
 
 initProviders();

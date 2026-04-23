@@ -2987,7 +2987,7 @@ class RotationHandler:
                                     completion_tokens = 0
                             
                             # Try to extract actual cost from provider response
-                            from ..cost_extractor import extract_cost_from_response
+                            from .cost_extractor import extract_cost_from_response
                             actual_cost = extract_cost_from_response(response, provider_id)
                             
                             # Always record analytics
@@ -4485,7 +4485,7 @@ class AutoselectHandler:
                         completion_tokens = 0
                 
                 # Try to extract actual cost from provider response
-                from ..cost_extractor import extract_cost_from_response
+                from .cost_extractor import extract_cost_from_response
                 actual_cost = extract_cost_from_response(response, 'autoselect')
                 
                 # Always record analytics

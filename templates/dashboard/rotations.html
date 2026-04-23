@@ -47,6 +47,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <script>
+function escHtmlAttr(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
 const rotationsData = {
     config: {{ rotations_json | safe }},
     providers: {{ available_providers | safe }},
@@ -56,6 +60,61 @@ const rotationsData = {
 let rotationsConfig = rotationsData.config;
 let availableProviders = rotationsData.providers;
 let expandedRotations = new Set();
+
+// Model name autocomplete: cache per provider
+const providerModelsCache = {};
+const modelSearchTimers = {};
+
+async function fetchProviderModels(providerId) {
+    if (!providerId) return [];
+    if (providerModelsCache[providerId]) return providerModelsCache[providerId];
+    try {
+        const resp = await fetch(`/dashboard/providers/${encodeURIComponent(providerId)}/configured-models`);
+        if (!resp.ok) return [];
+        const data = await resp.json();
+        providerModelsCache[providerId] = data.models || [];
+        return providerModelsCache[providerId];
+    } catch { return []; }
+}
+
+function searchModelsDebounced(datalistId, query, providerId, timerKey) {
+    clearTimeout(modelSearchTimers[timerKey]);
+    if (query.length < 3 || !providerId) return;
+    modelSearchTimers[timerKey] = setTimeout(async () => {
+        let models = await fetchProviderModels(providerId);
+        const q = query.toLowerCase();
+        models = models.filter(m => m.toLowerCase().includes(q)).slice(0, 30);
+        const dl = document.getElementById(datalistId);
+        if (dl) dl.innerHTML = models.map(m => `<option value="${escHtmlAttr(m)}">`).join('');
+    }, 350);
+}
+
+// Provider select widget: <select> for ≤25, datalist input for >25
+function buildProviderSelectHtml(uid, currentValue, onChangeFn) {
+    if (availableProviders.length <= 25) {
+        const opts = availableProviders.map(p =>
+            `<option value="${escHtmlAttr(p)}" ${currentValue === p ? 'selected' : ''}>${escHtmlAttr(p)}</option>`
+        ).join('');
+        return `<select id="${uid}" onchange="${onChangeFn}(this.value)" required>
+            <option value="">Select provider...</option>${opts}</select>`;
+    } else {
+        const dlOpts = availableProviders.map(p => `<option value="${escHtmlAttr(p)}">`).join('');
+        return `<div style="position:relative;">
+            <input type="text" id="${uid}" value="${escHtmlAttr(currentValue)}" list="${uid}-dl"
+                   placeholder="Type to search provider..."
+                   oninput="handleProviderInput('${uid}', this.value, ${onChangeFn})"
+                   onchange="handleProviderInput('${uid}', this.value, ${onChangeFn})"
+                   style="width:100%;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+            <datalist id="${uid}-dl">${dlOpts}</datalist>
+        </div>`;
+    }
+}
+
+function handleProviderInput(uid, value, callback) {
+    if (availableProviders.includes(value) || value === '') {
+        callback(value);
+    }
+}
 
 document.getElementById('global-notify').checked = rotationsConfig.notifyerrors || false;
 
@@ -70,18 +129,18 @@ function renderRotationsList() {
         
         const isExpanded = expandedRotations.has(key);
         const providerCount = rotation.providers ? rotation.providers.length : 0;
-        
+        const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
         rotationItem.innerHTML = `
-            <div class="rotation-header" onclick="toggleRotation('${key}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+            <div class="rotation-header" onclick="toggleRotation('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
-                    <strong style="font-size: 16px;">${key}</strong>
+                    <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                     <span style="color: #a0a0a0; font-size: 14px;">(${providerCount} provider${providerCount !== 1 ? 's' : ''})</span>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${key}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
             </div>
-            <div id="rotation-details-${key}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
-                <!-- Details will be rendered here -->
+            <div id="rotation-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
             </div>
         `;
         
@@ -105,6 +164,7 @@ function toggleRotation(key) {
 function renderRotationDetails(rotationKey) {
     const container = document.getElementById(`rotation-details-${rotationKey}`);
     const rotation = rotationsConfig.rotations[rotationKey];
+    const safeRKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     
     container.innerHTML = `
         <div class="form-group">
@@ -150,9 +210,14 @@ function renderRotationDetails(rotationKey) {
         
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Providers</h4>
         <div id="providers-${rotationKey}"></div>
-        <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${rotationKey}')" style="margin-top: 10px;">Add Provider</button>
+        <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${safeRKey}')" style="margin-top: 10px;">Add Provider</button>
+
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn" onclick="saveRotation('${safeRKey}')" style="background: #22c55e;">Save This Rotation</button>
+            <span id="rot-save-status-${rotationKey}" style="font-size: 13px; color: #a0a0a0;"></span>
+        </div>
     `;
-    
+
     renderRotationProviders(rotationKey);
 }
 
@@ -169,36 +234,32 @@ function renderRotationProviders(rotationKey) {
     rotation.providers.forEach((provider, providerIndex) => {
         const providerDiv = document.createElement('div');
         providerDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
-        
-        const providerOptions = availableProviders.map(p => 
-            `<option value="${p}" ${provider.provider_id === p ? 'selected' : ''}>${p}</option>`
-        ).join('');
-        
+        const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const provSelUid = `prov-sel-${rotationKey}-${providerIndex}`;
+
         providerDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <strong>Provider ${providerIndex + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${rotationKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
             </div>
-            
+
             <div class="form-group">
                 <label>Provider ID</label>
-                <select onchange="updateRotationProvider('${rotationKey}', ${providerIndex}, 'provider_id', this.value)" required>
-                    <option value="">Select provider...</option>
-                    ${providerOptions}
-                </select>
+                ${buildProviderSelectHtml(provSelUid, provider.provider_id || '',
+                    `function(v){updateRotationProvider('${safeKey}',${providerIndex},'provider_id',v)}`)}
             </div>
-            
+
             <div class="form-group">
                 <label>Weight (optional, for provider-level weight)</label>
-                <input type="number" value="${provider.weight || ''}" onchange="updateRotationProvider('${rotationKey}', ${providerIndex}, 'weight', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <input type="number" value="${provider.weight || ''}" onchange="updateRotationProvider('${safeKey}', ${providerIndex}, 'weight', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <h5 style="margin-top: 15px; margin-bottom: 10px;">Models</h5>
             <div id="models-${rotationKey}-${providerIndex}"></div>
-            <button type="button" class="btn btn-secondary" onclick="addRotationModel('${rotationKey}', ${providerIndex})" style="margin-top: 10px; font-size: 12px;">Add Model</button>
+            <button type="button" class="btn btn-secondary" onclick="addRotationModel('${safeKey}', ${providerIndex})" style="margin-top: 10px; font-size: 12px;">Add Model</button>
             <p style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">Leave models empty to use all models from provider config</p>
         `;
-        
+
         container.appendChild(providerDiv);
         renderRotationModels(rotationKey, providerIndex);
     });
@@ -207,26 +268,35 @@ function renderRotationProviders(rotationKey) {
 function renderRotationModels(rotationKey, providerIndex) {
     const container = document.getElementById(`models-${rotationKey}-${providerIndex}`);
     const provider = rotationsConfig.rotations[rotationKey].providers[providerIndex];
-    
+
     if (!provider.models || provider.models.length === 0) {
         container.innerHTML = '<p style="color: #a0a0a0; font-size: 12px;">No models specified (will use all from provider)</p>';
         return;
     }
-    
+
     container.innerHTML = '';
     provider.models.forEach((model, modelIndex) => {
         const modelDiv = document.createElement('div');
         modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 10px; margin-bottom: 8px; border-radius: 3px; background: #16213e;';
-        
+        const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const dlId = `mdl-dl-${rotationKey}-${providerIndex}-${modelIndex}`;
+        const timerKey = `${rotationKey}-${providerIndex}-${modelIndex}`;
+        const providerId = provider.provider_id || '';
+
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <strong style="font-size: 13px;">Model ${modelIndex + 1}</strong>
-                <button type="button" onclick="removeRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Remove</button>
+                <button type="button" onclick="removeRotationModel('${safeKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Remove</button>
             </div>
-            
+
             <div class="form-group" style="margin-bottom: 8px;">
                 <label style="font-size: 12px;">Model Name</label>
-                <input type="text" value="${model.name}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'name', this.value)" required style="font-size: 12px; padding: 5px;">
+                <input type="text" value="${escHtmlAttr(model.name)}" list="${dlId}"
+                    placeholder="Type 3+ chars to search..."
+                    oninput="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value);searchModelsDebounced('${dlId}',this.value,'${escHtmlAttr(providerId)}','${timerKey}')"
+                    onchange="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
+                    required style="font-size: 12px; padding: 5px;">
+                <datalist id="${dlId}"></datalist>
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
@@ -268,6 +338,31 @@ function updateGlobalNotify(value) {
     rotationsConfig.notifyerrors = value;
 }
 
+async function apiCall(method, url, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    return r.json();
+}
+
+async function saveRotation(key) {
+    const statusEl = document.getElementById(`rot-save-status-${key}`);
+    if (statusEl) statusEl.textContent = 'Saving…';
+    try {
+        const result = await apiCall('POST', '/dashboard/api/rotation', {
+            rotation_id: key,
+            config: rotationsConfig.rotations[key]
+        });
+        if (result.success) {
+            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+        } else {
+            if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
+        }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#f87171'; }
+    }
+}
+
 async function addRotation() {
     const key = await showPrompt('Enter rotation key (e.g., "coding", "general"):', '', 'rotation-key', 'Add Rotation');
     if (!key) return;
@@ -275,24 +370,31 @@ async function addRotation() {
         showAlert('Rotation key already exists', 'Duplicate Key', '⚠️', 'warn');
         return;
     }
-    
-    if (!rotationsConfig.rotations) {
-        rotationsConfig.rotations = {};
+    if (!rotationsConfig.rotations) rotationsConfig.rotations = {};
+    const newCfg = { model_name: key, notifyerrors: false, capabilities: [], providers: [] };
+    rotationsConfig.rotations[key] = newCfg;
+    try {
+        const result = await apiCall('POST', '/dashboard/api/rotation', { rotation_id: key, config: newCfg });
+        if (!result.success) {
+            showAlert('Error creating rotation: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
+            delete rotationsConfig.rotations[key];
+            return;
+        }
+    } catch (e) {
+        showAlert('Error creating rotation: ' + e.message, 'Error', '❌', 'danger');
+        delete rotationsConfig.rotations[key];
+        return;
     }
-    
-    rotationsConfig.rotations[key] = {
-        model_name: key,
-        notifyerrors: false,
-        capabilities: [],
-        providers: []
-    };
-    
     expandedRotations.add(key);
     renderRotationsList();
 }
 
 async function removeRotation(key) {
     if (await showDangerConfirm(`Remove rotation "${key}"?`, 'Remove Rotation')) {
+        try {
+            const result = await apiCall('DELETE', '/dashboard/api/rotation/' + encodeURIComponent(key));
+            if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
+        } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete rotationsConfig.rotations[key];
         expandedRotations.delete(key);
         renderRotationsList();

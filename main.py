@@ -62,6 +62,7 @@ from pathlib import Path
 import json
 import re
 import markdown
+import threading
 from urllib.parse import urljoin, urlencode
 from cryptography.fernet import Fernet
 
@@ -368,6 +369,57 @@ def setup_logging():
 
 # Configure logging
 logger = setup_logging()
+
+# Thread-safe lock for config reload operations
+_config_reload_lock = threading.Lock()
+
+def _reload_global_config():
+    """Thread-safe reload of the global config singleton after file changes.
+    Safe to call from async handlers since config.reload() is fast."""
+    with _config_reload_lock:
+        try:
+            from aisbf.config import config as _global_cfg
+            if _global_cfg is not None:
+                _global_cfg.reload()
+                logger.info("Global config hot-reloaded after dashboard change")
+        except Exception as _e:
+            logger.error(f"Error reloading global config: {_e}", exc_info=True)
+
+
+def _apply_condense_defaults_provider(provider: dict):
+    """Apply condense_context=80 default when condense_method is set but condense_context is not."""
+    for model in provider.get('models', []):
+        if isinstance(model, dict) and model.get('condense_method') and not model.get('condense_context'):
+            model['condense_context'] = 80
+
+
+def _apply_condense_defaults_rotation(rotation: dict):
+    for prov in rotation.get('providers', []):
+        for model in prov.get('models', []):
+            if isinstance(model, dict) and model.get('condense_method') and not model.get('condense_context'):
+                model['condense_context'] = 80
+
+
+def _providers_json_path():
+    p = Path.home() / '.aisbf' / 'providers.json'
+    if not p.exists():
+        p = Path(__file__).parent / 'config' / 'providers.json'
+    return p
+
+
+def _rotations_json_path():
+    p = Path.home() / '.aisbf' / 'rotations.json'
+    if not p.exists():
+        p = Path(__file__).parent / 'config' / 'rotations.json'
+    return p
+
+
+def _autoselect_json_path():
+    p = Path.home() / '.aisbf' / 'autoselect.json'
+    if not p.exists():
+        p = Path(__file__).parent / 'config' / 'autoselect.json'
+    return p
+
 
 class ProxyHeadersMiddleware(BaseHTTPMiddleware):
     """
@@ -4408,7 +4460,7 @@ async def dashboard_providers(request: Request):
             "__version__": __version__,
             "providers_json": json.dumps(providers_data),
             "claude_cli_mode": _claude_cli_mode,
-            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+            "success": "Configuration saved successfully!" if success else None
         }
         )
     else:
@@ -4599,6 +4651,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             save_path.parent.mkdir(parents=True, exist_ok=True)
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
+            _reload_global_config()
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
@@ -4620,7 +4673,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             logger.info(f"Saved {len(providers_data)} provider(s) to database for user {current_user_id}")
         
         if is_config_admin:
-            success_msg = "Configuration saved successfully! Restart server for changes to take effect."
+            success_msg = "Configuration saved successfully!"
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/providers.html",
@@ -4787,6 +4840,49 @@ async def dashboard_providers_get_models(request: Request):
             "error": str(e)
         }, status_code=500)
 
+@app.get("/dashboard/providers/{provider_id}/configured-models")
+async def get_provider_configured_models(request: Request, provider_id: str, search: str = ""):
+    """Return model names from a provider's local config (no external API calls)"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"models": []}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    provider = None
+    if is_config_admin:
+        config_path = Path.home() / '.aisbf' / 'providers.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'providers.json'
+        with open(config_path) as f:
+            full_config = json.load(f)
+        if 'providers' in full_config and isinstance(full_config['providers'], dict):
+            providers_data = full_config['providers']
+        else:
+            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+        provider = providers_data.get(provider_id)
+    else:
+        db = DatabaseRegistry.get_config_database()
+        user_providers = db.get_user_providers(current_user_id)
+        match = next((p for p in user_providers if p['provider_id'] == provider_id), None)
+        if match:
+            provider = match.get('config', match)
+
+    if not provider:
+        return JSONResponse({"models": []})
+
+    models = provider.get('models', [])
+    model_names = [m.get('name', '') if isinstance(m, dict) else str(m) for m in models]
+    model_names = [n for n in model_names if n]
+
+    if search:
+        search_lower = search.lower()
+        model_names = [n for n in model_names if search_lower in n.lower()]
+
+    return JSONResponse({"models": model_names[:50]})
+
+
 @app.get("/dashboard/rotations", response_class=HTMLResponse)
 async def dashboard_rotations(request: Request):
     """Edit rotations configuration"""
@@ -4839,7 +4935,7 @@ async def dashboard_rotations(request: Request):
             "session": request.session,
             "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
-            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+            "success": "Configuration saved successfully!" if success else None
         }
         )
     else:
@@ -4888,6 +4984,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, 'w') as f:
                 json.dump(rotations_data, f, indent=2)
+            _reload_global_config()
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
@@ -4921,7 +5018,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                     "__version__": __version__,
                     "rotations_json": json.dumps(rotations_data),
                     "available_providers": json.dumps(available_providers),
-                    "success": "Configuration saved successfully! Restart server for changes to take effect."
+                    "success": "Configuration saved successfully!"
                 }
             )
         else:
@@ -5072,7 +5169,7 @@ async def dashboard_autoselect(request: Request):
             "autoselect_json": json.dumps(autoselect_data),
             "available_rotations": json.dumps(available_rotations),
             "available_models": json.dumps(available_models),
-            "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
+            "success": "Configuration saved successfully!" if success else None
         }
         )
     else:
@@ -5144,6 +5241,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             config_path.parent.mkdir(parents=True, exist_ok=True)
             with open(config_path, 'w') as f:
                 json.dump(autoselect_data, f, indent=2)
+            _reload_global_config()
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
@@ -5207,7 +5305,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                     "autoselect_json": json.dumps(autoselect_data),
                     "available_rotations": json.dumps(available_rotations),
                     "available_models": json.dumps(available_models),
-                    "success": "Configuration saved successfully! Restart server for changes to take effect."
+                    "success": "Configuration saved successfully!"
                 }
             )
         else:
@@ -5366,6 +5464,233 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
                     "error": f"Invalid JSON: {str(e)}"
                 }
             )
+
+# ---------------------------------------------------------------------------
+# Granular CRUD endpoints — act on a single provider/rotation/autoselect
+# and trigger hot-reload of the in-memory config so no restart is needed.
+# ---------------------------------------------------------------------------
+
+@app.post("/dashboard/api/provider")
+async def api_provider_save(request: Request):
+    """Create or update a single provider"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        provider_id = body.get('provider_id')
+        provider_config = body.get('config', {})
+
+        if not provider_id:
+            return JSONResponse({"success": False, "error": "provider_id required"}, status_code=400)
+
+        _apply_condense_defaults_provider(provider_config)
+
+        if is_config_admin:
+            config_path = _providers_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            if 'providers' not in full_config or not isinstance(full_config['providers'], dict):
+                full_config['providers'] = {}
+            full_config['providers'][provider_id] = provider_config
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.save_user_provider(current_user_id, provider_id, provider_config)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_provider_save error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/dashboard/api/provider/{provider_id:path}")
+async def api_provider_delete(request: Request, provider_id: str):
+    """Delete a single provider"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        if is_config_admin:
+            config_path = _providers_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            providers = full_config.get('providers', full_config)
+            providers.pop(provider_id, None)
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.delete_user_provider(current_user_id, provider_id)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_provider_delete error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/dashboard/api/rotation")
+async def api_rotation_save(request: Request):
+    """Create or update a single rotation"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        rotation_id = body.get('rotation_id')
+        rotation_config = body.get('config', {})
+
+        if not rotation_id:
+            return JSONResponse({"success": False, "error": "rotation_id required"}, status_code=400)
+
+        _apply_condense_defaults_rotation(rotation_config)
+
+        if is_config_admin:
+            config_path = _rotations_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            if 'rotations' not in full_config or not isinstance(full_config['rotations'], dict):
+                full_config['rotations'] = {}
+            full_config['rotations'][rotation_id] = rotation_config
+            save_path = Path.home() / '.aisbf' / 'rotations.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.save_user_rotation(current_user_id, rotation_id, rotation_config)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_rotation_save error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/dashboard/api/rotation/{rotation_id:path}")
+async def api_rotation_delete(request: Request, rotation_id: str):
+    """Delete a single rotation"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        if is_config_admin:
+            config_path = _rotations_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            full_config.get('rotations', {}).pop(rotation_id, None)
+            save_path = Path.home() / '.aisbf' / 'rotations.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.delete_user_rotation(current_user_id, rotation_id)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_rotation_delete error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/dashboard/api/autoselect")
+async def api_autoselect_save(request: Request):
+    """Create or update a single autoselect entry"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        autoselect_id = body.get('autoselect_id')
+        autoselect_config = body.get('config', {})
+
+        if not autoselect_id:
+            return JSONResponse({"success": False, "error": "autoselect_id required"}, status_code=400)
+
+        if is_config_admin:
+            config_path = _autoselect_json_path()
+            save_path = Path.home() / '.aisbf' / 'autoselect.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            if config_path.exists():
+                with open(config_path) as f:
+                    full_config = json.load(f)
+            else:
+                full_config = {}
+            full_config[autoselect_id] = autoselect_config
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.save_user_autoselect(current_user_id, autoselect_id, autoselect_config)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_autoselect_save error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.delete("/dashboard/api/autoselect/{autoselect_id:path}")
+async def api_autoselect_delete(request: Request, autoselect_id: str):
+    """Delete a single autoselect entry"""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        if is_config_admin:
+            config_path = _autoselect_json_path()
+            save_path = Path.home() / '.aisbf' / 'autoselect.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            if config_path.exists():
+                with open(config_path) as f:
+                    full_config = json.load(f)
+            else:
+                full_config = {}
+            full_config.pop(autoselect_id, None)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.delete_user_autoselect(current_user_id, autoselect_id)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_autoselect_delete error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
 
 @app.get("/dashboard/prompts", response_class=HTMLResponse)
 async def dashboard_prompts(request: Request):

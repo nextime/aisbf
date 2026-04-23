@@ -43,6 +43,43 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
+const escHtmlAttr = escHtml;
+
+async function apiCall(method, url, body) {
+    const opts = { method, headers: { 'Content-Type': 'application/json' } };
+    if (body !== undefined) opts.body = JSON.stringify(body);
+    const r = await fetch(url, opts);
+    return r.json();
+}
+
+// Build a searchable select for model lists (datalist when >25 options)
+function buildModelSelectHtml(uid, currentValue, allModels, onChangeFn) {
+    if (allModels.length <= 25) {
+        const opts = allModels.map(m =>
+            `<option value="${escHtml(m.id)}" ${currentValue === m.id ? 'selected' : ''}>${escHtml(m.name)}</option>`
+        ).join('');
+        return `<select id="${uid}" onchange="${onChangeFn}(this.value)" required>
+            <option value="">Select model...</option>${opts}</select>`;
+    } else {
+        const currentLabel = (allModels.find(m => m.id === currentValue) || {}).name || currentValue;
+        const dlOpts = allModels.map(m => `<option value="${escHtml(m.id)}" label="${escHtml(m.name)}">`).join('');
+        return `<div style="position:relative;">
+            <input type="text" id="${uid}" value="${escHtml(currentValue)}" list="${uid}-dl"
+                   placeholder="Type to search model..."
+                   oninput="handleModelInput('${uid}',this.value,${onChangeFn})"
+                   onchange="handleModelInput('${uid}',this.value,${onChangeFn})"
+                   style="width:100%;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+            <datalist id="${uid}-dl">${dlOpts}</datalist>
+        </div>`;
+    }
+}
+
+function handleModelInput(uid, value, callback) {
+    const allIds = availableModels.map(m => m.id).concat(availableRotations);
+    if (allIds.includes(value) || value === 'internal' || value === '') {
+        callback(value);
+    }
+}
 
 const autoselectData = {
     config: {{ autoselect_json | safe }},
@@ -72,17 +109,18 @@ function renderAutoselectList() {
         
         const isExpanded = expandedAutoselects.has(key);
         const modelCount = autoselect.available_models ? autoselect.available_models.length : 0;
-        
+        const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
         autoselectItem.innerHTML = `
-            <div class="autoselect-header" onclick="toggleAutoselect('${escHtml(key)}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
+            <div class="autoselect-header" onclick="toggleAutoselect('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtml(autoselect.model_name || key)}</strong>
                     <span style="color: #a0a0a0; font-size: 14px;">(${modelCount} available model${modelCount !== 1 ? 's' : ''})</span>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${escHtml(key)}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
             </div>
-            <div id="autoselect-details-${escHtml(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+            <div id="autoselect-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
                 <!-- Details will be rendered here -->
             </div>
         `;
@@ -107,7 +145,8 @@ function toggleAutoselect(key) {
 function renderAutoselectDetails(autoselectKey) {
     const container = document.getElementById(`autoselect-details-${autoselectKey}`);
     const autoselect = autoselectConfig[autoselectKey];
-    
+    const safeAKey = autoselectKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+
     // Default to "internal" if selection_model is not set
     const selectionValue = autoselect.selection_model || 'internal';
     
@@ -255,9 +294,14 @@ function renderAutoselectDetails(autoselectKey) {
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Available Models</h4>
         <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Define which models can be selected and their descriptions for AI analysis</p>
         <div id="models-${autoselectKey}"></div>
-        <button type="button" class="btn btn-secondary" onclick="addAutoselectModel('${autoselectKey}')" style="margin-top: 10px;">Add Model</button>
+        <button type="button" class="btn btn-secondary" onclick="addAutoselectModel('${safeAKey}')" style="margin-top: 10px;">Add Model</button>
+
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn" onclick="saveAutoselectItem('${safeAKey}')" style="background: #22c55e;">Save This Autoselect</button>
+            <span id="asel-save-status-${autoselectKey}" style="font-size: 13px; color: #a0a0a0;"></span>
+        </div>
     `;
-    
+
     renderAutoselectModels(autoselectKey);
 }
 
@@ -274,23 +318,20 @@ function renderAutoselectModels(autoselectKey) {
     autoselect.available_models.forEach((model, index) => {
         const modelDiv = document.createElement('div');
         modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
-        
-        const modelOptions = availableModels.map(m =>
-            `<option value="${m.id}" ${model.model_id === m.id ? 'selected' : ''}>${m.name}</option>`
-        ).join('');
-        
+        const safeKey = autoselectKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+        const allOptions = availableRotations.map(r => ({id: r, name: r})).concat(availableModels);
+        const selUid = `asel-mod-${autoselectKey}-${index}`;
+
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
                 <strong>Model ${index + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${autoselectKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+                <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${safeKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
             </div>
-            
+
             <div class="form-group">
                 <label>Model ID (Rotation or Provider Model)</label>
-                <select onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'model_id', this.value)" required>
-                    <option value="">Select model...</option>
-                    ${modelOptions}
-                </select>
+                ${buildModelSelectHtml(selUid, model.model_id || '', allOptions,
+                    `function(v){updateAutoselectModel('${safeKey}',${index},'model_id',v)}`)}
                 <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
             </div>
             
@@ -319,31 +360,55 @@ function renderAutoselectModels(autoselectKey) {
     });
 }
 
+async function saveAutoselectItem(key) {
+    const statusEl = document.getElementById(`asel-save-status-${key}`);
+    if (statusEl) statusEl.textContent = 'Saving…';
+    try {
+        const result = await apiCall('POST', '/dashboard/api/autoselect', {
+            autoselect_id: key,
+            config: autoselectConfig[key]
+        });
+        if (result.success) {
+            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+        } else {
+            if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
+        }
+    } catch (e) {
+        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#f87171'; }
+    }
+}
+
 async function addAutoselect() {
     const key = await showPrompt('Enter autoselect key (e.g., "autoselect", "smart-select"):', '', 'e.g. autoselect', 'Add Autoselect');
-    if (!key) {
-        return;
-    }
-    
+    if (!key) return;
     if (autoselectConfig[key]) {
         showAlert('Autoselect key already exists', 'Duplicate Key', '⚠️', 'warn');
         return;
     }
-    
-    autoselectConfig[key] = {
-        model_name: key,
-        description: '',
-        selection_model: '',
-        fallback: '',
-        available_models: []
-    };
-    
+    const newCfg = { model_name: key, description: '', selection_model: '', fallback: '', available_models: [] };
+    autoselectConfig[key] = newCfg;
+    try {
+        const result = await apiCall('POST', '/dashboard/api/autoselect', { autoselect_id: key, config: newCfg });
+        if (!result.success) {
+            showAlert('Error creating autoselect: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
+            delete autoselectConfig[key];
+            return;
+        }
+    } catch (e) {
+        showAlert('Error creating autoselect: ' + e.message, 'Error', '❌', 'danger');
+        delete autoselectConfig[key];
+        return;
+    }
     expandedAutoselects.add(key);
     renderAutoselectList();
 }
 
 async function removeAutoselect(key) {
     if (await showDangerConfirm(`Remove autoselect "${key}"?`, 'Remove Autoselect')) {
+        try {
+            const result = await apiCall('DELETE', '/dashboard/api/autoselect/' + encodeURIComponent(key));
+            if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
+        } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete autoselectConfig[key];
         expandedAutoselects.delete(key);
         renderAutoselectList();
