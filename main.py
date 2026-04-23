@@ -8946,6 +8946,8 @@ async def dashboard_pricing(request: Request):
             "currency_symbol": currency_symbol,
             "wallet_balance": wallet_balance,
             "has_stripe_card": has_stripe_card,
+            "success": request.query_params.get("success"),
+            "error": request.query_params.get("error"),
         }
     )
 
@@ -9072,7 +9074,9 @@ async def dashboard_subscribe_tier(request: Request, tier_id: int):
     result = await payment_service.stripe_handler.auto_charge(
         user_id,
         Decimal(str(tier_price)),
-        default_method['identifier']
+        default_method['identifier'],
+        description=f"Subscription upgrade to {target_tier['name']}",
+        metadata={'user_id': str(user_id), 'tier_id': str(tier_id), 'tier_name': target_tier['name'], 'amount': str(tier_price)}
     )
     if not result.get('success'):
         return JSONResponse({"error": result.get('error', 'Card charge failed')}, status_code=402)

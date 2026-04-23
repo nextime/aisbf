@@ -1083,7 +1083,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
         function open(opts) {
             titleEl.textContent = opts.title || 'Notice';
-            msgEl.textContent   = opts.message || '';
+            if (opts.html) msgEl.innerHTML = opts.message || '';
+            else msgEl.textContent = opts.message || '';
             if (opts.icon) { iconEl.className = 'ui-modal-icon ' + (opts.iconClass||'info'); iconEl.textContent = opts.icon; iconEl.style.display='block'; }
             else { iconEl.style.display='none'; }
             inputEl.style.display = opts.prompt ? 'block' : 'none';
@@ -1113,10 +1114,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     buttons: [{label:'OK', value:true, cls:'btn'}] });
             });
         };
-        window.showConfirm = function(message, title, icon, iconClass) {
+        window.showConfirm = function(message, title, icon, iconClass, html) {
             return new Promise(res => {
                 _resolve = res;
-                open({ title: title||'Confirm', message, icon: icon||'⚠️', iconClass: iconClass||'warn',
+                open({ title: title||'Confirm', message, html, icon: icon||'⚠️', iconClass: iconClass||'warn',
                     buttons: [
                         {label:'Cancel', value:false, cls:'btn-secondary'},
                         {label:'Confirm', value:true, cls:'btn'}

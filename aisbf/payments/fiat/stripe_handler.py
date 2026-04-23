@@ -268,14 +268,13 @@ class StripePaymentHandler:
         )
         logger.info(f"Wallet credited: user={user_id}, amount={amount}, intent={payment_intent['id']}")
 
-    async def auto_charge(self, user_id: int, amount: Decimal, payment_method_id: str) -> Dict[str, Any]:
-        """
-        Automatically charge a saved payment method for auto top up
-        """
+    async def auto_charge(self, user_id: int, amount: Decimal, payment_method_id: str,
+                          description: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Charge a saved payment method immediately (off-session)."""
         try:
             customer_id = await self._get_or_create_customer(user_id)
             amount_cents = int(amount * 100)
-            
+
             payment_intent = await asyncio.to_thread(
                 stripe.PaymentIntent.create,
                 amount=amount_cents,
@@ -284,23 +283,21 @@ class StripePaymentHandler:
                 payment_method=payment_method_id,
                 confirm=True,
                 off_session=True,
-                description=f'Auto wallet top up: ${amount:.2f}',
-                metadata={
-                    'user_id': str(user_id),
-                    'topup': 'true',
-                    'auto_topup': 'true',
-                    'amount': str(amount)
-                }
+                description=description or f'Charge: ${amount:.2f}',
+                metadata=metadata or {'user_id': str(user_id), 'amount': str(amount)}
             )
-            
-            logger.info(f"Auto charge successful for user {user_id}: {payment_intent.id}")
-            
+
+            if payment_intent.status not in ('succeeded', 'processing'):
+                logger.error(f"Unexpected PaymentIntent status for user {user_id}: {payment_intent.status} ({payment_intent.id})")
+                return {"success": False, "error": f"Payment not completed (status: {payment_intent.status})"}
+
+            logger.info(f"Auto charge successful for user {user_id}: {payment_intent.id} status={payment_intent.status}")
             return {
                 "success": True,
                 "gateway_transaction_id": payment_intent.id,
                 "amount": amount
             }
-            
+
         except stripe.error.CardError as e:
             logger.error(f"Auto charge card error for user {user_id}: {e.user_message}")
             return {"success": False, "error": e.user_message}

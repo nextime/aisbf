@@ -278,7 +278,7 @@ async function subscribeToTier(tierId, tierName, tierPrice) {
         msg += `<br><br><span style="color:#f87171;"><i class="fas fa-exclamation-triangle me-1"></i>Your wallet balance (${CURRENCY_SYMBOL}${WALLET_BALANCE.toFixed(2)}) is insufficient and no card is saved.</span><br><a href="/dashboard/wallet" style="color:#4a9eff;">Top up wallet</a> or <a href="/dashboard/billing/add-method" style="color:#4a9eff;">add a card</a> first.`;
     }
 
-    const ok = await showConfirm(msg, 'Upgrade Plan');
+    const ok = await showConfirm(msg, 'Upgrade Plan', undefined, undefined, true);
     if (!ok) return;
 
     const btn = document.querySelector(`button[onclick*="subscribeToTier(${tierId}"]`);
@@ -291,8 +291,8 @@ async function subscribeToTier(tierId, tierName, tierPrice) {
     .then(r => r.json())
     .then(result => {
         if (result.success) {
-            showToast(result.message || 'Plan upgraded successfully!', 'success');
-            setTimeout(() => window.location.reload(), 1500);
+            const msg = encodeURIComponent(result.message || 'Plan upgraded successfully!');
+            window.location.href = `/dashboard/pricing?success=${msg}`;
         } else if (result.error === 'insufficient_funds') {
             showToast(
                 `Insufficient funds. Wallet: ${CURRENCY_SYMBOL}${(result.wallet_balance||0).toFixed(2)}, needed: ${CURRENCY_SYMBOL}${(result.required||0).toFixed(2)}. ` +
@@ -322,8 +322,8 @@ async function downgradeToFree() {
     .then(r => r.json())
     .then(result => {
         if (result.success) {
-            showToast(result.message || 'Downgraded to free plan', 'success');
-            setTimeout(() => window.location.reload(), 1500);
+            const msg = encodeURIComponent(result.message || 'Downgraded to free plan');
+            window.location.href = `/dashboard/pricing?success=${msg}`;
         } else {
             showToast(result.error || 'Error processing downgrade', 'danger');
         }
