@@ -269,22 +269,35 @@ class StripePaymentHandler:
         logger.info(f"Wallet credited: user={user_id}, amount={amount}, intent={payment_intent['id']}")
 
     async def auto_charge(self, user_id: int, amount: Decimal, payment_method_id: str,
-                          description: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
-        """Charge a saved payment method immediately (off-session)."""
+                          description: Optional[str] = None, metadata: Optional[Dict[str, Any]] = None,
+                          off_session: bool = True) -> Dict[str, Any]:
+        """Charge a saved payment method immediately.
+
+        Use off_session=False when the customer is actively present (e.g. clicking
+        an upgrade button) so the charge is treated as a Customer-Initiated
+        Transaction and settles at normal speed.  Use off_session=True only for
+        background charges (auto-renewals, auto top-ups) where the customer is
+        not present.
+        """
         try:
             customer_id = await self._get_or_create_customer(user_id)
             amount_cents = int(amount * 100)
 
-            payment_intent = await asyncio.to_thread(
-                stripe.PaymentIntent.create,
+            intent_params = dict(
                 amount=amount_cents,
                 currency=self.config.get('currency_code', 'usd').lower(),
                 customer=customer_id,
                 payment_method=payment_method_id,
                 confirm=True,
-                off_session=True,
                 description=description or f'Charge: ${amount:.2f}',
                 metadata=metadata or {'user_id': str(user_id), 'amount': str(amount)}
+            )
+            if off_session:
+                intent_params['off_session'] = True
+
+            payment_intent = await asyncio.to_thread(
+                stripe.PaymentIntent.create,
+                **intent_params
             )
 
             if payment_intent.status not in ('succeeded', 'processing'):

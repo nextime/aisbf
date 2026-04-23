@@ -9076,7 +9076,8 @@ async def dashboard_subscribe_tier(request: Request, tier_id: int):
         Decimal(str(tier_price)),
         default_method['identifier'],
         description=f"Subscription upgrade to {target_tier['name']}",
-        metadata={'user_id': str(user_id), 'tier_id': str(tier_id), 'tier_name': target_tier['name'], 'amount': str(tier_price)}
+        metadata={'user_id': str(user_id), 'tier_id': str(tier_id), 'tier_name': target_tier['name'], 'amount': str(tier_price)},
+        off_session=False
     )
     if not result.get('success'):
         return JSONResponse({"error": result.get('error', 'Card charge failed')}, status_code=402)
@@ -9519,18 +9520,36 @@ async def dashboard_add_payment_method_stripe(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
-    
+
     data = await request.json()
     user_id = request.session.get('user_id')
     payment_method_id = data.get('payment_method_id')
-    
+
     if not payment_method_id:
         return JSONResponse({"success": False, "error": "Payment method ID required"}, status_code=400)
-    
+
     db = DatabaseRegistry.get_config_database()
-    
-    # Store payment method in database
+
     try:
+        # Attach the PM to the Stripe customer so it can be charged later
+        if payment_service and payment_service.stripe_handler:
+            customer_id = await payment_service.stripe_handler._get_or_create_customer(user_id)
+            import stripe as _stripe
+            import asyncio as _asyncio
+            try:
+                await _asyncio.to_thread(
+                    _stripe.PaymentMethod.attach,
+                    payment_method_id,
+                    customer=customer_id
+                )
+                await _asyncio.to_thread(
+                    _stripe.Customer.modify,
+                    customer_id,
+                    invoice_settings={'default_payment_method': payment_method_id}
+                )
+            except _stripe.error.InvalidRequestError as e:
+                if 'already been attached' not in str(e):
+                    raise
         method_id = db.add_payment_method(user_id, 'stripe', payment_method_id, is_default=True, metadata={'stripe_payment_method_id': payment_method_id})
         return JSONResponse({"success": True, "message": "Credit card added successfully"})
     except Exception as e:
