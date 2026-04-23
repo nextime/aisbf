@@ -64,11 +64,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div id="new-provider-claude-warning" style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px; display: none;">
         <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice for Claude Provider</h4>
         <p style="margin: 0; color: #2d3436;">
-            Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+            Claude.ai policies state that unofficial clients are not allowed. By using AISBF in <strong>HTTP API / OAuth2 mode</strong>, you acknowledge that:
             <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
             <br>• Claude.ai detects prompt patterns to identify unofficial client usage, so it may not work with complex agents and prompts
             <br>• You use this software at your own risk and responsibility
             <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+            <br><br>✅ <strong>CLI mode is different:</strong> when "Use Claude CLI mode" is enabled, AISBF proxies requests through the official <code>claude</code> binary using <code>claude -p</code>, which is the intended programmatic use of the official Anthropic CLI and is permitted by Claude's terms of service.
         </p>
     </div>
     
@@ -134,6 +135,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 {% block extra_js %}
 <script>
+const CLAUDE_CLI_MODE = {{ 'true' if claude_cli_mode else 'false' }};
 let providersData = {{ providers_json | replace("</script>", "<\\/script>") | safe }};
 let expandedProviders = new Set();
 
@@ -225,6 +227,41 @@ async function uploadKiloFile(providerKey, file) {
 // Upload handler for Claude credential files
 async function uploadClaudeFile(providerKey, file) {
     await uploadFileChunked(providerKey, 'credentials_file', file, 'claude_config');
+}
+
+// Upload handler for Claude CLI credentials (.credentials.json from ~/.claude/)
+async function uploadClaudeCliFile(providerKey, file) {
+    if (!file) return;
+    if (!expandedProviders.has(providerKey)) toggleProvider(providerKey);
+    const statusEl = document.getElementById(`claude-cli-upload-status-${providerKey}`);
+    if (!statusEl) return;
+    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading CLI credentials: 0%</div>';
+    try {
+        const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
+        for (let chunkNumber = 1; chunkNumber <= totalChunks; chunkNumber++) {
+            const start = (chunkNumber - 1) * CHUNK_SIZE;
+            const chunk = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
+            const progress = Math.round((chunkNumber / totalChunks) * 100);
+            statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading CLI credentials: ${progress}%</div>`;
+            const formData = new FormData();
+            formData.append('provider_key', providerKey);
+            formData.append('file_type', 'cli_credentials');
+            formData.append('file_name', file.name);
+            formData.append('total_size', file.size);
+            formData.append('chunk_number', chunkNumber);
+            formData.append('total_chunks', totalChunks);
+            formData.append('file', chunk);
+            const response = await fetch('/dashboard/providers/upload-auth-file/chunk', { method: 'POST', body: formData });
+            const result = await response.json();
+            if (!result.success) throw new Error(result.error || 'Upload failed');
+            if (result.complete) {
+                statusEl.innerHTML = '<div style="color: #4ade80;">CLI credentials saved to server!</div>';
+                return;
+            }
+        }
+    } catch (e) {
+        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+    }
 }
 
 // Upload handler for Qwen credential files
@@ -505,21 +542,60 @@ function renderProviderDetails(key) {
 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
                 <div class="form-group">
-                    <label>Upload Credentials File</label>
+                    <label>Upload OAuth2 Credentials File</label>
                     <input type="file" id="claude-creds-file-${key}" accept=".json" onchange="uploadClaudeFile('${key}', this.files[0])">
                     <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Claude OAuth2 credentials JSON file</small>
                 </div>
                 <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
+
+                ${CLAUDE_CLI_MODE ? `
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #1e3a5f;">
+                    <h5 style="margin: 0 0 8px 0; color: #4ade80;">Claude CLI Mode Active</h5>
+                    <small style="color: #4ade80; display: block; margin-bottom: 14px;">
+                        The claude CLI was detected at startup. When enabled, requests are piped
+                        through the local claude binary instead of the HTTP API.
+                    </small>
+
+                    <div class="form-group" style="margin-bottom: 16px;">
+                        <label style="display: flex; align-items: center; gap: 10px; cursor: pointer;">
+                            <input type="checkbox"
+                                   id="claude-use-cli-mode-${key}"
+                                   ${claudeConfig.use_cli_mode ? 'checked' : ''}
+                                   onchange="updateClaudeConfig('${key}', 'use_cli_mode', this.checked)"
+                                   style="width: 18px; height: 18px; cursor: pointer; accent-color: #4ade80;">
+                            <span style="color: #e0e0e0; font-weight: 500;">Use Claude CLI mode</span>
+                        </label>
+                        <small style="color: #a0a0a0; display: block; margin-top: 6px; padding-left: 28px;">
+                            When checked and you have already authenticated via OAuth2 above,
+                            your existing tokens are used automatically — no separate file upload needed.
+                            You can also upload an explicit <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">.credentials.json</code>
+                            below to override.
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Override: Upload CLI Credentials File</label>
+                        <input type="file" id="claude-cli-creds-file-${key}" accept=".json" onchange="uploadClaudeCliFile('${key}', this.files[0])">
+                        <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                            Optional — upload a <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">~/.claude/.credentials.json</code>
+                            to use a specific account. Path saved in
+                            <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">claude_config.cli_credentials_file</code>.
+                        </small>
+                    </div>
+                    <div id="claude-cli-upload-status-${key}" style="margin-top: 10px;"></div>
+                </div>
+                ` : ''}
             </div>
 
             <div style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
                 <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice</h4>
                 <p style="margin: 0; color: #2d3436;">
-                    Claude.ai policies state that unofficial clients are not allowed. By using AISBF as a client, you acknowledge that:
+                    Claude.ai policies state that unofficial clients are not allowed. By using AISBF in <strong>HTTP API / OAuth2 mode</strong>, you acknowledge that:
                     <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
                     <br>• Claude.ai detects prompt patterns to identify unofficial client usage, so it may not work with complex agents and prompts
                     <br>• You use this software at your own risk and responsibility
                     <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
+                    <br><br>✅ <strong>CLI mode is different:</strong> when "Use Claude CLI mode" is enabled, AISBF proxies requests through the official <code style="background:#e8e0b0;padding:1px 4px;border-radius:3px;">claude</code> binary using <code style="background:#e8e0b0;padding:1px 4px;border-radius:3px;">claude -p</code>, which is the intended programmatic use of the official Anthropic CLI and is permitted by Claude's terms of service.
                 </p>
             </div>
         `;

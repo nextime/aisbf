@@ -663,6 +663,7 @@ autoselect_handler = None
 server_config = None
 config = None
 _initialized = False
+_claude_cli_mode = False
 
 # Cache for user-specific handlers to avoid recreating them
 _user_handlers_cache = {}
@@ -712,20 +713,30 @@ _background_tasks: set = set()
 
 def initialize_app(custom_config_dir=None):
     """Initialize app globals. Called by startup event or main()."""
-    global config, request_handler, rotation_handler, autoselect_handler, server_config, _initialized
-    
+    global config, request_handler, rotation_handler, autoselect_handler, server_config, _initialized, _claude_cli_mode
+
     if _initialized:
         return
-    
+
     # Set custom config directory if provided
     if custom_config_dir:
         set_config_dir(custom_config_dir)
         logger.info(f"Using custom config directory: {custom_config_dir}")
-    
+
+    # Detect claude CLI in PATH and enable CLI proxy mode if found
+    import shutil as _shutil
+    from aisbf.cli_mode import detect_claude_cli
+    if detect_claude_cli():
+        _claude_cli_mode = True
+        import aisbf.cli_mode as _cli_mode_mod
+        logger.info(f"Claude CLI detected at {_cli_mode_mod.CLAUDE_CLI_PATH} – CLI proxy mode enabled")
+    else:
+        logger.info("Claude CLI not found in PATH – using HTTP API mode")
+
     # Import config
     from aisbf.config import config as cfg
     from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
-    
+
     config = cfg
     request_handler = RequestHandler()
     rotation_handler = RotationHandler()
@@ -4387,6 +4398,7 @@ async def dashboard_providers(request: Request):
             "session": request.session,
             "__version__": __version__,
             "providers_json": json.dumps(providers_data),
+            "claude_cli_mode": _claude_cli_mode,
             "success": "Configuration saved successfully! Restart server for changes to take effect." if success else None
         }
         )
@@ -4401,6 +4413,7 @@ async def dashboard_providers(request: Request):
             "__version__": __version__,
             "user_providers_json": json.dumps(providers_data),
             "user_id": current_user_id,
+            "claude_cli_mode": _claude_cli_mode,
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -4607,12 +4620,13 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
+                    "claude_cli_mode": _claude_cli_mode,
                     "success": success_msg
                 }
             )
         else:
             success_msg = "Configuration saved successfully!"
-            
+
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/user_providers.html",
@@ -4622,6 +4636,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "__version__": __version__,
                     "user_providers_json": json.dumps(providers_data),
                     "user_id": current_user_id,
+                    "claude_cli_mode": _claude_cli_mode,
                     "success": success_msg
                 }
             )
@@ -4629,20 +4644,20 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         # Reload current config on error
         current_user_id = request.session.get('user_id')
         is_config_admin = current_user_id is None
-        
+
         if is_config_admin:
             config_path = Path.home() / '.aisbf' / 'providers.json'
             if not config_path.exists():
                 config_path = Path(__file__).parent / 'config' / 'providers.json'
             with open(config_path) as f:
                 full_config = json.load(f)
-            
+
             # Extract providers
             if 'providers' in full_config and isinstance(full_config['providers'], dict):
                 providers_data = full_config['providers']
             else:
                 providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
-            
+
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/providers.html",
@@ -4651,13 +4666,14 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
+                    "claude_cli_mode": _claude_cli_mode,
                     "error": f"Invalid JSON: {str(e)}"
                 }
             )
         else:
             db = DatabaseRegistry.get_config_database()
             user_providers = db.get_user_providers(current_user_id)
-            
+
             return templates.TemplateResponse(
                 request=request,
                 name="dashboard/user_providers.html",
@@ -4667,6 +4683,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "__version__": __version__,
                     "user_providers_json": json.dumps(user_providers),
                     "user_id": current_user_id,
+                    "claude_cli_mode": _claude_cli_mode,
                     "error": f"Invalid JSON: {str(e)}"
                 }
             )
@@ -6321,7 +6338,7 @@ async def dashboard_provider_upload(
 
     try:
         # Validate file type
-        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file', 'cli_credentials']
         if file_type not in allowed_types:
             return JSONResponse(
                 status_code=400,
@@ -6486,7 +6503,7 @@ async def dashboard_provider_upload_form(
 
     try:
         # Validate file type
-        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file', 'cli_credentials']
         if file_type not in allowed_types:
             return JSONResponse(
                 status_code=400,
@@ -6582,7 +6599,7 @@ async def dashboard_provider_upload_chunk(
 
     try:
         # Validate file type
-        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file']
+        allowed_types = ['credentials', 'database', 'config', 'kiro_credentials', 'claude_credentials', 'sqlite_db', 'creds_file', 'cli_credentials']
         if file_type not in allowed_types:
             return JSONResponse(
                 status_code=400,
@@ -6636,16 +6653,38 @@ async def dashboard_provider_upload_chunk(
             # Save metadata to database if not admin
             if not is_config_admin:
                 db = DatabaseRegistry.get_config_database()
-                db.save_user_auth_file(
-                    user_id=current_user_id,
-                    provider_id=provider_key,
-                    file_type=file_type,
-                    original_filename=file_name,
-                    stored_filename=stored_filename,
-                    file_path=str(file_path),
-                    file_size=total_size,
-                    mime_type=file.content_type
-                )
+
+                # CLI credentials for claude providers go directly into
+                # user_oauth2_credentials so the provider handler can read them
+                # without touching the filesystem at request time.
+                if file_type == 'cli_credentials':
+                    try:
+                        with open(file_path, 'r') as fh:
+                            cli_creds_content = json.load(fh)
+                        db.save_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_key,
+                            auth_type='claude_cli_credentials',
+                            credentials={'credentials': cli_creds_content},
+                        )
+                        file_path.unlink(missing_ok=True)
+                        logger.info(
+                            f"Stored CLI credentials for user {current_user_id} "
+                            f"provider {provider_key} in user_oauth2_credentials"
+                        )
+                    except Exception as exc:
+                        logger.error(f"Failed to save CLI credentials to DB: {exc}")
+                else:
+                    db.save_user_auth_file(
+                        user_id=current_user_id,
+                        provider_id=provider_key,
+                        file_type=file_type,
+                        original_filename=file_name,
+                        stored_filename=stored_filename,
+                        file_path=str(file_path),
+                        file_size=total_size,
+                        mime_type=file.content_type
+                    )
             else:
                 # Config admin: update providers.json with full path
                 try:
@@ -6704,7 +6743,14 @@ async def dashboard_provider_upload_chunk(
                                 providers[provider_key]['codex_config'] = {}
                             providers[provider_key]['codex_config']['credentials_file'] = relative_path
                             logger.info(f"Updated providers.json: {provider_key}.codex_config.credentials_file = {relative_path}")
-                        
+
+                        # For Claude CLI credentials – store path in claude_config.cli_credentials_file
+                        elif provider_type == 'claude' and file_type == 'cli_credentials':
+                            if 'claude_config' not in providers[provider_key]:
+                                providers[provider_key]['claude_config'] = {}
+                            providers[provider_key]['claude_config']['cli_credentials_file'] = relative_path
+                            logger.info(f"Updated providers.json: {provider_key}.claude_config.cli_credentials_file = {relative_path}")
+
                         # Fallback: update top-level field
                         else:
                             providers[provider_key][file_type] = relative_path

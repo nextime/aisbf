@@ -19,7 +19,8 @@ Also available via TOR for privacy-first access:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, Kiro, Kilocode, Codex, and Qwen
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro, Kilocode, Codex, and Qwen
+- **Claude CLI Mode**: When the `claude` binary is in PATH, requests are proxied through the official Anthropic CLI (`claude -p`) — uses each user's own account, fully permitted by Claude's terms of service
 - **Unified Wallet System**: Fiat wallet with crypto/PayPal/Stripe top-ups and auto top-up for subscription renewals
 - **Intelligent Routing**: Weighted load balancing and AI-assisted model selection
 - **Streaming Support**: Full support for streaming responses from all providers

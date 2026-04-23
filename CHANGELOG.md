@@ -7,6 +7,40 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.99.57] - 2026-04-23
+
+### Added
+- **Claude CLI Mode** (`aisbf/cli_mode.py`, `aisbf/providers/claude.py`)
+  - At startup, AISBF checks for the `claude` binary in PATH via `shutil.which`; if found, CLI proxy mode is enabled globally
+  - New `ClaudeCliSessionManager` class manages per-user isolated temporary config directories (`CLAUDE_CONFIG_DIR`) containing `settings.json` (onboarding bypass) and `.credentials.json`
+  - Session directories are reused across requests and automatically cleaned up after 10 minutes of idle time; the background cleanup task runs every 60 seconds
+  - Each request spawns a dedicated `asyncio.create_subprocess_exec` subprocess running `claude -p --input-format stream-json --output-format stream-json --tools "" --dangerously-skip-permissions --no-session-persistence --verbose --model <model>`; multiple parallel requests are fully non-blocking
+  - Streaming output is parsed from the CLI's `stream-json` format and re-emitted as OpenAI-compatible SSE chunks
+  - Non-streaming requests collect all `text_delta` events and return a standard `chat.completion` response
+  - Messages are converted to a flat text prompt (system instructions as prefix, then `Human:`/`Assistant:` turns) — no Anthropic billing-header injection needed in CLI mode
+  - CLI mode falls through gracefully to HTTP API mode if no CLI credentials are configured for the requesting user
+
+- **"Use Claude CLI mode" checkbox** (provider configuration UI)
+  - New `claude_config.use_cli_mode` boolean field in the Claude provider configuration
+  - When checked, AISBF derives CLI credentials automatically from the user's existing OAuth2 tokens already stored in AISBF, converting them to the `claudeAiOauth` schema expected by the CLI (`expires_at` seconds → `expiresAt` milliseconds, `scope` string → `scopes` list)
+  - No separate file upload required when OAuth2 authentication has already been completed
+  - Available in both admin (`providers.html`) and user (`user_providers.html`) provider configuration pages, shown only when the `claude` binary is detected at startup
+
+- **Explicit CLI credentials file upload**
+  - Users can upload their own `~/.claude/.credentials.json` to use a specific Claude account independently of their AISBF OAuth2 session
+  - Uploaded file takes priority over OAuth2-derived credentials
+  - Admin: file path saved in `providers.json` under `claude_config.cli_credentials_file`
+  - Database users (all roles): credentials JSON content stored in `user_oauth2_credentials` with `auth_type='claude_cli_credentials'`; temp file removed after content is persisted to DB
+
+- **`ClaudeProviderHandler._oauth_tokens_to_cli_credentials()`** static method
+  - Converts AISBF's internal OAuth2 token dict to the `claudeAiOauth` credentials schema used by the Claude CLI
+  - Handles missing `scope` by defaulting to the standard five-scope set: `user:inference`, `user:file_upload`, `user:profile`, `user:mcp_servers`, `user:sessions:claude_code`
+
+### Changed
+- **Claude provider warning notices** updated in both `providers.html` and `user_providers.html`
+  - Warning now explicitly scopes the "unofficial client" risk to HTTP API / OAuth2 mode
+  - Added a green ✅ note clarifying that CLI mode uses the official `claude -p` interface, which is the intended programmatic use of the Anthropic CLI and is permitted by Claude's terms of service
+
 ## [0.99.49] - 2026-04-21
 
 ### Added

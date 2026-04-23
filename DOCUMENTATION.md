@@ -6,9 +6,10 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2), Ollama, Kiro (Amazon Q Developer), Kilocode (OAuth2), Codex (OAuth2), and Qwen (API Key/OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro (Amazon Q Developer), Kilocode (OAuth2), Codex (OAuth2), and Qwen (API Key/OAuth2)
 - **Unified Wallet System**: Fiat wallet with crypto/PayPal/Stripe top-ups and auto top-up for subscription renewals
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh, Chrome extension for remote servers, and curl_cffi TLS fingerprinting support
+- **Claude CLI Mode**: When the `claude` binary is present in PATH at startup, AISBF automatically enables CLI proxy mode — requests are piped through the official Anthropic CLI (`claude -p`) instead of the HTTP API, using per-user isolated config directories with a 10-minute idle cleanup
 - **Kiro-cli Support**: Full support for Amazon Q Developer CLI authentication with Device Authorization Grant
 - **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
 - **Codex OAuth2 Authentication**: OAuth2 Device Authorization Grant for OpenAI Codex with automatic token refresh and API key exchange
@@ -519,12 +520,46 @@ AISBF automatically extracts and tracks model metadata from provider responses:
 - Static model list (no dynamic model discovery)
 - cache_control support for cost reduction
 
-### Claude Code (OAuth2)
+### Claude Code (OAuth2 / CLI)
+
+AISBF supports two modes for the Claude provider, selected automatically at runtime:
+
+#### HTTP API / OAuth2 mode (default)
 - Full OAuth2 PKCE authentication flow
 - Automatic token refresh with refresh token rotation
 - Chrome extension for remote server OAuth2 callback interception
 - Proxy-aware extension serving: automatically detects reverse proxy deployments
 - Supports all Claude models with streaming, tool calling, vision, and extended thinking
+- **Note**: this mode uses an unofficial client interface; use at your own risk as per Claude's terms of service
+
+#### CLI proxy mode (requires `claude` in PATH)
+- Activated automatically at startup when the `claude` binary is found in PATH
+- Requests are proxied through the official Anthropic CLI using `claude -p --input-format stream-json --output-format stream-json`
+- Uses the official CLI as intended by Anthropic — permitted by Claude's terms of service
+- Per-user isolated temporary config directories (`CLAUDE_CONFIG_DIR`) prevent credential cross-contamination
+- Idle session cleanup: temp dirs are removed after 10 minutes of inactivity; active requests always get a fresh subprocess
+- Multiple parallel requests are handled concurrently via `asyncio.create_subprocess_exec`
+- Credentials can be supplied in two ways:
+  - **"Use Claude CLI mode" checkbox**: derives credentials automatically from existing OAuth2 tokens already stored in AISBF, converting them to the `claudeAiOauth` schema expected by the CLI
+  - **Explicit upload**: users can upload their own `~/.claude/.credentials.json` file to use a specific account (takes priority over OAuth2-derived credentials)
+- Admin (config-file user): CLI credentials file path stored in `providers.json` under `claude_config.cli_credentials_file`
+- Database users (all roles): CLI credentials stored in `user_oauth2_credentials` with `auth_type='claude_cli_credentials'`
+
+##### Credentials file schema
+The CLI expects a `.credentials.json` with this structure:
+```json
+{
+  "claudeAiOauth": {
+    "accessToken": "sk-ant-oat01-...",
+    "refreshToken": "sk-ant-ort01-...",
+    "expiresAt": 1776940481301,
+    "scopes": ["user:inference", "user:file_upload", "user:profile", "user:mcp_servers", "user:sessions:claude_code"],
+    "subscriptionType": "pro",
+    "rateLimitTier": "default_claude_ai"
+  }
+}
+```
+When "Use Claude CLI mode" is checked without an explicit file upload, AISBF converts the stored OAuth2 tokens to this format automatically (`expires_at` seconds → `expiresAt` milliseconds, `scope` string → `scopes` list).
 
 ### Ollama
 - Uses direct HTTP API

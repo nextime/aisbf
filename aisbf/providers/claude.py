@@ -24,11 +24,106 @@ import httpx
 import asyncio
 import time
 import random
-from typing import Dict, List, Optional, Union, Any
+import os
+import json
+import shutil
+import tempfile
+import logging as _logging
+from typing import Dict, List, Optional, Union, Any, Tuple
 from anthropic import Anthropic
 from ..models import Model
 from ..config import config
 from .base import BaseProviderHandler, AnthropicFormatConverter, AISBF_DEBUG
+
+
+class ClaudeCliSessionManager:
+    """
+    Manages per-user temporary config directories for the claude CLI subprocess.
+
+    Each (user_id, provider_id) pair gets its own temp dir containing
+    settings.json and .credentials.json.  The dir is reused across requests
+    and cleaned up after 10 minutes of idle time.
+    """
+
+    _sessions: Dict[Tuple, Dict] = {}
+    _cleanup_task: Optional[asyncio.Task] = None
+    _lock: Optional[asyncio.Lock] = None
+    _IDLE_TIMEOUT = 600  # 10 minutes
+
+    @classmethod
+    def _get_lock(cls) -> asyncio.Lock:
+        if cls._lock is None:
+            cls._lock = asyncio.Lock()
+        return cls._lock
+
+    @classmethod
+    async def get_config_dir(cls, user_id, provider_id: str, cli_credentials: dict) -> str:
+        """Return (creating if needed) the temp config dir for this user/provider."""
+        logger = _logging.getLogger(__name__)
+        key = (user_id, provider_id)
+
+        async with cls._get_lock():
+            if key in cls._sessions:
+                session = cls._sessions[key]
+                if os.path.exists(session['config_dir']):
+                    session['last_used'] = time.time()
+                    logger.debug(f"ClaudeCliMode: reusing session dir for {key}")
+                    return session['config_dir']
+                del cls._sessions[key]
+
+            temp_dir = tempfile.mkdtemp(prefix='aisbf_claude_cli_')
+
+            # settings.json – prevents interactive onboarding hang
+            with open(os.path.join(temp_dir, 'settings.json'), 'w') as fh:
+                json.dump({
+                    'hasCompletedOnboarding': True,
+                    'telemetry': 'off',
+                    'theme': 'dark',
+                }, fh, indent=2)
+
+            # .credentials.json – the user's Claude CLI OAuth tokens
+            with open(os.path.join(temp_dir, '.credentials.json'), 'w') as fh:
+                json.dump(cli_credentials, fh, indent=2)
+
+            cls._sessions[key] = {'config_dir': temp_dir, 'last_used': time.time()}
+            logger.info(f"ClaudeCliMode: created session dir {temp_dir} for {key}")
+            cls._ensure_cleanup_task()
+            return temp_dir
+
+    @classmethod
+    def _ensure_cleanup_task(cls):
+        try:
+            loop = asyncio.get_event_loop()
+            if cls._cleanup_task is None or cls._cleanup_task.done():
+                cls._cleanup_task = loop.create_task(cls._cleanup_loop())
+        except RuntimeError:
+            pass
+
+    @classmethod
+    async def _cleanup_loop(cls):
+        logger = _logging.getLogger(__name__)
+        while True:
+            await asyncio.sleep(60)
+            async with cls._get_lock():
+                if not cls._sessions:
+                    cls._cleanup_task = None
+                    return
+                now = time.time()
+                expired = [k for k, s in cls._sessions.items()
+                           if now - s['last_used'] > cls._IDLE_TIMEOUT]
+                for key in expired:
+                    session = cls._sessions.pop(key)
+                    try:
+                        shutil.rmtree(session['config_dir'], ignore_errors=True)
+                        logger.info(
+                            f"ClaudeCliMode: cleaned up idle session "
+                            f"{session['config_dir']} for {key}"
+                        )
+                    except Exception as exc:
+                        logger.warning(
+                            f"ClaudeCliMode: cleanup error for "
+                            f"{session['config_dir']}: {exc}"
+                        )
 
 
 class ClaudeProviderHandler(BaseProviderHandler):
@@ -155,7 +250,294 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # For regular users, NO file fallback - return empty auth instance
         logging.getLogger(__name__).info(f"ClaudeProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
         return ClaudeAuth(credentials_file=credentials_file, skip_initial_load=True)
-    
+
+    # ------------------------------------------------------------------ #
+    # Claude CLI mode helpers                                              #
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _oauth_tokens_to_cli_credentials(tokens: dict) -> dict:
+        """
+        Convert AISBF OAuth2 token dict to the Claude CLI .credentials.json schema:
+
+        AISBF stores:  access_token, refresh_token, expires_at (seconds float), scope
+        CLI expects:   claudeAiOauth.accessToken, .refreshToken, .expiresAt (ms int),
+                       .scopes (list), .subscriptionType, .rateLimitTier
+        """
+        default_scopes = [
+            'user:file_upload',
+            'user:inference',
+            'user:mcp_servers',
+            'user:profile',
+            'user:sessions:claude_code',
+        ]
+        raw_scope = tokens.get('scope', '')
+        scopes = raw_scope.split() if raw_scope.strip() else default_scopes
+
+        expires_at_sec = tokens.get('expires_at', 0)
+        expires_at_ms = int(expires_at_sec * 1000) if expires_at_sec else 0
+
+        return {
+            'claudeAiOauth': {
+                'accessToken': tokens.get('access_token', ''),
+                'refreshToken': tokens.get('refresh_token', ''),
+                'expiresAt': expires_at_ms,
+                'scopes': scopes,
+                'subscriptionType': tokens.get('subscription_type', 'pro'),
+                'rateLimitTier': tokens.get('rate_limit_tier', 'default_claude_ai'),
+            }
+        }
+
+    def _get_cli_credentials(self) -> Optional[dict]:
+        """
+        Return the Claude CLI .credentials.json content for this user/provider,
+        or None if CLI credentials are not configured.
+
+        Priority order:
+        1. Explicit CLI credentials file (admin) or uploaded CLI credentials (DB user)
+        2. If claude_config.use_cli_mode is true, derive from existing OAuth2 tokens
+        """
+        logger = _logging.getLogger(__name__)
+
+        if isinstance(self.provider_config, dict):
+            claude_cfg = self.provider_config.get('claude_config', {}) or {}
+        else:
+            claude_cfg = getattr(self.provider_config, 'claude_config', {}) or {}
+        use_cli_mode = bool(claude_cfg.get('use_cli_mode')) if isinstance(claude_cfg, dict) else False
+
+        if self.user_id is None:
+            # ── Config admin ──────────────────────────────────────────────
+            cli_file = claude_cfg.get('cli_credentials_file') if isinstance(claude_cfg, dict) else None
+            if cli_file:
+                expanded = os.path.expanduser(cli_file)
+                if not os.path.exists(expanded):
+                    logger.warning(f"ClaudeCliMode: CLI credentials file not found: {expanded}")
+                else:
+                    try:
+                        with open(expanded) as fh:
+                            return json.load(fh)
+                    except Exception as exc:
+                        logger.warning(f"ClaudeCliMode: failed to read CLI credentials file: {exc}")
+
+            # Fall back: derive from existing OAuth2 tokens when use_cli_mode is set
+            if use_cli_mode and self.auth and self.auth.tokens:
+                logger.info("ClaudeCliMode: building CLI credentials from existing OAuth2 tokens (admin)")
+                return self._oauth_tokens_to_cli_credentials(self.auth.tokens)
+
+            return None
+
+        else:
+            # ── DB user ───────────────────────────────────────────────────
+            try:
+                from ..database import DatabaseRegistry
+                db = DatabaseRegistry.get_config_database()
+                if db:
+                    # 1. Check for explicit uploaded CLI credentials
+                    row = db.get_user_oauth2_credentials(
+                        user_id=self.user_id,
+                        provider_id=self.provider_id,
+                        auth_type='claude_cli_credentials',
+                    )
+                    if row and row.get('credentials'):
+                        return row['credentials'].get('credentials')
+
+                    # 2. Derive from existing OAuth2 tokens when use_cli_mode is set
+                    if use_cli_mode:
+                        oauth_row = db.get_user_oauth2_credentials(
+                            user_id=self.user_id,
+                            provider_id=self.provider_id,
+                            auth_type='claude_oauth2',
+                        )
+                        if oauth_row and oauth_row.get('credentials'):
+                            tokens = oauth_row['credentials'].get('tokens', {})
+                            if tokens:
+                                logger.info(
+                                    f"ClaudeCliMode: building CLI credentials from "
+                                    f"OAuth2 tokens for user {self.user_id}"
+                                )
+                                return self._oauth_tokens_to_cli_credentials(tokens)
+            except Exception as exc:
+                logger.warning(f"ClaudeCliMode: failed to load credentials: {exc}")
+            return None
+
+    def _messages_to_cli_prompt(self, messages: List[Dict]) -> str:
+        """
+        Convert an OpenAI-style messages list to a flat text prompt for the
+        claude CLI.  System messages are included as a prefix; no Anthropic
+        system-prompt injection is needed in CLI mode.
+        """
+        system_parts: List[str] = []
+        turn_parts: List[str] = []
+
+        for msg in messages:
+            role = msg.get('role', '')
+            content = msg.get('content', '')
+
+            # Normalise content to str
+            if isinstance(content, list):
+                text_fragments = []
+                for block in content:
+                    if isinstance(block, dict) and block.get('type') == 'text':
+                        text_fragments.append(block.get('text', ''))
+                    elif isinstance(block, str):
+                        text_fragments.append(block)
+                content = '\n'.join(text_fragments)
+            elif not isinstance(content, str):
+                content = str(content)
+
+            if role == 'system':
+                system_parts.append(content.strip())
+            elif role == 'user':
+                turn_parts.append(f'Human: {content}')
+            elif role == 'assistant':
+                turn_parts.append(f'Assistant: {content}')
+
+        parts: List[str] = []
+        if system_parts:
+            parts.append('[System Instructions: ' + '\n'.join(system_parts) + ']')
+        parts.extend(turn_parts)
+        return '\n\n'.join(parts)
+
+    async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str):
+        """
+        Spawn a claude CLI subprocess, stream its JSON output, and yield
+        OpenAI-compatible SSE chunks.  Multiple parallel calls each get their
+        own subprocess; the config_dir is shared (read-only at runtime).
+        """
+        logger = _logging.getLogger(__name__)
+        clean_model = model.split('/')[-1] if '/' in model else model
+
+        env = os.environ.copy()
+        env['CLAUDE_CONFIG_DIR'] = config_dir
+        env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
+
+        cmd = [
+            'claude', '-p',
+            '--input-format', 'stream-json',
+            '--output-format', 'stream-json',
+            '--tools', '',
+            '--dangerously-skip-permissions',
+            '--no-session-persistence',
+            '--verbose',
+        ]
+        if clean_model:
+            cmd += ['--model', clean_model]
+
+        logger.info(f"ClaudeCliMode: launching subprocess model={clean_model} dir={config_dir}")
+
+        process = await asyncio.create_subprocess_exec(
+            *cmd,
+            env=env,
+            stdin=asyncio.subprocess.PIPE,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+
+        # Send the prompt as a stream-json user_message then close stdin
+        input_msg = json.dumps({
+            'type': 'user_message',
+            'content': [{'type': 'text', 'text': prompt}],
+        }) + '\n'
+        process.stdin.write(input_msg.encode())
+        await process.stdin.drain()
+        process.stdin.close()
+
+        completion_id = f'chatcmpl-cli-{int(time.time())}'
+        created_time = int(time.time())
+        first_chunk = True
+
+        try:
+            while True:
+                try:
+                    raw = await asyncio.wait_for(process.stdout.readline(), timeout=120.0)
+                except asyncio.TimeoutError:
+                    logger.error("ClaudeCliMode: subprocess read timeout (120 s)")
+                    break
+
+                if not raw:
+                    break
+
+                line_str = raw.decode('utf-8', errors='replace').strip()
+                if not line_str:
+                    continue
+
+                try:
+                    data = json.loads(line_str)
+                except json.JSONDecodeError:
+                    continue
+
+                event_type = data.get('type')
+
+                if event_type == 'content_block_delta':
+                    delta = data.get('delta', {})
+                    if delta.get('type') == 'text_delta':
+                        text = delta.get('text', '')
+                        if not text:
+                            continue
+
+                        if first_chunk:
+                            yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})}\n\n'
+                            first_chunk = False
+
+                        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}]})}\n\n'
+
+                elif event_type in ('message_stop', 'result'):
+                    logger.debug(f"ClaudeCliMode: received {event_type}, closing stream")
+                    break
+
+        except Exception as exc:
+            logger.error(f"ClaudeCliMode: streaming error: {exc}", exc_info=True)
+            try:
+                stderr_bytes = await asyncio.wait_for(process.stderr.read(), timeout=2.0)
+                if stderr_bytes:
+                    logger.error(f"ClaudeCliMode: stderr: {stderr_bytes.decode('utf-8', errors='replace')[:500]}")
+            except Exception:
+                pass
+        finally:
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+
+        # Final stop + DONE
+        yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}]})}\n\n'
+        yield 'data: [DONE]\n\n'
+
+    async def _handle_cli_request(self, prompt: str, model: str, config_dir: str) -> dict:
+        """Non-streaming CLI request – collects the full response text."""
+        accumulated: List[str] = []
+
+        async for chunk_str in self._handle_cli_streaming_request(prompt, model, config_dir):
+            if chunk_str.startswith('data: ') and '[DONE]' not in chunk_str:
+                try:
+                    data = json.loads(chunk_str[6:])
+                    choices = data.get('choices', [])
+                    if choices:
+                        text = choices[0].get('delta', {}).get('content', '')
+                        if text:
+                            accumulated.append(text)
+                except json.JSONDecodeError:
+                    pass
+
+        clean_model = model.split('/')[-1] if '/' in model else model
+        full_text = ''.join(accumulated)
+        return {
+            'id': f'chatcmpl-cli-{int(time.time())}',
+            'object': 'chat.completion',
+            'created': int(time.time()),
+            'model': f'{self.provider_id}/{clean_model}',
+            'choices': [{
+                'index': 0,
+                'message': {'role': 'assistant', 'content': full_text},
+                'finish_reason': 'stop',
+            }],
+            'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+        }
+
     def _init_session_identifiers(self):
         """Initialize persistent session identifiers (device_id, account_uuid, session_id)."""
         import uuid
@@ -832,13 +1214,33 @@ class ClaudeProviderHandler(BaseProviderHandler):
     async def _handle_request_with_model(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                                         temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                                         tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
-        """Handle request with a specific model using direct HTTP requests."""
+        """Handle request with a specific model.
+
+        When the claude CLI is detected at startup and the user has CLI
+        credentials configured, the request is proxied through a subprocess
+        instead of calling the Anthropic HTTP API directly.
+        """
         import logging
-        import json
         logger = logging.getLogger(__name__)
-        
+
+        # ── Claude CLI mode ──────────────────────────────────────────────
+        import aisbf.cli_mode as cli_mode_mod
+        if cli_mode_mod.CLAUDE_CLI_MODE:
+            cli_creds = self._get_cli_credentials()
+            if cli_creds is not None:
+                logger.info(f"ClaudeProviderHandler: using CLI subprocess mode for model {model}")
+                prompt = self._messages_to_cli_prompt(messages)
+                config_dir = await ClaudeCliSessionManager.get_config_dir(
+                    self.user_id, self.provider_id, cli_creds
+                )
+                if stream:
+                    return self._handle_cli_streaming_request(prompt, model, config_dir)
+                else:
+                    return await self._handle_cli_request(prompt, model, config_dir)
+        # ── Fall through to HTTP API mode ────────────────────────────────
+
         logger.info(f"ClaudeProviderHandler: Handling request for model {model} (Direct HTTP mode)")
-        
+
         if AISBF_DEBUG:
             logger.info(f"ClaudeProviderHandler: Messages: {messages}")
         else:
