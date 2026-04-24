@@ -75,7 +75,9 @@ setup(
     # install_requires=requirements,
     include_package_data=True,
     package_data={
-        "aisbf": ["*.json"],
+        # aisbf.sh bundled inside the package so cli.py can bootstrap the share
+        # directory even when pip fails to install data_files from the wheel.
+        "aisbf": ["*.json", "aisbf.sh"],
         "": ["templates/**/*.html", "templates/**/*.css", "templates/**/*.js", "static/**/*"],
     },
     data_files=[
@@ -116,6 +118,7 @@ setup(
             'aisbf/analytics.py',
             'aisbf/email_utils.py',
             'aisbf/geolocation.py',
+            'aisbf/aisbf.sh',
         ]),
         # aisbf.providers subpackage
         ('share/aisbf/aisbf/providers', [

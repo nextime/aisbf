@@ -8,6 +8,7 @@ include cli.py
 recursive-include config *.json
 recursive-include config *.md
 recursive-include aisbf *.py
+recursive-include aisbf *.sh
 recursive-include aisbf/payments/wallet *.py
 recursive-include templates *.html
 recursive-include templates *.css
