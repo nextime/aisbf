@@ -15651,10 +15651,11 @@ async def dashboard_tor_status(request: Request):
         return JSONResponse({'success': False, 'error': 'Admin access required'}, status_code=403)
     
     try:
-        from aisbf.config import get_config
-        config = get_config()
-        
-        tor_enabled = config and hasattr(config, 'tor') and config.tor and config.tor.enabled
+        config_path = get_aisbf_config_path()
+        with open(config_path) as f:
+            aisbf_config = json.load(f)
+        tor_cfg = aisbf_config.get('tor', {})
+        tor_enabled = bool(tor_cfg.get('enabled', False))
         tor_running = tor_service is not None and tor_service.is_connected() if tor_service else False
         
         response = {

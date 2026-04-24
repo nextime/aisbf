@@ -1638,8 +1638,8 @@ class ResponseCache:
             Dict with cache statistics
         """
         stats = self.stats.copy()
-
-        # Add current cache size
+        stats['enabled'] = self.enabled
+        stats['backend'] = self.backend
         if self.backend == 'redis' and self.redis_client:
             try:
                 pattern = f"{self.key_prefix}*"
