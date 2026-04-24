@@ -53,11 +53,15 @@ class build_py(_build_py):
 
     def run(self):
         self._populate_share()
+        self._update_package_data()
         super().run()
 
     def _populate_share(self):
         root = Path(__file__).parent
         share = root / 'aisbf' / '_share'
+        # Full clean rebuild so stale files never sneak in
+        if share.exists():
+            shutil.rmtree(share)
         share.mkdir(exist_ok=True)
 
         for fname in self._SHARE_FILES:
@@ -68,10 +72,24 @@ class build_py(_build_py):
         for dname in self._SHARE_DIRS:
             src = root / dname
             dst = share / dname
-            if src.exists():
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
+            if src.is_dir():
+                shutil.copytree(src, dst,
+                                ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
+
+    def _update_package_data(self):
+        """Dynamically register every file copied into _share/ so setuptools
+        includes them in the wheel.  The static package_data globs use '**'
+        which older setuptools silently ignores; this method is the fix."""
+        share = Path(__file__).parent / 'aisbf' / '_share'
+        if not share.exists():
+            return
+        patterns = []
+        for f in share.rglob('*'):
+            if f.is_file() and '__pycache__' not in f.parts and not f.name.endswith(('.pyc', '.pyo')):
+                rel = str(f.relative_to(Path(__file__).parent / 'aisbf'))
+                patterns.append(rel)
+        pkg_data = self.distribution.package_data
+        pkg_data.setdefault('aisbf', []).extend(patterns)
 
 
 class InstallCommand(_install):
@@ -112,24 +130,13 @@ setup(
     # install_requires=requirements,
     include_package_data=True,
     package_data={
-        # _share/ is populated at build time by the build_py hook above and
-        # bundled in the wheel so cli.py can extract it when data_files fail.
+        # Minimal static stubs — the build_py hook's _update_package_data()
+        # dynamically appends every file it copies into aisbf/_share/, so
+        # '**' glob patterns (unsupported by older setuptools) are not needed.
         "aisbf": [
             "*.json",
             "aisbf.sh",
-            "_share/main.py",
-            "_share/requirements.txt",
-            "_share/aisbf.sh",
-            "_share/templates/*.html",
-            "_share/templates/**/*.html",
-            "_share/templates/**/*.css",
-            "_share/templates/**/*.js",
-            "_share/static/*",
-            "_share/static/**/*",
-            "_share/config/*",
-            "_share/config/**/*",
         ],
-        "": ["templates/**/*.html", "templates/**/*.css", "templates/**/*.js", "static/**/*"],
     },
     data_files=[
         # Install to /usr/local/share/aisbf (system-wide)
