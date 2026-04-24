@@ -740,6 +740,9 @@ autoselect_handler = None
 server_config = None
 config = None
 _initialized = False
+
+# Set to True at startup if the server's own public IP resolves to Israel
+_server_ip_blocked: bool = False
 _claude_cli_mode = False
 
 # Cache for user-specific handlers to avoid recreating them
@@ -1238,6 +1241,7 @@ async def _prefetch_global_provider_models():
 async def startup_event():
     """Initialize app on startup (for uvicorn import case)."""
     global config, server_config, _cache_refresh_task, tor_service
+    await _check_server_ip_country()
     if not _initialized:
         # Use environment variable for config dir if set
         custom_config_dir = get_config_dir()
@@ -2111,76 +2115,87 @@ app.add_middleware(
     https_only=os.environ.get("AISBF_HTTPS", "false").lower() == "true",
 )
 
-class DashboardBlockingMiddleware(BaseHTTPMiddleware):
-    """Middleware to block dashboard access from Israeli domains."""
-    
-    async def dispatch(self, request: Request, call_next):
-        host = request.headers.get("host", "").lower()
-        if host.endswith(".il"):
-            # Check if this is a dashboard route
-            path = request.url.path
-            if path.startswith("/dashboard") or path == "/":
-                # Redirect to blocked page
-                base_url = get_base_url(request)
-                blocked_url = f"{base_url}/blocked"
-                return RedirectResponse(url=blocked_url, status_code=302)
-        
-        response = await call_next(request)
-        return response
+def _get_client_ip(request: Request) -> Optional[str]:
+    """Extract the real client IP, preferring X-Forwarded-For set by the proxy."""
+    x_forwarded_for = request.headers.get("X-Forwarded-For")
+    if x_forwarded_for:
+        return x_forwarded_for.split(",")[0].strip()
+    client = request.scope.get("client")
+    if client:
+        return client[0]
+    return None
 
 
-class APIBlockingMiddleware(BaseHTTPMiddleware):
-    """Middleware to block API/MCP access from Israeli domains and IPs."""
-    
-    async def dispatch(self, request: Request, call_next):
-        host = request.headers.get("host", "").lower()
-        path = request.url.path
-        
-        # Check if this is API or MCP route
-        is_api_route = path.startswith("/api") or path.startswith("/mcp")
-        
-        if is_api_route:
-            # Block if domain is Israeli
-            if host.endswith(".il"):
-                return JSONResponse(
-                    status_code=403,
-                    content={"error": "We do not support the Israeli genocide of Palestinian people."}
-                )
-            
-            # Block if IP is genocidial
-            client_ip = self._get_client_ip(request)
-            if client_ip:
-                country = await geolocation.get_ip_country(client_ip)
+async def _check_server_ip_country() -> None:
+    """Fetch the server's own public IP at startup and set _server_ip_blocked if Israeli."""
+    global _server_ip_blocked
+    try:
+        async with httpx.AsyncClient(timeout=5.0) as client:
+            resp = await client.get("https://api.ipify.org")
+            if resp.status_code == 200:
+                server_ip = resp.text.strip()
+                country = await geolocation.get_ip_country(server_ip)
                 if country == 'IL':
-                    return JSONResponse(
-                        status_code=403,
-                        content={"error": "We do not support the Israeli genocide of Palestinian people."}
-                    )
-        
-        response = await call_next(request)
-        return response
-    
-    def _get_client_ip(self, request: Request) -> Optional[str]:
-        """Extract client IP from request."""
-        # Try X-Forwarded-For first (from proxy)
-        x_forwarded_for = request.headers.get("X-Forwarded-For")
-        if x_forwarded_for:
-            # Take first IP if multiple
-            return x_forwarded_for.split(",")[0].strip()
-        
-        # Fall back to direct client
-        client = request.scope.get("client")
-        if client:
-            return client[0]
-        
-        return None
+                    _server_ip_blocked = True
+                    logger.warning(f"Server public IP {server_ip} is Israeli — all access will be blocked")
+                else:
+                    logger.info(f"Server public IP {server_ip} country: {country}")
+    except Exception as e:
+        logger.warning(f"Could not determine server public IP country: {e}")
+
+
+_BLOCK_MESSAGE = "We do not support the Israeli genocide of Palestinian people."
+
+
+class GenocidalBlockingMiddleware(BaseHTTPMiddleware):
+    """Block all access when the server or the connecting client is Israeli.
+
+    Blocks when ANY of the following is true:
+    - The server's own public IP resolves to Israel (checked once at startup)
+    - The Host header domain ends with .il
+    - The client's IP resolves to Israel (per-request geolocation lookup)
+
+    The /blocked page is always allowed through so the redirect target is reachable.
+    API/MCP routes return JSON 403; all other routes redirect to /blocked.
+    """
+
+    async def dispatch(self, request: Request, call_next):
+        if request.url.path == "/blocked":
+            return await call_next(request)
+
+        if await self._should_block(request):
+            return self._block_response(request)
+
+        return await call_next(request)
+
+    async def _should_block(self, request: Request) -> bool:
+        if _server_ip_blocked:
+            return True
+
+        host = request.headers.get("host", "").lower().split(":")[0]
+        if host.endswith(".il"):
+            return True
+
+        client_ip = _get_client_ip(request)
+        if client_ip:
+            country = await geolocation.get_ip_country(client_ip)
+            if country == 'IL':
+                return True
+
+        return False
+
+    def _block_response(self, request: Request):
+        path = request.url.path
+        if path.startswith("/api") or path.startswith("/mcp"):
+            return JSONResponse(status_code=403, content={"error": _BLOCK_MESSAGE})
+        return RedirectResponse(url=f"{get_base_url(request)}/blocked", status_code=302)
 
 
 # Middleware execution order: last added = first executed (outermost layer).
-# Blocking middlewares are added first so they execute AFTER proxy headers are decoded.
+# GenocidalBlockingMiddleware is added first so it executes AFTER ProxyHeadersMiddleware
+# has already decoded proxy headers (real client IP, real host) into the request scope.
 # ProxyHeadersMiddleware is added LAST so it executes FIRST on every request.
-app.add_middleware(DashboardBlockingMiddleware)
-app.add_middleware(APIBlockingMiddleware)
+app.add_middleware(GenocidalBlockingMiddleware)
 app.add_middleware(ProxyHeadersMiddleware)
 
 # Helper function for API authentication
