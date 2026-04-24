@@ -28,12 +28,12 @@ async def get_ip_country(ip: str) -> Optional[str]:
                 country = response.text.strip().upper()
                 _ip_country_cache[ip] = country
                 return country
+            else:
+                _ip_country_cache[ip] = None
+                return None
     except Exception:
-        pass
-    
-    # Cache failure to avoid repeated calls
-    _ip_country_cache[ip] = None
-    return None
+        _ip_country_cache[ip] = None
+        return None
 
 def is_ip_israeli(ip: str) -> bool:
     """Check if IP is from Israel."""
