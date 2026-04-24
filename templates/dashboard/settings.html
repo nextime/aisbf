@@ -347,6 +347,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <h3 style="margin: 24px 0 16px; font-size:1em; color:#a0a0a0; border-bottom: 1px solid #0f3460; padding-bottom:8px;">Response Cache Configuration</h3>
     
+    <!-- DEBUG: {{ config.response_cache }} -->
+    
     <div class="form-group">
         <label>
             <input type="checkbox" name="response_cache_enabled" {% if config.response_cache and config.response_cache.enabled %}checked{% endif %}>
@@ -529,6 +531,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <input type="checkbox" name="tor_enabled" id="tor_enabled" {% if config.tor and config.tor.enabled %}checked{% endif %} onchange="toggleTorFields()">
             Enable TOR Hidden Service
         </label>
+        <!-- DEBUG TOR: {{ config.tor }} -->
         <small style="color: #666; display: block; margin-top: 5px;">Expose AISBF over TOR network as a hidden service</small>
     </div>
     
