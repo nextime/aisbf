@@ -29,6 +29,12 @@ import shutil
 from pathlib import Path
 
 
+# Files and directories that must be present in the share directory for the
+# server to start correctly.
+_REQUIRED_FILES = ['aisbf.sh', 'main.py', 'requirements.txt']
+_REQUIRED_DIRS  = ['templates', 'static', 'config']
+
+
 def _share_dir_candidates():
     """Return candidate share directories in priority order, deduplicated."""
     seen = set()
@@ -41,7 +47,7 @@ def _share_dir_candidates():
             result.append(Path(p))
 
     # sysconfig paths for the running Python interpreter — covers venvs,
-    # system installs, and user installs regardless of scheme.
+    # system installs, and user installs regardless of pip's install scheme.
     add(Path(sysconfig.get_path('data')) / 'share' / 'aisbf')
 
     for scheme in ('posix_user', 'posix_prefix', 'posix_home'):
@@ -50,7 +56,7 @@ def _share_dir_candidates():
         except Exception:
             pass
 
-    # Legacy hardcoded fallbacks (setup.py installs here for system-wide)
+    # Legacy hardcoded fallbacks
     add(Path('/usr/local/share/aisbf'))
     add(Path('/usr/share/aisbf'))
     add(Path.home() / '.local' / 'share' / 'aisbf')
@@ -58,34 +64,77 @@ def _share_dir_candidates():
     return result
 
 
+def _share_dir_is_complete(d):
+    """Return True only if d contains every file/dir the server needs."""
+    return all((d / f).exists() for f in _REQUIRED_FILES + _REQUIRED_DIRS)
+
+
 def _find_share_dir():
-    """Return the first candidate that contains aisbf.sh, or None."""
+    """Return the first complete share directory found, or None."""
     for candidate in _share_dir_candidates():
-        if (candidate / 'aisbf.sh').exists():
+        if _share_dir_is_complete(candidate):
             return candidate
     return None
 
 
-def _bootstrap_from_package():
+def _pkg_bundle_dir():
     """
-    Last-resort: copy aisbf.sh from the bundled package data to
-    ~/.local/share/aisbf/ so the user can at least run the script.
-    The other runtime files (main.py, templates, …) still need to be
-    present — this only fixes the 'aisbf.sh not found' error.
+    Return the aisbf/_share/ directory bundled inside the installed package,
+    or None if it doesn't exist (e.g. editable source install before build).
+    Falls back to the project root for editable installs.
     """
     try:
         import aisbf as _pkg
-        bundled = Path(_pkg.__file__).parent / 'aisbf.sh'
-        if not bundled.exists():
-            return None
+        pkg_dir = Path(_pkg.__file__).parent
 
-        dest_dir = Path.home() / '.local' / 'share' / 'aisbf'
-        dest_dir.mkdir(parents=True, exist_ok=True)
-        dest = dest_dir / 'aisbf.sh'
-        shutil.copy2(str(bundled), str(dest))
-        dest.chmod(dest.stat().st_mode | 0o755)
-        return dest_dir
+        # Normal wheel install: _share/ populated by build_py hook
+        share = pkg_dir / '_share'
+        if share.exists() and (share / 'main.py').exists():
+            return share
+
+        # Editable install: files live in the project root (one level up)
+        project_root = pkg_dir.parent
+        if (project_root / 'main.py').exists():
+            return project_root
+
     except Exception:
+        pass
+    return None
+
+
+def _bootstrap_share_dir():
+    """
+    Copy all runtime files from the bundled package data to
+    ~/.local/share/aisbf/ and return the destination path, or None on failure.
+    """
+    bundle = _pkg_bundle_dir()
+    if bundle is None:
+        return None
+
+    dest = Path.home() / '.local' / 'share' / 'aisbf'
+    try:
+        dest.mkdir(parents=True, exist_ok=True)
+
+        for fname in _REQUIRED_FILES:
+            src = bundle / fname
+            if src.exists():
+                shutil.copy2(src, dest / fname)
+                if fname.endswith('.sh'):
+                    p = dest / fname
+                    p.chmod(p.stat().st_mode | 0o755)
+
+        for dname in _REQUIRED_DIRS:
+            src = bundle / dname
+            dst = dest / dname
+            if src.exists():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+
+        return dest if _share_dir_is_complete(dest) else None
+
+    except Exception as e:
+        print(f"Warning: could not bootstrap share directory: {e}", file=sys.stderr)
         return None
 
 
@@ -93,32 +142,31 @@ def main():
     share_dir = _find_share_dir()
 
     if share_dir is None:
-        share_dir = _bootstrap_from_package()
-        if share_dir:
-            print(
-                "Warning: AISBF data files were not installed by pip to the expected\n"
-                f"location. Bootstrapped aisbf.sh to {share_dir}.\n"
-                "If the server fails to start, runtime files (main.py, templates/,\n"
-                "static/, config/, requirements.txt) may be missing from that directory.\n"
-                "Re-install from source to fix this:\n"
-                "  pip install aisbf --no-binary aisbf",
-                file=sys.stderr,
-            )
-
-    if share_dir is None or not (share_dir / 'aisbf.sh').exists():
-        checked = '\n'.join(f'  - {p}' for p in _share_dir_candidates())
         print(
-            "Error: AISBF share directory not found.\n"
-            "The data files may not have been installed correctly from the wheel.\n\n"
-            "Checked locations:\n"
-            f"{checked}\n\n"
-            "To fix, reinstall from source so pip can place files correctly:\n"
-            "  pip install aisbf --no-binary aisbf\n"
-            "Or install system-wide as root:\n"
-            "  sudo pip install aisbf",
+            "AISBF share directory not found or incomplete — bootstrapping from package data …",
             file=sys.stderr,
         )
-        sys.exit(1)
+        share_dir = _bootstrap_share_dir()
+
+        if share_dir:
+            print(
+                f"Bootstrapped to {share_dir}. Future runs will use this location.",
+                file=sys.stderr,
+            )
+        else:
+            checked = '\n'.join(f'  - {p}' for p in _share_dir_candidates())
+            print(
+                "Error: could not set up the AISBF share directory.\n\n"
+                "Checked locations:\n"
+                f"{checked}\n\n"
+                "The wheel may have been built without runtime files.\n"
+                "Re-install from a source distribution to fix this:\n"
+                "  pip install aisbf --no-binary aisbf\n"
+                "Or install system-wide as root:\n"
+                "  sudo pip install aisbf",
+                file=sys.stderr,
+            )
+            sys.exit(1)
 
     script_path = share_dir / 'aisbf.sh'
 

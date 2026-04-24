@@ -168,3 +168,6 @@ Thumbs.db
 # Worktrees
 .worktrees/
 docs/superpowers/
+
+# Generated at wheel-build time by the build_py hook in setup.py — do not commit
+aisbf/_share/

@@ -23,8 +23,10 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 from setuptools import setup, find_packages
 from setuptools.command.install import install as _install
+from setuptools.command.build_py import build_py as _build_py
 from pathlib import Path
 import os
+import shutil
 import sys
 
 # Read the contents of README file
@@ -37,9 +39,44 @@ if (this_directory / "requirements.txt").exists():
     with open(this_directory / "requirements.txt") as f:
         requirements = [line.strip() for line in f if line.strip() and not line.startswith("#")]
 
+class build_py(_build_py):
+    """Populate aisbf/_share/ with runtime files before the wheel is assembled.
+
+    data_files in wheels are not reliably installed by pip for all install
+    modes (user vs system, --break-system-packages, etc.).  Bundling the
+    runtime files as package_data inside aisbf/_share/ guarantees they land
+    in site-packages/aisbf/_share/ and can be extracted by cli.py on first run.
+    """
+
+    _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh']
+    _SHARE_DIRS  = ['templates', 'static', 'config']
+
+    def run(self):
+        self._populate_share()
+        super().run()
+
+    def _populate_share(self):
+        root = Path(__file__).parent
+        share = root / 'aisbf' / '_share'
+        share.mkdir(exist_ok=True)
+
+        for fname in self._SHARE_FILES:
+            src = root / fname
+            if src.exists():
+                shutil.copy2(src, share / fname)
+
+        for dname in self._SHARE_DIRS:
+            src = root / dname
+            dst = share / dname
+            if src.exists():
+                if dst.exists():
+                    shutil.rmtree(dst)
+                shutil.copytree(src, dst)
+
+
 class InstallCommand(_install):
     """Custom install command that adds --user flag for non-root users"""
-    
+
     def initialize_options(self):
         _install.initialize_options(self)
         # Check if running as non-root without --user flag
@@ -75,9 +112,23 @@ setup(
     # install_requires=requirements,
     include_package_data=True,
     package_data={
-        # aisbf.sh bundled inside the package so cli.py can bootstrap the share
-        # directory even when pip fails to install data_files from the wheel.
-        "aisbf": ["*.json", "aisbf.sh"],
+        # _share/ is populated at build time by the build_py hook above and
+        # bundled in the wheel so cli.py can extract it when data_files fail.
+        "aisbf": [
+            "*.json",
+            "aisbf.sh",
+            "_share/main.py",
+            "_share/requirements.txt",
+            "_share/aisbf.sh",
+            "_share/templates/*.html",
+            "_share/templates/**/*.html",
+            "_share/templates/**/*.css",
+            "_share/templates/**/*.js",
+            "_share/static/*",
+            "_share/static/**/*",
+            "_share/config/*",
+            "_share/config/**/*",
+        ],
         "": ["templates/**/*.html", "templates/**/*.css", "templates/**/*.js", "static/**/*"],
     },
     data_files=[
@@ -313,6 +364,7 @@ setup(
         ],
     },
     cmdclass={
+        'build_py': build_py,
         'install': InstallCommand,
     },
 )
