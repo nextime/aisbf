@@ -10443,12 +10443,19 @@ async def dashboard_license(request: Request):
         request=request,
         name="dashboard/docs.html",
         context={
-        "request": request,
-        "session": request.session,
-        "content": html_content,
-        "title": "License"
-    }
+            "request": request,
+            "session": request.session,
+            "content": html_content,
+            "title": "License"
+        }
     )
+
+
+@app.get("/blocked", response_class=HTMLResponse)
+async def blocked_page(request: Request):
+    """Display blocked access page."""
+    return templates.TemplateResponse("blocked.html", {"request": request})
+
 
 def parse_provider_from_model(model: str) -> tuple[str, str]:
     """
