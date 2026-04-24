@@ -219,8 +219,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="sqlite-fields" style="display: {% if not config.database or config.database.type == 'sqlite' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="sqlite_path">SQLite Database Path</label>
-            <input type="text" id="sqlite_path" name="sqlite_path" value="{{ config.database.sqlite_path if config.database and config.database.sqlite_path else '~/.aisbf/aisbf.db' }}">
+            <label for="db_sqlite_path">SQLite Database Path</label>
+            <input type="text" id="db_sqlite_path" name="sqlite_path" value="{{ config.database.sqlite_path if config.database and config.database.sqlite_path else '~/.aisbf/aisbf.db' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite database file (supports ~ expansion)</small>
         </div>
     </div>
@@ -275,8 +275,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="sqlite-cache-fields" style="display: {% if config.cache and config.cache.type == 'sqlite' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="sqlite_path">SQLite Cache Path</label>
-            <input type="text" id="sqlite_path" name="sqlite_path" value="{{ config.cache.sqlite_path if config.cache and config.cache.sqlite_path else '~/.aisbf/cache.db' }}">
+            <label for="cache_sqlite_path">SQLite Cache Path</label>
+            <input type="text" id="cache_sqlite_path" name="sqlite_path" value="{{ config.cache.sqlite_path if config.cache and config.cache.sqlite_path else '~/.aisbf/cache.db' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite cache database file (supports ~ expansion)</small>
         </div>
     </div>
