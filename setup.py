@@ -49,7 +49,7 @@ class build_py(_build_py):
     """
 
     _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh']
-    _SHARE_DIRS  = ['templates', 'static', 'config']
+    _SHARE_DIRS  = ['templates', 'static', 'config', 'aisbf']
 
     def run(self):
         self._populate_share()
@@ -73,8 +73,10 @@ class build_py(_build_py):
             src = root / dname
             dst = share / dname
             if src.is_dir():
+                # Exclude _share/ when copying the aisbf package — it's the
+                # directory we're currently building, so it must not recurse.
                 shutil.copytree(src, dst,
-                                ignore=shutil.ignore_patterns('__pycache__', '*.pyc', '*.pyo'))
+                                ignore=shutil.ignore_patterns('_share', '__pycache__', '*.pyc', '*.pyo'))
 
     def _update_package_data(self):
         """Dynamically register every file copied into _share/ so setuptools

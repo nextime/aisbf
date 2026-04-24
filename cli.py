@@ -32,7 +32,7 @@ from pathlib import Path
 
 # Files and directories the share directory must contain for the server to start.
 _REQUIRED_FILES = ['aisbf.sh', 'main.py', 'requirements.txt']
-_REQUIRED_DIRS  = ['templates', 'static', 'config']
+_REQUIRED_DIRS  = ['templates', 'static', 'config', 'aisbf']
 
 
 def _is_root():
