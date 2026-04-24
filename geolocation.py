@@ -3,7 +3,7 @@ import httpx
 from typing import Dict, Optional
 
 # Global cache for IP -> country mappings
-_ip_country_cache: Dict[str, str] = {}
+_ip_country_cache: Dict[str, Optional[str]] = {}
 
 async def get_ip_country(ip: str) -> Optional[str]:
     """Get country code for IP address using ipapi.co, with caching.
