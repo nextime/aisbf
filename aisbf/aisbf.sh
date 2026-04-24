@@ -182,6 +182,30 @@ check_package_upgrade() {
     return 1  # No update needed
 }
 
+# Expose user-installed packages (e.g. aisbf itself, installed via pip --user)
+# inside the venv.  --system-site-packages only covers system-wide packages
+# (/usr/lib/…); it does NOT include ~/.local/lib/… (user site-packages).
+# We fix this by writing a .pth file into the venv's site-packages directory.
+_link_user_site_packages() {
+    local USERPKG
+    USERPKG=$(python3 -m site --user-site 2>/dev/null)
+    if [ -z "$USERPKG" ] || [ ! -d "$USERPKG" ]; then
+        [ "$DEBUG" = "true" ] && echo "=== DEBUG: No user site-packages to link (${USERPKG:-not found}) ==="
+        return
+    fi
+
+    local VENV_SITE
+    VENV_SITE=$("$VENV_DIR/bin/python3" -c \
+        "import site; pkgs=site.getsitepackages(); print(pkgs[0] if pkgs else '')" 2>/dev/null)
+    if [ -z "$VENV_SITE" ] || [ ! -d "$VENV_SITE" ]; then
+        [ "$DEBUG" = "true" ] && echo "=== DEBUG: Could not locate venv site-packages ==="
+        return
+    fi
+
+    echo "$USERPKG" > "$VENV_SITE/aisbf_user_site.pth"
+    [ "$DEBUG" = "true" ] && echo "=== DEBUG: Linked user site-packages $USERPKG → $VENV_SITE/aisbf_user_site.pth ==="
+}
+
 # Function to create venv if it doesn't exist
 ensure_venv() {
     if [ "$DEBUG" = "true" ]; then
@@ -192,9 +216,11 @@ ensure_venv() {
 
     if [ ! -d "$VENV_DIR" ]; then
         echo "Creating virtual environment at $VENV_DIR"
-        # Create venv with --system-site-packages to access system-installed aisbf
         [ "$DEBUG" = "true" ] && echo "=== DEBUG: Creating venv ==="
         python3 -m venv --system-site-packages "$VENV_DIR"
+
+        # Make user-installed packages (incl. aisbf) visible inside the venv
+        _link_user_site_packages
 
         # Install requirements if requirements.txt exists
         if [ -f "$SHARE_DIR/requirements.txt" ]; then
@@ -224,19 +250,20 @@ ensure_venv() {
                 exit 1
             fi
             [ "$DEBUG" = "true" ] && echo "=== DEBUG: Force reinstalling uvicorn ==="
-            # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
             "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
         fi
 
-        # Save version for future upgrade detection
         [ "$DEBUG" = "true" ] && echo "=== DEBUG: Saving version info ==="
         python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
     else
         [ "$DEBUG" = "true" ] && echo "=== DEBUG: Venv already exists, checking for upgrades ==="
-        # Check if package was upgraded via pip
+
+        # Refresh the user-site link on every run — the user site-packages path
+        # can change after a Python upgrade or reinstall.
+        _link_user_site_packages
+
         if check_package_upgrade; then
             echo "Package upgrade detected, updating venv dependencies..."
-            # Only update requirements, aisbf is accessed from system site-packages
             if [ -f "$SHARE_DIR/requirements.txt" ]; then
                 [ "$DEBUG" = "true" ] && echo "=== DEBUG: Updating requirements ==="
                 if ! "$VENV_DIR/bin/pip" install -r "$SHARE_DIR/requirements.txt"; then
@@ -251,7 +278,6 @@ ensure_venv() {
                     exit 1
                 fi
                 [ "$DEBUG" = "true" ] && echo "=== DEBUG: Force reinstalling uvicorn ==="
-                # Force reinstall uvicorn in venv to ensure it's available inside the virtual environment
                 "$VENV_DIR/bin/pip" install --force-reinstall uvicorn
             fi
             python3 -c "import aisbf; print(aisbf.__version__)" > "$VENV_DIR/.aisbf_version" 2>/dev/null || echo "unknown" > "$VENV_DIR/.aisbf_version"
