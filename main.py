@@ -154,6 +154,24 @@ def generate_self_signed_cert(cert_file: Path, key_file: Path):
         logger.error("cryptography library not installed. Install with: pip install cryptography")
         raise
 
+def get_aisbf_config_path(custom_config_dir=None) -> Path:
+    """Resolve aisbf.json using the canonical search order."""
+    candidates = []
+    if custom_config_dir:
+        candidates.append(Path(custom_config_dir) / 'aisbf.json')
+    candidates += [
+        Path.home() / '.aisbf' / 'aisbf.json',
+        Path.home() / '.local' / 'share' / 'aisbf' / 'aisbf.json',
+        Path('/usr/local/share/aisbf/aisbf.json'),
+        Path('/usr/share/aisbf/aisbf.json'),
+        Path(__file__).parent / 'config' / 'aisbf.json',
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[-1]  # fallback
+
+
 def load_server_config(custom_config_dir=None):
     """Load server configuration from aisbf.json"""
     # If custom config directory is provided, try it first
@@ -804,18 +822,7 @@ def initialize_app(custom_config_dir=None):
     server_config = load_server_config(custom_config_dir)
     
     # Load dashboard config
-    aisbf_config_path = Path.home() / '.aisbf' / 'aisbf.json'
-    if not aisbf_config_path.exists():
-        if custom_config_dir:
-            aisbf_config_path = Path(custom_config_dir) / 'aisbf.json'
-        else:
-            # Try installed location first
-            installed_path = Path(__file__).parent / 'aisbf.json'
-            if installed_path.exists():
-                aisbf_config_path = installed_path
-            else:
-                # Fall back to config subdirectory
-                aisbf_config_path = Path(__file__).parent / 'config' / 'aisbf.json'
+    aisbf_config_path = get_aisbf_config_path(custom_config_dir)
     
     if aisbf_config_path.exists():
         with open(aisbf_config_path) as f:
@@ -5963,37 +5970,10 @@ async def dashboard_settings(request: Request):
     if auth_check:
         return auth_check
     
-    # Load aisbf.json - check user config first, then installed locations
-    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    config_path = get_aisbf_config_path()
     
     if not config_path.exists():
-        # Try installed locations
-        installed_dirs = [
-            Path.home() / '.local' / 'share' / 'aisbf',
-            Path('/usr/share/aisbf'),
-            Path(__file__).parent,  # For source tree
-        ]
-        
-        source_path = None
-        for installed_dir in installed_dirs:
-            test_path = installed_dir / 'aisbf.json'
-            if test_path.exists():
-                source_path = test_path
-                break
-            # Also check config subdirectory
-            test_path = installed_dir / 'config' / 'aisbf.json'
-            if test_path.exists():
-                source_path = test_path
-                break
-        
-        if source_path:
-            # Copy to user config directory
-            config_path.parent.mkdir(parents=True, exist_ok=True)
-            import shutil
-            shutil.copy2(source_path, config_path)
-            logger.info(f"Copied config from {source_path} to {config_path}")
-        else:
-            raise HTTPException(status_code=500, detail="Configuration file not found in any location")
+        raise HTTPException(status_code=500, detail="Configuration file not found")
     
     with open(config_path) as f:
         aisbf_config = json.load(f)
@@ -6106,7 +6086,7 @@ async def dashboard_settings_save(
         return auth_check
     
     # Load current config
-    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    config_path = get_aisbf_config_path()
     if not config_path.exists():
         config_path = Path(__file__).parent / 'config' / 'aisbf.json'
     
@@ -6311,7 +6291,7 @@ async def dashboard_test_smtp(request: Request):
             return JSONResponse({"success": False, "error": "Test recipient email is required"})
         
         # Load the actual saved SMTP config from aisbf.json
-        config_path = Path.home() / '.aisbf' / 'aisbf.json'
+        config_path = get_aisbf_config_path()
         if not config_path.exists():
             config_path = Path(__file__).parent / 'config' / 'aisbf.json'
         
