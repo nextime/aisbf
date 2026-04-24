@@ -346,19 +346,18 @@ class Config:
             if (self._custom_config_dir / 'providers.json').exists():
                 return self._custom_config_dir
         
-        # Try installed locations in order of preference
-        # 1. User-local installation (pip install --user)
-        # 2. System-wide installation (sudo pip install)
-        # 3. Alternative system location
-        installed_dirs = [
+        # Try installed locations in order of preference.
+        # Check both share_dir/config/ (current layout) and share_dir/ (legacy).
+        share_roots = [
             Path.home() / '.local' / 'share' / 'aisbf',
             Path('/usr/local/share/aisbf'),
             Path('/usr/share/aisbf'),
         ]
-        
-        for installed_dir in installed_dirs:
-            if installed_dir.exists() and (installed_dir / 'providers.json').exists():
-                return installed_dir
+
+        for root in share_roots:
+            for candidate in (root / 'config', root):
+                if candidate.exists() and (candidate / 'providers.json').exists():
+                    return candidate
         
         # Fallback to source tree config directory
         # This is for development mode

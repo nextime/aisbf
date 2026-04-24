@@ -73,31 +73,30 @@ fi
 mkdir -p "$LOG_DIR"
 
 # Function to find the aisbf.json config file
-# Checks user config first, then installed locations, then source tree
+# Checks user config first, then installed locations (config/ subdir first, then root), then source tree
 find_config_file() {
     # Check user config first (~/.aisbf/aisbf.json)
     if [ -f "$HOME/.aisbf/aisbf.json" ]; then
         echo "$HOME/.aisbf/aisbf.json"
         return
     fi
-    
-    # Check installed locations
-    if [ -f "/usr/share/aisbf/aisbf.json" ]; then
-        echo "/usr/share/aisbf/aisbf.json"
-        return
-    fi
-    
-    if [ -f "$HOME/.local/share/aisbf/aisbf.json" ]; then
-        echo "$HOME/.local/share/aisbf/aisbf.json"
-        return
-    fi
-    
-    # Check source tree config
-    if [ -f "$SHARE_DIR/config/aisbf.json" ]; then
-        echo "$SHARE_DIR/config/aisbf.json"
-        return
-    fi
-    
+
+    # Check installed share locations — config/ subdir takes priority over root
+    for dir in \
+        "$SHARE_DIR/config" \
+        "$SHARE_DIR" \
+        "$HOME/.local/share/aisbf/config" \
+        "$HOME/.local/share/aisbf" \
+        "/usr/local/share/aisbf/config" \
+        "/usr/local/share/aisbf" \
+        "/usr/share/aisbf/config" \
+        "/usr/share/aisbf"; do
+        if [ -f "$dir/aisbf.json" ]; then
+            echo "$dir/aisbf.json"
+            return
+        fi
+    done
+
     # Not found
     echo ""
 }
