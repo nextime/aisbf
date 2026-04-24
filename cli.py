@@ -208,11 +208,26 @@ def _bootstrap_share_dir():
             src = bundle / dname
             dst = dest / dname
             if src.is_dir():
-                if dst.exists():
-                    shutil.rmtree(dst)
-                shutil.copytree(src, dst)
-                n = sum(1 for _ in dst.rglob('*') if _.is_file())
-                _log(f"  Copied : {dname}/ ({n} files)")
+                if dname == 'config':
+                    # Config files may be user-customised — only write files
+                    # that don't already exist so upgrades never clobber them.
+                    dst.mkdir(parents=True, exist_ok=True)
+                    n = 0
+                    for f in src.rglob('*'):
+                        if f.is_file():
+                            rel = f.relative_to(src)
+                            target = dst / rel
+                            target.parent.mkdir(parents=True, exist_ok=True)
+                            if not target.exists():
+                                shutil.copy2(f, target)
+                                n += 1
+                    _log(f"  Config : config/ ({n} new files copied, existing preserved)")
+                else:
+                    if dst.exists():
+                        shutil.rmtree(dst)
+                    shutil.copytree(src, dst)
+                    n = sum(1 for _ in dst.rglob('*') if _.is_file())
+                    _log(f"  Copied : {dname}/ ({n} files)")
             else:
                 _log(f"  MISSING: {dname}/ (not in bundle)")
 
