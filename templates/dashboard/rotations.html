@@ -32,7 +32,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div class="form-group" style="margin-bottom: 20px;">
     <label>
         <input type="checkbox" id="global-notify" onchange="updateGlobalNotify(this.checked)">
-        Global Notify Errors
+        Global Notify Errors — return errors as messages (not HTTP 503) when all providers fail
     </label>
 </div>
 
@@ -178,7 +178,7 @@ function renderRotationDetails(rotationKey) {
         <div class="form-group">
             <label>
                 <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
-                Notify Errors
+                Notify Errors — return errors as messages (not HTTP 503) when all providers fail
             </label>
         </div>
         
