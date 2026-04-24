@@ -1,0 +1,13 @@
+{
+  "_note": "Quenya/Sindarin Elvish — fictional language from Tolkien's Lord of the Rings. Many technical terms have no Elvish equivalent and fall back to English.",
+  "header": { "title": "AISBF Palantír", "help": "Mára", "docs": "Parmar", "about": "Nó", "license": "Lestanen", "restart_server": "Restart Server", "logout": "Auta" },
+  "nav": { "overview": "Cenien", "providers": "Providers", "rotations": "Rotations", "autoselect": "Autoselect", "prompts": "Prompts", "analytics": "Analytics", "api_tokens": "API Tokens", "wallet": "Mírë", "usage": "Usage", "users": "Eleni", "settings": "Cantar", "tiers": "Tiers", "payment_settings": "Payment Settings", "upgrade": "✨ Ortë! ✨", "notifications": "Telpë", "account": "Nossë" },
+  "account_menu": { "edit_profile": "Cenda Nossë", "api_tokens": "API Tokens", "cache_settings": "Cache Settings", "subscription": "Subscription", "wallet": "Mírë", "billing": "Billing", "usage_quotas": "Usage & Quotas", "change_password": "Camta Tengwa" },
+  "notifications": { "title": "Telpë", "mark_all_read": "Cenda ilyë", "refresh": "Cuivë", "no_notifications": "Lá telpë", "just_now": "sí", "minutes_ago": "{n} lúmë", "hours_ago": "{n} ré", "days_ago": "{n} aure" },
+  "footer": { "support_development": "Auta AISBF", "privacy_policy": "Privacy Policy", "terms_of_service": "Terms of Service", "contact": "Maquenta" },
+  "donate": { "title": "Auta AISBF", "thank_you": "Hantanyel. Melmë lyen anta AISBF cuivëa ar lissë.", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "Tec i már ú-cenda", "copied": "Cendaina!" },
+  "welcome": { "title": "Aiya AISBF!", "early_adopter": "Hantanyel nó i minya eleni! Ná mardë i cuivëa.", "may_encounter": "Lerya quettar úcarë nó.", "feedback": "Quettalyë anta melmë AISBF. Maquenta ven!", "send_feedback": "Anta Quetta", "got_it": "Istanyel!" },
+  "contact": { "title": "Maquenta", "your_email": "Email", "type": "Nossë", "select_type": "Select type...", "bug_report": "Bug Report", "feature_request": "Feature Request", "feedback": "Quetta", "question": "Sac", "help": "Mára", "title_field": "Esse", "title_placeholder": "Brief summary", "message": "Quetta", "message_placeholder": "Describe your issue...", "send_message": "Anta Quetta", "cancel": "Ú-car", "sending": "Antëa...", "success": "Quetta antaina! Hantanyel.", "error": "Úcarë: {error}", "network_error": "Network error. Please try again later." },
+  "modal": { "notice": "Telpë", "confirm": "Námo", "warning": "Vórima", "ok": "Mára", "cancel": "Ú-car", "delete": "Heca" },
+  "common": { "save": "Harya", "loading": "Cuivëa...", "error": "Úcarë", "success": "Melmë", "close": "Panya", "yes": "Ná", "no": "Lá" }
+}

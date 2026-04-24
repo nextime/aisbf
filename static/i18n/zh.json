@@ -1,0 +1,12 @@
+{
+  "header": { "title": "AISBF 控制台", "help": "帮助", "docs": "文档", "about": "关于", "license": "许可证", "restart_server": "重启服务器", "logout": "退出" },
+  "nav": { "overview": "概览", "providers": "提供商", "rotations": "轮换", "autoselect": "自动选择", "prompts": "提示词", "analytics": "分析", "api_tokens": "API 令牌", "wallet": "钱包", "usage": "用量", "users": "用户", "settings": "设置", "tiers": "套餐", "payment_settings": "支付设置", "upgrade": "✨ 升级！✨", "notifications": "通知", "account": "账户" },
+  "account_menu": { "edit_profile": "编辑资料", "api_tokens": "API 令牌", "cache_settings": "缓存设置", "subscription": "订阅", "wallet": "钱包", "billing": "账单", "usage_quotas": "用量与配额", "change_password": "修改密码" },
+  "notifications": { "title": "通知", "mark_all_read": "全部标为已读", "refresh": "刷新", "no_notifications": "暂无通知", "just_now": "刚刚", "minutes_ago": "{n}分钟前", "hours_ago": "{n}小时前", "days_ago": "{n}天前" },
+  "footer": { "support_development": "支持 AISBF 开发", "privacy_policy": "隐私政策", "terms_of_service": "服务条款", "contact": "联系我们" },
+  "donate": { "title": "支持 AISBF", "thank_you": "感谢您考虑捐款。您的支持有助于将 AISBF 维护为完全开源的免费软件。", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "点击任意地址复制到剪贴板", "copied": "已复制！" },
+  "welcome": { "title": "欢迎使用 AISBF！", "early_adopter": "感谢您成为早期用户！我们目前处于密集开发阶段。", "may_encounter": "您可能会遇到错误、服务中断或变更。", "feedback": "您的反馈有助于我们改进 AISBF。请随时联系我们！", "send_feedback": "发送反馈", "got_it": "明白了！" },
+  "contact": { "title": "联系我们", "your_email": "您的邮箱", "type": "类型", "select_type": "选择类型...", "bug_report": "错误报告", "feature_request": "功能请求", "feedback": "反馈", "question": "问题", "help": "帮助", "title_field": "标题", "title_placeholder": "消息的简短摘要", "message": "消息", "message_placeholder": "详细描述您的问题或请求...", "send_message": "发送消息", "cancel": "取消", "sending": "发送中...", "success": "消息发送成功！感谢您的反馈。", "error": "错误：{error}", "network_error": "网络错误，请稍后重试。" },
+  "modal": { "notice": "通知", "confirm": "确认", "warning": "警告", "ok": "确定", "cancel": "取消", "delete": "删除" },
+  "common": { "save": "保存", "loading": "加载中...", "error": "错误", "success": "成功", "close": "关闭", "yes": "是", "no": "否" }
+}

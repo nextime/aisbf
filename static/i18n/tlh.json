@@ -1,0 +1,13 @@
+{
+  "_note": "Klingon (tlhIngan Hol) — fictional language from Star Trek. Technical terms without Klingon equivalents fall back to English.",
+  "header": { "title": "AISBF HaSta", "help": "QaH", "docs": "ghItlh", "about": "nuq", "license": "chaw'", "restart_server": "HaSta yIchoH", "logout": "mej" },
+  "nav": { "overview": "legh", "providers": "Providers", "rotations": "Rotations", "autoselect": "Autoselect", "prompts": "Prompts", "analytics": "Analytics", "api_tokens": "API Tokens", "wallet": "Huch", "usage": "lo'", "users": "nuv", "settings": "nab", "tiers": "Tiers", "payment_settings": "Huch nab", "upgrade": "✨ HoS! ✨", "notifications": "QIn", "account": "pong" },
+  "account_menu": { "edit_profile": "pong tI'", "api_tokens": "API Tokens", "cache_settings": "Cache Settings", "subscription": "Subscription", "wallet": "Huch", "billing": "Billing", "usage_quotas": "lo' & Quotas", "change_password": "mung lI' tI'" },
+  "notifications": { "title": "QIn", "mark_all_read": "Hoch laDlu'", "refresh": "chu' ghoS", "no_notifications": "QIn tu'be'lu'", "just_now": "DaH", "minutes_ago": "{n} tup ret", "hours_ago": "{n} rep ret", "days_ago": "{n} jaj ret" },
+  "footer": { "support_development": "AISBF yIQaH", "privacy_policy": "Privacy Policy", "terms_of_service": "Terms of Service", "contact": "jatlh" },
+  "donate": { "title": "AISBF yIQaH", "thank_you": "qatlho'. bIQaHmo' AISBF yIn.", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "nav yItap cha'", "copied": "taplu'!" },
+  "welcome": { "title": "AISBF yIghoS!", "early_adopter": "qatlho' wa'DIch lo'wI'pu'. maQap!", "may_encounter": "Qagh DaghomlaH.", "feedback": "mu'meylIj AISBF QaH. HIjatlh!", "send_feedback": "QIn yIlI'", "got_it": "jISov!" },
+  "contact": { "title": "HIjatlh", "your_email": "Email", "type": "Segh", "select_type": "Select type...", "bug_report": "Qagh QIn", "feature_request": "Feature Request", "feedback": "mu'mey", "question": "ghel", "help": "QaH", "title_field": "pong", "title_placeholder": "Brief summary", "message": "QIn", "message_placeholder": "Describe your issue...", "send_message": "QIn yIlI'", "cancel": "yImev", "sending": "lI'taH...", "success": "QIn lI'lu'! qatlho'.", "error": "Qagh: {error}", "network_error": "Network error. Please try again later." },
+  "modal": { "notice": "QIn", "confirm": "HIja'", "warning": "yIjach", "ok": "lu'", "cancel": "yImev", "delete": "teH" },
+  "common": { "save": "choq", "loading": "ngeD...", "error": "Qagh", "success": "Qap", "close": "SoQ", "yes": "HIja'", "no": "ghobe'" }
+}

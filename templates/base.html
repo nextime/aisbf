@@ -23,74 +23,196 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <link rel="icon" type="image/png" href="/favicon.ico">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
+        /* ── Theme: dark (default) ── */
+        :root {
+            --bg-page:       #1a1a2e;
+            --bg-panel:      #16213e;
+            --bg-input:      #1a1a2e;
+            --bg-accent:     #0f3460;
+            --color-text:    #e0e0e0;
+            --color-muted:   #a0a0a0;
+            --color-subtle:  #666;
+            --color-primary: #e94560;
+            --color-primary-hover: #c73e54;
+            --color-secondary: #0f3460;
+            --color-secondary-hover: #1a4a7a;
+            --color-border:  #0f3460;
+            --color-link:    #60a5fa;
+            --color-link-hover: #93c5fd;
+            --shadow:        rgba(0,0,0,0.3);
+            --shadow-lg:     rgba(0,0,0,0.4);
+            --alert-success-bg: #1a3a2e; --alert-success-fg: #4ade80; --alert-success-border: #22c55e;
+            --alert-error-bg:   #3a1a1a; --alert-error-fg:   #f87171; --alert-error-border:   #ef4444;
+            --alert-info-bg:    #1a2a3a; --alert-info-fg:    #60a5fa; --alert-info-border:    #3b82f6;
+            --th-bg: #0f3460;
+        }
+
+        /* ── Theme: light ── */
+        [data-theme="light"] {
+            --bg-page:       #f0f2f5;
+            --bg-panel:      #ffffff;
+            --bg-input:      #f8f9fa;
+            --bg-accent:     #e8edf5;
+            --color-text:    #1a1a2e;
+            --color-muted:   #555;
+            --color-subtle:  #888;
+            --color-primary: #d63251;
+            --color-primary-hover: #b02844;
+            --color-secondary: #dde3ee;
+            --color-secondary-hover: #c5cfe0;
+            --color-border:  #c8d0e0;
+            --color-link:    #2563eb;
+            --color-link-hover: #1d4ed8;
+            --shadow:        rgba(0,0,0,0.08);
+            --shadow-lg:     rgba(0,0,0,0.12);
+            --alert-success-bg: #ecfdf5; --alert-success-fg: #166534; --alert-success-border: #86efac;
+            --alert-error-bg:   #fef2f2; --alert-error-fg:   #991b1b; --alert-error-border:   #fca5a5;
+            --alert-info-bg:    #eff6ff; --alert-info-fg:    #1e40af; --alert-info-border:    #93c5fd;
+            --th-bg: #e8edf5;
+        }
+
+        /* ── Theme: trans (transgender flag colors) ── */
+        /* Flag: light blue #55CDFC, pink #F7A8B8, white #FFFFFF */
+        [data-theme="trans"] {
+            --bg-page:       #e8f7fd;
+            --bg-panel:      #ffffff;
+            --bg-input:      #f0faff;
+            --bg-accent:     #cceefa;
+            --color-text:    #1a3a4a;
+            --color-muted:   #4a7a8a;
+            --color-subtle:  #7aaabb;
+            --color-primary: #e8789a;
+            --color-primary-hover: #d45a80;
+            --color-secondary: #cceefa;
+            --color-secondary-hover: #aadff5;
+            --color-border:  #a8dff5;
+            --color-link:    #2a8ab5;
+            --color-link-hover: #1a6a90;
+            --shadow:        rgba(85,205,252,0.15);
+            --shadow-lg:     rgba(85,205,252,0.25);
+            --alert-success-bg: #e8f7fd; --alert-success-fg: #1a5a6a; --alert-success-border: #55cdfc;
+            --alert-error-bg:   #fff0f5; --alert-error-fg:   #8a2040; --alert-error-border:   #f7a8b8;
+            --alert-info-bg:    #e8f7fd; --alert-info-fg:    #1a5a6a; --alert-info-border:    #55cdfc;
+            --th-bg: #cceefa;
+        }
+
+        /* ── Theme: freepal (Palestinian flag colors) ── */
+        /* Flag: black #000000, white #FFFFFF, green #009736, red #EE2A35 */
+        [data-theme="freepal"] {
+            --bg-page:       #f5f5f0;
+            --bg-panel:      #ffffff;
+            --bg-input:      #f9f9f7;
+            --bg-accent:     #e8f5ec;
+            --color-text:    #111111;
+            --color-muted:   #444444;
+            --color-subtle:  #777777;
+            --color-primary: #ee2a35;
+            --color-primary-hover: #c41f28;
+            --color-secondary: #d4edda;
+            --color-secondary-hover: #b8dfc3;
+            --color-border:  #009736;
+            --color-link:    #007a2b;
+            --color-link-hover: #005a1f;
+            --shadow:        rgba(0,0,0,0.1);
+            --shadow-lg:     rgba(0,0,0,0.18);
+            --alert-success-bg: #e8f5ec; --alert-success-fg: #005a1f; --alert-success-border: #009736;
+            --alert-error-bg:   #fdecea; --alert-error-fg:   #8a0a10; --alert-error-border:   #ee2a35;
+            --alert-info-bg:    #f0f0f0; --alert-info-fg:    #222222; --alert-info-border:    #000000;
+            --th-bg: #e8f5ec;
+        }
+
         * { margin: 0; padding: 0; box-sizing: border-box; }
-        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: #1a1a2e; color: #e0e0e0; }
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: var(--bg-page); color: var(--color-text); }
         .container { max-width: 1452px; margin: 0 auto; padding: 20px; }
-        .header { background: #16213e; color: white; padding: 20px 0; margin-bottom: 30px; border-bottom: 2px solid #0f3460; }
+        .header { background: var(--bg-panel); color: var(--color-text); padding: 20px 0; margin-bottom: 30px; border-bottom: 2px solid var(--color-border); }
         .header .container { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
         .header h1 { font-size: 24px; font-weight: 600; }
         .header-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-        .nav { background: #16213e; padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); display: flex; flex-wrap: wrap; gap: 10px; }
-        .nav a { color: #a0a0a0; text-decoration: none; padding: 8px 12px; border-radius: 4px; flex-shrink: 0; }
-        .nav a:hover { background: #0f3460; color: #e0e0e0; }
-        .nav a.active { background: #e94560; color: white; }
-        .content { background: #16213e; padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px rgba(0,0,0,0.3); }
+        .nav { background: var(--bg-panel); padding: 15px; border-radius: 8px; margin-bottom: 20px; box-shadow: 0 2px 4px var(--shadow); display: flex; flex-wrap: wrap; gap: 10px; }
+        .nav a { color: var(--color-muted); text-decoration: none; padding: 8px 12px; border-radius: 4px; flex-shrink: 0; }
+        .nav a:hover { background: var(--bg-accent); color: var(--color-text); }
+        .nav a.active { background: var(--color-primary); color: white; }
+        .content { background: var(--bg-panel); padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px var(--shadow); }
         .form-group { margin-bottom: 20px; }
-        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0; }
-        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 4px; font-size: 14px; background: #1a1a2e; color: #e0e0e0; }
+        .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text); }
+        .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 14px; background: var(--bg-input); color: var(--color-text); }
         .form-group textarea { min-height: 200px; font-family: 'Courier New', monospace; }
-        .btn { padding: 10px 20px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; margin-left: 10px; }
-        .btn:hover { background: #c73e54; }
-        .btn-secondary { background: #0f3460; }
-        .btn-secondary:hover { background: #1a4a7a; }
-        .btn-danger { background: #e74c3c; }
+        .btn { padding: 10px 20px; background: var(--color-primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; margin-left: 10px; }
+        .btn:hover { background: var(--color-primary-hover); }
+        .btn-secondary { background: var(--color-secondary); color: var(--color-text); }
+        .btn-secondary:hover { background: var(--color-secondary-hover); }
+        .btn-danger { background: #e74c3c; color: white; }
         .btn-danger:hover { background: #c0392b; }
-        .btn-warning { background: #f39c12; }
+        .btn-warning { background: #f39c12; color: white; }
         .btn-warning:hover { background: #e67e22; }
         .alert { padding: 15px; border-radius: 4px; margin-bottom: 20px; }
-        .alert-success { background: #1a3a2e; color: #4ade80; border: 1px solid #22c55e; }
-        .alert-error { background: #3a1a1a; color: #f87171; border: 1px solid #ef4444; }
-        .alert-info { background: #1a2a3a; color: #60a5fa; border: 1px solid #3b82f6; }
+        .alert-success { background: var(--alert-success-bg); color: var(--alert-success-fg); border: 1px solid var(--alert-success-border); }
+        .alert-error { background: var(--alert-error-bg); color: var(--alert-error-fg); border: 1px solid var(--alert-error-border); }
+        .alert-info { background: var(--alert-info-bg); color: var(--alert-info-fg); border: 1px solid var(--alert-info-border); }
         table { width: 100%; border-collapse: collapse; margin-top: 20px; }
-        th, td { padding: 12px; text-align: left; border-bottom: 1px solid #0f3460; color: #e0e0e0; }
-        th { background: #0f3460; font-weight: 600; color: #e0e0e0; }
-        .code { background: #0f3460; padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; overflow-x: auto; color: #e0e0e0; }
+        th, td { padding: 12px; text-align: left; border-bottom: 1px solid var(--color-border); color: var(--color-text); }
+        th { background: var(--th-bg); font-weight: 600; color: var(--color-text); }
+        .code { background: var(--bg-accent); padding: 15px; border-radius: 4px; font-family: 'Courier New', monospace; font-size: 13px; overflow-x: auto; color: var(--color-text); }
         .nav .account-menu { position: relative; margin-left: auto; }
-        .nav .account-trigger { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 4px; cursor: pointer; color: #a0a0a0; }
-        .nav .account-trigger:hover { background: #0f3460; color: #e0e0e0; }
+        .nav .account-trigger { display: flex; align-items: center; gap: 8px; padding: 6px 12px; border-radius: 4px; cursor: pointer; color: var(--color-muted); }
+        .nav .account-trigger:hover { background: var(--bg-accent); color: var(--color-text); }
         .nav .account-trigger img { width: 24px; height: 24px; border-radius: 50%; vertical-align: middle; }
-        .nav .account-dropdown { position: absolute; top: 100%; right: 0; background: #16213e; border-radius: 8px; min-width: 200px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); margin-top: 8px; display: none; z-index: 100; border: 1px solid #0f3460; }
+        .nav .account-dropdown { position: absolute; top: 100%; right: 0; background: var(--bg-panel); border-radius: 8px; min-width: 200px; box-shadow: 0 4px 12px var(--shadow-lg); margin-top: 8px; display: none; z-index: 100; border: 1px solid var(--color-border); }
         .nav .account-dropdown.active { display: block; }
-        .nav .account-dropdown a { display: block; padding: 12px 16px; color: #a0a0a0; text-decoration: none; border-radius: 0; }
+        .nav .account-dropdown a { display: block; padding: 12px 16px; color: var(--color-muted); text-decoration: none; border-radius: 0; }
         .nav .account-dropdown a:first-child { border-radius: 8px 8px 0 0; }
         .nav .account-dropdown a:last-child { border-radius: 0 0 8px 8px; }
-        .nav .account-dropdown a:hover { background: #0f3460; color: #e0e0e0; }
+        .nav .account-dropdown a:hover { background: var(--bg-accent); color: var(--color-text); }
 
         /* Notification bell */
-        .notif-bell { position: relative; display: flex; align-items: center; padding: 6px 10px; border-radius: 4px; cursor: pointer; color: #a0a0a0; user-select: none; }
-        .notif-bell:hover { background: #0f3460; color: #e0e0e0; }
-        .notif-badge { position: absolute; top: 2px; right: 2px; background: #e94560; color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; line-height: 16px; text-align: center; padding: 0 3px; display: none; }
-        .notif-dropdown { position: absolute; top: 100%; right: 0; background: #16213e; border: 1px solid #0f3460; border-radius: 8px; min-width: 320px; max-width: 360px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); margin-top: 8px; z-index: 200; display: none; }
+        .notif-bell { position: relative; display: flex; align-items: center; padding: 6px 10px; border-radius: 4px; cursor: pointer; color: var(--color-muted); user-select: none; }
+        .notif-bell:hover { background: var(--bg-accent); color: var(--color-text); }
+        .notif-badge { position: absolute; top: 2px; right: 2px; background: var(--color-primary); color: #fff; border-radius: 50%; font-size: 10px; font-weight: 700; min-width: 16px; height: 16px; line-height: 16px; text-align: center; padding: 0 3px; display: none; }
+        .notif-dropdown { position: absolute; top: 100%; right: 0; background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 8px; min-width: 320px; max-width: 360px; box-shadow: 0 4px 12px var(--shadow-lg); margin-top: 8px; z-index: 200; display: none; }
         .notif-dropdown.active { display: block; }
-        .notif-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid #0f3460; }
-        .notif-header span { font-weight: 600; color: #e0e0e0; font-size: 13px; }
-        .notif-header button { background: none; border: none; color: #60a5fa; font-size: 12px; cursor: pointer; padding: 0; }
-        .notif-header button:hover { color: #93c5fd; }
+        .notif-header { display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--color-border); }
+        .notif-header span { font-weight: 600; color: var(--color-text); font-size: 13px; }
+        .notif-header button { background: none; border: none; color: var(--color-link); font-size: 12px; cursor: pointer; padding: 0; }
+        .notif-header button:hover { color: var(--color-link-hover); }
         .notif-list { max-height: 340px; overflow-y: auto; }
-        .notif-item { padding: 12px 16px; border-bottom: 1px solid #0f3460; cursor: pointer; transition: background .15s; display: flex; gap: 10px; align-items: flex-start; }
-        .notif-item:hover { background: #0f3460; }
-        .notif-item.unread { border-left: 3px solid #e94560; }
+        .notif-item { padding: 12px 16px; border-bottom: 1px solid var(--color-border); cursor: pointer; transition: background .15s; display: flex; gap: 10px; align-items: flex-start; }
+        .notif-item:hover { background: var(--bg-accent); }
+        .notif-item.unread { border-left: 3px solid var(--color-primary); }
         .notif-item.read { border-left: 3px solid transparent; opacity: .75; }
         .notif-item-body { flex: 1; min-width: 0; }
-        .notif-item-title { font-size: 13px; font-weight: 600; color: #e0e0e0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-        .notif-item-msg { font-size: 12px; color: #a0a0a0; margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
-        .notif-item-time { font-size: 11px; color: #666; margin-top: 4px; }
-        .notif-item-del { color: #666; font-size: 14px; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
+        .notif-item-title { font-size: 13px; font-weight: 600; color: var(--color-text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+        .notif-item-msg { font-size: 12px; color: var(--color-muted); margin-top: 3px; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+        .notif-item-time { font-size: 11px; color: var(--color-subtle); margin-top: 4px; }
+        .notif-item-del { color: var(--color-subtle); font-size: 14px; padding: 2px 6px; border-radius: 3px; flex-shrink: 0; }
         .notif-item-del:hover { color: #f87171; background: rgba(239,68,68,.15); }
-        .notif-empty { padding: 24px 16px; text-align: center; color: #666; font-size: 13px; }
-        .notif-footer { padding: 10px 16px; border-top: 1px solid #0f3460; text-align: center; }
-        .notif-footer a { color: #60a5fa; font-size: 12px; text-decoration: none; }
-        .notif-footer a:hover { color: #93c5fd; }
+        .notif-empty { padding: 24px 16px; text-align: center; color: var(--color-subtle); font-size: 13px; }
+        .notif-footer { padding: 10px 16px; border-top: 1px solid var(--color-border); text-align: center; }
+        .notif-footer a { color: var(--color-link); font-size: 12px; text-decoration: none; }
+        .notif-footer a:hover { color: var(--color-link-hover); }
+
+        /* ── Language switcher ── */
+        .lang-switcher { position: relative; display: flex; align-items: center; }
+        .lang-trigger { display: flex; align-items: center; gap: 5px; padding: 4px 8px; border-radius: 4px; cursor: pointer; color: var(--color-muted); font-size: 13px; background: none; border: 1px solid var(--color-border); }
+        .lang-trigger:hover { background: var(--bg-accent); color: var(--color-text); }
+        .lang-dropdown { position: absolute; top: 100%; right: 0; background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 8px; min-width: 200px; max-height: 320px; overflow-y: auto; box-shadow: 0 4px 12px var(--shadow-lg); margin-top: 6px; z-index: 200; display: none; }
+        .lang-dropdown.active { display: block; }
+        .lang-option { display: block; padding: 8px 14px; color: var(--color-muted); text-decoration: none; font-size: 13px; cursor: pointer; border: none; background: none; width: 100%; text-align: left; }
+        .lang-option:hover { background: var(--bg-accent); color: var(--color-text); }
+        .lang-option.active { color: var(--color-primary); font-weight: 600; }
+        .lang-option .lang-code { font-size: 11px; color: var(--color-subtle); margin-left: 4px; }
+
+        /* ── Theme switcher ── */
+        .theme-switcher { display: flex; align-items: center; gap: 5px; }
+        .theme-btn { width: 22px; height: 22px; border-radius: 50%; border: 2px solid rgba(255,255,255,0.25); cursor: pointer; transition: border-color .2s, transform .2s; flex-shrink: 0; padding: 0; }
+        .theme-btn:hover { transform: scale(1.2); border-color: rgba(255,255,255,0.6); }
+        .theme-btn.active { border-color: white; box-shadow: 0 0 0 1px rgba(0,0,0,0.3); }
+        [data-theme="light"] .theme-btn { border-color: rgba(0,0,0,0.2); }
+        [data-theme="light"] .theme-btn:hover { border-color: rgba(0,0,0,0.5); }
+        [data-theme="light"] .theme-btn.active { border-color: #333; box-shadow: 0 0 0 1px rgba(255,255,255,0.5); }
+        .theme-btn[data-t="dark"]     { background: linear-gradient(135deg, #1a1a2e 50%, #e94560 50%); }
+        .theme-btn[data-t="light"]    { background: linear-gradient(135deg, #f0f2f5 50%, #d63251 50%); }
+        .theme-btn[data-t="trans"]    { background: linear-gradient(to bottom, #55cdfc 33%, #f7a8b8 33% 66%, #ffffff 66%); }
+        .theme-btn[data-t="freepal"] { background: linear-gradient(to bottom, #000000 33%, #ffffff 33% 66%, #009736 66%); }
         
         /* Rainbow Upgrade Button */
         .upgrade-button {
@@ -163,6 +285,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         }
     </style>
     <script>
+        /* Apply saved theme and language immediately to avoid flash */
+        (function() {
+            var user = '{{ request.session.username|default("__guest__") }}';
+            var t = localStorage.getItem('aisbf_theme_' + user) || 'dark';
+            if (t !== 'dark') document.documentElement.setAttribute('data-theme', t);
+            var l = localStorage.getItem('aisbf_lang_' + user);
+            if (l && l !== 'en') document.documentElement.setAttribute('lang', l);
+        })();
+    </script>
+    <script>
         /*
          * Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
          *
@@ -183,6 +315,74 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             const dropdown = document.getElementById('account-dropdown');
             dropdown.classList.toggle('active');
         }
+        
+        // Theme switcher
+        (function() {
+            var user = '{{ request.session.username|default("__guest__") }}';
+            var key = 'aisbf_theme_' + user;
+            function applyTheme(t) {
+                if (t === 'dark') document.documentElement.removeAttribute('data-theme');
+                else document.documentElement.setAttribute('data-theme', t);
+                document.querySelectorAll('.theme-btn').forEach(function(b) {
+                    b.classList.toggle('active', b.dataset.t === t);
+                });
+            }
+            window.setTheme = function(t) {
+                localStorage.setItem(key, t);
+                applyTheme(t);
+            };
+            // Sync buttons on load
+            document.addEventListener('DOMContentLoaded', function() {
+                var saved = localStorage.getItem(key) || 'dark';
+                applyTheme(saved);
+            });
+        })();
+
+        // Language switcher
+        (function() {
+            function buildLangDropdown() {
+                var dd = document.getElementById('lang-dropdown');
+                if (!dd || !window.i18n) return;
+                var langs = window.i18n.getAvailableLanguages();
+                var current = window.i18n.getCurrentLanguage();
+                dd.innerHTML = Object.entries(langs).map(function(entry) {
+                    var code = entry[0], name = entry[1];
+                    return '<button class="lang-option lang-btn' + (code === current ? ' active' : '') + '" data-lang="' + code + '" onclick="selectLanguage(\'' + code + '\')">' +
+                        name + '<span class="lang-code">' + code.toUpperCase() + '</span></button>';
+                }).join('');
+                var codeEl = document.getElementById('current-lang-code');
+                if (codeEl) codeEl.textContent = current.toUpperCase();
+            }
+
+            window.selectLanguage = function(lang) {
+                window.i18n.setLanguage(lang).then(function() {
+                    var codeEl = document.getElementById('current-lang-code');
+                    if (codeEl) codeEl.textContent = lang.toUpperCase();
+                    document.getElementById('lang-dropdown').classList.remove('active');
+                    buildLangDropdown();
+                });
+            };
+
+            window.toggleLangDropdown = function(e) {
+                e.stopPropagation();
+                var dd = document.getElementById('lang-dropdown');
+                if (!dd.innerHTML) buildLangDropdown();
+                dd.classList.toggle('active');
+            };
+
+            document.addEventListener('DOMContentLoaded', function() {
+                // Rebuild after i18n initializes (it fires translatePage on DOMContentLoaded too)
+                setTimeout(buildLangDropdown, 100);
+            });
+
+            document.addEventListener('click', function(e) {
+                var sw = document.querySelector('.lang-switcher');
+                if (sw && !sw.contains(e.target)) {
+                    var dd = document.getElementById('lang-dropdown');
+                    if (dd) dd.classList.remove('active');
+                }
+            });
+        })();
         
         // Close account dropdown when clicking outside
         document.addEventListener('click', function(event) {
@@ -560,23 +760,37 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         })();
     </script>
     {% block extra_css %}{% endblock %}
+    <script src="/static/i18n.js"></script>
 </head>
-<body>
+<body data-username="{{ request.session.username|default('__guest__') }}">
     <div class="header">
         <div class="container">
             <h1>AISBF Dashboard <span style="font-size: 0.8em; font-weight: normal; opacity: 0.7;">v{{ __version__ }}</span></h1>
             {% if request.session.logged_in %}
             <div class="header-actions">
                 {% if is_aisbf_cloud %}
-                <button onclick="openContactModal()" class="btn btn-secondary">Help</button>
+                <button onclick="openContactModal()" class="btn btn-secondary" data-i18n="header.help">Help</button>
                 {% endif %}
-                <a href="{{ url_for(request, '/dashboard/docs') }}" class="btn btn-secondary">Docs</a>
-                <a href="{{ url_for(request, '/dashboard/about') }}" class="btn btn-secondary">About</a>
-                <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary">License</a>
+                <a href="{{ url_for(request, '/dashboard/docs') }}" class="btn btn-secondary" data-i18n="header.docs">Docs</a>
+                <a href="{{ url_for(request, '/dashboard/about') }}" class="btn btn-secondary" data-i18n="header.about">About</a>
+                <a href="{{ url_for(request, '/dashboard/license') }}" class="btn btn-secondary" data-i18n="header.license">License</a>
                 {% if request.session.role == 'admin' %}
-                <button onclick="restartServer()" class="btn btn-warning">Restart Server</button>
+                <button onclick="restartServer()" class="btn btn-warning" data-i18n="header.restart_server">Restart Server</button>
                 {% endif %}
-                <a href="{{ url_for(request, '/dashboard/logout') }}" class="btn btn-secondary">Logout</a>
+                <div class="theme-switcher" title="Color theme">
+                    <button class="theme-btn" data-t="dark"    onclick="setTheme('dark')"    title="Dark theme"></button>
+                    <button class="theme-btn" data-t="light"   onclick="setTheme('light')"   title="Light theme"></button>
+                    <button class="theme-btn" data-t="trans"   onclick="setTheme('trans')"   title="Trans theme"></button>
+                    <button class="theme-btn" data-t="freepal" onclick="setTheme('freepal')" title="Free Palestine theme"></button>
+                </div>
+                <div class="lang-switcher">
+                    <button class="lang-trigger" onclick="toggleLangDropdown(event)" title="Language">
+                        <i class="fas fa-language"></i>
+                        <span id="current-lang-code">EN</span>
+                    </button>
+                    <div class="lang-dropdown" id="lang-dropdown"></div>
+                </div>
+                <a href="{{ url_for(request, '/dashboard/logout') }}" class="btn btn-secondary" data-i18n="header.logout">Logout</a>
             </div>
             {% endif %}
         </div>
@@ -601,22 +815,22 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     {% if request.session.logged_in %}
     <div class="container">
         <div class="nav">
-            <a href="{{ url_for(request, '/dashboard') }}" {% if request.path == '/dashboard' %}class="active"{% endif %}>Overview</a>
-            <a href="{{ url_for(request, '/dashboard/providers') }}" {% if '/providers' in request.path %}class="active"{% endif %}>Providers</a>
-            <a href="{{ url_for(request, '/dashboard/rotations') }}" {% if '/rotations' in request.path %}class="active"{% endif %}>Rotations</a>
-            <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %}>Autoselect</a>
-            <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %}>Prompts</a>
-            <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %}>Analytics</a>
+            <a href="{{ url_for(request, '/dashboard') }}" {% if request.path == '/dashboard' %}class="active"{% endif %} data-i18n="nav.overview">Overview</a>
+            <a href="{{ url_for(request, '/dashboard/providers') }}" {% if '/providers' in request.path %}class="active"{% endif %} data-i18n="nav.providers">Providers</a>
+            <a href="{{ url_for(request, '/dashboard/rotations') }}" {% if '/rotations' in request.path %}class="active"{% endif %} data-i18n="nav.rotations">Rotations</a>
+            <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %} data-i18n="nav.autoselect">Autoselect</a>
+            <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %} data-i18n="nav.prompts">Prompts</a>
+            <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %} data-i18n="nav.analytics">Analytics</a>
             {% if request.session.user_id %}
-            <a href="{{ url_for(request, '/dashboard/user/tokens') }}" {% if '/user/tokens' in request.path %}class="active"{% endif %}>API Tokens</a>
-            <a href="{{ url_for(request, '/dashboard/wallet') }}" {% if '/wallet' in request.path %}class="active"{% endif %}>Wallet</a>
-            <a href="{{ url_for(request, '/dashboard/usage') }}" {% if '/usage' in request.path %}class="active"{% endif %}>Usage</a>
+            <a href="{{ url_for(request, '/dashboard/user/tokens') }}" {% if '/user/tokens' in request.path %}class="active"{% endif %} data-i18n="nav.api_tokens">API Tokens</a>
+            <a href="{{ url_for(request, '/dashboard/wallet') }}" {% if '/wallet' in request.path %}class="active"{% endif %} data-i18n="nav.wallet">Wallet</a>
+            <a href="{{ url_for(request, '/dashboard/usage') }}" {% if '/usage' in request.path %}class="active"{% endif %} data-i18n="nav.usage">Usage</a>
             {% endif %}
             {% if request.session.role == 'admin' %}
-            <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %}>Users</a>
-            <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %}>Settings</a>
-            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" {% if '/admin/tiers' in request.path %}class="active"{% endif %}>Tiers</a>
-            <a href="{{ url_for(request, '/dashboard/admin/payment-settings') }}" {% if '/admin/payment-settings' in request.path %}class="active"{% endif %}>Payment Settings</a>
+            <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %} data-i18n="nav.users">Users</a>
+            <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %} data-i18n="nav.settings">Settings</a>
+            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" {% if '/admin/tiers' in request.path %}class="active"{% endif %} data-i18n="nav.tiers">Tiers</a>
+            <a href="{{ url_for(request, '/dashboard/admin/payment-settings') }}" {% if '/admin/payment-settings' in request.path %}class="active"{% endif %} data-i18n="nav.payment_settings">Payment Settings</a>
             {% endif %}
             {% if show_upgrade_button %}
             <a href="{{ url_for(request, '/dashboard/pricing') }}" class="upgrade-button rainbow-text">✨ Upgrade! ✨</a>
@@ -630,33 +844,33 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 </div>
                 <div class="notif-dropdown" id="notif-dropdown">
                     <div class="notif-header">
-                        <span>Notifications</span>
-                        <button onclick="markAllNotifRead(event)">Mark all as read</button>
+                        <span data-i18n="notifications.title">Notifications</span>
+                        <button onclick="markAllNotifRead(event)" data-i18n="notifications.mark_all_read">Mark all as read</button>
                     </div>
                     <div class="notif-list" id="notif-list">
-                        <div class="notif-empty">Loading…</div>
+                        <div class="notif-empty" data-i18n="common.loading">Loading…</div>
                     </div>
                     <div class="notif-footer">
-                        <a href="#" onclick="loadNotifications(); return false;">Refresh</a>
+                        <a href="#" onclick="loadNotifications(); return false;" data-i18n="notifications.refresh">Refresh</a>
                     </div>
                 </div>
             </div>
             <div class="account-menu">
                 <div class="account-trigger" onclick="toggleAccountMenu()">
                     <img src="{{ '/dashboard/profile-pic' if request.session.has_profile_pic else 'https://www.gravatar.com/avatar/' ~ (request.session.email|md5 if request.session.email else '') ~ '?s=48&d=identicon' }}" alt="User avatar">
-                    <span>Account</span>
+                    <span data-i18n="nav.account">Account</span>
                 </div>
                 <div class="account-dropdown" id="account-dropdown">
                     {% if request.session.user_id %}
                     {% if request.session.user_id %}
-                     <a href="{{ url_for(request, '/dashboard/profile') }}">Edit Profile</a>
-                     <a href="{{ url_for(request, '/dashboard/user/tokens') }}">API Tokens</a>
-                     <a href="{{ url_for(request, '/dashboard/cache-settings') }}">Cache Settings</a>
-                     <a href="{{ url_for(request, '/dashboard/subscription') }}">Subscription</a>
-                     <a href="{{ url_for(request, '/dashboard/wallet') }}">Wallet</a>
-                     <a href="{{ url_for(request, '/dashboard/billing') }}">Billing</a>
-                     <a href="{{ url_for(request, '/dashboard/usage') }}">Usage &amp; Quotas</a>
-                     <a href="{{ url_for(request, '/dashboard/change-password') }}">Change Password</a>
+                     <a href="{{ url_for(request, '/dashboard/profile') }}" data-i18n="account_menu.edit_profile">Edit Profile</a>
+                     <a href="{{ url_for(request, '/dashboard/user/tokens') }}" data-i18n="account_menu.api_tokens">API Tokens</a>
+                     <a href="{{ url_for(request, '/dashboard/cache-settings') }}" data-i18n="account_menu.cache_settings">Cache Settings</a>
+                     <a href="{{ url_for(request, '/dashboard/subscription') }}" data-i18n="account_menu.subscription">Subscription</a>
+                     <a href="{{ url_for(request, '/dashboard/wallet') }}" data-i18n="account_menu.wallet">Wallet</a>
+                     <a href="{{ url_for(request, '/dashboard/billing') }}" data-i18n="account_menu.billing">Billing</a>
+                     <a href="{{ url_for(request, '/dashboard/usage') }}" data-i18n="account_menu.usage_quotas">Usage &amp; Quotas</a>
+                     <a href="{{ url_for(request, '/dashboard/change-password') }}" data-i18n="account_menu.change_password">Change Password</a>
                     {% endif %}
                     {% endif %}
                 </div>
@@ -677,8 +891,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             margin-top: 40px;
             padding: 20px 0;
             text-align: center;
-            border-top: 1px solid #0f3460;
-            background: #16213e;
+            border-top: 1px solid var(--color-border);
+            background: var(--bg-panel);
         }
         
         .donate-btn {
@@ -712,14 +926,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .donate-modal.active, .ui-modal-backdrop.active { display: flex; }
 
         .donate-modal-content, .ui-modal-box {
-            background: #16213e;
+            background: var(--bg-panel);
             padding: 30px;
             border-radius: 12px;
             max-width: 500px;
             width: 90%;
             max-height: 90vh;
             overflow-y: auto;
-            border: 1px solid #0f3460;
+            border: 1px solid var(--color-border);
         }
         
         .donate-modal-header, .ui-modal-header {
@@ -730,24 +944,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         }
         
         .donate-modal-header h3, .ui-modal-header h3 {
-            color: #f5576c;
+            color: var(--color-primary);
             margin: 0;
         }
         
         .close-modal {
             background: none;
             border: none;
-            color: #a0a0a0;
+            color: var(--color-muted);
             font-size: 24px;
             cursor: pointer;
         }
 
         /* ── ui-modal specific ── */
-        .ui-modal-body { color: #e0e0e0; line-height: 1.5; margin-bottom: 20px; }
+        .ui-modal-body { color: var(--color-text); line-height: 1.5; margin-bottom: 20px; }
         .ui-modal-input {
             width: 100%; padding: 10px;
-            border: 1px solid #0f3460; border-radius: 4px;
-            font-size: 14px; background: #1a1a2e; color: #e0e0e0;
+            border: 1px solid var(--color-border); border-radius: 4px;
+            font-size: 14px; background: var(--bg-input); color: var(--color-text);
             margin-top: 10px;
         }
         .ui-modal-footer { display: flex; gap: 10px; justify-content: flex-end; }
@@ -757,7 +971,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .ui-modal-icon.danger { color: #e74c3c; }
         
         .crypto-address {
-            background: #0f3460;
+            background: var(--bg-accent);
             padding: 12px;
             border-radius: 6px;
             margin: 10px 0;
@@ -766,17 +980,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             word-break: break-all;
             cursor: pointer;
             user-select: all;
+            color: var(--color-text);
         }
         
         .crypto-label {
             font-weight: 600;
             margin-top: 15px;
-            color: #e0e0e0;
+            color: var(--color-text);
         }
         
         .donate-message {
             margin: 20px 0;
-            color: #a0a0a0;
+            color: var(--color-muted);
             line-height: 1.5;
         }
     </style>
@@ -785,18 +1000,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <div class="container">
             <div style="display: flex; justify-content: center; gap: 15px; align-items: center; flex-wrap: wrap;">
                 <button class="donate-btn" onclick="openDonateModal()">
-                    <i class="fas fa-heart"></i> Support AISBF Development
+                    <i class="fas fa-heart"></i> <span data-i18n="footer.support_development">Support AISBF Development</span>
                 </button>
                 
                 {% if is_aisbf_cloud %}
-                <a href="https://aisbf.cloud/privacy.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                <a href="https://aisbf.cloud/privacy.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;" data-i18n="footer.privacy_policy">
                     Privacy Policy
                 </a>
-                <a href="https://aisbf.cloud/tos.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;">
+                <a href="https://aisbf.cloud/tos.html" target="_blank" class="btn btn-secondary" style="font-size: 13px; padding: 8px 16px;" data-i18n="footer.terms_of_service">
                     Terms of Service
                 </a>
                 <button class="btn btn-secondary" onclick="openContactModal()" style="font-size: 13px; padding: 8px 16px;">
-                    <i class="fas fa-envelope"></i> Contact
+                    <i class="fas fa-envelope"></i> <span data-i18n="footer.contact">Contact</span>
                 </button>
                 {% endif %}
             </div>

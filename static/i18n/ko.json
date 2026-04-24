@@ -1,0 +1,12 @@
+{
+  "header": { "title": "AISBF 대시보드", "help": "도움말", "docs": "문서", "about": "정보", "license": "라이선스", "restart_server": "서버 재시작", "logout": "로그아웃" },
+  "nav": { "overview": "개요", "providers": "공급자", "rotations": "로테이션", "autoselect": "자동 선택", "prompts": "프롬프트", "analytics": "분석", "api_tokens": "API 토큰", "wallet": "지갑", "usage": "사용량", "users": "사용자", "settings": "설정", "tiers": "등급", "payment_settings": "결제 설정", "upgrade": "✨ 업그레이드! ✨", "notifications": "알림", "account": "계정" },
+  "account_menu": { "edit_profile": "프로필 편집", "api_tokens": "API 토큰", "cache_settings": "캐시 설정", "subscription": "구독", "wallet": "지갑", "billing": "청구", "usage_quotas": "사용량 및 할당량", "change_password": "비밀번호 변경" },
+  "notifications": { "title": "알림", "mark_all_read": "모두 읽음으로 표시", "refresh": "새로고침", "no_notifications": "알림 없음", "just_now": "방금", "minutes_ago": "{n}분 전", "hours_ago": "{n}시간 전", "days_ago": "{n}일 전" },
+  "footer": { "support_development": "AISBF 개발 지원", "privacy_policy": "개인정보 처리방침", "terms_of_service": "서비스 약관", "contact": "문의" },
+  "donate": { "title": "AISBF 지원", "thank_you": "기부를 고려해 주셔서 감사합니다. 여러분의 지원이 AISBF를 완전한 오픈소스 무료 소프트웨어로 유지하는 데 도움이 됩니다.", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "주소를 클릭하여 클립보드에 복사", "copied": "복사됨!" },
+  "welcome": { "title": "AISBF에 오신 것을 환영합니다!", "early_adopter": "얼리 어답터가 되어 주셔서 감사합니다! 현재 집중 개발 단계에 있습니다.", "may_encounter": "버그, 서비스 중단 또는 변경 사항이 발생할 수 있습니다.", "feedback": "여러분의 피드백이 AISBF를 더 좋게 만드는 데 도움이 됩니다. 언제든지 연락해 주세요!", "send_feedback": "피드백 보내기", "got_it": "알겠습니다!" },
+  "contact": { "title": "문의하기", "your_email": "이메일", "type": "유형", "select_type": "유형 선택...", "bug_report": "버그 신고", "feature_request": "기능 요청", "feedback": "피드백", "question": "질문", "help": "도움말", "title_field": "제목", "title_placeholder": "메시지의 간단한 요약", "message": "메시지", "message_placeholder": "문제나 요청을 자세히 설명해 주세요...", "send_message": "메시지 보내기", "cancel": "취소", "sending": "전송 중...", "success": "메시지가 성공적으로 전송되었습니다! 피드백 감사합니다.", "error": "오류: {error}", "network_error": "네트워크 오류. 나중에 다시 시도해 주세요." },
+  "modal": { "notice": "알림", "confirm": "확인", "warning": "경고", "ok": "확인", "cancel": "취소", "delete": "삭제" },
+  "common": { "save": "저장", "loading": "로딩 중...", "error": "오류", "success": "성공", "close": "닫기", "yes": "예", "no": "아니오" }
+}

@@ -35,17 +35,12 @@ async def get_ip_country(ip: str) -> Optional[str]:
         _ip_country_cache[ip] = None
         return None
 
-def is_ip_israeli(ip: str) -> bool:
-    """Check if IP is from Israel."""
-    # Run async function in sync context if needed
+def is_ip_genocidal(ip: str) -> bool:
+    """Check if IP is from Israel. Only safe to call outside a running event loop."""
     try:
         loop = asyncio.get_event_loop()
         if loop.is_running():
-            # If loop is running, we can't use run_until_complete
-            # For middleware, we'll need to handle this differently
-            return False  # Temporary fallback
-        else:
-            country = loop.run_until_complete(get_ip_country(ip))
-            return country == 'IL'
+            return False
+        return loop.run_until_complete(get_ip_country(ip)) == 'IL'
     except Exception:
         return False

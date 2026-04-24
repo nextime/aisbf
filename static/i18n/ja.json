@@ -1,0 +1,12 @@
+{
+  "header": { "title": "AISBF ダッシュボード", "help": "ヘルプ", "docs": "ドキュメント", "about": "概要", "license": "ライセンス", "restart_server": "サーバー再起動", "logout": "ログアウト" },
+  "nav": { "overview": "概要", "providers": "プロバイダー", "rotations": "ローテーション", "autoselect": "自動選択", "prompts": "プロンプト", "analytics": "分析", "api_tokens": "APIトークン", "wallet": "ウォレット", "usage": "使用状況", "users": "ユーザー", "settings": "設定", "tiers": "プラン", "payment_settings": "支払い設定", "upgrade": "✨ アップグレード！✨", "notifications": "通知", "account": "アカウント" },
+  "account_menu": { "edit_profile": "プロフィール編集", "api_tokens": "APIトークン", "cache_settings": "キャッシュ設定", "subscription": "サブスクリプション", "wallet": "ウォレット", "billing": "請求", "usage_quotas": "使用量とクォータ", "change_password": "パスワード変更" },
+  "notifications": { "title": "通知", "mark_all_read": "すべて既読にする", "refresh": "更新", "no_notifications": "通知なし", "just_now": "たった今", "minutes_ago": "{n}分前", "hours_ago": "{n}時間前", "days_ago": "{n}日前" },
+  "footer": { "support_development": "AISBF開発を支援", "privacy_policy": "プライバシーポリシー", "terms_of_service": "利用規約", "contact": "お問い合わせ" },
+  "donate": { "title": "AISBFを支援", "thank_you": "寄付をご検討いただきありがとうございます。あなたのサポートがAISBFをオープンソースの無料ソフトウェアとして維持するのに役立ちます。", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "アドレスをクリックしてコピー", "copied": "コピーしました！" },
+  "welcome": { "title": "AISBFへようこそ！", "early_adopter": "早期ユーザーとしてご参加いただきありがとうございます！現在、開発の集中フェーズにあります。", "may_encounter": "バグやサービス中断が発生する場合があります。", "feedback": "フィードバックはAISBFの改善に役立ちます。お気軽にご連絡ください！", "send_feedback": "フィードバックを送る", "got_it": "了解！" },
+  "contact": { "title": "お問い合わせ", "your_email": "メールアドレス", "type": "種類", "select_type": "種類を選択...", "bug_report": "バグ報告", "feature_request": "機能リクエスト", "feedback": "フィードバック", "question": "質問", "help": "ヘルプ", "title_field": "タイトル", "title_placeholder": "メッセージの簡単な概要", "message": "メッセージ", "message_placeholder": "問題やリクエストを詳しく説明してください...", "send_message": "メッセージを送る", "cancel": "キャンセル", "sending": "送信中...", "success": "メッセージが正常に送信されました！フィードバックありがとうございます。", "error": "エラー: {error}", "network_error": "ネットワークエラー。後でもう一度お試しください。" },
+  "modal": { "notice": "お知らせ", "confirm": "確認", "warning": "警告", "ok": "OK", "cancel": "キャンセル", "delete": "削除" },
+  "common": { "save": "保存", "loading": "読み込み中...", "error": "エラー", "success": "成功", "close": "閉じる", "yes": "はい", "no": "いいえ" }
+}

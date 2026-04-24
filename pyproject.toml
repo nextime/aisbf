@@ -66,3 +66,7 @@ include-package-data = true
 
 [tool.setuptools.package-data]
 "*" = ["*.json", "*.md", "*.sh", "*.py", "LICENSE.txt", "requirements.txt", "main.py"]
+
+[tool.setuptools.data-files]
+"share/aisbf/static" = ["static/i18n.js"]
+"share/aisbf/static/i18n" = ["static/i18n/*.json"]

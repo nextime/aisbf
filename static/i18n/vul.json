@@ -1,0 +1,13 @@
+{
+  "_note": "Vulcan — fictional language from Star Trek. Many technical terms have no Vulcan equivalent and fall back to English.",
+  "header": { "title": "AISBF t'Veh", "help": "Ek'tra", "docs": "Veh-kur", "about": "Ri'nah", "license": "Sochya", "restart_server": "Restart Server", "logout": "Ek'tra-tor" },
+  "nav": { "overview": "Kol-ut-shan", "providers": "Providers", "rotations": "Rotations", "autoselect": "Autoselect", "prompts": "Prompts", "analytics": "Analytics", "api_tokens": "API Tokens", "wallet": "Kash-naf", "usage": "Ek'naf", "users": "Vuhlkansu", "settings": "Sochya-tor", "tiers": "Tiers", "payment_settings": "Payment Settings", "upgrade": "✨ Ek'naf! ✨", "notifications": "Veh-tor", "account": "Katra" },
+  "account_menu": { "edit_profile": "Katra t'Veh", "api_tokens": "API Tokens", "cache_settings": "Cache Settings", "subscription": "Subscription", "wallet": "Kash-naf", "billing": "Billing", "usage_quotas": "Usage & Quotas", "change_password": "Sochya-tor Kash" },
+  "notifications": { "title": "Veh-tor", "mark_all_read": "Kol-ut veh", "refresh": "Ek'tra", "no_notifications": "Ri veh-tor", "just_now": "Sochya", "minutes_ago": "{n} reh", "hours_ago": "{n} kah", "days_ago": "{n} sarlah" },
+  "footer": { "support_development": "Ek'tra AISBF", "privacy_policy": "Privacy Policy", "terms_of_service": "Terms of Service", "contact": "Veh-tor" },
+  "donate": { "title": "Ek'tra AISBF", "thank_you": "Nam-tor. Ek'traik AISBF sochya t'du.", "bitcoin": "Bitcoin (BTC)", "ethereum": "Ethereum (ETH), USDC, USDT (ERC20, Mainnet)", "click_to_copy": "Kash t'veh ek'tra", "copied": "Ek'traik!" },
+  "welcome": { "title": "Sochya AISBF!", "early_adopter": "Nam-tor t'du wa'reh vuhlkansu. Sochya.", "may_encounter": "Ri'nah t'veh ek'naf.", "feedback": "Veh-tor t'du ek'tra AISBF. Veh-tor!", "send_feedback": "Veh-tor Ek'tra", "got_it": "Sochya!" },
+  "contact": { "title": "Veh-tor", "your_email": "Email", "type": "Kol", "select_type": "Select type...", "bug_report": "Bug Report", "feature_request": "Feature Request", "feedback": "Veh-tor", "question": "Ri'nah", "help": "Ek'tra", "title_field": "Kol-ut", "title_placeholder": "Brief summary", "message": "Veh-tor", "message_placeholder": "Describe your issue...", "send_message": "Veh-tor Ek'tra", "cancel": "Ri-tor", "sending": "Ek'traik...", "success": "Veh-tor ek'traik! Nam-tor.", "error": "Ri'nah: {error}", "network_error": "Network error. Please try again later." },
+  "modal": { "notice": "Veh-tor", "confirm": "Sochya", "warning": "Ri'nah", "ok": "Nam-tor", "cancel": "Ri-tor", "delete": "Ek'naf" },
+  "common": { "save": "Kol-ut", "loading": "Ek'traik...", "error": "Ri'nah", "success": "Sochya", "close": "Ri-tor", "yes": "Sochya", "no": "Ri" }
+}

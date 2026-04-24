@@ -55,6 +55,7 @@ import asyncio
 from aisbf.database import _hash_password as _db_hash_password, _verify_password as _db_verify_password
 import httpx
 import multiprocessing
+from aisbf import geolocation
 from logging.handlers import RotatingFileHandler
 from datetime import datetime, timedelta
 from collections import defaultdict
@@ -2110,8 +2111,76 @@ app.add_middleware(
     https_only=os.environ.get("AISBF_HTTPS", "false").lower() == "true",
 )
 
-# Add proxy headers middleware LAST so it executes FIRST
-# This ensures proxy headers are processed before any other middleware (including auth_middleware)
+class DashboardBlockingMiddleware(BaseHTTPMiddleware):
+    """Middleware to block dashboard access from Israeli domains."""
+    
+    async def dispatch(self, request: Request, call_next):
+        host = request.headers.get("host", "").lower()
+        if host.endswith(".il"):
+            # Check if this is a dashboard route
+            path = request.url.path
+            if path.startswith("/dashboard") or path == "/":
+                # Redirect to blocked page
+                base_url = get_base_url(request)
+                blocked_url = f"{base_url}/blocked"
+                return RedirectResponse(url=blocked_url, status_code=302)
+        
+        response = await call_next(request)
+        return response
+
+
+class APIBlockingMiddleware(BaseHTTPMiddleware):
+    """Middleware to block API/MCP access from Israeli domains and IPs."""
+    
+    async def dispatch(self, request: Request, call_next):
+        host = request.headers.get("host", "").lower()
+        path = request.url.path
+        
+        # Check if this is API or MCP route
+        is_api_route = path.startswith("/api") or path.startswith("/mcp")
+        
+        if is_api_route:
+            # Block if domain is Israeli
+            if host.endswith(".il"):
+                return JSONResponse(
+                    status_code=403,
+                    content={"error": "We do not support the Israeli genocide of Palestinian people."}
+                )
+            
+            # Block if IP is genocidial
+            client_ip = self._get_client_ip(request)
+            if client_ip:
+                country = await geolocation.get_ip_country(client_ip)
+                if country == 'IL':
+                    return JSONResponse(
+                        status_code=403,
+                        content={"error": "We do not support the Israeli genocide of Palestinian people."}
+                    )
+        
+        response = await call_next(request)
+        return response
+    
+    def _get_client_ip(self, request: Request) -> Optional[str]:
+        """Extract client IP from request."""
+        # Try X-Forwarded-For first (from proxy)
+        x_forwarded_for = request.headers.get("X-Forwarded-For")
+        if x_forwarded_for:
+            # Take first IP if multiple
+            return x_forwarded_for.split(",")[0].strip()
+        
+        # Fall back to direct client
+        client = request.scope.get("client")
+        if client:
+            return client[0]
+        
+        return None
+
+
+# Middleware execution order: last added = first executed (outermost layer).
+# Blocking middlewares are added first so they execute AFTER proxy headers are decoded.
+# ProxyHeadersMiddleware is added LAST so it executes FIRST on every request.
+app.add_middleware(DashboardBlockingMiddleware)
+app.add_middleware(APIBlockingMiddleware)
 app.add_middleware(ProxyHeadersMiddleware)
 
 # Helper function for API authentication
