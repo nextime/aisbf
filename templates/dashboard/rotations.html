@@ -61,32 +61,101 @@ let rotationsConfig = rotationsData.config;
 let availableProviders = rotationsData.providers;
 let expandedRotations = new Set();
 
-// Model name autocomplete: cache per provider
-const providerModelsCache = {};
-const modelSearchTimers = {};
+// ===== Model Search Modal =====
+let _msAllItems = [], _msDispItems = [], _msCancelled = false, _msCallback = null;
 
-async function fetchProviderModels(providerId) {
-    if (!providerId) return [];
-    if (providerModelsCache[providerId]) return providerModelsCache[providerId];
-    try {
-        const resp = await fetch(`/dashboard/providers/${encodeURIComponent(providerId)}/configured-models`);
-        if (!resp.ok) return [];
-        const data = await resp.json();
-        providerModelsCache[providerId] = data.models || [];
-        return providerModelsCache[providerId];
-    } catch { return []; }
+function _msEnsure() {
+    if (document.getElementById('ms-overlay')) return;
+    const d = document.createElement('div');
+    d.id = 'ms-overlay';
+    d.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;';
+    d.innerHTML = `
+      <div style="background:#1a1a2e;border:1px solid #0f3460;border-radius:8px;padding:24px;max-width:560px;width:93%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+          <h3 id="ms-title" style="margin:0;font-size:16px;color:#e0e0e0;"></h3>
+          <button type="button" onclick="msClose()" style="background:none;border:none;color:#a0a0a0;cursor:pointer;font-size:22px;padding:0 4px;">&times;</button>
+        </div>
+        <div id="ms-status" style="font-size:13px;color:#a0a0a0;min-height:18px;margin-bottom:10px;"></div>
+        <div style="display:flex;gap:8px;margin-bottom:12px;">
+          <input type="text" id="ms-filter-input" placeholder="Filter results…"
+            style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;color:#e0e0e0;font-size:14px;"
+            onkeydown="if(event.key==='Enter')msFilter()">
+          <button type="button" onclick="msFilter()" class="btn btn-secondary" style="padding:8px 14px;font-size:13px;">Filter</button>
+        </div>
+        <div id="ms-results" style="overflow-y:auto;flex:1;max-height:340px;border:1px solid #0f3460;border-radius:3px;background:#16213e;min-height:40px;"></div>
+        <div style="margin-top:14px;display:flex;justify-content:flex-end;">
+          <button type="button" onclick="msClose()" class="btn btn-secondary">Cancel</button>
+        </div>
+      </div>`;
+    document.body.appendChild(d);
 }
 
-function searchModelsDebounced(datalistId, query, providerId, timerKey) {
-    clearTimeout(modelSearchTimers[timerKey]);
-    if (query.length < 3 || !providerId) return;
-    modelSearchTimers[timerKey] = setTimeout(async () => {
-        let models = await fetchProviderModels(providerId);
-        const q = query.toLowerCase();
-        models = models.filter(m => m.toLowerCase().includes(q)).slice(0, 30);
-        const dl = document.getElementById(datalistId);
-        if (dl) dl.innerHTML = models.map(m => `<option value="${escHtmlAttr(m)}">`).join('');
-    }, 350);
+async function msOpenProvider(providerId, inputId, cb) {
+    _msEnsure(); _msCancelled = false; _msAllItems = []; _msDispItems = [];
+    _msCallback = function(v) { const e = document.getElementById(inputId); if (e) e.value = v; cb(v); };
+    const o = document.getElementById('ms-overlay'); o.style.display = 'flex';
+    document.getElementById('ms-title').textContent = 'Search Models — ' + providerId;
+    document.getElementById('ms-filter-input').value = '';
+    document.getElementById('ms-status').textContent = 'Checking provider models…';
+    document.getElementById('ms-results').innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">Loading…</p>';
+    try {
+        let r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/configured-models');
+        if (_msCancelled) return;
+        let d = await r.json(); let m = d.models || [];
+        if (!m.length) {
+            document.getElementById('ms-status').textContent = 'No local model list — fetching from provider API…';
+            r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/search-models?refresh=true');
+            if (_msCancelled) return;
+            d = await r.json(); m = d.models || [];
+        }
+        if (_msCancelled) return;
+        _msAllItems = m;
+        document.getElementById('ms-status').textContent = m.length ? m.length + ' model(s) found. Use Filter to narrow results.' : 'No models found for this provider.';
+        msRenderResults(m);
+    } catch(e) {
+        if (!_msCancelled) { document.getElementById('ms-status').textContent = 'Error: ' + e.message; document.getElementById('ms-results').innerHTML = '<p style="color:#f87171;padding:15px;">Failed to load models.</p>'; }
+    }
+}
+
+function msFilter() {
+    const q = document.getElementById('ms-filter-input').value.trim().toLowerCase();
+    document.getElementById('ms-status').textContent = 'Searching…';
+    const filtered = q ? _msAllItems.filter(m => (typeof m === 'string' ? m : m.id + ' ' + m.name).toLowerCase().includes(q)) : _msAllItems;
+    document.getElementById('ms-status').textContent = filtered.length + ' result(s).';
+    msRenderResults(filtered);
+}
+
+function msRenderResults(items) {
+    _msDispItems = items;
+    const el = document.getElementById('ms-results');
+    if (!items || !items.length) { el.innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">No results.</p>'; return; }
+    el.innerHTML = items.map((item, i) => {
+        const isStr = typeof item === 'string';
+        const id = isStr ? item : item.id, label = isStr ? item : item.name;
+        return `<div data-idx="${i}" onclick="msPickIdx(this)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #0a2a50;font-size:13px;word-break:break-all;" onmouseover="this.style.background='#0f3460'" onmouseout="this.style.background=''">` +
+               (id !== label ? `<span style="color:#c8d6e5;">${escHtmlAttr(id)}</span><span style="color:#888;font-size:11px;margin-left:6px;">${escHtmlAttr(label)}</span>` : `<span>${escHtmlAttr(id)}</span>`) + '</div>';
+    }).join('');
+}
+
+function msPickIdx(el) {
+    const i = parseInt(el.getAttribute('data-idx'));
+    const item = _msDispItems[i]; const val = typeof item === 'string' ? item : item.id;
+    if (_msCallback) _msCallback(val);
+    msClose();
+}
+
+function msClose() {
+    _msCancelled = true;
+    const el = document.getElementById('ms-overlay'); if (el) el.style.display = 'none';
+}
+
+function msOpenProviderForInput(btn) {
+    const providerId = btn.getAttribute('data-provider');
+    const inputId = btn.getAttribute('data-input-id');
+    const input = document.getElementById(inputId);
+    msOpenProvider(providerId, inputId, function(v) {
+        if (input) { input.value = v; input.dispatchEvent(new Event('change')); }
+    });
 }
 
 // Provider select widget: <select> for ≤25, datalist input for >25
@@ -282,8 +351,7 @@ function renderRotationModels(rotationKey, providerIndex) {
         const modelDiv = document.createElement('div');
         modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 10px; margin-bottom: 8px; border-radius: 3px; background: #16213e;';
         const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const dlId = `mdl-dl-${rotationKey}-${providerIndex}-${modelIndex}`;
-        const timerKey = `${rotationKey}-${providerIndex}-${modelIndex}`;
+        const inputId = `mdl-inp-${rotationKey}-${providerIndex}-${modelIndex}`;
         const providerId = provider.provider_id || '';
 
         modelDiv.innerHTML = `
@@ -294,12 +362,18 @@ function renderRotationModels(rotationKey, providerIndex) {
 
             <div class="form-group" style="margin-bottom: 8px;">
                 <label style="font-size: 12px;">Model Name</label>
-                <input type="text" value="${escHtmlAttr(model.name)}" list="${dlId}"
-                    placeholder="Type 3+ chars to search..."
-                    oninput="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value);searchModelsDebounced('${dlId}',this.value,'${escHtmlAttr(providerId)}','${timerKey}')"
-                    onchange="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
-                    required style="font-size: 12px; padding: 5px;">
-                <datalist id="${dlId}"></datalist>
+                <div style="display:flex;gap:5px;align-items:center;">
+                    <input type="text" id="${escHtmlAttr(inputId)}" value="${escHtmlAttr(model.name)}"
+                        oninput="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
+                        onchange="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
+                        placeholder="Model name…"
+                        required style="flex:1;font-size:12px;padding:5px;">
+                    <button type="button" class="btn btn-secondary"
+                        data-provider="${escHtmlAttr(providerId)}"
+                        data-input-id="${escHtmlAttr(inputId)}"
+                        onclick="msOpenProviderForInput(this)"
+                        style="padding:4px 8px;font-size:11px;white-space:nowrap;">Search</button>
+                </div>
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">

@@ -4848,6 +4848,135 @@ async def get_provider_configured_models(request: Request, provider_id: str, sea
     return JSONResponse({"models": model_names[:50]})
 
 
+@app.get("/dashboard/providers/{provider_id}/search-models")
+async def search_provider_models_api(request: Request, provider_id: str, query: str = "", refresh: bool = False):
+    """Search provider models; fetches from live API if local config has none or refresh=True."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"models": [], "error": "unauthorized"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    models = []
+    if is_config_admin:
+        try:
+            config_path = Path.home() / '.aisbf' / 'providers.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'providers.json'
+            with open(config_path) as f:
+                full_config = json.load(f)
+            if 'providers' in full_config and isinstance(full_config['providers'], dict):
+                providers_data = full_config['providers']
+            else:
+                providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+            provider = providers_data.get(provider_id, {})
+            raw = provider.get('models', [])
+            models = [m.get('name', '') if isinstance(m, dict) else str(m) for m in raw]
+            models = [n for n in models if n]
+        except Exception:
+            pass
+    else:
+        try:
+            db = DatabaseRegistry.get_config_database()
+            user_providers = db.get_user_providers(current_user_id)
+            match = next((p for p in user_providers if p['provider_id'] == provider_id), None)
+            if match:
+                prov = match.get('config', match)
+                raw = prov.get('models', [])
+                models = [m.get('name', '') if isinstance(m, dict) else str(m) for m in raw]
+                models = [n for n in models if n]
+        except Exception:
+            pass
+
+    fetched_live = False
+    if not models or refresh:
+        try:
+            live = await fetch_provider_models(provider_id, user_id=current_user_id)
+            if live:
+                models = [m.get('name', m.get('id', '')) if isinstance(m, dict) else str(m) for m in live]
+                models = [n for n in models if n]
+                fetched_live = True
+        except Exception:
+            pass
+
+    if query:
+        q = query.lower()
+        models = [m for m in models if q in m.lower()]
+
+    return JSONResponse({"models": models[:200], "fetched_live": fetched_live})
+
+
+@app.get("/dashboard/search-all-models")
+async def search_all_models_api(request: Request, query: str = "", refresh: bool = False):
+    """Return all available models (rotations + provider models) for autoselect, with optional live refresh."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"models": [], "error": "unauthorized"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+    all_models = []
+
+    if is_config_admin:
+        if config:
+            for rid in config.rotations:
+                all_models.append({'id': rid, 'name': f'{rid} (rotation)', 'type': 'rotation'})
+        try:
+            providers_path = Path.home() / '.aisbf' / 'providers.json'
+            if not providers_path.exists():
+                providers_path = Path(__file__).parent / 'config' / 'providers.json'
+            with open(providers_path) as f:
+                pc = json.load(f)
+            pd_map = pc.get('providers', {k: v for k, v in pc.items() if k != 'condensation'})
+            for pid, prov in pd_map.items():
+                pmodels = prov.get('models', [])
+                if not pmodels and refresh:
+                    try:
+                        live = await fetch_provider_models(pid)
+                        if live:
+                            pmodels = live
+                    except Exception:
+                        pass
+                for m in pmodels:
+                    mname = m.get('name', m.get('id', '')) if isinstance(m, dict) else str(m)
+                    if mname:
+                        mid = f"{pid}/{mname}"
+                        all_models.append({'id': mid, 'name': f"{mid} (provider model)", 'type': 'provider'})
+        except Exception:
+            pass
+    else:
+        try:
+            db = DatabaseRegistry.get_config_database()
+            for rot in db.get_user_rotations(current_user_id):
+                rid = rot['rotation_id']
+                all_models.append({'id': rid, 'name': f'{rid} (rotation)', 'type': 'rotation'})
+            for prov in db.get_user_providers(current_user_id):
+                pid = prov['provider_id']
+                pconfig = prov.get('config', prov)
+                pmodels = pconfig.get('models', [])
+                if not pmodels and refresh:
+                    try:
+                        live = await fetch_provider_models(pid, user_id=current_user_id)
+                        if live:
+                            pmodels = live
+                    except Exception:
+                        pass
+                for m in pmodels:
+                    mname = m.get('name', m.get('id', '')) if isinstance(m, dict) else str(m)
+                    if mname:
+                        mid = f"{pid}/{mname}"
+                        all_models.append({'id': mid, 'name': f"{mid} (provider model)", 'type': 'provider'})
+        except Exception:
+            pass
+
+    if query:
+        q = query.lower()
+        all_models = [m for m in all_models if q in m['id'].lower() or q in m['name'].lower()]
+
+    return JSONResponse({"models": all_models[:300]})
+
+
 @app.get("/dashboard/rotations", response_class=HTMLResponse)
 async def dashboard_rotations(request: Request):
     """Edit rotations configuration"""
