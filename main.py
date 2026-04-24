@@ -6011,6 +6011,31 @@ async def dashboard_settings_save(
    dashboard_username: str = Form(...),
    condensation_model_id: str = Form(...),
    autoselect_model_id: str = Form(...),
+   nsfw_classifier: str = Form("michelleli99/NSFW_text_classifier"),
+   privacy_classifier: str = Form("iiiorg/piiranha-v1-detect-personal-information"),
+   semantic_vectorization: str = Form("sentence-transformers/all-MiniLM-L6-v2"),
+   classify_nsfw: bool = Form(False),
+   classify_privacy: bool = Form(False),
+   classify_semantic: bool = Form(False),
+   batching_enabled: bool = Form(False),
+   batching_window_ms: int = Form(100),
+   batching_max_batch_size: int = Form(8),
+   batching_openai_enabled: bool = Form(False),
+   batching_openai_max_batch_size: int = Form(10),
+   batching_anthropic_enabled: bool = Form(False),
+   batching_anthropic_max_batch_size: int = Form(5),
+   adaptive_rate_limiting_enabled: bool = Form(False),
+   adaptive_initial_rate_limit: float = Form(0),
+   adaptive_learning_rate: float = Form(0.1),
+   adaptive_headroom_percent: float = Form(10),
+   adaptive_recovery_rate: float = Form(0.05),
+   adaptive_max_rate_limit: float = Form(60),
+   adaptive_min_rate_limit: float = Form(0.1),
+   adaptive_backoff_base: float = Form(2),
+   adaptive_jitter_factor: float = Form(0.25),
+   adaptive_history_window: int = Form(3600),
+   adaptive_consecutive_successes: int = Form(10),
+   active_tab: str = Form("server"),
    database_type: str = Form("sqlite"),
    sqlite_path: str = Form("~/.aisbf/aisbf.db"),
    mysql_host: str = Form("localhost"),
@@ -6252,6 +6277,50 @@ async def dashboard_settings_save(
             aisbf_config['dashboard']['password'] = _db_hash_password(new_admin_password)
             request.session.pop('must_change_password', None)
 
+    # Update classification config
+    aisbf_config['classify_nsfw'] = classify_nsfw
+    aisbf_config['classify_privacy'] = classify_privacy
+    aisbf_config['classify_semantic'] = classify_semantic
+
+    # Update internal model classifiers
+    if 'internal_model' not in aisbf_config:
+        aisbf_config['internal_model'] = {}
+    aisbf_config['internal_model']['nsfw_classifier'] = nsfw_classifier
+    aisbf_config['internal_model']['privacy_classifier'] = privacy_classifier
+    aisbf_config['internal_model']['semantic_vectorization'] = semantic_vectorization
+
+    # Update batching config
+    if 'batching' not in aisbf_config:
+        aisbf_config['batching'] = {}
+    aisbf_config['batching']['enabled'] = batching_enabled
+    aisbf_config['batching']['window_ms'] = batching_window_ms
+    aisbf_config['batching']['max_batch_size'] = batching_max_batch_size
+    if 'provider_settings' not in aisbf_config['batching']:
+        aisbf_config['batching']['provider_settings'] = {}
+    if 'openai' not in aisbf_config['batching']['provider_settings']:
+        aisbf_config['batching']['provider_settings']['openai'] = {}
+    aisbf_config['batching']['provider_settings']['openai']['enabled'] = batching_openai_enabled
+    aisbf_config['batching']['provider_settings']['openai']['max_batch_size'] = batching_openai_max_batch_size
+    if 'anthropic' not in aisbf_config['batching']['provider_settings']:
+        aisbf_config['batching']['provider_settings']['anthropic'] = {}
+    aisbf_config['batching']['provider_settings']['anthropic']['enabled'] = batching_anthropic_enabled
+    aisbf_config['batching']['provider_settings']['anthropic']['max_batch_size'] = batching_anthropic_max_batch_size
+
+    # Update adaptive rate limiting config
+    if 'adaptive_rate_limiting' not in aisbf_config:
+        aisbf_config['adaptive_rate_limiting'] = {}
+    aisbf_config['adaptive_rate_limiting']['enabled'] = adaptive_rate_limiting_enabled
+    aisbf_config['adaptive_rate_limiting']['initial_rate_limit'] = adaptive_initial_rate_limit
+    aisbf_config['adaptive_rate_limiting']['learning_rate'] = adaptive_learning_rate
+    aisbf_config['adaptive_rate_limiting']['headroom_percent'] = adaptive_headroom_percent
+    aisbf_config['adaptive_rate_limiting']['recovery_rate'] = adaptive_recovery_rate
+    aisbf_config['adaptive_rate_limiting']['max_rate_limit'] = adaptive_max_rate_limit
+    aisbf_config['adaptive_rate_limiting']['min_rate_limit'] = adaptive_min_rate_limit
+    aisbf_config['adaptive_rate_limiting']['backoff_base'] = adaptive_backoff_base
+    aisbf_config['adaptive_rate_limiting']['jitter_factor'] = adaptive_jitter_factor
+    aisbf_config['adaptive_rate_limiting']['history_window'] = adaptive_history_window
+    aisbf_config['adaptive_rate_limiting']['consecutive_successes_for_recovery'] = adaptive_consecutive_successes
+
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
     config_path.parent.mkdir(parents=True, exist_ok=True)
@@ -6262,6 +6331,9 @@ async def dashboard_settings_save(
     if server_config is not None:
         server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
 
+    # Hot-reload global config so changes take effect without restart
+    _reload_global_config()
+
     return templates.TemplateResponse(
         request=request,
         name="dashboard/settings.html",
@@ -6270,7 +6342,8 @@ async def dashboard_settings_save(
         "session": request.session,
         "config": aisbf_config,
         "os": os,
-        "success": "Settings saved successfully! Restart server for changes to take effect."
+        "active_tab": active_tab,
+        "success": "Settings saved and reloaded successfully."
     }
     )
 

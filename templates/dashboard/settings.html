@@ -69,6 +69,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <form method="POST">
+    <input type="hidden" name="active_tab" id="active_tab_input" value="{{ active_tab if active_tab else 'server' }}">
     <div class="settings-section active" id="tab-server">
     <div class="section-title"><i class="fas fa-server"></i> Server Configuration</div>
     
@@ -981,6 +982,7 @@ function switchTab(name) {
     document.querySelectorAll('.settings-section').forEach(s => s.classList.remove('active'));
     document.querySelector(`[onclick="switchTab('${name}')"]`).classList.add('active');
     document.getElementById('tab-' + name).classList.add('active');
+    document.getElementById('active_tab_input').value = name;
 }
 
 // Validate admin password match before form submit
@@ -1220,6 +1222,9 @@ document.addEventListener('DOMContentLoaded', function() {
     setInterval(refreshCacheStats, 10000);
     {% if warning == 'default_password' %}
     switchTab('admin');
+    {% else %}
+    const savedTab = document.getElementById('active_tab_input').value;
+    if (savedTab && savedTab !== 'server') switchTab(savedTab);
     {% endif %}
 });
 
