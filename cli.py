@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 Why did the programmer quit his job? Because he didn't get arrays!
 """
 
+import importlib.util
 import os
 import sys
 import subprocess
@@ -92,13 +93,18 @@ def _pkg_bundle_dir():
     """
     Locate the bundle of runtime files shipped inside the aisbf package.
 
+    Uses importlib.util.find_spec() to locate the package on disk without
+    executing __init__.py (which would crash trying to load providers.json).
+
     Two sources, tried in order:
       1. aisbf/_share/   — populated by the build_py hook at wheel-build time
       2. project root    — for editable (pip install -e) installs
     """
     try:
-        import aisbf as _pkg
-        pkg_dir = Path(_pkg.__file__).parent
+        spec = importlib.util.find_spec('aisbf')
+        if spec is None or spec.origin is None:
+            return None
+        pkg_dir = Path(spec.origin).parent
 
         share = pkg_dir / '_share'
         if share.is_dir() and (share / 'main.py').exists():
@@ -150,15 +156,18 @@ def _bootstrap_share_dir():
     # ── package bundle ────────────────────────────────────────────────────────
     _log("Package bundle location:")
     try:
-        import aisbf as _pkg
-        pkg_dir = Path(_pkg.__file__).parent
-        _log(f"  Package dir : {pkg_dir}")
+        spec = importlib.util.find_spec('aisbf')
+        if spec is not None and spec.origin is not None:
+            pkg_dir = Path(spec.origin).parent
+            _log(f"  Package dir : {pkg_dir}")
 
-        share = pkg_dir / '_share'
-        _log(f"  _share exists: {share.exists()}")
-        if share.is_dir():
-            contents = sorted(p.name for p in share.iterdir())
-            _log(f"  _share contents: {contents}")
+            share = pkg_dir / '_share'
+            _log(f"  _share exists: {share.exists()}")
+            if share.is_dir():
+                contents = sorted(p.name for p in share.iterdir())
+                _log(f"  _share contents: {contents}")
+        else:
+            _log("  Package 'aisbf' not found by importlib")
 
         bundle = _pkg_bundle_dir()
         _log(f"  Bundle source: {bundle}")
