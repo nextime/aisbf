@@ -138,14 +138,17 @@ function renderRotationsList() {
                     <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                     <span style="color: #a0a0a0; font-size: 14px;">(${providerCount} provider${providerCount !== 1 ? 's' : ''})</span>
                 </div>
-                <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                <div style="display: flex; gap: 8px;">
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyRotation('${safeKey}')" style="padding: 5px 15px;">Copy</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                </div>
             </div>
             <div id="rotation-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
             </div>
         `;
-        
+
         container.appendChild(rotationItem);
-        
+
         if (isExpanded) {
             renderRotationDetails(key);
         }
@@ -361,6 +364,29 @@ async function saveRotation(key) {
     } catch (e) {
         if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#f87171'; }
     }
+}
+
+async function copyRotation(sourceKey) {
+    const newKey = await showPrompt(`Copy "${sourceKey}" — enter new rotation key:`, `${sourceKey}_copy`, 'rotation-key', 'Copy Rotation');
+    if (!newKey) return;
+    if (newKey === sourceKey) { showAlert('New key must be different from the source.', 'Invalid Key', '⚠️', 'warn'); return; }
+    if (rotationsConfig.rotations[newKey]) { showAlert('Rotation key already exists.', 'Duplicate Key', '⚠️', 'warn'); return; }
+    const cloned = JSON.parse(JSON.stringify(rotationsConfig.rotations[sourceKey]));
+    rotationsConfig.rotations[newKey] = cloned;
+    try {
+        const result = await apiCall('POST', '/dashboard/api/rotation', { rotation_id: newKey, config: cloned });
+        if (!result.success) {
+            showAlert('Error copying rotation: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
+            delete rotationsConfig.rotations[newKey];
+            return;
+        }
+    } catch (e) {
+        showAlert('Error copying rotation: ' + e.message, 'Error', '❌', 'danger');
+        delete rotationsConfig.rotations[newKey];
+        return;
+    }
+    expandedRotations.add(newKey);
+    renderRotationsList();
 }
 
 async function addRotation() {

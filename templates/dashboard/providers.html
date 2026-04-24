@@ -165,6 +165,42 @@ let providerSearchFilter = '';
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
 const CHUNK_SIZE = 512 * 1024;
 
+function showToast(message, type) {
+    const alertDiv = document.createElement('div');
+    alertDiv.style.cssText = `
+        position: fixed;
+        top: 20px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 10000;
+        min-width: 400px;
+        max-width: calc(100vw - 16px);
+        padding: 20px 30px;
+        border-radius: 6px;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.4);
+        ${type === 'success' ? 'background: linear-gradient(135deg, #27ae60 0%, #2ecc71 100%); color: white; border: 2px solid #27ae60;' : ''}
+        ${type === 'danger'  ? 'background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); color: white; border: 2px solid #e74c3c;' : ''}
+        ${type === 'warning' ? 'background: linear-gradient(135deg, #f39c12 0%, #e67e22 100%); color: white; border: 2px solid #f39c12;' : ''}
+    `;
+    const icon = type === 'success' ? 'fa-check-circle' : type === 'danger' ? 'fa-times-circle' : 'fa-exclamation-triangle';
+    alertDiv.innerHTML = `<i class="fas ${icon}" style="font-size: 24px; margin-right: 10px; vertical-align: middle;"></i><span style="vertical-align: middle;">${message}</span>`;
+    if (!document.getElementById('alertAnimations')) {
+        const style = document.createElement('style');
+        style.id = 'alertAnimations';
+        style.textContent = `
+            @keyframes slideDown { from { opacity:0; transform:translateX(-50%) translateY(-20px); } to { opacity:1; transform:translateX(-50%) translateY(0); } }
+            @keyframes slideUp   { from { opacity:1; transform:translateX(-50%) translateY(0); } to { opacity:0; transform:translateX(-50%) translateY(-20px); } }
+        `;
+        document.head.appendChild(style);
+    }
+    alertDiv.style.animation = 'slideDown 0.3s ease-out';
+    document.body.appendChild(alertDiv);
+    setTimeout(() => {
+        alertDiv.style.animation = 'slideUp 0.3s ease-out';
+        setTimeout(() => alertDiv.remove(), 300);
+    }, 4000);
+}
+
 // Generic chunked upload handler for all providers
 async function uploadFileChunked(providerKey, fileType, file, configObject) {
     if (!file) return;
@@ -220,20 +256,23 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             
             // When upload is complete
             if (result.complete) {
-                statusEl.innerHTML = '<div style="color: #4ade80;">File uploaded successfully!</div>';
-                
+                const savedPath = result.file_path || result.stored_filename || file.name;
+                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> Saved: <code style="background: #0f2840; padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${savedPath}</code></div>`;
+                showToast(`File uploaded successfully: ${savedPath}`, 'success');
+
                 // Update the config with the full file path (not just filename)
                 if (!providersData[providerKey][configObject]) {
                     providersData[providerKey][configObject] = {};
                 }
                 // Use file_path from server response (tilde format: ~/.aisbf/...)
                 providersData[providerKey][configObject][fileType] = result.file_path || result.stored_filename;
-                renderProvidersList();
+                setTimeout(() => renderProvidersList(), 2500);
                 return;
             }
         }
     } catch (e) {
         statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+        showToast(`Upload failed: ${e.message}`, 'danger');
     }
 }
 
@@ -278,12 +317,14 @@ async function uploadClaudeCliFile(providerKey, file) {
             const result = await response.json();
             if (!result.success) throw new Error(result.error || 'Upload failed');
             if (result.complete) {
-                statusEl.innerHTML = '<div style="color: #4ade80;">CLI credentials saved to server!</div>';
+                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> CLI credentials saved: <code style="background: #0f2840; padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${file.name}</code></div>`;
+                showToast(`CLI credentials saved: ${file.name}`, 'success');
                 return;
             }
         }
     } catch (e) {
         statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+        showToast(`Upload failed: ${e.message}`, 'danger');
     }
 }
 
@@ -1840,6 +1881,10 @@ function updateCodexConfig(key, field, value) {
 
 function updateProviderType(key, value) {
     providersData[key].type = value;
+    const defaultEndpoint = getDefaultEndpoint(value);
+    if (defaultEndpoint) {
+        providersData[key].endpoint = defaultEndpoint;
+    }
     // Re-render to update the configuration fields
     renderProvidersList();
 }

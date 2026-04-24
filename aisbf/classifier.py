@@ -75,19 +75,29 @@ class ContentClassifier:
         try:
             from transformers import pipeline
             self.logger.info(f"Loading NSFW classifier model: {model_name}")
-            self._nsfw_classifier = pipeline("text-classification", model=model_name)
-            self.logger.info("NSFW classifier loaded successfully")
+            try:
+                self._nsfw_classifier = pipeline("text-classification", model=model_name, local_files_only=True)
+                self.logger.info("NSFW classifier loaded from local cache")
+            except (OSError, EnvironmentError):
+                self.logger.info("NSFW model not cached, downloading from HuggingFace...")
+                self._nsfw_classifier = pipeline("text-classification", model=model_name)
+                self.logger.info("NSFW classifier downloaded and cached")
         except Exception as e:
             self.logger.error(f"Failed to load NSFW classifier: {e}")
             self._nsfw_classifier = None
-    
+
     def _load_privacy_classifier(self, model_name: str):
         """Load the privacy classifier model"""
         try:
             from transformers import pipeline
             self.logger.info(f"Loading privacy classifier model: {model_name}")
-            self._privacy_classifier = pipeline("text-classification", model=model_name)
-            self.logger.info("Privacy classifier loaded successfully")
+            try:
+                self._privacy_classifier = pipeline("text-classification", model=model_name, local_files_only=True)
+                self.logger.info("Privacy classifier loaded from local cache")
+            except (OSError, EnvironmentError):
+                self.logger.info("Privacy model not cached, downloading from HuggingFace...")
+                self._privacy_classifier = pipeline("text-classification", model=model_name)
+                self.logger.info("Privacy classifier downloaded and cached")
         except Exception as e:
             self.logger.error(f"Failed to load privacy classifier: {e}")
             self._privacy_classifier = None
@@ -163,7 +173,13 @@ class ContentClassifier:
             # Default to safe on error
             return True, f"Error during classification: {str(e)}"
     
-    def check_content(self, text: str, check_nsfw: bool = True, check_privacy: bool = True, 
+    def reset(self):
+        """Unload models from memory so they are re-loaded on next use."""
+        with self._classifier_lock:
+            self._nsfw_classifier = None
+            self._privacy_classifier = None
+
+    def check_content(self, text: str, check_nsfw: bool = True, check_privacy: bool = True,
                       threshold: float = 0.8) -> Tuple[bool, str]:
         """
         Check content for both NSFW and privacy concerns.
@@ -244,8 +260,13 @@ class SemanticClassifier:
         try:
             from sentence_transformers import SentenceTransformer
             self.logger.info(f"Loading semantic embedder model: {self._model_name}")
-            self._embedder = SentenceTransformer(self._model_name)
-            self.logger.info("Semantic embedder loaded successfully")
+            try:
+                self._embedder = SentenceTransformer(self._model_name, local_files_only=True)
+                self.logger.info("Semantic embedder loaded from local cache")
+            except (OSError, EnvironmentError):
+                self.logger.info("Embedder not cached, downloading from HuggingFace...")
+                self._embedder = SentenceTransformer(self._model_name)
+                self.logger.info("Semantic embedder downloaded and cached")
         except Exception as e:
             self.logger.error(f"Failed to load semantic embedder: {e}")
             self._embedder = None
@@ -336,6 +357,11 @@ class SemanticClassifier:
             # Fallback to first model
             return [(list(model_library.keys())[0], 1.0)] if model_library else []
     
+    def reset(self):
+        """Unload the embedder from memory so it is re-loaded on next use."""
+        with self._embedder_lock:
+            self._embedder = None
+
     def select_best_model(
         self,
         query: str,

@@ -151,35 +151,57 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     <div class="settings-section" id="tab-models">
     <div class="section-title"><i class="fas fa-brain"></i> Internal Models</div>
-    
+
     <div class="form-group">
         <label for="condensation_model_id">Condensation Model ID</label>
-        <input type="text" id="condensation_model_id" name="condensation_model_id" value="{{ config.internal_model.condensation_model_id }}" required>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="condensation_model_id" name="condensation_model_id" value="{{ config.internal_model.condensation_model_id }}" required style="flex:1;">
+            <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('condensation_model_id').value, 'condensation', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
+        </div>
         <small style="color: #666; display: block; margin-top: 5px;">Used when condensation model is set to "internal"</small>
     </div>
-    
+
     <div class="form-group">
         <label for="autoselect_model_id">Autoselect Model ID</label>
-        <input type="text" id="autoselect_model_id" name="autoselect_model_id" value="{{ config.internal_model.autoselect_model_id }}" required>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="autoselect_model_id" name="autoselect_model_id" value="{{ config.internal_model.autoselect_model_id }}" required style="flex:1;">
+            <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('autoselect_model_id').value, 'autoselect', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
+        </div>
         <small style="color: #666; display: block; margin-top: 5px;">Used when autoselect selection_model is set to "internal"</small>
     </div>
-    
+
     <div class="form-group">
         <label for="nsfw_classifier">NSFW Classifier Model ID</label>
-        <input type="text" id="nsfw_classifier" name="nsfw_classifier" value="{{ config.internal_model.nsfw_classifier or 'michelleli99/NSFW_text_classifier' }}" required>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="nsfw_classifier" name="nsfw_classifier" value="{{ config.internal_model.nsfw_classifier or 'michelleli99/NSFW_text_classifier' }}" required style="flex:1;">
+            <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('nsfw_classifier').value, 'nsfw', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
+        </div>
         <small style="color: #666; display: block; margin-top: 5px;">Model used for NSFW content detection</small>
     </div>
-    
+
     <div class="form-group">
         <label for="privacy_classifier">Privacy Classifier Model ID</label>
-        <input type="text" id="privacy_classifier" name="privacy_classifier" value="{{ config.internal_model.privacy_classifier or 'iiiorg/piiranha-v1-detect-personal-information' }}" required>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="privacy_classifier" name="privacy_classifier" value="{{ config.internal_model.privacy_classifier or 'iiiorg/piiranha-v1-detect-personal-information' }}" required style="flex:1;">
+            <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('privacy_classifier').value, 'privacy', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
+        </div>
         <small style="color: #666; display: block; margin-top: 5px;">Model used for privacy-sensitive information detection</small>
     </div>
-    
+
     <div class="form-group">
         <label for="semantic_vectorization">Semantic Vectorization Model ID</label>
-        <input type="text" id="semantic_vectorization" name="semantic_vectorization" value="{{ config.internal_model.semantic_vectorization or 'sentence-transformers/all-MiniLM-L6-v2' }}" required>
+        <div style="display:flex; gap:8px; align-items:center;">
+            <input type="text" id="semantic_vectorization" name="semantic_vectorization" value="{{ config.internal_model.semantic_vectorization or 'sentence-transformers/all-MiniLM-L6-v2' }}" required style="flex:1;">
+            <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('semantic_vectorization').value, 'semantic', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
+        </div>
         <small style="color: #666; display: block; margin-top: 5px;">Model used for semantic embedding and vectorization</small>
+    </div>
+
+    <div style="margin-top:20px; padding-top:16px; border-top:1px solid #0f3460;">
+        <button type="button" class="btn" style="background:#b71c1c; border-color:#b71c1c;" onclick="clearAllModelCaches(this)">
+            <i class="fas fa-trash-alt"></i> Clear All Local Model Caches
+        </button>
+        <small style="color:#666; display:block; margin-top:8px;">Removes all locally cached model files and unloads them from memory. Models will be re-downloaded from HuggingFace on next use.</small>
     </div>
     </div><!-- /tab-models -->
 
@@ -1229,6 +1251,75 @@ async function refreshCacheStats() {
         console.error('Error fetching cache stats:', error);
         document.getElementById('cache-stats-text').textContent = 'Error loading stats';
         document.getElementById('cache-stats-text').style.color = '#f44336';
+    }
+}
+
+async function clearModelCache(modelId, modelType, btn) {
+    if (!modelId) {
+        showAlert('Model ID is empty.', 'Error', '⚠️', 'warn');
+        return;
+    }
+    const ok = await showDangerConfirm(
+        `Delete local cache for <strong>${modelId}</strong>?<br><br>The model will be re-downloaded from HuggingFace on next use.`,
+        'Clear Model Cache'
+    );
+    if (!ok) return;
+
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing…';
+
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/local-models/clear-cache") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({model_id: modelId, model_type: modelType})
+        });
+        const data = await response.json();
+        if (data.success) {
+            showAlert(`Cache cleared for <strong>${modelId}</strong>. It will be re-downloaded on next use.`, 'Done', '✅', 'info');
+        } else {
+            const errs = (data.errors || []).join('<br>');
+            showAlert('Cache clear finished with errors:<br>' + errs, 'Warning', '⚠️', 'warn');
+        }
+    } catch (err) {
+        showAlert('Error: ' + err.message, 'Error', '❌', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
+    }
+}
+
+async function clearAllModelCaches(btn) {
+    const ok = await showDangerConfirm(
+        'Delete the local cache for <strong>all</strong> configured models?<br><br>All models will be re-downloaded from HuggingFace on next use.',
+        'Clear All Model Caches'
+    );
+    if (!ok) return;
+
+    const orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Clearing…';
+
+    try {
+        const response = await fetch('{{ url_for(request, "/dashboard/local-models/clear-cache") }}', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'},
+            body: JSON.stringify({})
+        });
+        const data = await response.json();
+        if (data.success) {
+            const count = (data.cleared || []).length;
+            showAlert(`Cleared ${count} model cache(s). They will be re-downloaded on next use.`, 'Done', '✅', 'info');
+        } else {
+            const errs = (data.errors || []).join('<br>');
+            showAlert('Cache clear finished with errors:<br>' + errs, 'Warning', '⚠️', 'warn');
+        }
+    } catch (err) {
+        showAlert('Error: ' + err.message, 'Error', '❌', 'danger');
+    } finally {
+        btn.disabled = false;
+        btn.innerHTML = orig;
     }
 }
 

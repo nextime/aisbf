@@ -1264,7 +1264,8 @@ class ResponseCache:
         Generate a cache key from request data using semantic deduplication.
 
         The key is based on:
-        - model
+        - backend endpoint (provider-agnostic: same endpoint → shared cache)
+        - model name (provider prefix stripped)
         - messages content (hashed for semantic deduplication)
         - temperature (normalized)
         - max_tokens
@@ -1277,8 +1278,11 @@ class ResponseCache:
         Returns:
             Cache key string
         """
-        # Extract key components
-        model = request_data.get('model', '')
+        # Extract key components.
+        # Prefer backend-normalised values (injected by handle_chat_completion) so
+        # that two providers pointing at the same endpoint+model share cache entries.
+        model = request_data.get('_backend_model') or request_data.get('model', '')
+        endpoint = request_data.get('_backend_endpoint', '')
         messages = request_data.get('messages', [])
         temperature = request_data.get('temperature', 1.0)
         max_tokens = request_data.get('max_tokens')
@@ -1314,6 +1318,7 @@ class ResponseCache:
 
         # Build key components
         key_parts = [
+            f"endpoint:{endpoint}",
             f"model:{model}",
             f"msgs:{messages_hash}",
             f"temp:{temperature}"

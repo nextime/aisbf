@@ -338,6 +338,22 @@ class RequestHandler:
             provider_config = self.config.get_provider(provider_id)
             logger.info(f"Using global provider config for {provider_id}")
 
+        # Inject backend endpoint and normalised model name so the cache key is
+        # provider-agnostic: two providers sharing the same endpoint+model share
+        # the same cache entries regardless of their provider_id.
+        if isinstance(provider_config, dict):
+            _backend_endpoint = provider_config.get('endpoint', '')
+        else:
+            _backend_endpoint = getattr(provider_config, 'endpoint', '')
+        _raw_model = request_data.get('model', '')
+        # Models are exposed as "{provider_id}/{model_name}"; strip the prefix.
+        if _raw_model.startswith(f"{provider_id}/"):
+            _backend_model = _raw_model[len(provider_id) + 1:]
+        else:
+            _backend_model = _raw_model
+        request_data['_backend_endpoint'] = _backend_endpoint
+        request_data['_backend_model'] = _backend_model
+
         # Check response cache for non-streaming requests
         stream = request_data.get('stream', False)
         if not stream:
@@ -3940,7 +3956,13 @@ class AutoselectHandler:
             raise FileNotFoundError("Could not find autoselect.md skill file")
         
         return self._skill_file_content
-    
+
+    def reset_internal_model(self):
+        """Unload the internal model from memory so it is re-loaded on next use."""
+        self._internal_model = None
+        self._internal_tokenizer = None
+        self._internal_model_lock = None
+
     def _initialize_internal_model(self):
         """Initialize the internal HuggingFace model for selection (lazy loading)"""
         import logging
@@ -3990,18 +4012,34 @@ class AutoselectHandler:
             device = "cuda" if torch.cuda.is_available() else "cpu"
             logger.info(f"Device: {device}")
             
-            # Load tokenizer
+            # Load tokenizer - try local cache first, download only on first use
             logger.info("Loading tokenizer...")
-            self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name)
-            logger.info("Tokenizer loaded")
-            
-            # Load model
+            try:
+                self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+                logger.info("Tokenizer loaded from local cache")
+            except (OSError, EnvironmentError):
+                logger.info("Tokenizer not cached, downloading from HuggingFace...")
+                self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name)
+                logger.info("Tokenizer downloaded and cached")
+
+            # Load model - try local cache first, download only on first use
             logger.info("Loading model...")
-            self._internal_model = AutoModelForCausalLM.from_pretrained(
-                model_name,
-                torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                device_map="auto" if device == "cuda" else None
-            )
+            try:
+                self._internal_model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    device_map="auto" if device == "cuda" else None,
+                    local_files_only=True
+                )
+                logger.info("Model loaded from local cache")
+            except (OSError, EnvironmentError):
+                logger.info("Model not cached, downloading from HuggingFace...")
+                self._internal_model = AutoModelForCausalLM.from_pretrained(
+                    model_name,
+                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    device_map="auto" if device == "cuda" else None
+                )
+                logger.info("Model downloaded and cached")
             
             if device == "cpu":
                 self._internal_model = self._internal_model.to(device)

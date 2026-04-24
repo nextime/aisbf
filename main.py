@@ -633,6 +633,7 @@ _MUST_CHANGE_PASSWORD_WHITELIST = (
     '/dashboard/tor/status',
     '/dashboard/response-cache/stats',
     '/dashboard/response-cache/clear',
+    '/dashboard/local-models/clear-cache',
     '/dashboard/test-smtp',
     '/dashboard/restart',
 )
@@ -1144,6 +1145,87 @@ async def get_provider_models(provider_id: str, provider_config, user_id: Option
     # No models available - return empty list (don't show generic fallback)
     return []
 
+async def _prefetch_global_provider_models():
+    """Background task: fetch model lists for all global providers that have no static model config."""
+    logger.info("=== STARTUP MODEL PRE-FETCHING (background) ===")
+    prefetch_count = 0
+    total_providers_checked = 0
+
+    for provider_id, provider_config in config.providers.items():
+        total_providers_checked += 1
+        logger.debug(f"Checking provider '{provider_id}' for model pre-fetching...")
+
+        if not (hasattr(provider_config, 'models') and provider_config.models):
+            logger.debug(f"Provider '{provider_id}' has no local model config, attempting pre-fetch")
+
+            provider_type = getattr(provider_config, 'type', '')
+            if provider_type in ('kilo', 'kilocode'):
+                logger.debug(f"Kilo provider '{provider_id}' detected, validating authentication...")
+                has_valid_auth = False
+
+                api_key = getattr(provider_config, 'api_key', None)
+                if api_key and not api_key.startswith('YOUR_'):
+                    has_valid_auth = True
+                    logger.info(f"  ✓ Kilo provider '{provider_id}' has API key configured, will fetch models")
+                else:
+                    logger.debug(f"  ✗ API key not configured or placeholder for provider '{provider_id}'")
+
+                if not has_valid_auth:
+                    try:
+                        from aisbf.auth.kilo import KiloOAuth2
+                        kilo_config = getattr(provider_config, 'kilo_config', None)
+                        credentials_file = None
+                        api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
+                        if kilo_config and isinstance(kilo_config, dict):
+                            credentials_file = kilo_config.get('credentials_file')
+                            if 'api_base' in kilo_config and kilo_config['api_base']:
+                                api_base = kilo_config['api_base']
+                        oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+                        if oauth2.is_authenticated():
+                            has_valid_auth = True
+                            logger.info(f"  ✓ Kilo provider '{provider_id}' has valid OAuth2 credentials file, will fetch models")
+                        else:
+                            logger.debug(f"  ✗ OAuth2 not authenticated for provider '{provider_id}'")
+                    except Exception as e:
+                        logger.warning(f"  ✗ Kilo provider '{provider_id}' OAuth2 file check failed: {e}")
+
+                if not has_valid_auth:
+                    try:
+                        db = DatabaseRegistry.get_config_database()
+                        if db:
+                            auth_files = db.get_user_auth_files(0, provider_id)
+                            if auth_files:
+                                for auth_file in auth_files:
+                                    file_type = auth_file.get('file_type', '')
+                                    file_path = auth_file.get('file_path', '')
+                                    if file_type in ('credentials', 'kilo_credentials', 'config') and file_path:
+                                        if os.path.exists(file_path):
+                                            has_valid_auth = True
+                                            logger.info(f"  ✓ Kilo provider '{provider_id}' has uploaded credentials in database, will fetch models")
+                                            break
+                    except Exception as e:
+                        logger.warning(f"  ✗ Kilo provider '{provider_id}' database credentials check failed: {e}")
+
+                if not has_valid_auth:
+                    logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no valid authentication found)")
+                    continue
+            else:
+                logger.debug(f"Provider '{provider_id}' type '{provider_type}', proceeding with fetch")
+
+            try:
+                models = await fetch_provider_models(provider_id)
+                if models:
+                    prefetch_count += 1
+                    logger.info(f"✓ Pre-fetched {len(models)} models from provider: {provider_id}")
+                else:
+                    logger.warning(f"✗ Pre-fetch returned empty model list from provider '{provider_id}'")
+            except Exception as e:
+                logger.error(f"✗ Failed to pre-fetch models from provider '{provider_id}': {e}")
+        else:
+            logger.debug(f"Provider '{provider_id}' has local model config ({len(provider_config.models)} models), skipping pre-fetch")
+
+    logger.info(f"=== MODEL PRE-FETCHING COMPLETE: {prefetch_count}/{total_providers_checked} providers ===")
+
 @app.on_event("startup")
 async def startup_event():
     """Initialize app on startup (for uvicorn import case)."""
@@ -1246,125 +1328,8 @@ async def startup_event():
             else:
                 logger.warning("TOR hidden service initialization failed")
     
-    # Pre-fetch models at startup for providers without local model config
-    # For Kilo providers, check API key, OAuth2 file credentials, and database-stored credentials
-    logger.info("=== STARTUP MODEL PRE-FETCHING ===")
-    logger.info("Pre-fetching models from providers with dynamic model lists...")
-    prefetch_count = 0
-    total_providers_checked = 0
-
-    for provider_id, provider_config in config.providers.items():
-        total_providers_checked += 1
-        logger.debug(f"Checking provider '{provider_id}' for model pre-fetching...")
-
-        if not (hasattr(provider_config, 'models') and provider_config.models):
-            logger.debug(f"Provider '{provider_id}' has no local model config, attempting pre-fetch")
-
-            # For Kilo providers, check if any authentication method is available
-            provider_type = getattr(provider_config, 'type', '')
-            if provider_type in ('kilo', 'kilocode'):
-                logger.debug(f"Kilo provider '{provider_id}' detected, validating authentication...")
-                has_valid_auth = False
-
-                # Check 1: API key
-                logger.debug(f"  Checking API key for provider '{provider_id}'...")
-                api_key = getattr(provider_config, 'api_key', None)
-                if api_key and not api_key.startswith('YOUR_'):
-                    has_valid_auth = True
-                    logger.info(f"  ✓ Kilo provider '{provider_id}' has API key configured, will fetch models")
-                else:
-                    logger.debug(f"  ✗ API key not configured or placeholder for provider '{provider_id}'")
-
-                # Check 2: OAuth2 credentials file
-                if not has_valid_auth:
-                    logger.debug(f"  Checking OAuth2 credentials file for provider '{provider_id}'...")
-                    try:
-                        from aisbf.auth.kilo import KiloOAuth2
-                        kilo_config = getattr(provider_config, 'kilo_config', None)
-                        credentials_file = None
-                        api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
-
-                        if kilo_config and isinstance(kilo_config, dict):
-                            credentials_file = kilo_config.get('credentials_file')
-                            logger.debug(f"    Credentials file from config: {credentials_file}")
-                            # Override api_base from kilo_config if present
-                            if 'api_base' in kilo_config and kilo_config['api_base']:
-                                api_base = kilo_config['api_base']
-                                logger.debug(f"    API base from config: {api_base}")
-
-                        logger.debug(f"    Attempting OAuth2 authentication check...")
-                        oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
-                        if oauth2.is_authenticated():
-                            has_valid_auth = True
-                            logger.info(f"  ✓ Kilo provider '{provider_id}' has valid OAuth2 credentials file, will fetch models")
-                        else:
-                            logger.debug(f"  ✗ OAuth2 not authenticated for provider '{provider_id}'")
-                    except Exception as e:
-                        logger.warning(f"  ✗ Kilo provider '{provider_id}' OAuth2 file check failed: {e}")
-                        logger.debug(f"    OAuth2 check error details: {type(e).__name__}: {str(e)}", exc_info=True)
-
-                # Check 3: Database-stored credentials (uploaded via dashboard)
-                if not has_valid_auth:
-                    logger.debug(f"  Checking database credentials for provider '{provider_id}'...")
-                    try:
-                        db = DatabaseRegistry.get_config_database()
-                        if db:
-                            logger.debug(f"    Database available, checking for uploaded credentials...")
-                            # Check for uploaded credentials files for this provider
-                            auth_files = db.get_user_auth_files(0, provider_id)  # 0 for admin/global
-                            if auth_files:
-                                logger.debug(f"    Found {len(auth_files)} auth files for provider '{provider_id}'")
-                                for auth_file in auth_files:
-                                    file_type = auth_file.get('file_type', '')
-                                    file_path = auth_file.get('file_path', '')
-                                    logger.debug(f"      Checking auth file: type={file_type}, path={file_path}")
-                                    if file_type in ('credentials', 'kilo_credentials', 'config') and file_path:
-                                        if os.path.exists(file_path):
-                                            has_valid_auth = True
-                                            logger.info(f"  ✓ Kilo provider '{provider_id}' has uploaded credentials in database, will fetch models")
-                                            logger.debug(f"    Using credentials file: {file_path}")
-                                            break
-                                        else:
-                                            logger.debug(f"    Credentials file does not exist: {file_path}")
-                            else:
-                                logger.debug(f"    No auth files found in database for provider '{provider_id}'")
-                        else:
-                            logger.debug(f"    Database not available for credentials check")
-                    except Exception as e:
-                        logger.warning(f"  ✗ Kilo provider '{provider_id}' database credentials check failed: {e}")
-                        logger.debug(f"    Database credentials check error details: {type(e).__name__}: {str(e)}", exc_info=True)
-
-                if not has_valid_auth:
-                    logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no valid authentication method found)")
-                    logger.debug(f"  Authentication methods checked: API key, OAuth2 file, database credentials")
-                    continue
-            else:
-                logger.debug(f"Provider '{provider_id}' is not Kilo type (type: {provider_type}), proceeding with fetch")
-
-            logger.info(f"Attempting to pre-fetch models from provider '{provider_id}'...")
-            try:
-                models = await fetch_provider_models(provider_id)
-                if models:
-                    prefetch_count += 1
-                    logger.info(f"✓ Successfully pre-fetched {len(models)} models from provider: {provider_id}")
-                    logger.debug(f"  Models: {[m.get('id', m.get('name', 'unknown')) for m in models[:5]]}" + (f" ... and {len(models)-5} more" if len(models) > 5 else ""))
-                else:
-                    logger.warning(f"✗ Pre-fetch returned empty model list from provider '{provider_id}'")
-            except Exception as e:
-                logger.error(f"✗ Failed to pre-fetch models from provider '{provider_id}': {e}")
-                logger.debug(f"  Pre-fetch error details for '{provider_id}': {type(e).__name__}: {str(e)}", exc_info=True)
-        else:
-            logger.debug(f"Provider '{provider_id}' has local model config ({len(provider_config.models)} models), skipping pre-fetch")
-
-    logger.info(f"=== MODEL PRE-FETCHING COMPLETE ===")
-    logger.info(f"Checked {total_providers_checked} providers, successfully pre-fetched from {prefetch_count} providers")
-    
-    if prefetch_count > 0:
-        logger.info(f"Pre-fetched models from {prefetch_count} provider(s) at startup")
-    else:
-        logger.info("No providers with dynamic model lists found for pre-fetching")
-    
-    # Start background task for model cache refresh
+    # Start model pre-fetching and cache refresh as non-blocking background tasks
+    asyncio.create_task(_prefetch_global_provider_models())
     if _cache_refresh_task is None:
         _cache_refresh_task = asyncio.create_task(refresh_model_cache())
         logger.info(f"Started model cache refresh task (interval: {_cache_refresh_interval/3600} hours)")
@@ -10097,6 +10062,74 @@ async def dashboard_response_cache_clear(request: Request):
     except Exception as e:
         logger.error(f"Error clearing response cache: {e}")
         return JSONResponse({'success': False, 'error': str(e)}, status_code=500)
+
+@app.post("/dashboard/local-models/clear-cache")
+async def dashboard_local_models_clear_cache(request: Request):
+    """Delete one or all local HuggingFace model caches and unload in-memory models."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    if request.session.get('role') != 'admin':
+        return JSONResponse({'success': False, 'error': 'Admin only'}, status_code=403)
+
+    body = await request.json()
+    model_id = body.get('model_id')   # None means "clear all configured models"
+    model_type = body.get('model_type')  # 'autoselect', 'condensation', 'nsfw', 'privacy', 'semantic'
+
+    from aisbf.config import config as cfg
+    internal = cfg.aisbf.internal_model if (cfg.aisbf and cfg.aisbf.internal_model) else {}
+
+    if model_id:
+        model_ids_to_clear = [model_id]
+    else:
+        model_ids_to_clear = [v for v in [
+            internal.get('autoselect_model_id'),
+            internal.get('condensation_model_id'),
+            internal.get('nsfw_classifier', 'michelleli99/NSFW_text_classifier'),
+            internal.get('privacy_classifier', 'iiiorg/piiranha-v1-detect-personal-information'),
+            internal.get('semantic_vectorization', 'sentence-transformers/all-MiniLM-L6-v2'),
+        ] if v]
+
+    cleared = []
+    errors = []
+
+    # 1. Remove disk cache via huggingface_hub
+    try:
+        from huggingface_hub import scan_cache_dir
+        cache_info = scan_cache_dir()
+        for repo in cache_info.repos:
+            if repo.repo_id in model_ids_to_clear:
+                commit_hashes = [rev.commit_hash for rev in repo.revisions]
+                if commit_hashes:
+                    delete_strategy = cache_info.delete_revisions(*commit_hashes)
+                    delete_strategy.execute()
+                    cleared.append(repo.repo_id)
+    except Exception as e:
+        errors.append(f"Cache deletion error: {e}")
+
+    # 2. Unload in-memory models
+    try:
+        from aisbf.classifier import content_classifier, semantic_classifier
+        should_reset_content = not model_id or model_type in ('nsfw', 'privacy')
+        should_reset_semantic = not model_id or model_type == 'semantic'
+        if should_reset_content:
+            content_classifier.reset()
+        if should_reset_semantic:
+            semantic_classifier.reset()
+    except Exception as e:
+        errors.append(f"Classifier reset error: {e}")
+
+    try:
+        should_reset_autoselect = not model_id or model_type == 'autoselect'
+        if should_reset_autoselect and autoselect_handler:
+            autoselect_handler.reset_internal_model()
+    except Exception as e:
+        errors.append(f"Autoselect handler reset error: {e}")
+
+    if errors:
+        return JSONResponse({'success': len(cleared) > 0, 'cleared': cleared, 'errors': errors})
+    return JSONResponse({'success': True, 'cleared': cleared, 'message': f'Cleared {len(cleared)} model(s) from cache'})
 
 @app.get("/dashboard/docs", response_class=HTMLResponse)
 async def dashboard_docs(request: Request):
