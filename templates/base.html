@@ -20,7 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}AISBF Dashboard{% endblock %}</title>
-    <link rel="icon" type="image/png" href="/favicon.ico">
+    <link rel="icon" type="image/png" href="{{ url_for(request, '/favicon.ico') }}">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <style>
         /* ── Theme: dark (default) ── */
@@ -69,56 +69,62 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             --alert-error-bg:   #fef2f2; --alert-error-fg:   #991b1b; --alert-error-border:   #fca5a5;
             --alert-info-bg:    #eff6ff; --alert-info-fg:    #1e40af; --alert-info-border:    #93c5fd;
             --th-bg: #e8edf5;
+            --btn-danger-bg: #c0392b; --btn-danger-fg: #ffffff; --btn-danger-hover: #96281b;
+            --btn-warning-bg: #d68910; --btn-warning-fg: #ffffff; --btn-warning-hover: #b7770d;
         }
 
         /* ── Theme: trans (transgender flag colors) ── */
         /* Flag: light blue #55CDFC, pink #F7A8B8, white #FFFFFF */
         [data-theme="trans"] {
-            --bg-page:       #e8f7fd;
-            --bg-panel:      #ffffff;
-            --bg-input:      #f0faff;
-            --bg-accent:     #cceefa;
-            --color-text:    #1a3a4a;
-            --color-muted:   #4a7a8a;
-            --color-subtle:  #7aaabb;
-            --color-primary: #e8789a;
-            --color-primary-hover: #d45a80;
-            --color-secondary: #cceefa;
-            --color-secondary-hover: #aadff5;
-            --color-border:  #a8dff5;
-            --color-link:    #2a8ab5;
-            --color-link-hover: #1a6a90;
-            --shadow:        rgba(85,205,252,0.15);
-            --shadow-lg:     rgba(85,205,252,0.25);
-            --alert-success-bg: #e8f7fd; --alert-success-fg: #1a5a6a; --alert-success-border: #55cdfc;
-            --alert-error-bg:   #fff0f5; --alert-error-fg:   #8a2040; --alert-error-border:   #f7a8b8;
-            --alert-info-bg:    #e8f7fd; --alert-info-fg:    #1a5a6a; --alert-info-border:    #55cdfc;
-            --th-bg: #cceefa;
+            --bg-page:       #d0eef8;
+            --bg-panel:      #eef8fd;
+            --bg-input:      #e0f4fb;
+            --bg-accent:     #55cdfc;
+            --color-text:    #0d2a38;
+            --color-muted:   #2a5a70;
+            --color-subtle:  #4a8a9a;
+            --color-primary: #d4547a;
+            --color-primary-hover: #b83a60;
+            --color-secondary: #f7a8b8;
+            --color-secondary-hover: #f08098;
+            --color-border:  #55cdfc;
+            --color-link:    #0a6a95;
+            --color-link-hover: #084f70;
+            --shadow:        rgba(85,205,252,0.25);
+            --shadow-lg:     rgba(85,205,252,0.4);
+            --alert-success-bg: #cceefa; --alert-success-fg: #0a3a50; --alert-success-border: #55cdfc;
+            --alert-error-bg:   #fde0ea; --alert-error-fg:   #7a1030; --alert-error-border:   #f7a8b8;
+            --alert-info-bg:    #cceefa; --alert-info-fg:    #0a3a50; --alert-info-border:    #55cdfc;
+            --th-bg: #a8e4f8;
+            --btn-danger-bg: #c0392b; --btn-danger-fg: #ffffff; --btn-danger-hover: #96281b;
+            --btn-warning-bg: #d68910; --btn-warning-fg: #ffffff; --btn-warning-hover: #b7770d;
         }
 
         /* ── Theme: freepal (Palestinian flag colors) ── */
         /* Flag: black #000000, white #FFFFFF, green #009736, red #EE2A35 */
         [data-theme="freepal"] {
-            --bg-page:       #f5f5f0;
-            --bg-panel:      #ffffff;
-            --bg-input:      #f9f9f7;
-            --bg-accent:     #e8f5ec;
-            --color-text:    #111111;
-            --color-muted:   #444444;
-            --color-subtle:  #777777;
+            --bg-page:       #0a1a0a;
+            --bg-panel:      #0f2a0f;
+            --bg-input:      #0d200d;
+            --bg-accent:     #1a4a1a;
+            --color-text:    #e8f5e8;
+            --color-muted:   #90c890;
+            --color-subtle:  #5a9a5a;
             --color-primary: #ee2a35;
             --color-primary-hover: #c41f28;
-            --color-secondary: #d4edda;
-            --color-secondary-hover: #b8dfc3;
+            --color-secondary: #1a4a1a;
+            --color-secondary-hover: #245a24;
             --color-border:  #009736;
-            --color-link:    #007a2b;
-            --color-link-hover: #005a1f;
-            --shadow:        rgba(0,0,0,0.1);
-            --shadow-lg:     rgba(0,0,0,0.18);
-            --alert-success-bg: #e8f5ec; --alert-success-fg: #005a1f; --alert-success-border: #009736;
-            --alert-error-bg:   #fdecea; --alert-error-fg:   #8a0a10; --alert-error-border:   #ee2a35;
-            --alert-info-bg:    #f0f0f0; --alert-info-fg:    #222222; --alert-info-border:    #000000;
-            --th-bg: #e8f5ec;
+            --color-link:    #4ade80;
+            --color-link-hover: #22c55e;
+            --shadow:        rgba(0,0,0,0.4);
+            --shadow-lg:     rgba(0,0,0,0.6);
+            --alert-success-bg: #0f2a0f; --alert-success-fg: #4ade80; --alert-success-border: #009736;
+            --alert-error-bg:   #2a0a0a; --alert-error-fg:   #f87171; --alert-error-border:   #ee2a35;
+            --alert-info-bg:    #0a0a0a; --alert-info-fg:    #e8f5e8; --alert-info-border:    #444444;
+            --th-bg: #1a4a1a;
+            --btn-danger-bg: #ee2a35; --btn-danger-fg: #ffffff; --btn-danger-hover: #c41f28;
+            --btn-warning-bg: #d68910; --btn-warning-fg: #ffffff; --btn-warning-hover: #b7770d;
         }
 
         * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -141,10 +147,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .btn:hover { background: var(--color-primary-hover); }
         .btn-secondary { background: var(--color-secondary); color: var(--color-text); }
         .btn-secondary:hover { background: var(--color-secondary-hover); }
-        .btn-danger { background: #e74c3c; color: white; }
-        .btn-danger:hover { background: #c0392b; }
-        .btn-warning { background: #f39c12; color: white; }
-        .btn-warning:hover { background: #e67e22; }
+        .btn-danger { background: var(--btn-danger-bg, #e74c3c); color: var(--btn-danger-fg, white); }
+        .btn-danger:hover { background: var(--btn-danger-hover, #c0392b); }
+        .btn-warning { background: var(--btn-warning-bg, #f39c12); color: var(--btn-warning-fg, white); }
+        .btn-warning:hover { background: var(--btn-warning-hover, #e67e22); }
         .alert { padding: 15px; border-radius: 4px; margin-bottom: 20px; }
         .alert-success { background: var(--alert-success-bg); color: var(--alert-success-fg); border: 1px solid var(--alert-success-border); }
         .alert-error { background: var(--alert-error-bg); color: var(--alert-error-fg); border: 1px solid var(--alert-error-border); }
@@ -371,8 +377,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             };
 
             document.addEventListener('DOMContentLoaded', function() {
-                // Rebuild after i18n initializes (it fires translatePage on DOMContentLoaded too)
-                setTimeout(buildLangDropdown, 100);
+                // Rebuild after i18n initializes (fires i18n:ready when language is loaded)
+                document.addEventListener('i18n:ready', buildLangDropdown);
             });
 
             document.addEventListener('click', function(e) {
@@ -760,7 +766,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         })();
     </script>
     {% block extra_css %}{% endblock %}
-    <script src="/static/i18n.js"></script>
+    <script src="{{ url_for(request, '/dashboard/static/i18n.js') }}"></script>
 </head>
 <body data-username="{{ request.session.username|default('__guest__') }}">
     <div class="header">

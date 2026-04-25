@@ -16,18 +16,18 @@
 .page-header h2 {
     font-size: 1.35rem;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--color-text);
     display: flex;
     align-items: center;
     gap: .6rem;
 }
 .page-header h2 i { color: #667eea; }
-.page-header p { color: #888; font-size: .9rem; margin-top: .2rem; }
+.page-header p { color: var(--color-subtle); font-size: .9rem; margin-top: .2rem; }
 
 /* ── Section card ─────────────────────────────────────────── */
 .section-card {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border:1px solid var(--color-border);
     border-radius: 10px;
     overflow: hidden;
     margin-bottom: 1.5rem;
@@ -37,13 +37,13 @@
     align-items: center;
     justify-content: space-between;
     padding: .85rem 1.25rem;
-    border-bottom: 1px solid #0f3460;
+    border-bottom:1px solid var(--color-border);
     background: rgba(15,52,96,.3);
 }
 .section-header h3 {
     font-size: .95rem;
     font-weight: 600;
-    color: #e0e0e0;
+    color: var(--color-text);
     display: flex;
     align-items: center;
     gap: .5rem;
@@ -54,8 +54,8 @@
 /* ── Token card ───────────────────────────────────────────── */
 .token-list { display: flex; flex-direction: column; gap: .85rem; }
 .token-card {
-    background: #1a1a2e;
-    border: 1px solid #0f3460;
+    background: var(--bg-page);
+    border:1px solid var(--color-border);
     border-radius: 8px;
     padding: 1rem 1.25rem;
     transition: border-color .2s;
@@ -72,12 +72,12 @@
 .token-name {
     font-size: 1rem;
     font-weight: 600;
-    color: #e0e0e0;
+    color: var(--color-text);
     margin-bottom: .2rem;
 }
 .token-meta {
     font-size: .8rem;
-    color: #666;
+    color: var(--color-subtle);
     display: flex;
     gap: 1rem;
     flex-wrap: wrap;
@@ -117,12 +117,12 @@
     align-items: center;
     gap: .6rem;
     background: #0f1c33;
-    border: 1px solid #0f3460;
+    border:1px solid var(--color-border);
     border-radius: 6px;
     padding: .55rem .85rem;
     font-family: monospace;
     font-size: .85rem;
-    color: #a0a0a0;
+    color: var(--color-muted);
 }
 .token-value-text { flex: 1; word-break: break-all; }
 .copy-btn {
@@ -157,7 +157,7 @@
 /* ── Create token form (inline) ───────────────────────────── */
 .create-form-area {
     display: none;
-    background: #1a1a2e;
+    background: var(--bg-page);
     border: 1px solid #667eea;
     border-radius: 8px;
     padding: 1.25rem;
@@ -165,14 +165,14 @@
 }
 .create-form-area.visible { display: block; }
 .create-form-area .form-group { margin-bottom: 1rem; }
-.create-form-area label { font-size: .85rem; color: #a0a0a0; margin-bottom: .4rem; display: block; }
+.create-form-area label { font-size: .85rem; color: var(--color-muted); margin-bottom: .4rem; display: block; }
 .create-form-area input[type="text"] {
     width: 100%;
     padding: .6rem .85rem;
-    border: 1px solid #0f3460;
+    border:1px solid var(--color-border);
     border-radius: 6px;
     background: #0f1c33;
-    color: #e0e0e0;
+    color: var(--color-text);
     font-size: .9rem;
 }
 .create-form-area input:focus {
@@ -211,7 +211,7 @@
     text-transform: uppercase;
     letter-spacing: .05em;
     color: #555;
-    border-bottom: 1px solid #0f3460;
+    border-bottom:1px solid var(--color-border);
     padding: .5rem .75rem;
     text-align: left;
 }
@@ -233,7 +233,7 @@
 .method-POST { background: rgba(96,165,250,.18); color: #60a5fa; }
 .code-block {
     background: #0f1c33;
-    border: 1px solid #0f3460;
+    border:1px solid var(--color-border);
     border-radius: 6px;
     padding: .85rem 1rem;
     font-family: monospace;
@@ -322,10 +322,10 @@
     </div>
     <div class="docs-body" id="docsBody">
         <div class="section-body">
-            <p style="color:#a0a0a0; font-size:.88rem; margin-bottom:.75rem;">Add the token to every request in the <code style="background:#0f3460; padding:.1rem .35rem; border-radius:3px;">Authorization</code> header:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-bottom:.75rem;">Add the token to every request in the <code style="background:var(--bg-accent); padding:.1rem .35rem; border-radius:3px;">Authorization</code> header:</p>
             <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
 
-            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Token scopes:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Token scopes:</p>
             <table class="ep-table">
                 <thead><tr><th>Scope</th><th>Access</th></tr></thead>
                 <tbody>
@@ -335,7 +335,7 @@
                 </tbody>
             </table>
 
-            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Available endpoints:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Available endpoints:</p>
             <table class="ep-table">
                 <thead><tr><th>Method</th><th>Endpoint</th><th>Scope</th><th>Description</th></tr></thead>
                 <tbody>
@@ -349,7 +349,7 @@
                 </tbody>
             </table>
 
-            <p style="color:#a0a0a0; font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Example curl commands:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Example curl commands:</p>
             <div class="code-block"># List your models
 curl -H "Authorization: Bearer YOUR_TOKEN" \
   {{ request.base_url }}api/u/{{ session.username }}/models

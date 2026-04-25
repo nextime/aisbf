@@ -61,21 +61,21 @@ function _msEnsure() {
     d.id = 'ms-overlay';
     d.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;';
     d.innerHTML = `
-      <div style="background:#1a1a2e;border:1px solid #0f3460;border-radius:8px;padding:24px;max-width:560px;width:93%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+      <div style="background:var(--bg-page);border:1px solid var(--color-border);border-radius:8px;padding:24px;max-width:560px;width:93%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <h3 id="ms-title" style="margin:0;font-size:16px;color:#e0e0e0;"></h3>
-          <button type="button" onclick="msClose()" style="background:none;border:none;color:#a0a0a0;cursor:pointer;font-size:22px;padding:0 4px;">&times;</button>
+          <h3 id="ms-title" style="margin:0;font-size:16px;color:var(--color-text);">${window.i18n.t('autoselect.search_models_title')}</h3>
+          <button type="button" onclick="msClose()" style="background:none;border:none;color:var(--color-muted);cursor:pointer;font-size:22px;padding:0 4px;">&times;</button>
         </div>
-        <div id="ms-status" style="font-size:13px;color:#a0a0a0;min-height:18px;margin-bottom:10px;"></div>
+        <div id="ms-status" style="font-size:13px;color:var(--color-muted);min-height:18px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;margin-bottom:12px;">
-          <input type="text" id="ms-filter-input" placeholder="Filter results…"
-            style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;color:#e0e0e0;font-size:14px;"
+          <input type="text" id="ms-filter-input" placeholder="${window.i18n.t('autoselect.filter_results')}"
+            style="flex:1;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-panel);color:var(--color-text);font-size:14px;"
             onkeydown="if(event.key==='Enter')msFilter()">
-          <button type="button" onclick="msFilter()" class="btn btn-secondary" style="padding:8px 14px;font-size:13px;">Filter</button>
+          <button type="button" onclick="msFilter()" class="btn btn-secondary" style="padding:8px 14px;font-size:13px;">${window.i18n.t('autoselect.filter')}</button>
         </div>
-        <div id="ms-results" style="overflow-y:auto;flex:1;max-height:340px;border:1px solid #0f3460;border-radius:3px;background:#16213e;min-height:40px;"></div>
+        <div id="ms-results" style="overflow-y:auto;flex:1;max-height:340px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-panel);min-height:40px;"></div>
         <div style="margin-top:14px;display:flex;justify-content:flex-end;">
-          <button type="button" onclick="msClose()" class="btn btn-secondary">Cancel</button>
+          <button type="button" onclick="msClose()" class="btn btn-secondary">${window.i18n.t('autoselect.cancel')}</button>
         </div>
       </div>`;
     document.body.appendChild(d);
@@ -85,7 +85,7 @@ async function msOpenAll(inputId, cb) {
     _msEnsure(); _msCancelled = false; _msAllItems = []; _msDispItems = [];
     _msCallback = function(v) { const e = document.getElementById(inputId); if (e) e.value = v; cb(v); };
     const o = document.getElementById('ms-overlay'); o.style.display = 'flex';
-    document.getElementById('ms-title').textContent = 'Search Models';
+    document.getElementById('ms-title').textContent = window.i18n.t('autoselect.search_models_title');
     document.getElementById('ms-filter-input').value = '';
     const all = availableRotations.map(r => ({id: r, name: r + ' (rotation)'})).concat(availableModels);
     if (all.length) {
@@ -93,8 +93,8 @@ async function msOpenAll(inputId, cb) {
         document.getElementById('ms-status').textContent = all.length + ' model(s) available. Use Filter to narrow results.';
         msRenderResults(all);
     } else {
-        document.getElementById('ms-status').textContent = 'No models loaded — fetching from provider APIs…';
-        document.getElementById('ms-results').innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">Loading…</p>';
+        document.getElementById('ms-status').textContent = window.i18n.t('autoselect.no_models_loaded');
+        document.getElementById('ms-results').innerHTML = `<p style="color:var(--color-muted);text-align:center;padding:20px;">${window.i18n.t('autoselect.loading')}</p>`;
         try {
             const r = await fetch('/dashboard/search-all-models?refresh=true');
             if (_msCancelled) return;
@@ -104,14 +104,14 @@ async function msOpenAll(inputId, cb) {
             document.getElementById('ms-status').textContent = fetched.length ? fetched.length + ' model(s) found.' : 'No models found.';
             msRenderResults(fetched);
         } catch(e) {
-            if (!_msCancelled) { document.getElementById('ms-status').textContent = 'Error: ' + e.message; document.getElementById('ms-results').innerHTML = '<p style="color:#f87171;padding:15px;">Failed to load.</p>'; }
+            if (!_msCancelled) { document.getElementById('ms-status').textContent = window.i18n.t('autoselect.error_prefix') + ' ' + e.message; document.getElementById('ms-results').innerHTML = `<p style="color:#f87171;padding:15px;">${window.i18n.t('autoselect.failed_load')}</p>`; }
         }
     }
 }
 
 function msFilter() {
     const q = document.getElementById('ms-filter-input').value.trim().toLowerCase();
-    document.getElementById('ms-status').textContent = 'Searching…';
+    document.getElementById('ms-status').textContent = window.i18n.t('autoselect.searching');
     const filtered = q ? _msAllItems.filter(m => (typeof m === 'string' ? m : m.id + ' ' + m.name).toLowerCase().includes(q)) : _msAllItems;
     document.getElementById('ms-status').textContent = filtered.length + ' result(s).';
     msRenderResults(filtered);
@@ -120,12 +120,12 @@ function msFilter() {
 function msRenderResults(items) {
     _msDispItems = items;
     const el = document.getElementById('ms-results');
-    if (!items || !items.length) { el.innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">No results.</p>'; return; }
+    if (!items || !items.length) { el.innerHTML = `<p style="color:var(--color-muted);text-align:center;padding:20px;">${window.i18n.t('autoselect.no_results')}</p>`; return; }
     el.innerHTML = items.map((item, i) => {
         const isStr = typeof item === 'string';
         const id = isStr ? item : item.id, label = isStr ? item : item.name;
-        return `<div data-idx="${i}" onclick="msPickIdx(this)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #0a2a50;font-size:13px;word-break:break-all;" onmouseover="this.style.background='#0f3460'" onmouseout="this.style.background=''">` +
-               (id !== label ? `<span style="color:#c8d6e5;">${escHtml(id)}</span><span style="color:#888;font-size:11px;margin-left:6px;">${escHtml(label)}</span>` : `<span>${escHtml(id)}</span>`) + '</div>';
+        return `<div data-idx="${i}" onclick="msPickIdx(this)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--color-border);font-size:13px;word-break:break-all;" onmouseover="this.style.background='var(--bg-accent)'" onmouseout="this.style.background=''">` +
+               (id !== label ? `<span style="color:var(--color-text);">${escHtml(id)}</span><span style="color:var(--color-subtle);font-size:11px;margin-left:6px;">${escHtml(label)}</span>` : `<span>${escHtml(id)}</span>`) + '</div>';
     }).join('');
 }
 
@@ -161,11 +161,11 @@ function buildModelSelectHtml(uid, currentValue, allModels, onChangeFn) {
             <input type="text" id="${escHtml(uid)}" value="${escHtml(currentValue)}"
                    onchange="${onChangeFn}(this.value)"
                    placeholder="Model ID…"
-                   style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+                   style="flex:1;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
             <button type="button" class="btn btn-secondary"
                 data-input-id="${escHtml(uid)}"
                 onclick="msOpenAllForInput(this)"
-                style="padding:7px 12px;white-space:nowrap;">Search</button>
+                style="padding:7px 12px;white-space:nowrap;">${window.i18n.t('autoselect.search')}</button>
         </div>`;
     }
 }
@@ -187,14 +187,14 @@ function renderAutoselectList() {
     container.innerHTML = '';
     
     if (!autoselectConfig || Object.keys(autoselectConfig).length === 0) {
-        container.innerHTML = '<p style="color: #a0a0a0;">No autoselect configurations defined</p>';
+        container.innerHTML = `<p style="color: var(--color-muted);">${window.i18n.t('autoselect.no_autoselects')}</p>`;
         return;
     }
     
     Object.entries(autoselectConfig).forEach(([key, autoselect]) => {
         const autoselectItem = document.createElement('div');
         autoselectItem.className = 'autoselect-item';
-        autoselectItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+        autoselectItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
         
         const isExpanded = expandedAutoselects.has(key);
         const modelCount = autoselect.available_models ? autoselect.available_models.length : 0;
@@ -205,14 +205,14 @@ function renderAutoselectList() {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtml(autoselect.model_name || key)}</strong>
-                    <span style="color: #a0a0a0; font-size: 14px;">(${modelCount} available model${modelCount !== 1 ? 's' : ''})</span>
+                    <span style="color: var(--color-muted); font-size: 14px;">(${modelCount} ${modelCount !== 1 ? window.i18n.t('autoselect.models_plural') : window.i18n.t('autoselect.models_singular')})</span>
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyAutoselect('${safeKey}')" style="padding: 5px 15px;">Copy</button>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyAutoselect('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('autoselect.copy')}</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('autoselect.remove')}</button>
                 </div>
             </div>
-            <div id="autoselect-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+            <div id="autoselect-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
                 <!-- Details will be rendered here -->
             </div>
         `;
@@ -243,25 +243,25 @@ function renderAutoselectDetails(autoselectKey) {
     const selectionValue = autoselect.selection_model || 'internal';
     
     // Build selection model options: internal + rotations + provider models
-    let selectionOptions = `<option value="internal" ${selectionValue === 'internal' ? 'selected' : ''}>internal (Use configured internal model)</option>`;
-    selectionOptions += '<optgroup label="Rotations">';
+    let selectionOptions = `<option value="internal" ${selectionValue === 'internal' ? 'selected' : ''}>${window.i18n.t('autoselect.internal_model')}</option>`;
+    selectionOptions += `<optgroup label="${window.i18n.t('autoselect.rotations_group')}">`;
     selectionOptions += availableRotations.map(r =>
         `<option value="${r}" ${selectionValue === r ? 'selected' : ''}>${r}</option>`
     ).join('');
     selectionOptions += '</optgroup>';
-    selectionOptions += '<optgroup label="Provider Models">';
+    selectionOptions += `<optgroup label="${window.i18n.t('autoselect.provider_models_group')}">`;
     selectionOptions += availableModels.map(m =>
         `<option value="${m.id}" ${selectionValue === m.id ? 'selected' : ''}>${m.name}</option>`
     ).join('');
     selectionOptions += '</optgroup>';
     
     // Build fallback options: rotations + provider models
-    let fallbackOptions = '<optgroup label="Rotations">';
+    let fallbackOptions = `<optgroup label="${window.i18n.t('autoselect.rotations_group')}">`;
     fallbackOptions += availableRotations.map(r =>
         `<option value="${r}" ${autoselect.fallback === r ? 'selected' : ''}>${r}</option>`
     ).join('');
     fallbackOptions += '</optgroup>';
-    fallbackOptions += '<optgroup label="Provider Models">';
+    fallbackOptions += `<optgroup label="${window.i18n.t('autoselect.provider_models_group')}">`;
     fallbackOptions += availableModels.map(m =>
         `<option value="${m.id}" ${autoselect.fallback === m.id ? 'selected' : ''}>${m.name}</option>`
     ).join('');
@@ -269,128 +269,128 @@ function renderAutoselectDetails(autoselectKey) {
     
     container.innerHTML = `
         <div class="form-group">
-            <label>Model Name</label>
+            <label>${window.i18n.t('autoselect.model_name')}</label>
             <input type="text" value="${escHtml(autoselect.model_name)}" onchange="updateAutoselect('${escHtml(autoselectKey)}', 'model_name', this.value)" required>
         </div>
 
         <div class="form-group">
-            <label>Capabilities (comma-separated)</label>
-            <input type="text" value="${escHtml(autoselect.capabilities ? autoselect.capabilities.join(', ') : '')}" onchange="updateAutoselectCapabilities('${escHtml(autoselectKey)}', this.value)" placeholder="e.g., t2t, reasoning, multimodal">
+            <label>${window.i18n.t('autoselect.capabilities')}</label>
+            <input type="text" value="${escHtml(autoselect.capabilities ? autoselect.capabilities.join(', ') : '')}" onchange="updateAutoselectCapabilities('${escHtml(autoselectKey)}', this.value)" placeholder="${window.i18n.t('autoselect.capabilities_placeholder')}">
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${autoselect.nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'nsfw', this.checked)">
-                NSFW
+                ${window.i18n.t('autoselect.nsfw')}
             </label>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${autoselect.privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'privacy', this.checked)">
-                Privacy
+                ${window.i18n.t('autoselect.privacy')}
             </label>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${autoselect.classify_nsfw ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_nsfw', this.checked)">
-                Classify NSFW
+                ${window.i18n.t('autoselect.classify_nsfw')}
             </label>
-            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_nsfw setting for this autoselection</small>
+            <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.classify_nsfw_desc')}</small>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${autoselect.classify_privacy ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_privacy', this.checked)">
-                Classify Privacy
+                ${window.i18n.t('autoselect.classify_privacy')}
             </label>
-            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_privacy setting for this autoselection</small>
+            <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.classify_privacy_desc')}</small>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${autoselect.classify_semantic ? 'checked' : ''} onchange="updateAutoselect('${autoselectKey}', 'classify_semantic', this.checked)">
-                Classify Semantic
+                ${window.i18n.t('autoselect.classify_semantic')}
             </label>
-            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Override global classify_semantic setting for this autoselection</small>
+            <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.classify_semantic_desc')}</small>
         </div>
         
         <div class="form-group">
-            <label>Description</label>
+            <label>${window.i18n.t('autoselect.description')}</label>
             <textarea onchange="updateAutoselect('${autoselectKey}', 'description', this.value)" style="min-height: 60px;">${autoselect.description || ''}</textarea>
         </div>
         
         <div class="form-group">
-            <label>Selection Model (Model to use for analysis)</label>
+            <label>${window.i18n.t('autoselect.selection_model')}</label>
             <select onchange="updateAutoselect('${autoselectKey}', 'selection_model', this.value)" required>
-                <option value="">Select model...</option>
+                <option value="">${window.i18n.t('autoselect.select_model')}</option>
                 ${selectionOptions}
             </select>
-            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose "internal" to use the configured internal model, or select a rotation/provider model</small>
+            <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.selection_model_desc')}</small>
         </div>
         
         <div class="form-group">
-            <label>Fallback Model (Default if selection fails)</label>
+            <label>${window.i18n.t('autoselect.fallback_model')}</label>
             <select onchange="updateAutoselect('${autoselectKey}', 'fallback', this.value)" required>
-                <option value="">Select model...</option>
+                <option value="">${window.i18n.t('autoselect.select_model')}</option>
                 ${fallbackOptions}
             </select>
-            <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
+            <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.fallback_model_desc')}</small>
         </div>
         
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Default Settings</h4>
-        <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Default values for models in this autoselect (optional - auto-derived from first model if not set)</p>
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('autoselect.default_settings')}</h4>
+        <p style="color: var(--color-muted); font-size: 14px; margin-bottom: 10px;">${window.i18n.t('autoselect.default_settings_desc')}</p>
         
         <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 15px;">
             <div class="form-group">
-                <label>Default Rate Limit (seconds)</label>
-                <input type="number" value="${autoselect.default_rate_limit || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
+                <label>${window.i18n.t('autoselect.default_rate_limit')}</label>
+                <input type="number" value="${autoselect.default_rate_limit || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="${window.i18n.t('autoselect.optional')}">
             </div>
             
             <div class="form-group">
-                <label>Default Max Request Tokens</label>
-                <input type="number" value="${autoselect.default_max_request_tokens || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <label>${window.i18n.t('autoselect.default_max_request_tokens')}</label>
+                <input type="number" value="${autoselect.default_max_request_tokens || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
             </div>
             
             <div class="form-group">
-                <label>Default Context Size</label>
-                <input type="number" value="${autoselect.default_context_size || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <label>${window.i18n.t('autoselect.default_context_size')}</label>
+                <input type="number" value="${autoselect.default_context_size || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
             </div>
             
             <div class="form-group">
-                <label>Default Rate Limit TPM</label>
-                <input type="number" value="${autoselect.default_rate_limit_TPM || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per minute limit</small>
+                <label>${window.i18n.t('autoselect.default_rate_limit_tpm')}</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPM || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
+                <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.default_rate_limit_tpm_desc')}</small>
             </div>
             
             <div class="form-group">
-                <label>Default Rate Limit TPH</label>
-                <input type="number" value="${autoselect.default_rate_limit_TPH || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per hour limit</small>
+                <label>${window.i18n.t('autoselect.default_rate_limit_tph')}</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPH || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
+                <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.default_rate_limit_tph_desc')}</small>
             </div>
             
             <div class="form-group">
-                <label>Default Rate Limit TPD</label>
-                <input type="number" value="${autoselect.default_rate_limit_TPD || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Tokens per day limit</small>
+                <label>${window.i18n.t('autoselect.default_rate_limit_tpd')}</label>
+                <input type="number" value="${autoselect.default_rate_limit_TPD || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
+                <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.default_rate_limit_tpd_desc')}</small>
             </div>
             
             <div class="form-group">
-                <label>Default Condense Context</label>
-                <input type="number" value="${autoselect.default_condense_context || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Trigger context condensation at this token count</small>
+                <label>${window.i18n.t('autoselect.default_condense_context')}</label>
+                <input type="number" value="${autoselect.default_condense_context || ''}" onchange="updateAutoselect('${autoselectKey}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('autoselect.optional')}">
+                <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.default_condense_context_desc')}</small>
             </div>
         </div>
         
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Available Models</h4>
-        <p style="color: #a0a0a0; font-size: 14px; margin-bottom: 10px;">Define which models can be selected and their descriptions for AI analysis</p>
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('autoselect.available_models')}</h4>
+        <p style="color: var(--color-muted); font-size: 14px; margin-bottom: 10px;">${window.i18n.t('autoselect.available_models_desc')}</p>
         <div id="models-${autoselectKey}"></div>
-        <button type="button" class="btn btn-secondary" onclick="addAutoselectModel('${safeAKey}')" style="margin-top: 10px;">Add Model</button>
+        <button type="button" class="btn btn-secondary" onclick="addAutoselectModel('${safeAKey}')" style="margin-top: 10px;">${window.i18n.t('autoselect.add_model')}</button>
 
-        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center;">
-            <button type="button" class="btn" onclick="saveAutoselectItem('${safeAKey}')" style="background: #22c55e;">Save This Autoselect</button>
-            <span id="asel-save-status-${autoselectKey}" style="font-size: 13px; color: #a0a0a0;"></span>
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border); display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn" onclick="saveAutoselectItem('${safeAKey}')" style="background: #22c55e;">${window.i18n.t('autoselect.save_this')}</button>
+            <span id="asel-save-status-${autoselectKey}" style="font-size: 13px; color: var(--color-muted);"></span>
         </div>
     `;
 
@@ -402,48 +402,48 @@ function renderAutoselectModels(autoselectKey) {
     const autoselect = autoselectConfig[autoselectKey];
     
     if (!autoselect.available_models || autoselect.available_models.length === 0) {
-        container.innerHTML = '<p style="color: #a0a0a0;">No models configured</p>';
+        container.innerHTML = `<p style="color: var(--color-muted);">${window.i18n.t('autoselect.no_models')}</p>`;
         return;
     }
     
     container.innerHTML = '';
     autoselect.available_models.forEach((model, index) => {
         const modelDiv = document.createElement('div');
-        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
         const safeKey = autoselectKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const allOptions = availableRotations.map(r => ({id: r, name: r})).concat(availableModels);
         const selUid = `asel-mod-${autoselectKey}-${index}`;
 
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>Model ${index + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${safeKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+                <strong>${window.i18n.t('autoselect.model_label')} ${index + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${safeKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('autoselect.remove')}</button>
             </div>
 
             <div class="form-group">
-                <label>Model ID (Rotation or Provider Model)</label>
+                <label>${window.i18n.t('autoselect.model_id')}</label>
                 ${buildModelSelectHtml(selUid, model.model_id || '', allOptions,
                     `function(v){updateAutoselectModel('${safeKey}',${index},'model_id',v)}`)}
-                <small style="color: #a0a0a0; font-size: 12px; display: block; margin-top: 5px;">Choose from rotations or provider models</small>
+                <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.model_id_desc')}</small>
             </div>
             
             <div class="form-group">
-                <label>Description (Used by AI to select appropriate model)</label>
+                <label>${window.i18n.t('autoselect.model_description')}</label>
                 <textarea onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'description', this.value)" style="min-height: 80px;" required>${model.description || ''}</textarea>
-                <small style="color: #666; font-size: 12px;">Be specific about when this model should be used (e.g., "Best for programming, code generation, debugging")</small>
+                <small style="color: var(--color-subtle); font-size: 12px;">${window.i18n.t('autoselect.model_description_hint')}</small>
             </div>
             
             <div class="form-group">
                 <label>
                     <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'nsfw', this.checked)">
-                    NSFW
+                    ${window.i18n.t('autoselect.nsfw')}
                 </label>
             </div>
             
             <div class="form-group">
                 <label>
                     <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'privacy', this.checked)">
-                    Privacy
+                    ${window.i18n.t('autoselect.privacy')}
                 </label>
             </div>
         `;
@@ -454,19 +454,19 @@ function renderAutoselectModels(autoselectKey) {
 
 async function saveAutoselectItem(key) {
     const statusEl = document.getElementById(`asel-save-status-${key}`);
-    if (statusEl) statusEl.textContent = 'Saving…';
+    if (statusEl) statusEl.textContent = window.i18n.t('autoselect.saving');
     try {
         const result = await apiCall('POST', '/dashboard/api/autoselect', {
             autoselect_id: key,
             config: autoselectConfig[key]
         });
         if (result.success) {
-            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+            if (statusEl) { statusEl.textContent = window.i18n.t('autoselect.saved'); statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
         } else {
-            if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
+            if (statusEl) { statusEl.textContent = window.i18n.t('autoselect.error_prefix') + ' ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
         }
     } catch (e) {
-        if (statusEl) { statusEl.textContent = 'Error: ' + e.message; statusEl.style.color = '#f87171'; }
+        if (statusEl) { statusEl.textContent = window.i18n.t('autoselect.error_prefix') + ' ' + e.message; statusEl.style.color = '#f87171'; }
     }
 }
 
@@ -590,8 +590,9 @@ async function saveAutoselect() {
     }
 }
 
-// Initial render
-renderAutoselectList();
+// Initial render — defer until i18n is ready so translated strings are available
+function _doInitialRender() { renderAutoselectList(); }
+if (window.i18n) { _doInitialRender(); } else { document.addEventListener('i18n:ready', _doInitialRender, {once: true}); }
 </script>
 
 <style>
@@ -600,7 +601,7 @@ renderAutoselectList();
 }
 
 .autoselect-header:hover {
-    background: #0f3460;
+    background: var(--bg-accent);
 }
 
 @keyframes fadeIn {
@@ -623,7 +624,7 @@ renderAutoselectList();
 .form-group select {
     width: 100%;
     padding: 8px;
-    border: 1px solid #ddd;
+    border: 1px solid var(--color-border);
     border-radius: 3px;
     font-size: 14px;
 }

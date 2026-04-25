@@ -23,53 +23,53 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     .markdown-content {
         font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif;
         line-height: 1.6;
-        color: #e0e0e0;
+        color: var(--color-text);
         max-width: 100%;
         overflow-x: auto;
     }
     .markdown-content pre {
-        background: #0f3460;
+        background: var(--bg-accent);
         padding: 16px;
         border-radius: 6px;
         overflow-x: auto;
-        border: 1px solid #1a4a7a;
+        border: 1px solid var(--color-border);
         font-family: 'Courier New', Consolas, Monaco, monospace;
         font-size: 13px;
         line-height: 1.45;
-        color: #e0e0e0;
+        color: var(--color-text);
     }
     .markdown-content code {
-        background: #0f3460;
+        background: var(--bg-accent);
         padding: 2px 6px;
         border-radius: 3px;
         font-family: 'Courier New', Consolas, Monaco, monospace;
         font-size: 13px;
-        color: #e0e0e0;
+        color: var(--color-text);
     }
     .markdown-content h1 {
         font-size: 2em;
-        border-bottom: 2px solid #e94560;
+        border-bottom: 2px solid var(--color-primary);
         padding-bottom: 0.3em;
         margin-top: 24px;
         margin-bottom: 16px;
-        color: #ffffff;
+        color: var(--color-text);
     }
     .markdown-content h2 {
         font-size: 1.5em;
-        border-bottom: 1px solid #0f3460;
+        border-bottom: 1px solid var(--color-border);
         padding-bottom: 0.3em;
         margin-top: 24px;
         margin-bottom: 16px;
-        color: #ffffff;
+        color: var(--color-text);
     }
     .markdown-content h3 {
         font-size: 1.25em;
         margin-top: 24px;
         margin-bottom: 16px;
-        color: #ffffff;
+        color: var(--color-text);
     }
     .markdown-content h4, .markdown-content h5, .markdown-content h6 {
-        color: #ffffff;
+        color: var(--color-text);
     }
     .markdown-content ul, .markdown-content ol {
         padding-left: 2em;
@@ -82,7 +82,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         margin-bottom: 16px;
     }
     .markdown-content a {
-        color: #e94560;
+        color: var(--color-primary);
         text-decoration: none;
     }
     .markdown-content a:hover {
@@ -90,8 +90,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     }
     .markdown-content blockquote {
         padding: 0 1em;
-        color: #a0a0a0;
-        border-left: 4px solid #e94560;
+        color: var(--color-muted);
+        border-left: 4px solid var(--color-primary);
         margin-bottom: 16px;
     }
     .markdown-content table {
@@ -102,18 +102,18 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     .markdown-content table th,
     .markdown-content table td {
         padding: 6px 13px;
-        border: 1px solid #0f3460;
+        border: 1px solid var(--color-border);
     }
     .markdown-content table th {
-        background: #0f3460;
+        background: var(--bg-accent);
         font-weight: 600;
     }
     .markdown-content table tr:nth-child(2n) {
-        background: #0f346055;
+        background: var(--bg-accent)55;
     }
     .markdown-content hr {
         border: none;
-        border-top: 1px solid #0f3460;
+        border-top: 1px solid var(--color-border);
         margin: 24px 0;
     }
     .markdown-content img {
@@ -123,10 +123,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     /* Inline code that isn't in a pre block */
     .markdown-content p > code,
     .markdown-content li > code {
-        background: #0f3460;
+        background: var(--bg-accent);
         padding: 2px 6px;
         border-radius: 3px;
-        color: #e94560;
+        color: var(--color-primary);
     }
 </style>
 

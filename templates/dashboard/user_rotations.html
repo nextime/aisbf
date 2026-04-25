@@ -63,21 +63,21 @@ function _msEnsure() {
     d.id = 'ms-overlay';
     d.style.cssText = 'display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.75);z-index:9999;align-items:center;justify-content:center;';
     d.innerHTML = `
-      <div style="background:#1a1a2e;border:1px solid #0f3460;border-radius:8px;padding:24px;max-width:560px;width:93%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
+      <div style="background:var(--bg-page);border:1px solid var(--color-border);border-radius:8px;padding:24px;max-width:560px;width:93%;max-height:85vh;display:flex;flex-direction:column;box-shadow:0 8px 32px rgba(0,0,0,0.6);">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
-          <h3 id="ms-title" style="margin:0;font-size:16px;color:#e0e0e0;"></h3>
-          <button type="button" onclick="msClose()" style="background:none;border:none;color:#a0a0a0;cursor:pointer;font-size:22px;padding:0 4px;">&times;</button>
+          <h3 id="ms-title" style="margin:0;font-size:16px;color:var(--color-text);"></h3>
+          <button type="button" onclick="msClose()" style="background:none;border:none;color:var(--color-muted);cursor:pointer;font-size:22px;padding:0 4px;">&times;</button>
         </div>
-        <div id="ms-status" style="font-size:13px;color:#a0a0a0;min-height:18px;margin-bottom:10px;"></div>
+        <div id="ms-status" style="font-size:13px;color:var(--color-muted);min-height:18px;margin-bottom:10px;"></div>
         <div style="display:flex;gap:8px;margin-bottom:12px;">
-          <input type="text" id="ms-filter-input" placeholder="Filter results…"
-            style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#16213e;color:#e0e0e0;font-size:14px;"
+          <input type="text" id="ms-filter-input" placeholder="${window.i18n.t('rotations.filter_results')}"
+            style="flex:1;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-panel);color:var(--color-text);font-size:14px;"
             onkeydown="if(event.key==='Enter')msFilter()">
-          <button type="button" onclick="msFilter()" class="btn btn-secondary" style="padding:8px 14px;font-size:13px;">Filter</button>
+          <button type="button" onclick="msFilter()" class="btn btn-secondary" style="padding:8px 14px;font-size:13px;">${window.i18n.t('rotations.filter')}</button>
         </div>
-        <div id="ms-results" style="overflow-y:auto;flex:1;max-height:340px;border:1px solid #0f3460;border-radius:3px;background:#16213e;min-height:40px;"></div>
+        <div id="ms-results" style="overflow-y:auto;flex:1;max-height:340px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-panel);min-height:40px;"></div>
         <div style="margin-top:14px;display:flex;justify-content:flex-end;">
-          <button type="button" onclick="msClose()" class="btn btn-secondary">Cancel</button>
+          <button type="button" onclick="msClose()" class="btn btn-secondary">${window.i18n.t('rotations.cancel')}</button>
         </div>
       </div>`;
     document.body.appendChild(d);
@@ -89,30 +89,30 @@ async function msOpenProvider(providerId, inputId, cb) {
     const o = document.getElementById('ms-overlay'); o.style.display = 'flex';
     document.getElementById('ms-title').textContent = 'Search Models — ' + providerId;
     document.getElementById('ms-filter-input').value = '';
-    document.getElementById('ms-status').textContent = 'Checking provider models…';
-    document.getElementById('ms-results').innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">Loading…</p>';
+    document.getElementById('ms-status').textContent = window.i18n.t('rotations.checking_models');
+    document.getElementById('ms-results').innerHTML = '<p style="color:var(--color-muted);text-align:center;padding:20px;">' + window.i18n.t('rotations.loading') + '</p>';
     try {
         let r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/configured-models');
         if (_msCancelled) return;
         let d = await r.json(); let m = d.models || [];
         if (!m.length) {
-            document.getElementById('ms-status').textContent = 'No local model list — fetching from provider API…';
+            document.getElementById('ms-status').textContent = window.i18n.t('rotations.fetching_from_api');
             r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/search-models?refresh=true');
             if (_msCancelled) return;
             d = await r.json(); m = d.models || [];
         }
         if (_msCancelled) return;
         _msAllItems = m;
-        document.getElementById('ms-status').textContent = m.length ? m.length + ' model(s) found. Use Filter to narrow results.' : 'No models found for this provider.';
+        document.getElementById('ms-status').textContent = m.length ? m.length + ' model(s) found. ' + window.i18n.t('rotations.models_found_filter') : window.i18n.t('rotations.no_models_found');
         msRenderResults(m);
     } catch(e) {
-        if (!_msCancelled) { document.getElementById('ms-status').textContent = 'Error: ' + e.message; document.getElementById('ms-results').innerHTML = '<p style="color:#f87171;padding:15px;">Failed to load models.</p>'; }
+        if (!_msCancelled) { document.getElementById('ms-status').textContent = 'Error: ' + e.message; document.getElementById('ms-results').innerHTML = '<p style="color:#f87171;padding:15px;">' + window.i18n.t('rotations.failed_load') + '</p>'; }
     }
 }
 
 function msFilter() {
     const q = document.getElementById('ms-filter-input').value.trim().toLowerCase();
-    document.getElementById('ms-status').textContent = 'Searching…';
+    document.getElementById('ms-status').textContent = window.i18n.t('rotations.searching');
     const filtered = q ? _msAllItems.filter(m => (typeof m === 'string' ? m : m.id + ' ' + m.name).toLowerCase().includes(q)) : _msAllItems;
     document.getElementById('ms-status').textContent = filtered.length + ' result(s).';
     msRenderResults(filtered);
@@ -121,12 +121,12 @@ function msFilter() {
 function msRenderResults(items) {
     _msDispItems = items;
     const el = document.getElementById('ms-results');
-    if (!items || !items.length) { el.innerHTML = '<p style="color:#a0a0a0;text-align:center;padding:20px;">No results.</p>'; return; }
+    if (!items || !items.length) { el.innerHTML = '<p style="color:var(--color-muted);text-align:center;padding:20px;">' + window.i18n.t('rotations.no_results') + '</p>'; return; }
     el.innerHTML = items.map((item, i) => {
         const isStr = typeof item === 'string';
         const id = isStr ? item : item.id, label = isStr ? item : item.name;
-        return `<div data-idx="${i}" onclick="msPickIdx(this)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid #0a2a50;font-size:13px;word-break:break-all;" onmouseover="this.style.background='#0f3460'" onmouseout="this.style.background=''">` +
-               (id !== label ? `<span style="color:#c8d6e5;">${escHtmlAttr(id)}</span><span style="color:#888;font-size:11px;margin-left:6px;">${escHtmlAttr(label)}</span>` : `<span>${escHtmlAttr(id)}</span>`) + '</div>';
+        return `<div data-idx="${i}" onclick="msPickIdx(this)" style="padding:8px 12px;cursor:pointer;border-bottom:1px solid var(--color-border);font-size:13px;word-break:break-all;" onmouseover="this.style.background='var(--bg-accent)'" onmouseout="this.style.background=''">` +
+               (id !== label ? `<span style="color:var(--color-text);">${escHtmlAttr(id)}</span><span style="color:var(--color-subtle);font-size:11px;margin-left:6px;">${escHtmlAttr(label)}</span>` : `<span>${escHtmlAttr(id)}</span>`) + '</div>';
     }).join('');
 }
 
@@ -157,15 +157,15 @@ function buildProviderSelectHtml(uid, currentValue, onChangeFn) {
             `<option value="${escHtmlAttr(p)}" ${currentValue === p ? 'selected' : ''}>${escHtmlAttr(p)}</option>`
         ).join('');
         return `<select id="${uid}" onchange="${onChangeFn}(this.value)" required>
-            <option value="">Select provider...</option>${opts}</select>`;
+            <option value="">${window.i18n.t('rotations.select_provider')}</option>${opts}</select>`;
     } else {
         const dlOpts = availableProviders.map(p => `<option value="${escHtmlAttr(p)}">`).join('');
         return `<div style="position:relative;">
             <input type="text" id="${uid}" value="${escHtmlAttr(currentValue)}" list="${uid}-dl"
-                   placeholder="Type to search provider..."
+                   placeholder="${window.i18n.t('rotations.type_search_provider')}"
                    oninput="handleProviderInput('${uid}',this.value,${onChangeFn})"
                    onchange="handleProviderInput('${uid}',this.value,${onChangeFn})"
-                   style="width:100%;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
+                   style="width:100%;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
             <datalist id="${uid}-dl">${dlOpts}</datalist>
         </div>`;
     }
@@ -184,7 +184,7 @@ function renderRotationsList() {
     Object.entries(rotationsConfig.rotations || {}).forEach(([key, rotation]) => {
         const rotationItem = document.createElement('div');
         rotationItem.className = 'rotation-item';
-        rotationItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+        rotationItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
         
         const isExpanded = expandedRotations.has(key);
         const providerCount = rotation.providers ? rotation.providers.length : 0;
@@ -195,14 +195,14 @@ function renderRotationsList() {
                 <div style="display: flex; align-items: center; gap: 10px;">
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
-                    <span style="color: #a0a0a0; font-size: 14px;">(${providerCount} provider${providerCount !== 1 ? 's' : ''})</span>
+                    <span style="color: var(--color-muted); font-size: 14px;">(${providerCount} ${window.i18n.t(providerCount !== 1 ? 'rotations.providers_plural' : 'rotations.providers_singular')})</span>
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyRotation('${safeKey}')" style="padding: 5px 15px;">Copy</button>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyRotation('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('rotations.copy')}</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('rotations.remove')}</button>
                 </div>
             </div>
-            <div id="rotation-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+            <div id="rotation-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
             </div>
         `;
 
@@ -230,57 +230,57 @@ function renderRotationDetails(rotationKey) {
     
     container.innerHTML = `
         <div class="form-group">
-            <label>Model Name</label>
+            <label>${window.i18n.t('rotations.model_name')}</label>
             <input type="text" value="${rotation.model_name}" onchange="updateRotation('${rotationKey}', 'model_name', this.value)" required>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
-                Notify Errors
+                ${window.i18n.t('rotations.notify_errors')}
             </label>
-            <small style="color: #888; font-size: 12px; display: block;">
+            <small style="color: var(--color-subtle); font-size: 12px; display: block;">
                 When enabled, provider errors will be returned to the client instead of silently failing over to next provider.
                 Disable this for silent failover without exposing internal errors.
             </small>
         </div>
         
         <div class="form-group">
-            <label>Capabilities (comma-separated)</label>
-            <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="e.g., code_generation, t2t, reasoning">
+            <label>${window.i18n.t('rotations.capabilities')}</label>
+            <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="${window.i18n.t('rotations.capabilities_placeholder')}">
         </div>
         
         <div class="form-group">
-            <label>Default Rate Limit (seconds)</label>
-            <input type="number" value="${rotation.default_rate_limit || ''}" onchange="updateRotation('${rotationKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="Optional">
+            <label>${window.i18n.t('rotations.default_rate_limit')}</label>
+            <input type="number" value="${rotation.default_rate_limit || ''}" onchange="updateRotation('${rotationKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="${window.i18n.t('rotations.optional')}">
         </div>
         
         <div class="form-group">
-            <label>Default Context Size</label>
-            <input type="number" value="${rotation.default_context_size || ''}" onchange="updateRotation('${rotationKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+            <label>${window.i18n.t('rotations.default_context_size')}</label>
+            <input type="number" value="${rotation.default_context_size || ''}" onchange="updateRotation('${rotationKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}">
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${rotation.nsfw ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'nsfw', this.checked)">
-                NSFW
+                ${window.i18n.t('rotations.nsfw')}
             </label>
         </div>
         
         <div class="form-group">
             <label>
                 <input type="checkbox" ${rotation.privacy ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'privacy', this.checked)">
-                Privacy
+                ${window.i18n.t('rotations.privacy')}
             </label>
         </div>
         
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Providers</h4>
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('rotations.providers_section')}</h4>
         <div id="providers-${rotationKey}"></div>
-        <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${safeRKey}')" style="margin-top: 10px;">Add Provider</button>
+        <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${safeRKey}')" style="margin-top: 10px;">${window.i18n.t('rotations.add_provider')}</button>
 
-        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center;">
-            <button type="button" class="btn" onclick="saveRotation('${safeRKey}')" style="background: #22c55e;">Save This Rotation</button>
-            <span id="rot-save-status-${rotationKey}" style="font-size: 13px; color: #a0a0a0;"></span>
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border); display: flex; gap: 10px; align-items: center;">
+            <button type="button" class="btn" onclick="saveRotation('${safeRKey}')" style="background: #22c55e;">${window.i18n.t('rotations.save_this')}</button>
+            <span id="rot-save-status-${rotationKey}" style="font-size: 13px; color: var(--color-muted);"></span>
         </div>
     `;
 
@@ -292,38 +292,38 @@ function renderRotationProviders(rotationKey) {
     const rotation = rotationsConfig.rotations[rotationKey];
     
     if (!rotation.providers || rotation.providers.length === 0) {
-        container.innerHTML = '<p style="color: #a0a0a0;">No providers configured</p>';
+        container.innerHTML = '<p style="color: var(--color-muted);">' + window.i18n.t('rotations.no_providers') + '</p>';
         return;
     }
     
     container.innerHTML = '';
     rotation.providers.forEach((provider, providerIndex) => {
         const providerDiv = document.createElement('div');
-        providerDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        providerDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
         const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const provSelUid = `prov-sel-${rotationKey}-${providerIndex}`;
 
         providerDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>Provider ${providerIndex + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+                <strong>${window.i18n.t('rotations.provider_label')} ${providerIndex + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
             <div class="form-group">
-                <label>Provider ID</label>
+                <label>${window.i18n.t('rotations.provider_id')}</label>
                 ${buildProviderSelectHtml(provSelUid, provider.provider_id || '',
                     `function(v){updateRotationProvider('${safeKey}',${providerIndex},'provider_id',v)}`)}
             </div>
 
             <div class="form-group">
-                <label>Weight (optional, for provider-level weight)</label>
-                <input type="number" value="${provider.weight || ''}" onchange="updateRotationProvider('${safeKey}', ${providerIndex}, 'weight', this.value ? parseInt(this.value) : null)" placeholder="Optional">
+                <label>${window.i18n.t('rotations.weight_optional')}</label>
+                <input type="number" value="${provider.weight || ''}" onchange="updateRotationProvider('${safeKey}', ${providerIndex}, 'weight', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}">
             </div>
 
-            <h5 style="margin-top: 15px; margin-bottom: 10px;">Models</h5>
+            <h5 style="margin-top: 15px; margin-bottom: 10px;">${window.i18n.t('rotations.models_section')}</h5>
             <div id="models-${rotationKey}-${providerIndex}"></div>
-            <button type="button" class="btn btn-secondary" onclick="addRotationModel('${safeKey}', ${providerIndex})" style="margin-top: 10px; font-size: 12px;">Add Model</button>
-            <p style="font-size: 12px; color: #a0a0a0; margin-top: 5px;">Leave models empty to use all models from provider config</p>
+            <button type="button" class="btn btn-secondary" onclick="addRotationModel('${safeKey}', ${providerIndex})" style="margin-top: 10px; font-size: 12px;">${window.i18n.t('rotations.add_model')}</button>
+            <p style="font-size: 12px; color: var(--color-muted); margin-top: 5px;">${window.i18n.t('rotations.leave_empty')}</p>
         `;
 
         container.appendChild(providerDiv);
@@ -336,26 +336,26 @@ function renderRotationModels(rotationKey, providerIndex) {
     const provider = rotationsConfig.rotations[rotationKey].providers[providerIndex];
 
     if (!provider.models || provider.models.length === 0) {
-        container.innerHTML = '<p style="color: #a0a0a0; font-size: 12px;">No models specified (will use all from provider)</p>';
+        container.innerHTML = '<p style="color: var(--color-muted); font-size: 12px;">' + window.i18n.t('rotations.no_models') + '</p>';
         return;
     }
 
     container.innerHTML = '';
     provider.models.forEach((model, modelIndex) => {
         const modelDiv = document.createElement('div');
-        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 10px; margin-bottom: 8px; border-radius: 3px; background: #16213e;';
+        modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 10px; margin-bottom: 8px; border-radius: 3px; background: var(--bg-panel);';
         const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const inputId = `mdl-inp-${rotationKey}-${providerIndex}-${modelIndex}`;
         const providerId = provider.provider_id || '';
 
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="font-size: 13px;">Model ${modelIndex + 1}</strong>
-                <button type="button" onclick="removeRotationModel('${safeKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">Remove</button>
+                <strong style="font-size: 13px;">${window.i18n.t('rotations.model_label')} ${modelIndex + 1}</strong>
+                <button type="button" onclick="removeRotationModel('${safeKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Model Name</label>
+                <label style="font-size: 12px;">${window.i18n.t('rotations.model_name')}</label>
                 <div style="display:flex;gap:5px;align-items:center;">
                     <input type="text" id="${escHtmlAttr(inputId)}" value="${escHtmlAttr(model.name)}"
                         oninput="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
@@ -366,38 +366,38 @@ function renderRotationModels(rotationKey, providerIndex) {
                         data-provider="${escHtmlAttr(providerId)}"
                         data-input-id="${escHtmlAttr(inputId)}"
                         onclick="msOpenProviderForInput(this)"
-                        style="padding:4px 8px;font-size:11px;white-space:nowrap;">Search</button>
+                        style="padding:4px 8px;font-size:11px;white-space:nowrap;">${window.i18n.t('rotations.search')}</button>
                 </div>
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Weight</label>
+                <label style="font-size: 12px;">${window.i18n.t('rotations.weight')}</label>
                 <input type="number" value="${model.weight || 1}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'weight', parseInt(this.value))" style="font-size: 12px; padding: 5px;">
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Rate Limit (seconds)</label>
+                <label style="font-size: 12px;">${window.i18n.t('rotations.rate_limit')}</label>
                 <input type="number" value="${model.rate_limit || 0}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'rate_limit', parseFloat(this.value))" step="0.1" style="font-size: 12px; padding: 5px;">
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Max Request Tokens</label>
-                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional" style="font-size: 12px; padding: 5px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.max_request_tokens')}</label>
+                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Context Size</label>
-                <input type="number" value="${model.context_size || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional" style="font-size: 12px; padding: 5px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.context_size')}</label>
+                <input type="number" value="${model.context_size || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
             </div>
             
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">Condense Context (%)</label>
-                <input type="number" value="${model.condense_context || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (default: 80)" style="font-size: 12px; padding: 5px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_context_pct')}</label>
+                <input type="number" value="${model.condense_context || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')} (default: 80)" style="font-size: 12px; padding: 5px;">
             </div>
             
             <div class="form-group" style="margin-bottom: 0;">
-                <label style="font-size: 12px;">Condense Method</label>
-                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="e.g., semantic, conversational, hierarchical" style="font-size: 12px; padding: 5px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_method')}</label>
+                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="${window.i18n.t('rotations.condense_method_placeholder')}" style="font-size: 12px; padding: 5px;">
             </div>
         `;
         
@@ -414,14 +414,14 @@ async function apiCall(method, url, body) {
 
 async function saveRotation(key) {
     const statusEl = document.getElementById(`rot-save-status-${key}`);
-    if (statusEl) statusEl.textContent = 'Saving…';
+    if (statusEl) statusEl.textContent = window.i18n.t('rotations.saving');
     try {
         const result = await apiCall('POST', '/dashboard/api/rotation', {
             rotation_id: key,
             config: rotationsConfig.rotations[key]
         });
         if (result.success) {
-            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+            if (statusEl) { statusEl.textContent = window.i18n.t('rotations.saved'); statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
         } else {
             if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
         }
@@ -593,8 +593,9 @@ async function saveRotations() {
     }
 }
 
-// Initial render
-renderRotationsList();
+// Initial render — defer until i18n is ready so translated strings are available
+function _doInitialRender() { renderRotationsList(); }
+if (window.i18n) { _doInitialRender(); } else { document.addEventListener('i18n:ready', _doInitialRender, {once: true}); }
 </script>
 
 <style>
@@ -603,7 +604,7 @@ renderRotationsList();
 }
 
 .rotation-header:hover {
-    background: #0f3460;
+    background: var(--bg-accent);
 }
 
 @keyframes fadeIn {
@@ -619,7 +620,7 @@ renderRotationsList();
     display: block;
     margin-bottom: 5px;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .form-group input[type="text"],
@@ -627,11 +628,11 @@ renderRotationsList();
 .form-group select {
     width: 100%;
     padding: 8px;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--color-border);
     border-radius: 3px;
     font-size: 14px;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg-page);
+    color: var(--color-text);
 }
 
 .form-group input[type="checkbox"] {

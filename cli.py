@@ -31,7 +31,7 @@ from pathlib import Path
 
 
 # Files and directories the share directory must contain for the server to start.
-_REQUIRED_FILES = ['aisbf.sh', 'main.py', 'requirements.txt']
+_REQUIRED_FILES = ['aisbf.sh', 'main.py', 'requirements.txt', 'DOCUMENTATION.md', 'README.md', 'LICENSE.txt']
 _REQUIRED_DIRS  = ['templates', 'static', 'config', 'aisbf']
 
 
@@ -247,11 +247,32 @@ def _bootstrap_share_dir():
         return None
 
 
+def _get_installed_version():
+    try:
+        from importlib.metadata import version
+        return version('aisbf')
+    except Exception:
+        return None
+
+def _share_version(share_dir):
+    try:
+        return (share_dir / '.version').read_text().strip()
+    except Exception:
+        return None
+
+def _write_share_version(share_dir):
+    v = _get_installed_version()
+    if v:
+        (share_dir / '.version').write_text(v)
+
 def main():
     share_dir = _find_share_dir()
 
-    if share_dir is None:
-        share_dir = _bootstrap_share_dir()
+    # Always bootstrap to keep share dir files current.
+    # The venv pip-update is gated by version change inside aisbf.sh (check_package_upgrade).
+    share_dir = _bootstrap_share_dir()
+    if share_dir:
+        _write_share_version(share_dir)
 
     if share_dir is None:
         checked = '\n'.join(f'  - {p}' for p in _share_dir_candidates())

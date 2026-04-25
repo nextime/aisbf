@@ -48,7 +48,7 @@ class build_py(_build_py):
     in site-packages/aisbf/_share/ and can be extracted by cli.py on first run.
     """
 
-    _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh']
+    _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh', 'DOCUMENTATION.md', 'README.md', 'LICENSE.txt']
     _SHARE_DIRS  = ['templates', 'static', 'config', 'aisbf']
 
     def run(self):

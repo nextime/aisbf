@@ -4,8 +4,8 @@
 
 {% block content %}
 <div class="container">
-    <h1>Edit Profile</h1>
-    <p>Update your account information</p>
+    <h1 data-i18n="profile_page.title">Edit Profile</h1>
+    <p data-i18n="profile_page.subtitle">Update your account information</p>
 
     {% if success %}
     <div class="alert alert-success">{{ success }}</div>
@@ -16,16 +16,16 @@
     {% endif %}
 
     <div class="card">
-        <h2>Account Information</h2>
+        <h2 data-i18n="profile_page.account_info">Account Information</h2>
 
         <form method="POST" action="{{ url_for(request, '/dashboard/profile') }}">
             <div class="form-group">
-                <label for="username">Username</label>
+                <label for="username" data-i18n="profile_page.username">Username</label>
                 <input type="text" id="username" name="username" value="{{ session.username }}" required>
             </div>
 
             <div class="form-group">
-                <label for="display_name">Display Name</label>
+                <label for="display_name" data-i18n="profile_page.display_name">Display Name</label>
                 <input type="text" id="display_name" name="display_name" value="{{ user.display_name or session.username }}" placeholder="Your display name">
                 <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
                     This is how your name will be displayed throughout the application
@@ -33,7 +33,7 @@
             </div>
 
             <div class="form-group">
-                <label for="email">Email Address</label>
+                <label for="email" data-i18n="profile_page.email">Email Address</label>
                 <input type="email" id="email" name="email" value="{{ session.email or '' }}" readonly style="background: #0f1419; cursor: not-allowed;">
                 {% if not session.email %}
                 <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
@@ -47,7 +47,7 @@
             </div>
 
             <div class="form-group">
-                <label>Profile Picture</label>
+                <label data-i18n="profile_page.profile_picture">Profile Picture</label>
                 <div style="display: flex; align-items: flex-start; gap: 1.5rem; flex-wrap: wrap;">
                     <div style="position: relative; cursor: pointer; flex-shrink: 0;" id="avatar-wrap">
                         <img id="avatar-preview"
@@ -73,7 +73,7 @@
             </div>
 
             <div style="margin-top: 1.5rem;">
-                <button type="submit" class="btn btn-primary">Save Changes</button>
+                <button type="submit" class="btn btn-primary" data-i18n="profile_page.save">Save Changes</button>
             </div>
         </form>
     </div>

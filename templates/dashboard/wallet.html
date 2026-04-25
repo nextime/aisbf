@@ -10,8 +10,8 @@
 <div style="background: linear-gradient(135deg, rgba(74,158,255,.12), rgba(103,126,234,.08)); border: 1px solid rgba(74,158,255,.5); border-radius: 8px; padding: 14px 20px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap;">
     <div>
         <i class="fas fa-crown" style="color: #ffc107; margin-right: 8px;"></i>
-        <span style="color: #e0e0e0; font-weight: 600;">Did you know?</span>
-        <span style="color: #a0a0a0; margin-left: 6px;">You can use your wallet balance to subscribe to a paid plan and unlock higher limits.</span>
+        <span style="color: var(--color-text); font-weight: 600;">Did you know?</span>
+        <span style="color: var(--color-muted); margin-left: 6px;">You can use your wallet balance to subscribe to a paid plan and unlock higher limits.</span>
     </div>
     <a href="{{ url_for(request, '/dashboard/pricing') }}" style="background: linear-gradient(135deg, #4a9eff, #667eea); color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0;">
         <i class="fas fa-arrow-up me-1"></i> View Plans
@@ -20,14 +20,14 @@
 {% endif %}
 
 <!-- Balance Banner -->
-<div style="background: linear-gradient(135deg, #1a4a2e, #0f3460); border: 2px solid #28a745; border-radius: 8px; padding: 24px; margin-bottom: 20px;">
+<div style="background: linear-gradient(135deg, #1a4a2e, var(--bg-accent)); border: 2px solid #28a745; border-radius: 8px; padding: 24px; margin-bottom: 20px;">
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div>
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 6px;">Available Balance</div>
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 6px;">Available Balance</div>
             <div style="font-size: 42px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ "%.2f"|format(wallet.balance|float) }}</div>
-            <div style="color: #a0a0a0; font-size: 13px; margin-top: 6px;">
-                Currency: <span style="color: #e0e0e0;">{{ wallet.currency_code }}</span>
-                &nbsp;·&nbsp; Wallet ID: <span style="color: #e0e0e0; font-family: monospace;">{{ wallet.id }}</span>
+            <div style="color: var(--color-muted); font-size: 13px; margin-top: 6px;">
+                Currency: <span style="color: var(--color-text);">{{ wallet.currency_code }}</span>
+                &nbsp;·&nbsp; Wallet ID: <span style="color: var(--color-text); font-family: monospace;">{{ wallet.id }}</span>
             </div>
         </div>
         <div style="text-align: right;">
@@ -47,7 +47,7 @@
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
 
     <!-- Top Up -->
-    <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px;">
+    <div style="background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px;">
         <h3 style="margin: 0 0 18px 0; color: #4a9eff;">
             <i class="fas fa-plus-circle me-2"></i>Top Up Wallet
         </h3>
@@ -56,7 +56,7 @@
         {% set crypto_gateways = enabled_gateways.keys() | select('in', ['bitcoin', 'ethereum', 'usdt', 'usdc']) | list %}
 
         {% if not enabled_gateways %}
-        <div style="color: #a0a0a0; text-align: center; padding: 20px 10px;">
+        <div style="color: var(--color-muted); text-align: center; padding: 20px 10px;">
             <i class="fas fa-info-circle fa-2x" style="margin-bottom: 12px; display: block; color: #4a9eff;"></i>
             No payment methods are currently enabled.<br>
             <span style="font-size: 13px;">Please contact the administrator to enable a payment gateway.</span>
@@ -65,20 +65,20 @@
 
         {% if fiat_gateways %}
         <div style="margin-bottom: 16px;">
-            <div style="color: #a0a0a0; font-size: 13px; margin-bottom: 8px;">Quick amounts</div>
+            <div style="color: var(--color-muted); font-size: 13px; margin-bottom: 8px;">Quick amounts</div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 {% for amt in [10, 15, 20, 50, 100] %}
                 <button type="button" class="amount-btn" data-amount="{{ amt }}"
-                    style="background: #1a1a2e; border: 1px solid #4a9eff; color: #4a9eff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
+                    style="background: var(--bg-page); border: 1px solid #4a9eff; color: #4a9eff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
                     {{ currency_symbol }}{{ amt }}
                 </button>
                 {% endfor %}
             </div>
         </div>
         <div style="margin-bottom: 16px;">
-            <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Custom amount</label>
+            <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Custom amount</label>
             <input type="number" id="custom-amount"
-                style="width: 100%; padding: 10px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                style="width: 100%; padding: 10px; background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text); font-size: 15px;"
                 placeholder="Enter amount ({{ currency_symbol }}5 – {{ currency_symbol }}500)" step="0.01" min="5" max="500">
         </div>
         <div style="display: flex; flex-direction: column; gap: 10px; {% if crypto_gateways %}margin-bottom: 16px;{% endif %}">
@@ -100,17 +100,17 @@
 
         {% if crypto_gateways %}
         {% if fiat_gateways %}
-        <hr style="border-color: #0f3460; margin: 4px 0 14px 0;">
+        <hr style="border-color: var(--color-border); margin: 4px 0 14px 0;">
         {% endif %}
-        <div style="color: #a0a0a0; font-size: 13px; margin-bottom: 10px;">
+        <div style="color: var(--color-muted); font-size: 13px; margin-bottom: 10px;">
             <i class="fas fa-coins me-1"></i>Crypto deposit
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         {% for name in crypto_gateways %}
         {% set cfg = enabled_gateways[name] %}
         <button onclick="openCryptoModal('{{ name }}')"
-            style="background:#1a1a2e; border:1px solid #0f3460; color:#e0e0e0; padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; transition:border-color .15s;"
-            onmouseover="this.style.borderColor='#4a9eff'" onmouseout="this.style.borderColor='#0f3460'">
+            style="background:var(--bg-page); border:1px solid var(--color-border); color:var(--color-text); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; transition:border-color .15s;"
+            onmouseover="this.style.borderColor='#4a9eff'" onmouseout="this.style.borderColor='var(--color-border)'">
             {% if name == 'bitcoin' %}<i class="fab fa-bitcoin" style="color:#f7931a;"></i>
             {% elif name == 'ethereum' %}<i class="fab fa-ethereum" style="color:#627eea;"></i>
             {% else %}<i class="fas fa-coins" style="color:#26a17b;"></i>
@@ -125,7 +125,7 @@
     </div>
 
     <!-- Auto Top-Up -->
-    <div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 20px;">
+    <div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px;">
         <h3 style="margin: 0 0 18px 0; color: #17a2b8;">
             <i class="fas fa-sync-alt me-2"></i>Auto Top-Up Settings
         </h3>
@@ -140,42 +140,42 @@
                     <span id="toggle-knob" style="position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s;"></span>
                 </label>
             </div>
-            <span style="color: #e0e0e0; font-size: 15px;">Enable Auto Top-Up</span>
+            <span style="color: var(--color-text); font-size: 15px;">Enable Auto Top-Up</span>
         </div>
 
         <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
             {% if stripe_cards %}
             <div style="margin-bottom: 14px;">
-                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
+                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
                 <div style="position: relative;">
                     <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #4ade80; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-amount"
-                        style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                        style="width: 100%; padding: 10px 10px 10px 26px; background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text); font-size: 15px;"
                         value="{{ wallet.auto_topup_amount or '15' }}" step="0.01" min="10">
                 </div>
             </div>
             <div style="margin-bottom: 14px;">
-                <label style="display: block; color: #a0a0a0; font-size: 13px; margin-bottom: 6px;">Trigger when balance falls below</label>
+                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Trigger when balance falls below</label>
                 <div style="position: relative;">
                     <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #ffc107; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-threshold"
-                        style="width: 100%; padding: 10px 10px 10px 26px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; color: #e0e0e0; font-size: 15px;"
+                        style="width: 100%; padding: 10px 10px 10px 26px; background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text); font-size: 15px;"
                         value="{{ wallet.auto_topup_threshold or '5' }}" step="0.01" min="1">
                 </div>
             </div>
-            <div style="margin-bottom: 14px; color: #a0a0a0; font-size: 13px;">
+            <div style="margin-bottom: 14px; color: var(--color-muted); font-size: 13px;">
                 <i class="fab fa-cc-stripe me-1"></i>
                 Charged to your default credit card:
                 {% set default_card = stripe_cards | selectattr('is_default') | first | default(stripe_cards[0]) %}
-                <strong style="color: #e0e0e0;">•••• {{ default_card.last4 or '????'  }} ({{ default_card.brand | default('Card') | capitalize }})</strong>
+                <strong style="color: var(--color-text);">•••• {{ default_card.last4 or '????'  }} ({{ default_card.brand | default('Card') | capitalize }})</strong>
             </div>
             <button id="save-auto-topup"
                 style="background: #17a2b8; border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .15s;">
                 <i class="fas fa-save me-2"></i>Save Settings
             </button>
             {% else %}
-            <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 6px; padding: 16px; text-align: center;">
-                <p style="color: #a0a0a0; margin: 0 0 12px 0; font-size: 13px;">
+            <div style="background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; padding: 16px; text-align: center;">
+                <p style="color: var(--color-muted); margin: 0 0 12px 0; font-size: 13px;">
                     Auto top-up charges your saved credit card automatically.<br>You don't have a credit card on file yet.
                 </p>
                 <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn" style="font-size: 13px; padding: 8px 16px;">
@@ -186,7 +186,7 @@
         </div>
 
         {% if not wallet.auto_topup_enabled %}
-        <div style="color: #a0a0a0; font-size: 13px; line-height: 1.6;">
+        <div style="color: var(--color-muted); font-size: 13px; line-height: 1.6;">
             Enable auto top-up to automatically reload your wallet when the balance drops below a threshold. This ensures uninterrupted API access.
         </div>
         {% endif %}
@@ -194,7 +194,7 @@
 </div>
 
 <!-- Transaction History -->
-<div style="background: #16213e; border: 2px solid #6f42c1; border-radius: 8px; padding: 20px;">
+<div style="background: var(--bg-panel); border: 2px solid #6f42c1; border-radius: 8px; padding: 20px;">
     <h3 style="margin: 0 0 20px 0; color: #a57bff;">
         <i class="fas fa-history me-2"></i>Transaction History
     </h3>
@@ -202,19 +202,19 @@
     <div style="overflow-x: auto;">
         <table style="width: 100%; border-collapse: collapse;">
             <thead>
-                <tr style="background: #0f3460; color: #e0e0e0;">
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Date</th>
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Type</th>
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Description</th>
-                    <th style="padding: 12px 14px; text-align: right; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Amount</th>
-                    <th style="padding: 12px 14px; text-align: center; font-weight: 600; border-bottom: 1px solid #1a1a2e;">Status</th>
+                <tr style="background: var(--bg-accent); color: var(--color-text);">
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Date</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Type</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Description</th>
+                    <th style="padding: 12px 14px; text-align: right; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Amount</th>
+                    <th style="padding: 12px 14px; text-align: center; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Status</th>
                 </tr>
             </thead>
             <tbody id="transaction-list">
                 <tr id="tx-loading">
-                    <td colspan="5" style="padding: 40px; text-align: center; color: #a0a0a0;">
+                    <td colspan="5" style="padding: 40px; text-align: center; color: var(--color-muted);">
                         <i class="fas fa-spinner fa-spin fa-2x"></i>
-                        <div style="margin-top: 10px;">Loading transactions…</div>
+                        <div style="margin-top: 10px;">${window.i18n.t('wallet.loading_transactions')}</div>
                     </td>
                 </tr>
             </tbody>
@@ -230,15 +230,15 @@
         </div>
         <div style="text-align:center; padding: 0 0 16px;">
             <div id="cryptoQR" style="margin: 0 auto 16px; width:200px; height:200px; background:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center;">
-                <i class="fas fa-spinner fa-spin fa-2x" style="color:#0f3460;"></i>
+                <i class="fas fa-spinner fa-spin fa-2x" style="color:var(--bg-accent);"></i>
             </div>
-            <div style="color:#a0a0a0; font-size:12px; margin-bottom:6px;">Send to this address:</div>
-            <div id="cryptoAddress" style="font-family:monospace; font-size:12px; color:#e0e0e0; word-break:break-all; background:#0f1631; padding:10px; border-radius:6px; margin-bottom:12px;"></div>
+            <div style="color:var(--color-muted); font-size:12px; margin-bottom:6px;">${window.i18n.t('wallet.send_to_address')}</div>
+            <div id="cryptoAddress" style="font-family:monospace; font-size:12px; color:var(--color-text); word-break:break-all; background:var(--bg-page); padding:10px; border-radius:6px; margin-bottom:12px;"></div>
             <button onclick="copyCryptoAddress()"
                 style="background:#4a9eff; border:none; color:white; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">
                 <i class="fas fa-copy me-1"></i>Copy Address
             </button>
-            <div style="color:#6c757d; font-size:11px; margin-top:12px;">Balance credited after on-chain confirmation.</div>
+            <div style="color:#6c757d; font-size:11px; margin-top:12px;">${window.i18n.t('wallet.balance_credited')}</div>
         </div>
     </div>
 </div>
@@ -325,13 +325,13 @@ document.addEventListener('DOMContentLoaded', function () {
                         }
                     }, 800);
                 } else {
-                    showAlert(data.error || 'Failed to initiate checkout.', 'Error', '❌', 'danger');
+                    showAlert(data.error || window.i18n.t('wallet.failed_checkout'), 'Error', '❌', 'danger');
                 }
             })
             .catch(() => {
                 this.disabled = false;
                 this.innerHTML = orig;
-                showAlert('Network error. Please try again.', 'Error', '❌', 'danger');
+                showAlert(window.i18n.t('wallet.network_error'), 'Error', '❌', 'danger');
             });
         });
     });
@@ -373,22 +373,22 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(r => r.json())
         .then(data => {
             if (data.success) {
-                this.textContent = '✓ Saved';
+                this.textContent = window.i18n.t('wallet.saved');
                 setTimeout(() => { this.innerHTML = '<i class="fas fa-save me-2"></i>Save Settings'; }, 2000);
             } else {
-                showAlert(data.error || 'Failed to save settings.', 'Error', '❌', 'danger');
+                showAlert(data.error || window.i18n.t('wallet.save_failed'), 'Error', '❌', 'danger');
             }
         })
-        .catch(() => showAlert('Network error. Please try again.', 'Error', '❌', 'danger'));
+        .catch(() => showAlert(window.i18n.t('wallet.network_error'), 'Error', '❌', 'danger'));
     });
 
     // ── Transaction history ─────────────────────────────────────
     const typeLabels = {
-        credit:  '<span style="color:#4ade80;">&#9650; Credit</span>',
-        debit:   '<span style="color:#f87171;">&#9660; Debit</span>',
-        refund:  '<span style="color:#60a5fa;">&#8617; Refund</span>',
-        topup:   '<span style="color:#4ade80;">&#43; Top-Up</span>',
-        payment: '<span style="color:#f87171;">&#8722; Payment</span>',
+        credit:  `<span style="color:#4ade80;">&#9650; ${window.i18n.t('wallet.credit')}</span>`,
+        debit:   `<span style="color:#f87171;">&#9660; ${window.i18n.t('wallet.debit')}</span>`,
+        refund:  `<span style="color:#60a5fa;">&#8617; ${window.i18n.t('wallet.refund')}</span>`,
+        topup:   `<span style="color:#4ade80;">&#43; ${window.i18n.t('wallet.topup')}</span>`,
+        payment: `<span style="color:#f87171;">&#8722; ${window.i18n.t('wallet.payment')}</span>`,
     };
 
     const statusBadge = {
@@ -409,9 +409,9 @@ document.addEventListener('DOMContentLoaded', function () {
             if (txLoading && txLoading.parentNode) txLoading.remove();
 
             if (!Array.isArray(transactions) || transactions.length === 0) {
-                list.innerHTML = `<tr><td colspan="5" style="padding:40px;text-align:center;color:#a0a0a0;">
+                list.innerHTML = `<tr><td colspan="5" style="padding:40px;text-align:center;color:var(--color-muted);">
                     <i class="fas fa-receipt fa-3x" style="margin-bottom:12px;display:block;"></i>
-                    No transactions yet.
+                    ${window.i18n.t('wallet.no_transactions')}
                 </td></tr>`;
                 return;
             }
@@ -421,20 +421,20 @@ document.addEventListener('DOMContentLoaded', function () {
                 const dateStr  = date ? date.toLocaleDateString()  : '—';
                 const timeStr  = date ? date.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'}) : '';
                 const typeKey  = (tx.type || '').toLowerCase();
-                const typeHtml = typeLabels[typeKey] || `<span style="color:#e0e0e0;">${tx.type || '—'}</span>`;
+                const typeHtml = typeLabels[typeKey] || `<span style="color:var(--color-text);">${tx.type || '—'}</span>`;
                 const amt      = parseFloat(tx.amount) || 0;
                 const amtColor = amt >= 0 ? '#4ade80' : '#f87171';
                 const amtStr   = (amt >= 0 ? '+' : '') + '$' + Math.abs(amt).toFixed(2);
                 const status   = (tx.status || 'unknown').toLowerCase();
                 const badgeStyle = statusBadge[status] || 'background:#6c757d;color:white;';
-                const rowBg    = i % 2 === 0 ? '#1a1a2e' : '#16213e';
+                const rowBg    = i % 2 === 0 ? 'var(--bg-page)' : 'var(--bg-panel)';
 
                 const row = document.createElement('tr');
-                row.style.cssText = `background:${rowBg};border-bottom:1px solid #0f3460;`;
+                row.style.cssText = `background:${rowBg};border-bottom:1px solid var(--color-border);`;
                 row.innerHTML = `
-                    <td style="padding:12px 14px;color:#e0e0e0;">
+                    <td style="padding:12px 14px;color:var(--color-text);">
                         <div style="font-weight:600;">${dateStr}</div>
-                        <small style="color:#a0a0a0;">${timeStr}</small>
+                        <small style="color:var(--color-muted);">${timeStr}</small>
                     </td>
                     <td style="padding:12px 14px;">${typeHtml}</td>
                     <td style="padding:12px 14px;color:#c0c0c0;font-size:13px;">${tx.description || '—'}</td>
@@ -449,7 +449,7 @@ document.addEventListener('DOMContentLoaded', function () {
             const list = document.getElementById('transaction-list');
             if (txLoading && txLoading.parentNode) txLoading.remove();
             if (list) list.innerHTML =
-                '<tr><td colspan="5" style="padding:30px;text-align:center;color:#f87171;">Failed to load transactions.</td></tr>';
+                `<tr><td colspan="5" style="padding:30px;text-align:center;color:#f87171;">${window.i18n.t('wallet.failed_transactions')}</td></tr>`;
         });
 });
 
@@ -459,7 +459,7 @@ function copyAddress(addr, btn) {
         btn.innerHTML = '<i class="fas fa-check me-1"></i>Copied!';
         btn.style.background = '#28a745';
         setTimeout(() => { btn.innerHTML = orig; btn.style.background = ''; }, 2000);
-    }).catch(() => showAlert('Copy failed — please copy the address manually.', 'Copy Failed', '⚠️', 'warn'));
+    }).catch(() => showAlert('Copy failed — please copy the address manually.', window.i18n.t('wallet.copy_failed_title'), '⚠️', 'warn'));
 }
 
 let _cryptoAddr = '';
@@ -467,11 +467,11 @@ let _cryptoAddr = '';
 function openCryptoModal(name) {
     const icons = { bitcoin: '₿ Bitcoin (BTC)', ethereum: 'Ξ Ethereum (ETH)', usdt: '₮ USDT', usdc: '◎ USDC' };
     document.getElementById('cryptoModalTitle').textContent = icons[name] || name.toUpperCase();
-    document.getElementById('cryptoAddress').textContent = 'Loading…';
+    document.getElementById('cryptoAddress').textContent = window.i18n.t('wallet.loading_address');
     _cryptoAddr = '';
 
     const qrEl = document.getElementById('cryptoQR');
-    qrEl.innerHTML = '<i class="fas fa-spinner fa-spin fa-2x" style="color:#0f3460;"></i>';
+    qrEl.innerHTML = '<i class="fas fa-spinner fa-spin fa-2x" style="color:var(--bg-accent);"></i>';
 
     document.getElementById('cryptoModal').classList.add('active');
 
@@ -487,27 +487,27 @@ function openCryptoModal(name) {
     .then(data => {
         if (data.error) {
             document.getElementById('cryptoAddress').textContent = data.error;
-            qrEl.innerHTML = '<span style="color:#f87171;font-size:12px;">Error</span>';
+            qrEl.innerHTML = `<span style="color:#f87171;font-size:12px;">${window.i18n.t('wallet.error')}</span>`;
             return;
         }
         const address = data.address || '';
         _cryptoAddr = address;
-        document.getElementById('cryptoAddress').textContent = address || 'Address unavailable';
+        document.getElementById('cryptoAddress').textContent = address || window.i18n.t('wallet.address_unavailable');
 
         if (address) {
             const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(address)}&bgcolor=ffffff&color=000000&margin=8`;
             const img = new Image();
             img.onload = () => { qrEl.innerHTML = ''; qrEl.appendChild(img); };
-            img.onerror = () => { qrEl.innerHTML = '<span style="color:#888;font-size:12px;">QR unavailable</span>'; };
+            img.onerror = () => { qrEl.innerHTML = `<span style="color:var(--color-subtle);font-size:12px;">${window.i18n.t('wallet.qr_unavailable')}</span>`; };
             img.src = qrUrl;
             img.style.cssText = 'width:200px;height:200px;border-radius:8px;';
         } else {
-            qrEl.innerHTML = '<span style="color:#888;font-size:12px;">No address</span>';
+            qrEl.innerHTML = `<span style="color:var(--color-subtle);font-size:12px;">${window.i18n.t('wallet.no_address')}</span>`;
         }
     })
     .catch(() => {
-        document.getElementById('cryptoAddress').textContent = 'Failed to load address';
-        qrEl.innerHTML = '<span style="color:#f87171;font-size:12px;">Error</span>';
+        document.getElementById('cryptoAddress').textContent = window.i18n.t('wallet.address_unavailable');
+        qrEl.innerHTML = `<span style="color:#f87171;font-size:12px;">${window.i18n.t('wallet.error')}</span>`;
     });
 }
 
@@ -517,8 +517,8 @@ function closeCryptoModal() {
 
 function copyCryptoAddress() {
     navigator.clipboard.writeText(_cryptoAddr)
-        .then(() => showAlert('Address copied to clipboard!', 'Copied', '✅', 'info'))
-        .catch(() => showAlert('Copy failed — please copy manually.', 'Copy Failed', '⚠️', 'warn'));
+        .then(() => showAlert(window.i18n.t('wallet.address_copied'), 'Copied', '✅', 'info'))
+        .catch(() => showAlert(window.i18n.t('wallet.copy_failed'), window.i18n.t('wallet.copy_failed_title'), '⚠️', 'warn'));
 }
 
 document.getElementById('cryptoModal').addEventListener('click', e => {

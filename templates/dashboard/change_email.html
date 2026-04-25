@@ -4,8 +4,8 @@
 
 {% block content %}
 <div class="container">
-    <h1>Change Email Address</h1>
-    <p>Update your email address. You will need to verify the new email before it takes effect.</p>
+    <h1 data-i18n="email_page.title">Change Email Address</h1>
+    <p data-i18n="email_page.subtitle">Update your email address. You will need to verify the new email before it takes effect.</p>
 
     {% if success %}
     <div class="alert alert-success">{{ success }}</div>
@@ -16,23 +16,23 @@
     {% endif %}
 
     <div class="card">
-        <h2>Current Email</h2>
+        <h2 data-i18n="email_page.current">Current Email</h2>
         <p style="color: #a0a0a0; margin-bottom: 2rem;">{{ session.email }}</p>
         
         <form method="POST" action="{{ url_for(request, '/dashboard/change-email') }}">
             <div class="form-group">
-                <label for="new_email">New Email Address</label>
+                <label for="new_email" data-i18n="email_page.new">New Email Address</label>
                 <input type="email" id="new_email" name="new_email" required>
             </div>
 
             <div class="form-group">
-                <label for="password">Current Password</label>
+                <label for="password" data-i18n="email_page.password">Current Password</label>
                 <input type="password" id="password" name="password" required>
                 <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Confirm your password to proceed</small>
             </div>
 
             <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-                <button type="submit" class="btn btn-primary">Send Verification Email</button>
+                <button type="submit" class="btn btn-primary" data-i18n="email_page.submit">Send Verification Email</button>
                 <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary">Cancel</a>
             </div>
         </form>

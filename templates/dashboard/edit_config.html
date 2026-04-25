@@ -31,12 +31,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <form method="POST">
     <div class="form-group">
-        <label for="config">Configuration (JSON)</label>
+        <label for="config" data-i18n="config_page.label">Configuration (JSON)</label>
         <textarea id="config" name="config" required>{{ config_content }}</textarea>
     </div>
     
     <div style="display: flex; gap: 10px;">
-        <button type="submit" class="btn">Save Changes</button>
+        <button type="submit" class="btn" data-i18n="config_page.save">Save Changes</button>
         <a href="/dashboard" class="btn btn-secondary">Cancel</a>
     </div>
 </form>
@@ -44,9 +44,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div style="margin-top: 30px; padding: 15px; background: #f8f9fa; border-radius: 4px;">
     <h4 style="margin-bottom: 10px;">Tips:</h4>
     <ul style="margin-left: 20px; line-height: 1.8;">
-        <li>Ensure valid JSON syntax before saving</li>
-        <li>Changes take effect after server restart</li>
-        <li>Backup your configuration before making changes</li>
+        <li data-i18n="config_page.hint_json">Ensure valid JSON syntax before saving</li>
+        <li data-i18n="config_page.hint_restart">Changes take effect after server restart</li>
+        <li data-i18n="config_page.hint_backup">Backup your configuration before making changes</li>
     </ul>
 </div>
 {% endblock %}

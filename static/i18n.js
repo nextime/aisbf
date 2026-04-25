@@ -54,6 +54,10 @@
         'vul': 'Vulcan'
     };
 
+    // Detect base path from this script's src so it works behind a reverse proxy prefix
+    const _scriptSrc = (document.currentScript && document.currentScript.src) || '/dashboard/static/i18n.js';
+    const _staticBase = _scriptSrc.replace(/\/i18n\.js$/, '');
+
     let currentLang = 'en';
     let translations = {};
     let fallbackTranslations = {};
@@ -131,7 +135,7 @@
     // Load language file
     async function loadLanguage(lang) {
         try {
-            const response = await fetch(`/static/i18n/${lang}.json`);
+            const response = await fetch(`${_staticBase}/i18n/${lang}.json`);
             if (!response.ok) throw new Error('Language file not found');
             return await response.json();
         } catch (error) {
@@ -190,6 +194,7 @@
         const initialLang = savedLang || (AVAILABLE_LANGUAGES[browserLang] ? browserLang : 'en');
 
         await setLanguage(initialLang);
+        document.dispatchEvent(new CustomEvent('i18n:ready', { detail: { lang: currentLang } }));
     }
 
     // Public API

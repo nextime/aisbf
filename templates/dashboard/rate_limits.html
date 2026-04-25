@@ -24,7 +24,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div id="rate-limits-data" data-data-url="{{ url_for(request, '/dashboard/rate-limits/data') }}" style="display:none;"></div>
 
 <!-- Quick Links Navigation -->
-<div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 30px;">
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
             📊 Analytics
@@ -99,14 +99,14 @@ const dataUrl = document.getElementById('rate-limits-data').dataset.dataUrl;
 
 async function loadRateLimits() {
     const content = document.getElementById('rate-limits-content');
-    content.innerHTML = '<p>Loading rate limit data...</p>';
+    content.innerHTML = `<p>${window.i18n.t('rate_limits.loading')}</p>`;
 
     try {
         const response = await fetch(dataUrl);
         const data = await response.json();
         
         if (Object.keys(data).length === 0) {
-            content.innerHTML = '<p>No rate limiters active. Rate limiting data will appear when providers receive 429 responses.</p>';
+            content.innerHTML = `<p>${window.i18n.t('rate_limits.no_data')}</p>`;
             return;
         }
         

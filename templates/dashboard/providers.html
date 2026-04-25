@@ -30,13 +30,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
 
 <!-- New Provider Form (hidden by default) -->
-<div id="new-provider-form" style="display: none; background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+<div id="new-provider-form" style="display: none; background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
     <h3 style="margin: 0 0 20px 0; color: #4a9eff;">Add New Provider</h3>
     
     <div class="form-group">
         <label>Provider Key (unique identifier, e.g., "gemini", "openai", "kiro")</label>
         <input type="text" id="new-provider-key" placeholder="Enter provider key" style="width: 100%;">
-        <small style="color: #a0a0a0; display: block; margin-top: 5px;">This will be used as the provider ID in the configuration and API endpoints</small>
+        <small style="color: var(--color-muted); display: block; margin-top: 5px;">This will be used as the provider ID in the configuration and API endpoints</small>
     </div>
     
     <div class="form-group">
@@ -52,11 +52,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="qwen">Qwen (OAuth2)</option>
             <option value="codex">Codex (OpenAI OAuth2)</option>
         </select>
-        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
+        <small style="color: var(--color-muted); display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
     
-    <div id="new-provider-type-info" style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-        <p style="margin: 0; color: #a0a0a0;" id="new-provider-type-description">
+    <div id="new-provider-type-info" style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+        <p style="margin: 0; color: var(--color-muted);" id="new-provider-type-description">
             OpenAI-compatible provider. Uses standard API key authentication.
         </p>
     </div>
@@ -82,8 +82,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div style="margin-bottom: 15px; display: flex; gap: 10px; align-items: center;">
     <input type="text" id="providers-search" placeholder="Search providers by key or name..."
            oninput="providerSearchFilter = this.value; currentProviderPage = 0; renderProvidersList();"
-           style="flex:1;padding:8px;border:1px solid #0f3460;border-radius:3px;background:#1a1a2e;color:#e0e0e0;font-size:14px;">
-    <span id="providers-count" style="color:#a0a0a0;font-size:13px;white-space:nowrap;"></span>
+           style="flex:1;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
+    <span id="providers-count" style="color:var(--color-muted);font-size:13px;white-space:nowrap;"></span>
 </div>
 
 <div id="providers-list" style="margin-bottom: 10px;">
@@ -104,7 +104,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 }
 
 .provider-header:hover {
-    background: #0f3460;
+    background: var(--bg-accent);
 }
 
 @keyframes fadeIn {
@@ -120,7 +120,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     display: block;
     margin-bottom: 5px;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .form-group input[type="text"],
@@ -129,11 +129,11 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 .form-group select {
     width: 100%;
     padding: 8px;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--bg-accent);
     border-radius: 3px;
     font-size: 14px;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg-page);
+    color: var(--color-text);
 }
 
 .form-group input[type="checkbox"] {
@@ -156,6 +156,8 @@ async function apiCall(method, url, body) {
 }
 
 const CLAUDE_CLI_MODE = {{ 'true' if claude_cli_mode else 'false' }};
+const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
+const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 let providersData = {{ providers_json | replace("</script>", "<\\/script>") | safe }};
 let expandedProviders = new Set();
 let currentProviderPage = 0;
@@ -243,7 +245,7 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             formData.append('total_chunks', totalChunks);
             formData.append('file', chunk);
             
-            const response = await fetch('/dashboard/providers/upload-auth-file/chunk', {
+            const response = await fetch(BASE_PATH + '/dashboard/providers/upload-auth-file/chunk', {
                 method: 'POST',
                 body: formData
             });
@@ -257,7 +259,7 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             // When upload is complete
             if (result.complete) {
                 const savedPath = result.file_path || result.stored_filename || file.name;
-                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> Saved: <code style="background: #0f2840; padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${savedPath}</code></div>`;
+                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> Saved: <code style="background: var(--bg-panel); padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${savedPath}</code></div>`;
                 showToast(`File uploaded successfully: ${savedPath}`, 'success');
 
                 // Update the config with the full file path (not just filename)
@@ -313,11 +315,11 @@ async function uploadClaudeCliFile(providerKey, file) {
             formData.append('chunk_number', chunkNumber);
             formData.append('total_chunks', totalChunks);
             formData.append('file', chunk);
-            const response = await fetch('/dashboard/providers/upload-auth-file/chunk', { method: 'POST', body: formData });
+            const response = await fetch(BASE_PATH + '/dashboard/providers/upload-auth-file/chunk', { method: 'POST', body: formData });
             const result = await response.json();
             if (!result.success) throw new Error(result.error || 'Upload failed');
             if (result.complete) {
-                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> CLI credentials saved: <code style="background: #0f2840; padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${file.name}</code></div>`;
+                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> CLI credentials saved: <code style="background: var(--bg-panel); padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${file.name}</code></div>`;
                 showToast(`CLI credentials saved: ${file.name}`, 'success');
                 return;
             }
@@ -359,13 +361,13 @@ function renderProvidersList() {
 
     container.innerHTML = '';
     if (pageKeys.length === 0) {
-        container.innerHTML = '<p style="color:#a0a0a0;">No providers found.</p>';
+        container.innerHTML = `<p style="color:var(--color-muted);">${window.i18n.t('providers.no_providers')}</p>`;
     } else {
         pageKeys.forEach(key => {
             const provider = providersData[key];
             const providerItem = document.createElement('div');
             providerItem.className = 'provider-item';
-            providerItem.style.cssText = 'border: 1px solid #0f3460; margin-bottom: 10px; border-radius: 5px; background: #1a1a2e;';
+            providerItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
 
             const isExpanded = expandedProviders.has(key);
             const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -375,11 +377,11 @@ function renderProvidersList() {
                     <div style="display: flex; align-items: center; gap: 10px;">
                         <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
-                        <span style="color: #a0a0a0; font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
+                        <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
                     </div>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">Remove</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>
                 </div>
-                <div id="provider-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid #0f3460; background: #16213e;">
+                <div id="provider-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
                 </div>
             `;
 
@@ -407,7 +409,7 @@ function renderProvidersList() {
             btns += `<button class="btn btn-secondary" onclick="goToProviderPage(${currentProviderPage + 1})" ${currentProviderPage >= totalPages - 1 ? 'disabled' : ''} style="padding:5px 12px;">Next →</button>`;
             paginationEl.innerHTML = `<div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;">
                 ${btns}
-                <span style="color:#a0a0a0;font-size:13px;margin-left:8px;">Page ${currentProviderPage + 1} of ${totalPages}</span>
+                <span style="color:var(--color-muted);font-size:13px;margin-left:8px;">Page ${currentProviderPage + 1} of ${totalPages}</span>
             </div>`;
         }
     }
@@ -504,67 +506,67 @@ function renderProviderDetails(key) {
     if (isKiroProvider) {
         // Kiro-specific authentication fields
         authFieldsHtml = `
-            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kiro Authentication</h4>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose one authentication method: Kiro IDE credentials (creds_file), kiro-cli database (sqlite_db), or direct credentials (refresh_token + client_id/secret).
                 </small>
                 
                 <div class="form-group">
                     <label>AWS Region</label>
                     <input type="text" value="${kiroConfig.region || 'us-east-1'}" onchange="updateKiroConfig('${key}', 'region', this.value)" placeholder="us-east-1">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">AWS region for Kiro API (default: us-east-1)</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">AWS region for Kiro API (default: us-east-1)</small>
                 </div>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: Kiro IDE Credentials</h5>
                 <div class="form-group">
-                    <label>Credentials File Path</label>
+                    <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${kiroConfig.creds_file || ''}" onchange="updateKiroConfig('${key}', 'creds_file', this.value)" placeholder="~/.config/Code/User/globalStorage/amazon.q/credentials.json">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path to Kiro IDE credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Path to Kiro IDE credentials JSON file</small>
                 </div>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: kiro-cli Database</h5>
                 <div class="form-group">
                     <label>SQLite Database Path</label>
                     <input type="text" value="${kiroConfig.sqlite_db || ''}" onchange="updateKiroConfig('${key}', 'sqlite_db', this.value)" placeholder="~/.local/share/kiro-cli/data.sqlite3">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path to kiro-cli SQLite database</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Path to kiro-cli SQLite database</small>
                 </div>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 3: Direct Credentials</h5>
                 <div class="form-group">
                     <label>Refresh Token</label>
                     <input type="password" value="${kiroConfig.refresh_token || ''}" onchange="updateKiroConfig('${key}', 'refresh_token', this.value)" placeholder="Enter refresh token">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Kiro refresh token for direct authentication</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Kiro refresh token for direct authentication</small>
                 </div>
                 
                 <div class="form-group">
                     <label>Profile ARN</label>
                     <input type="text" value="${kiroConfig.profile_arn || ''}" onchange="updateKiroConfig('${key}', 'profile_arn', this.value)" placeholder="arn:aws:codewhisperer:us-east-1:...">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">AWS CodeWhisperer profile ARN (optional)</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">AWS CodeWhisperer profile ARN (optional)</small>
                 </div>
                 
                 <div class="form-group">
                     <label>Client ID (for AWS SSO OIDC)</label>
                     <input type="text" value="${kiroConfig.client_id || ''}" onchange="updateKiroConfig('${key}', 'client_id', this.value)" placeholder="OAuth client ID">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth client ID for AWS SSO OIDC authentication</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth client ID for AWS SSO OIDC authentication</small>
                 </div>
                 
                 <div class="form-group">
                     <label>Client Secret (for AWS SSO OIDC)</label>
                     <input type="password" value="${kiroConfig.client_secret || ''}" onchange="updateKiroConfig('${key}', 'client_secret', this.value)" placeholder="OAuth client secret">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth client secret for AWS SSO OIDC authentication</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth client secret for AWS SSO OIDC authentication</small>
                 </div>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 4: Upload Files</h5>
                 <div class="form-group">
                     <label>Upload Credentials File</label>
                     <input type="file" id="kiro-creds-file-${key}" accept=".json" onchange="uploadKiroFile('${key}', 'creds_file', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Kiro IDE credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload Kiro IDE credentials JSON file</small>
                 </div>
                 <div class="form-group">
                     <label>Upload SQLite Database</label>
                     <input type="file" id="kiro-db-file-${key}" accept=".sqlite3,.db,.sqlite" onchange="uploadKiroFile('${key}', 'sqlite_db', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload kiro-cli SQLite database file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload kiro-cli SQLite database file</small>
                 </div>
                 <div id="kiro-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
@@ -572,42 +574,42 @@ function renderProviderDetails(key) {
     } else if (isKiloProvider) {
         // Kilocode authentication fields - supports both API key and OAuth2
         authFieldsHtml = `
-            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kilocode Authentication</h4>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
                 </small>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key / Auth Token</h5>
                 <div class="form-group">
-                    <label>API Key</label>
+                    <label>${window.i18n.t('providers.api_key')}</label>
                     <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter your Kilocode API key">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
                 </div>
                 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication</h5>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     If no API key is provided, OAuth2 will be used automatically.
                 </small>
                 
                 <div class="form-group">
-                    <label>API Base URL</label>
-                    <input type="text" value="${kiloConfig.api_base || 'https://api.kilo.ai/api/gateway'}" readonly style="background: #0f2840; cursor: not-allowed;" placeholder="https://api.kilo.ai/api/gateway">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Kilocode API base URL (fixed)</small>
+                    <label>${window.i18n.t('providers.api_base')}</label>
+                    <input type="text" value="${kiloConfig.api_base || 'https://api.kilo.ai/api/gateway'}" readonly style="background: var(--bg-panel); cursor: not-allowed;" placeholder="https://api.kilo.ai/api/gateway">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Kilocode API base URL (fixed)</small>
                 </div>
                 
                 <div class="form-group">
-                    <label>Credentials File Path</label>
+                    <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${kiloConfig.credentials_file || '~/.kilo_credentials.json'}" onchange="updateKiloConfig('${key}', 'credentials_file', this.value)" placeholder="~/.kilo_credentials.json">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">${window.i18n.t('providers.credentials_file_desc')}</small>
                 </div>
                 
                 <div style="margin-top: 15px;">
                     <button type="button" class="btn" onclick="authenticateKilo('${key}')" style="background: #4a9eff;">
-                        🔐 Authenticate with Kilocode OAuth2
+                        🔐 ${window.i18n.t('providers.authenticate_claude').replace('Claude', 'Kilocode OAuth2')}
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="checkKiloAuth('${key}')" style="margin-left: 10px;">
-                        Check Status
+                        ${window.i18n.t('providers.check_status')}
                     </button>
                 </div>
                 
@@ -615,36 +617,63 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload OAuth2 Credentials File</h5>
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
-                    <label>Upload Credentials File</label>
+                    <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="kilo-creds-file-${key}" accept=".json" onchange="uploadKiloFile('${key}', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Kilocode OAuth2 credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload Kilocode OAuth2 credentials JSON file</small>
                 </div>
                 <div id="kilo-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
         `;
     } else if (isClaudeProvider) {
         // Claude OAuth2 authentication fields
+        // Determine extension state: local clients don't need it; remote clients need it installed
+        const extensionInstalled = !!window.aisbfOAuth2Extension;
+        const oauth2Available = IS_LOCAL_CLIENT || extensionInstalled;
+
         authFieldsHtml = `
-            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Claude OAuth2 Authentication</h4>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Claude uses OAuth2 authentication. Click "Authenticate" to start the OAuth2 flow in your browser.
                 </small>
 
+                ${!IS_LOCAL_CLIENT && !extensionInstalled ? `
+                <div style="background: #2a1a00; border: 2px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+                    <h5 style="margin: 0 0 8px 0; color: #f59e0b;">🧩 Chrome Extension Required</h5>
+                    <p style="margin: 0 0 10px 0; color: #fcd34d; font-size: 0.9em;">
+                        Claude's OAuth2 flow redirects your browser to <code style="background:#1a1000;padding:1px 4px;border-radius:3px;">http://localhost:54545/callback</code>
+                        to deliver the auth token. When you access AISBF remotely, that localhost URL goes to
+                        <em>your machine</em>, not the server — so the token never reaches AISBF.
+                        <br><br>
+                        The AISBF Chrome Extension intercepts that localhost callback in your browser and
+                        forwards it to this server, completing the OAuth2 flow transparently.
+                        Install it, reload this page, and the Authenticate button will appear.
+                    </p>
+                    <a href="${BASE_PATH}/dashboard/extension/download" download
+                       style="display: inline-block; padding: 8px 16px; background: #2d6a4f; color: #fff; border-radius: 4px; text-decoration: none; font-weight: 600;">
+                        ⬇️ Download Chrome Extension (.zip)
+                    </a>
+                    <small style="color: var(--color-muted); display: block; margin-top: 8px;">
+                        In Chrome: go to <strong>chrome://extensions</strong>, enable Developer Mode, click "Load unpacked", and select the extracted folder.
+                    </small>
+                </div>
+                ` : ''}
+
+                ${oauth2Available ? `
                 <div class="form-group">
-                    <label>Credentials File Path</label>
+                    <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${claudeConfig.credentials_file || '~/.claude_credentials.json'}" onchange="updateClaudeConfig('${key}', 'credentials_file', this.value)" placeholder="~/.claude_credentials.json">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">${window.i18n.t('providers.credentials_file_desc')}</small>
                 </div>
 
                 <div style="margin-top: 15px;">
                     <button type="button" class="btn" onclick="authenticateClaude('${key}')" style="background: #4a9eff;">
-                        🔐 Authenticate with Claude
+                        🔐 ${window.i18n.t('providers.authenticate_claude')}
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="checkClaudeAuth('${key}')" style="margin-left: 10px;">
-                        Check Status
+                        ${window.i18n.t('providers.check_status')}
                     </button>
                 </div>
 
@@ -652,17 +681,21 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
-                    <label>Upload OAuth2 Credentials File</label>
+                    <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="claude-creds-file-${key}" accept=".json" onchange="uploadClaudeFile('${key}', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Claude OAuth2 credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">${window.i18n.t('providers.upload_credentials_desc')}</small>
                 </div>
                 <div id="claude-upload-status-${key}" style="margin-top: 10px;"></div>
+                ` : `
+                <div id="claude-auth-status-${key}" style="display:none;"></div>
+                <div id="claude-upload-status-${key}" style="display:none;"></div>
+                `}
 
                 ${CLAUDE_CLI_MODE ? `
-                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #1e3a5f;">
-                    <h5 style="margin: 0 0 8px 0; color: #4ade80;">Claude CLI Mode Active</h5>
+                <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border);">
+                    <h5 style="margin: 0 0 8px 0; color: #4ade80;">${window.i18n.t('providers.cli_mode_active')}</h5>
                     <small style="color: #4ade80; display: block; margin-bottom: 8px;">
                         The claude CLI was detected at startup. When enabled, requests are piped
                         through the local claude binary instead of the HTTP API.
@@ -683,23 +716,23 @@ function renderProviderDetails(key) {
                                    ${claudeConfig.use_cli_mode ? 'checked' : ''}
                                    onchange="updateClaudeConfig('${key}', 'use_cli_mode', this.checked)"
                                    style="width: 18px; height: 18px; cursor: pointer; accent-color: #4ade80;">
-                            <span style="color: #e0e0e0; font-weight: 500;">Use Claude CLI mode</span>
+                            <span style="color: var(--color-text); font-weight: 500;">${window.i18n.t('providers.use_cli_mode')}</span>
                         </label>
-                        <small style="color: #a0a0a0; display: block; margin-top: 6px; padding-left: 28px;">
+                        <small style="color: var(--color-muted); display: block; margin-top: 6px; padding-left: 28px;">
                             When checked and you have already authenticated via OAuth2 above,
                             your existing tokens are used automatically — no separate file upload needed.
-                            You can also upload an explicit <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">.credentials.json</code>
+                            You can also upload an explicit <code style="background:var(--bg-panel);padding:1px 4px;border-radius:3px;">.credentials.json</code>
                             below to override.
                         </small>
                     </div>
 
                     <div class="form-group">
-                        <label>Override: Upload CLI Credentials File</label>
+                        <label>${window.i18n.t('providers.upload_cli_creds')}</label>
                         <input type="file" id="claude-cli-creds-file-${key}" accept=".json" onchange="uploadClaudeCliFile('${key}', this.files[0])">
-                        <small style="color: #a0a0a0; display: block; margin-top: 5px;">
-                            Optional — upload a <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">~/.claude/.credentials.json</code>
+                        <small style="color: var(--color-muted); display: block; margin-top: 5px;">
+                            Optional — upload a <code style="background:var(--bg-panel);padding:1px 4px;border-radius:3px;">~/.claude/.credentials.json</code>
                             to use a specific account. Path saved in
-                            <code style="background:#0f2840;padding:1px 4px;border-radius:3px;">claude_config.cli_credentials_file</code>.
+                            <code style="background:var(--bg-panel);padding:1px 4px;border-radius:3px;">claude_config.cli_credentials_file</code>.
                         </small>
                     </div>
                     <div id="claude-cli-upload-status-${key}" style="margin-top: 10px;"></div>
@@ -732,22 +765,22 @@ function renderProviderDetails(key) {
                 </p>
             </div>
             
-            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Qwen Authentication</h4>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
                 </small>
 
                 <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key (Recommended)</h5>
                 <div class="form-group">
-                    <label>API Key</label>
+                    <label>${window.i18n.t('providers.api_key')}</label>
                     <input type="password" value="${qwenConfig.api_key || ''}" onchange="updateQwenConfig('${key}', 'api_key', this.value)" placeholder="Enter your Qwen API key">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
                 </div>
 
                 <div id="qwen-region-config-${key}" style="display: ${qwenConfig.api_key ? 'block' : 'none'}; margin-top: 15px;">
                     <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Region Configuration (API Key Mode)</h5>
-                    <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                    <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                         Select your preferred region for API key authentication. Different regions have different endpoints.
                     </small>
 
@@ -760,14 +793,14 @@ function renderProviderDetails(key) {
                             <option value="china-hongkong" ${qwenConfig.region === 'china-hongkong' ? 'selected' : ''}>China (Hong Kong) - cn-hongkong.dashscope.aliyuncs.com</option>
                             <option value="germany-frankfurt" ${qwenConfig.region === 'germany-frankfurt' ? 'selected' : ''}>Germany (Frankfurt) - Requires Workspace ID</option>
                         </select>
-                        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Select the region for your Qwen API endpoint</small>
+                        <small style="color: var(--color-muted); display: block; margin-top: 5px;">Select the region for your Qwen API endpoint</small>
                     </div>
 
                     <div id="qwen-workspace-config-${key}" style="display: ${qwenConfig.region === 'germany-frankfurt' ? 'block' : 'none'};">
                         <div class="form-group">
                             <label>Workspace ID</label>
                             <input type="text" value="${qwenConfig.workspace_id || 'Default Workspace'}" onchange="updateQwenConfig('${key}', 'workspace_id', this.value)" placeholder="Default Workspace">
-                            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Workspace ID for Germany region (default: "Default Workspace")</small>
+                            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Workspace ID for Germany region (default: "Default Workspace")</small>
                         </div>
                     </div>
                 </div>
@@ -778,9 +811,9 @@ function renderProviderDetails(key) {
                 </small>
 
                 <div class="form-group">
-                    <label>Credentials File Path</label>
+                    <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${qwenConfig.credentials_file || '~/.aisbf/qwen_credentials.json'}" onchange="updateQwenConfig('${key}', 'credentials_file', this.value)" placeholder="~/.aisbf/qwen_credentials.json">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">${window.i18n.t('providers.credentials_file_desc')}</small>
                 </div>
 
                 <div style="margin-top: 15px;">
@@ -788,7 +821,7 @@ function renderProviderDetails(key) {
                         🔐 Authenticate with Qwen OAuth2
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="checkQwenAuth('${key}')" style="margin-left: 10px;">
-                        Check Status
+                        ${window.i18n.t('providers.check_status')}
                     </button>
                 </div>
 
@@ -796,11 +829,11 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload OAuth2 Credentials File</h5>
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
-                    <label>Upload Credentials File</label>
+                    <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="qwen-creds-file-${key}" accept=".json" onchange="uploadQwenFile('${key}', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Qwen OAuth2 credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload Qwen OAuth2 credentials JSON file</small>
                 </div>
                 <div id="qwen-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
@@ -808,28 +841,28 @@ function renderProviderDetails(key) {
     } else if (isCodexProvider) {
         // Codex OAuth2 authentication fields
         authFieldsHtml = `
-            <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
                 <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Codex OAuth2 Authentication</h4>
-                <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Codex uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Click "Authenticate" to start the OAuth2 flow.
                 </small>
                 
                 <div class="form-group">
-                    <label>API Key (optional - if provided, used instead of OAuth2)</label>
+                    <label>${window.i18n.t('providers.api_key')} (${window.i18n.t('providers.optional')} - if provided, used instead of OAuth2)</label>
                     <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter OpenAI API key (optional)">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
                 </div>
                 
                 <div class="form-group">
                     <label>OAuth2 Issuer URL</label>
                     <input type="text" value="${codexConfig.issuer || 'https://auth.openai.com'}" onchange="updateCodexConfig('${key}', 'issuer', this.value)" placeholder="https://auth.openai.com">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">OAuth2 issuer URL (default: https://auth.openai.com)</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth2 issuer URL (default: https://auth.openai.com)</small>
                 </div>
                 
                 <div class="form-group">
-                    <label>Credentials File Path</label>
+                    <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${codexConfig.credentials_file || '~/.aisbf/codex_credentials.json'}" onchange="updateCodexConfig('${key}', 'credentials_file', this.value)" placeholder="~/.aisbf/codex_credentials.json">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Path where OAuth2 credentials will be stored</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">${window.i18n.t('providers.credentials_file_desc')}</small>
                 </div>
                 
                 <div style="margin-top: 15px;">
@@ -837,7 +870,7 @@ function renderProviderDetails(key) {
                         🔐 Authenticate with Codex (Device Code)
                     </button>
                     <button type="button" class="btn btn-secondary" onclick="checkCodexAuth('${key}')" style="margin-left: 10px;">
-                        Check Status
+                        ${window.i18n.t('providers.check_status')}
                     </button>
                 </div>
                 
@@ -845,11 +878,11 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Or Upload Credentials File</h5>
+                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
-                    <label>Upload Credentials File</label>
+                    <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="codex-creds-file-${key}" accept=".json" onchange="uploadCodexFile('${key}', this.files[0])">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">Upload Codex OAuth2 credentials JSON file</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload Codex OAuth2 credentials JSON file</small>
                 </div>
                 <div id="codex-upload-status-${key}" style="margin-top: 10px;"></div>
             </div>
@@ -873,7 +906,7 @@ function renderProviderDetails(key) {
     
     container.innerHTML = `
         <div class="form-group">
-            <label>Provider ID</label>
+            <label>${window.i18n.t('providers.provider_name')}</label>
             <input type="text" value="${provider.id}" onchange="updateProvider('${key}', 'id', this.value)" required>
         </div>
         
@@ -884,16 +917,16 @@ function renderProviderDetails(key) {
         
         <div class="form-group">
             <label>Endpoint</label>
-            <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${(provider.type === 'kilocode' || provider.type === 'qwen' || provider.type === 'claude' || provider.type === 'codex') ? 'readonly style="background: #0f2840; cursor: not-allowed;"' : ''} required>
-            ${isKiroProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
-            ${provider.type === 'kilocode' ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Kilocode OAuth2 provider</small>' : ''}
-            ${isQwenProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Qwen OAuth2 provider (https://dashscope.aliyuncs.com/compatible-mode/v1)</small>' : ''}
-            ${isClaudeProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Claude OAuth2 provider (https://api.anthropic.com/v1)</small>' : ''}
-            ${isCodexProvider ? '<small style="color: #a0a0a0; display: block; margin-top: 5px;">Fixed endpoint for Codex OAuth2 provider (https://api.openai.com/v1)</small>' : ''}
+            <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${(provider.type === 'kilocode' || provider.type === 'qwen' || provider.type === 'claude' || provider.type === 'codex') ? 'readonly style="background: var(--bg-panel); cursor: not-allowed;"' : ''} required>
+            ${isKiroProvider ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
+            ${provider.type === 'kilocode' ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Fixed endpoint for Kilocode OAuth2 provider</small>' : ''}
+            ${isQwenProvider ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Fixed endpoint for Qwen OAuth2 provider (https://dashscope.aliyuncs.com/compatible-mode/v1)</small>' : ''}
+            ${isClaudeProvider ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Fixed endpoint for Claude OAuth2 provider (https://api.anthropic.com/v1)</small>' : ''}
+            ${isCodexProvider ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Fixed endpoint for Codex OAuth2 provider (https://api.openai.com/v1)</small>' : ''}
         </div>
         
         <div class="form-group">
-            <label>Type</label>
+            <label>${window.i18n.t('providers.provider_type')}</label>
             <select onchange="updateProviderType('${key}', this.value)" required>
                 <option value="google" ${provider.type === 'google' ? 'selected' : ''}>Google</option>
                 <option value="openai" ${provider.type === 'openai' ? 'selected' : ''}>OpenAI</option>
@@ -909,7 +942,7 @@ function renderProviderDetails(key) {
         
         ${authFieldsHtml}
         
-        <div style="background: #0f2840; padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
+        <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
             <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Pricing Configuration</h4>
             
             <div class="form-group">
@@ -917,7 +950,7 @@ function renderProviderDetails(key) {
                     <input type="checkbox" ${provider.is_subscription ? 'checked' : ''} onchange="updateProvider('${key}', 'is_subscription', this.checked); togglePricingFields('${key}')">
                     Subscription-Based Provider (Free)
                 </label>
-                <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                     If checked, this provider is subscription-based and costs will be calculated as $0. Usage is still tracked for analytics.
                 </small>
             </div>
@@ -926,7 +959,7 @@ function renderProviderDetails(key) {
                 <div class="form-group">
                     <label>Price per Million Prompt Tokens (USD)</label>
                     <input type="number" step="0.01" min="0" value="${provider.price_per_million_prompt || ''}" onchange="updateProvider('${key}', 'price_per_million_prompt', parseFloat(this.value) || null)" placeholder="e.g., 15.00">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $10, Anthropic Claude: $15, Google Gemini: $1.25
                     </small>
                 </div>
@@ -934,7 +967,7 @@ function renderProviderDetails(key) {
                 <div class="form-group">
                     <label>Price per Million Completion Tokens (USD)</label>
                     <input type="number" step="0.01" min="0" value="${provider.price_per_million_completion || ''}" onchange="updateProvider('${key}', 'price_per_million_completion', parseFloat(this.value) || null)" placeholder="e.g., 75.00">
-                    <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $30, Anthropic Claude: $75, Google Gemini: $5.00
                     </small>
                 </div>
@@ -942,36 +975,36 @@ function renderProviderDetails(key) {
         </div>
 
         <div class="form-group">
-            <label>Rate Limit (seconds)</label>
+            <label>${window.i18n.t('providers.rate_limit')}</label>
             <input type="number" value="${provider.rate_limit || 0}" onchange="updateProvider('${key}', 'rate_limit', parseFloat(this.value))" step="0.1">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Time delay between requests to this provider</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Time delay between requests to this provider</small>
         </div>
         
         <div class="form-group">
             <label>Default Rate Limit TPM (Tokens Per Minute)</label>
             <input type="number" value="${provider.default_rate_limit_TPM || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per minute for models in this provider</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per minute for models in this provider</small>
         </div>
         
         <div class="form-group">
             <label>Default Rate Limit TPH (Tokens Per Hour)</label>
             <input type="number" value="${provider.default_rate_limit_TPH || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per hour for models in this provider</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per hour for models in this provider</small>
         </div>
         
         <div class="form-group">
             <label>Default Rate Limit TPD (Tokens Per Day)</label>
             <input type="number" value="${provider.default_rate_limit_TPD || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Default token limit per day for models in this provider</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per day for models in this provider</small>
         </div>
         
         <div class="form-group">
-            <label>Default Max Request Tokens</label>
+            <label>${window.i18n.t('providers.max_tokens')}</label>
             <input type="number" value="${provider.default_max_request_tokens || ''}" onchange="updateProvider('${key}', 'default_max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
         </div>
         
         <div class="form-group">
-            <label>Default Context Size</label>
+            <label>${window.i18n.t('providers.context_size')}</label>
             <input type="number" value="${provider.default_context_size || ''}" onchange="updateProvider('${key}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
         </div>
         
@@ -1000,7 +1033,7 @@ function renderProviderDetails(key) {
         </div>
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">Native Caching</h4>
-        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+        <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
             Provider-native caching features (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs) for cost reduction.
         </small>
 
@@ -1009,36 +1042,36 @@ function renderProviderDetails(key) {
                 <input type="checkbox" ${provider.enable_native_caching ? 'checked' : ''} onchange="updateProvider('${key}', 'enable_native_caching', this.checked)">
                 Enable Native Caching
             </label>
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Enable provider-native caching for cost reduction (50-70% savings for supported providers)</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Enable provider-native caching for cost reduction (50-70% savings for supported providers)</small>
         </div>
 
         <div class="form-group">
             <label>Cache TTL (seconds)</label>
             <input type="number" value="${provider.cache_ttl || ''}" onchange="updateProvider('${key}', 'cache_ttl', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 3600)">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Cache time-to-live in seconds (Google Context Caching only)</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Cache time-to-live in seconds (Google Context Caching only)</small>
         </div>
 
         <div class="form-group">
             <label>Min Cacheable Tokens</label>
             <input type="number" value="${provider.min_cacheable_tokens || 1000}" onchange="updateProvider('${key}', 'min_cacheable_tokens', this.value ? parseInt(this.value) : 1000)" placeholder="1000">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
         </div>
 
         <div class="form-group">
             <label>Prompt Cache Key (OpenAI/Kilo)</label>
             <input type="text" value="${provider.prompt_cache_key || ''}" onchange="updateProvider('${key}', 'prompt_cache_key', this.value)" placeholder="Optional cache key for load balancer optimization">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
         </div>
 
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Models</h4>
-        <small style="color: #a0a0a0; display: block; margin-bottom: 15px;">
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.models_section')}</h4>
+        <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
             Configure specific models for this provider, or leave empty to automatically fetch all available models from the provider's API.
         </small>
 
-        <div class="form-group" style="background: #0f2840; padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+        <div class="form-group" style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
             <label>Model Filter (for auto-fetched models)</label>
             <input type="text" value="${provider.model_filter || ''}" onchange="updateProvider('${key}', 'model_filter', this.value)" placeholder="e.g., free, pro, flash">
-            <small style="color: #a0a0a0; display: block; margin-top: 5px;">
+            <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                 When no models are manually configured, only expose models whose ID contains this filter word (case-insensitive wildcard matching).
                 <br>Example: "free" will match models like "model-name-free", "free-model", "gpt-4-free-tier", etc.
             </small>
@@ -1047,15 +1080,15 @@ function renderProviderDetails(key) {
         <div id="models-${key}"></div>
         <div style="display: flex; gap: 10px; margin-top: 10px; flex-wrap: wrap;">
             <button type="button" class="btn" onclick="getModelsFromProvider('${key}')" style="background: #4a9eff;">
-                🔄 Get Models from Provider
+                🔄 ${window.i18n.t('providers.fetch_models')}
             </button>
-            <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">Add Model Manually</button>
+            <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">${window.i18n.t('providers.add_model')}</button>
         </div>
         <div id="get-models-status-${key}" style="margin-top: 10px;"></div>
 
-        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid #0f3460; display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
-            <button type="button" class="btn" onclick="saveProvider('${safeKey}')" style="background: #22c55e;">Save This Provider</button>
-            <span id="save-status-${key}" style="font-size: 13px; color: #a0a0a0;"></span>
+        <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+            <button type="button" class="btn" onclick="saveProvider('${safeKey}')" style="background: #22c55e;">${window.i18n.t('providers.save_this')}</button>
+            <span id="save-status-${key}" style="font-size: 13px; color: var(--color-muted);"></span>
         </div>
     `;
 
@@ -1067,38 +1100,38 @@ function renderModels(providerKey) {
     const provider = providersData[providerKey];
     
     if (!provider.models || provider.models.length === 0) {
-        container.innerHTML = '<p style="color: #a0a0a0;">No models configured</p>';
+        container.innerHTML = `<p style="color: var(--color-muted);">${window.i18n.t('providers.no_models')}</p>`;
         return;
     }
     
     container.innerHTML = '';
     provider.models.forEach((model, index) => {
         const modelDiv = document.createElement('div');
-        modelDiv.style.cssText = 'border: 1px solid #0f3460; padding: 15px; margin-bottom: 10px; border-radius: 3px; background: #1a1a2e;';
+        modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
         
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>Model ${index + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeModel('${providerKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">Remove</button>
+                <strong>${window.i18n.t('providers.model_label')} ${index + 1}</strong>
+                <button type="button" class="btn btn-secondary" onclick="removeModel('${providerKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('providers.remove')}</button>
             </div>
             
             <div class="form-group">
-                <label>Model Name</label>
+                <label>${window.i18n.t('providers.model_name')}</label>
                 <input type="text" value="${model.name}" onchange="updateModel('${providerKey}', ${index}, 'name', this.value)" required>
             </div>
             
             <div class="form-group">
-                <label>Rate Limit (seconds)</label>
+                <label>${window.i18n.t('providers.rate_limit')}</label>
                 <input type="number" value="${model.rate_limit || 0}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit', parseFloat(this.value))" step="0.1">
             </div>
             
             <div class="form-group">
-                <label>Max Request Tokens</label>
+                <label>${window.i18n.t('providers.max_tokens')}</label>
                 <input type="number" value="${model.max_request_tokens || ''}" onchange="updateModel('${providerKey}', ${index}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
             
             <div class="form-group">
-                <label>Context Size</label>
+                <label>${window.i18n.t('providers.context_size')}</label>
                 <input type="number" value="${model.context_size || ''}" onchange="updateModel('${providerKey}', ${index}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
             
@@ -1233,7 +1266,7 @@ async function checkClaudeAuth(providerKey) {
     statusDiv.innerHTML = 'Checking Claude authentication status...';
 
     try {
-        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+        const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -1269,7 +1302,7 @@ async function checkQwenAuth(providerKey) {
     statusDiv.innerHTML = 'Checking Qwen authentication status...';
 
     try {
-        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+        const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -1305,7 +1338,7 @@ async function checkCodexAuth(providerKey) {
     statusDiv.innerHTML = 'Checking Codex authentication status...';
 
     try {
-        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+        const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -1341,7 +1374,7 @@ async function checkKiloAuth(providerKey) {
     statusDiv.innerHTML = 'Checking Kilocode authentication status...';
 
     try {
-        const response = await fetch(`/dashboard/providers/${providerKey}/auth/check`, {
+        const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
             method: 'GET',
             headers: {
                 'Content-Type': 'application/json',
@@ -1371,12 +1404,12 @@ async function checkKiloAuth(providerKey) {
 async function authenticateClaude(key) {
     const statusEl = document.getElementById(`claude-auth-status-${key}`);
     statusEl.style.display = 'block';
-    statusEl.style.background = '#0f2840';
+    statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/claude/auth/start', {
+        const response = await fetch(BASE_PATH + '/dashboard/claude/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1414,7 +1447,7 @@ async function authenticateClaude(key) {
             pollCount++;
             
             try {
-                const statusResponse = await fetch('/dashboard/claude/auth/callback-status');
+                const statusResponse = await fetch(BASE_PATH + '/dashboard/claude/auth/callback-status');
                 const statusData = await statusResponse.json();
                 
                 if (statusData.received) {
@@ -1439,7 +1472,7 @@ async function authenticateClaude(key) {
                     try {
                         statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication...</p>';
                         
-                        const completeResponse = await fetch('/dashboard/claude/auth/complete', {
+                        const completeResponse = await fetch(BASE_PATH + '/dashboard/claude/auth/complete', {
                             method: 'POST',
                             headers: {
                                 'Content-Type': 'application/json',
@@ -1488,12 +1521,12 @@ async function authenticateClaude(key) {
 async function authenticateQwen(key) {
     const statusEl = document.getElementById(`qwen-auth-status-${key}`);
     statusEl.style.display = 'block';
-    statusEl.style.background = '#0f2840';
+    statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/qwen/auth/start', {
+        const response = await fetch(BASE_PATH + '/dashboard/qwen/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1513,18 +1546,18 @@ async function authenticateQwen(key) {
             return;
         }
         
-        statusEl.style.background = '#0f2840';
+        statusEl.style.background = 'var(--bg-panel)';
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
                 <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Qwen Device Authorization</p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
                 </p>
-                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                <p style="margin: 0; color: var(--color-muted); font-size: 13px;">
                     Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
                 </p>
             </div>
@@ -1542,7 +1575,7 @@ async function authenticateQwen(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('/dashboard/qwen/auth/poll', {
+                const pollResponse = await fetch(BASE_PATH + '/dashboard/qwen/auth/poll', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1594,12 +1627,12 @@ async function pollQwenAuth(providerKey, deviceCode) {
 async function authenticateCodex(key) {
     const statusEl = document.getElementById(`codex-auth-status-${key}`);
     statusEl.style.display = 'block';
-    statusEl.style.background = '#0f2840';
+    statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/codex/auth/start', {
+        const response = await fetch(BASE_PATH + '/dashboard/codex/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1620,18 +1653,18 @@ async function authenticateCodex(key) {
             return;
         }
         
-        statusEl.style.background = '#0f2840';
+        statusEl.style.background = 'var(--bg-panel)';
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
                 <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Codex Device Authorization</p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
                 </p>
-                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                <p style="margin: 0; color: var(--color-muted); font-size: 13px;">
                     Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
                 </p>
             </div>
@@ -1649,7 +1682,7 @@ async function authenticateCodex(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('/dashboard/codex/auth/poll', {
+                const pollResponse = await fetch(BASE_PATH + '/dashboard/codex/auth/poll', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1701,12 +1734,12 @@ async function pollCodexAuth(providerKey, deviceCode) {
 async function authenticateKilo(key) {
     const statusEl = document.getElementById(`kilo-auth-status-${key}`);
     statusEl.style.display = 'block';
-    statusEl.style.background = '#0f2840';
+    statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
     statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Kilocode OAuth2 Device Authorization flow...</p>';
     
     try {
-        const response = await fetch('/dashboard/kilo/auth/start', {
+        const response = await fetch(BASE_PATH + '/dashboard/kilo/auth/start', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -1726,18 +1759,18 @@ async function authenticateKilo(key) {
             return;
         }
         
-        statusEl.style.background = '#0f2840';
+        statusEl.style.background = 'var(--bg-panel)';
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
                 <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Kilocode Device Authorization</p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
-                <p style="margin: 0 0 10px 0; color: #e0e0e0;">
+                <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Enter code: <strong style="color: #4eff9e; font-size: 18px; letter-spacing: 2px;">${data.user_code}</strong>
                 </p>
-                <p style="margin: 0; color: #a0a0a0; font-size: 13px;">
+                <p style="margin: 0; color: var(--color-muted); font-size: 13px;">
                     Waiting for authorization... (expires in ${Math.floor(data.expires_in / 60)} minutes)
                 </p>
             </div>
@@ -1755,7 +1788,7 @@ async function authenticateKilo(key) {
             pollCount++;
             
             try {
-                const pollResponse = await fetch('/dashboard/kilo/auth/poll', {
+                const pollResponse = await fetch(BASE_PATH + '/dashboard/kilo/auth/poll', {
                     method: 'POST',
                     headers: {
                         'Content-Type': 'application/json',
@@ -1806,14 +1839,14 @@ async function pollKiloAuth(providerKey, deviceCode) {
 
 async function saveProvider(key) {
     const statusEl = document.getElementById(`save-status-${key}`);
-    if (statusEl) statusEl.textContent = 'Saving…';
+    if (statusEl) statusEl.textContent = window.i18n.t('providers.saving');
     try {
         const result = await apiCall('POST', '/dashboard/api/provider', {
             provider_id: key,
             config: providersData[key]
         });
         if (result.success) {
-            if (statusEl) { statusEl.textContent = 'Saved!'; statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
+            if (statusEl) { statusEl.textContent = window.i18n.t('providers.saved'); statusEl.style.color = '#4ade80'; setTimeout(() => { statusEl.textContent = ''; }, 3000); }
         } else {
             if (statusEl) { statusEl.textContent = 'Error: ' + (result.error || 'Unknown'); statusEl.style.color = '#f87171'; }
         }
@@ -2027,7 +2060,7 @@ async function getModelsFromProvider(key) {
     statusDiv.innerHTML = 'Fetching models...';
 
     try {
-        const response = await fetch('/dashboard/providers/get-models', {
+        const response = await fetch(BASE_PATH + '/dashboard/providers/get-models', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -2073,7 +2106,7 @@ function updateModelCondenseMethod(providerKey, index, value) {
 
 async function saveProviders() {
     try {
-        const response = await fetch('/dashboard/providers', {
+        const response = await fetch(BASE_PATH + '/dashboard/providers', {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
@@ -2082,7 +2115,7 @@ async function saveProviders() {
         });
 
         if (response.ok) {
-            window.location.href = '/dashboard/providers?success=1';
+            window.location.href = BASE_PATH + '/dashboard/providers?success=1';
         } else {
             showAlert('Error saving configuration', 'Error', '❌', 'danger');
         }
@@ -2091,7 +2124,9 @@ async function saveProviders() {
     }
 }
 
-renderProvidersList();
+// Defer until i18n is ready so translated strings are available
+function _doInitialRender() { renderProvidersList(); }
+if (window.i18n) { _doInitialRender(); } else { document.addEventListener('i18n:ready', _doInitialRender, {once: true}); }
 
 </script>
 {% endblock %}

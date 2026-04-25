@@ -3,33 +3,33 @@
 {% block title %}Payment System Settings - Admin{% endblock %}
 
 {% block content %}
-<div class="container-fluid" style="padding: 20px; background: #0f3460; min-height: 100vh;">
+<div class="container-fluid" style="padding: 20px; background:var(--bg-accent); min-height: 100vh;">
     <div style="max-width: 1400px; margin: 0 auto;">
         <h2 style="color: #4a9eff; margin-bottom: 30px;">
-            <i class="fas fa-cog me-2"></i>Payment System Settings
+            <i class="fas fa-cog me-2"></i><span data-i18n="payments_page.title">Payment System Settings</span>
         </h2>
 
         <!-- Currency Selection Warning -->
-        <div style="background: #1a1a2e; border-left: 4px solid #f39c12; padding: 15px; margin-bottom: 25px; border-radius: 4px;">
+        <div style="background: var(--bg-page); border-left: 4px solid #f39c12; padding: 15px; margin-bottom: 25px; border-radius: 4px;">
             <div style="color: #f39c12; font-weight: bold; margin-bottom: 8px;">
                 <i class="fas fa-info-circle me-2"></i>Important Note About Currency Selection
             </div>
-            <div style="color: #e0e0e0; font-size: 14px;">
+            <div style="color: var(--color-text); font-size: 14px;">
                 We do not suggest using USD if you are not in the USA. This project does not support the actions of the USA in the international context and we don't support a politic of war and threats to allies.
             </div>
         </div>
 
         <!-- Global Currency Settings -->
-        <div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #17a2b8;">
-                <i class="fas fa-dollar-sign me-2"></i>Global Currency Settings
+                <i class="fas fa-dollar-sign me-2"></i><span data-i18n="payments_page.currency_settings">Global Currency Settings</span>
             </h3>
 
             <form id="currencySettingsForm">
                 <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
                     <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Code</label>
-                        <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyCode">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.currency_code">Currency Code</label>
+                        <select style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; font-size: 14px; background: var(--bg-page); color: var(--color-text);" id="currencyCode">
                             <option value="USD">USD - US Dollar</option>
                             <option value="EUR">EUR - Euro</option>
                             <option value="GBP">GBP - British Pound</option>
@@ -40,15 +40,65 @@
                             <option value="CNY">CNY - Chinese Yuan</option>
                             <option value="INR">INR - Indian Rupee</option>
                             <option value="BRL">BRL - Brazilian Real</option>
+                            <option value="MXN">MXN - Mexican Peso</option>
+                            <option value="SGD">SGD - Singapore Dollar</option>
+                            <option value="HKD">HKD - Hong Kong Dollar</option>
+                            <option value="NOK">NOK - Norwegian Krone</option>
+                            <option value="SEK">SEK - Swedish Krona</option>
+                            <option value="DKK">DKK - Danish Krone</option>
+                            <option value="NZD">NZD - New Zealand Dollar</option>
+                            <option value="ZAR">ZAR - South African Rand</option>
+                            <option value="RUB">RUB - Russian Ruble</option>
+                            <option value="TRY">TRY - Turkish Lira</option>
+                            <option value="KRW">KRW - South Korean Won</option>
+                            <option value="IDR">IDR - Indonesian Rupiah</option>
+                            <option value="MYR">MYR - Malaysian Ringgit</option>
+                            <option value="THB">THB - Thai Baht</option>
+                            <option value="PHP">PHP - Philippine Peso</option>
+                            <option value="VND">VND - Vietnamese Dong</option>
+                            <option value="PKR">PKR - Pakistani Rupee</option>
+                            <option value="BDT">BDT - Bangladeshi Taka</option>
+                            <option value="EGP">EGP - Egyptian Pound</option>
+                            <option value="NGN">NGN - Nigerian Naira</option>
+                            <option value="KES">KES - Kenyan Shilling</option>
+                            <option value="GHS">GHS - Ghanaian Cedi</option>
+                            <option value="MAD">MAD - Moroccan Dirham</option>
+                            <option value="TND">TND - Tunisian Dinar</option>
+                            <option value="DZD">DZD - Algerian Dinar</option>
+                            <option value="SAR">SAR - Saudi Riyal</option>
+                            <option value="AED">AED - UAE Dirham</option>
+                            <option value="QAR">QAR - Qatari Riyal</option>
+                            <option value="KWD">KWD - Kuwaiti Dinar</option>
+                            <option value="BHD">BHD - Bahraini Dinar</option>
+                            <option value="OMR">OMR - Omani Rial</option>
+                            <option value="ILS">ILS - Israeli Shekel</option>
+                            <option value="PLN">PLN - Polish Zloty</option>
+                            <option value="CZK">CZK - Czech Koruna</option>
+                            <option value="HUF">HUF - Hungarian Forint</option>
+                            <option value="RON">RON - Romanian Leu</option>
+                            <option value="BGN">BGN - Bulgarian Lev</option>
+                            <option value="HRK">HRK - Croatian Kuna</option>
+                            <option value="RSD">RSD - Serbian Dinar</option>
+                            <option value="UAH">UAH - Ukrainian Hryvnia</option>
+                            <option value="ARS">ARS - Argentine Peso</option>
+                            <option value="CLP">CLP - Chilean Peso</option>
+                            <option value="COP">COP - Colombian Peso</option>
+                            <option value="PEN">PEN - Peruvian Sol</option>
+                            <option value="UYU">UYU - Uruguayan Peso</option>
+                            <option value="TWD">TWD - Taiwan Dollar</option>
+                            <option value="LKR">LKR - Sri Lankan Rupee</option>
+                            <option value="NPR">NPR - Nepalese Rupee</option>
+                            <option value="MMK">MMK - Myanmar Kyat</option>
+                            <option value="KZT">KZT - Kazakhstani Tenge</option>
                         </select>
                     </div>
                     <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Currency Symbol</label>
-                        <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencySymbol" value="{{ currency_symbol }}">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.currency_symbol">Currency Symbol</label>
+                        <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; font-size: 14px; background: var(--bg-page); color: var(--color-text);" id="currencySymbol" value="{{ currency_symbol }}">
                     </div>
                     <div>
-                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Decimal Places</label>
-                        <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; font-size: 14px; background: #1a1a2e; color: #e0e0e0;" id="currencyDecimals">
+                        <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.decimal_places">Decimal Places</label>
+                        <select style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; font-size: 14px; background: var(--bg-page); color: var(--color-text);" id="currencyDecimals">
                             <option value="0">0</option>
                             <option value="1">1</option>
                             <option value="2" selected>2</option>
@@ -57,42 +107,42 @@
                     </div>
                 </div>
                 <button type="submit" class="btn" style="background: #17a2b8; color: white;">
-                    <i class="fas fa-save me-2"></i>Save Currency Settings
+                    <i class="fas fa-save me-2"></i><span data-i18n="payments_page.save_currency">Save Currency Settings</span>
                 </button>
             </form>
         </div>
 
         <!-- Encryption Key Configuration -->
-        <div style="background: #16213e; border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #e74c3c; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #e74c3c;">
-                <i class="fas fa-key me-2"></i>Encryption Key Configuration
+                <i class="fas fa-key me-2"></i><span data-i18n="payments_page.encryption_title">Encryption Key Configuration</span>
             </h3>
             
-            <div style="margin-bottom: 20px; padding: 15px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #e74c3c;">
+            <div style="margin-bottom: 20px; padding: 15px; background: var(--bg-page); border-radius: 8px; border-left: 4px solid #e74c3c;">
                 <div style="color: #e74c3c; font-weight: bold; margin-bottom: 5px;">
                     <i class="fas fa-exclamation-triangle me-2"></i>Critical Security Setting
                 </div>
-                <div style="color: #e0e0e0; font-size: 14px;">
+                <div style="color: var(--color-text); font-size: 14px;">
                     The encryption key is used to encrypt HD wallet master keys. Once set, DO NOT change it or you will lose access to all crypto wallets.
                     If not set, a temporary key is generated on each restart (not recommended for production).
                 </div>
             </div>
             
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">
+                <label style="display: block; margin-bottom: 10px; color: var(--color-text); font-weight: 500;">
                     Encryption Key Status
                 </label>
-                <div id="encryptionKeyStatus" style="padding: 15px; background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; color: #e0e0e0;">
+                <div id="encryptionKeyStatus" style="padding: 15px; background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; color: var(--color-text);">
                     <i class="fas fa-spinner fa-spin"></i> Loading...
                 </div>
             </div>
             
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">
+                <label style="display: block; margin-bottom: 10px; color: var(--color-text); font-weight: 500;">
                     Set New Encryption Key (44 characters, URL-safe base64)
                 </label>
-                <input type="text" id="encryptionKey" placeholder="Click Generate to create a secure key" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-family: monospace;">
-                <div style="margin-top: 10px; color: #888; font-size: 14px;">
+                <input type="text" id="encryptionKey" placeholder="Click Generate to create a secure key" style="width: 100%; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text); font-family: monospace;">
+                <div style="margin-top: 10px; color: var(--color-subtle); font-size: 14px;">
                     <i class="fas fa-info-circle me-2"></i>Generate a key, copy it to a safe place, then save it. You cannot retrieve it from the interface later.
                 </div>
             </div>
@@ -101,7 +151,7 @@
                 <div style="color: #f39c12; font-weight: bold; margin-bottom: 8px;">
                     <i class="fas fa-exclamation-triangle me-2"></i>Save this key now — it will not be shown again after you leave this page
                 </div>
-                <div style="font-family: monospace; font-size: 14px; color: #e0e0e0; word-break: break-all;" id="encryptionKeyBackupValue"></div>
+                <div style="font-family: monospace; font-size: 14px; color: var(--color-text); word-break: break-all;" id="encryptionKeyBackupValue"></div>
                 <button type="button" class="btn btn-sm mt-2" onclick="copyEncryptionKey()" style="background: #f39c12; color: #000;">
                     <i class="fas fa-copy me-1"></i>Copy to Clipboard
                 </button>
@@ -121,46 +171,46 @@
         </div>
 
         <!-- System Status -->
-        <div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
                 <i class="fas fa-heartbeat me-2"></i>System Status
             </h3>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Master Keys Status</div>
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
+                    <div style="color: var(--color-subtle); font-size: 14px; margin-bottom: 5px;">Master Keys Status</div>
                     <div id="masterKeysStatus" style="font-size: 24px; font-weight: bold; color: #4a9eff;">
                         <i class="fas fa-spinner fa-spin"></i> Loading...
                     </div>
                 </div>
                 
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Total Crypto Balance</div>
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
+                    <div style="color: var(--color-subtle); font-size: 14px; margin-bottom: 5px;">Total Crypto Balance</div>
                     <div id="totalBalance" style="font-size: 24px; font-weight: bold; color: #4a9eff;">
                         <i class="fas fa-spinner fa-spin"></i> Loading...
                     </div>
                 </div>
                 
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Pending Payments</div>
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
+                    <div style="color: var(--color-subtle); font-size: 14px; margin-bottom: 5px;">Pending Payments</div>
                     <div id="pendingPayments" style="font-size: 24px; font-weight: bold; color: #f39c12;">
                         <i class="fas fa-spinner fa-spin"></i> Loading...
                     </div>
                 </div>
                 
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
-                    <div style="color: #888; font-size: 14px; margin-bottom: 5px;">Failed Payments</div>
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
+                    <div style="color: var(--color-subtle); font-size: 14px; margin-bottom: 5px;">Failed Payments</div>
                     <div id="failedPayments" style="font-size: 24px; font-weight: bold; color: #e74c3c;">
                         <i class="fas fa-spinner fa-spin"></i> Loading...
                     </div>
                 </div>
             </div>
             
-            <div style="margin-top: 15px; padding: 15px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #4a9eff;">
+            <div style="margin-top: 15px; padding: 15px; background: var(--bg-page); border-radius: 8px; border-left: 4px solid #4a9eff;">
                 <div style="color: #4a9eff; font-weight: bold; margin-bottom: 5px;">
                     <i class="fas fa-info-circle me-2"></i>About Master Keys
                 </div>
-                <div style="color: #e0e0e0; font-size: 14px;">
+                <div style="color: var(--color-text); font-size: 14px;">
                     Master keys are automatically generated on first startup and encrypted with your ENCRYPTION_KEY. 
                     They are used to derive unique payment addresses for each user. The actual keys are never displayed for security.
                 </div>
@@ -168,14 +218,14 @@
         </div>
 
         <!-- Payment Gateways Configuration -->
-        <div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #f39c12;">
                 <i class="fas fa-credit-card me-2"></i>Payment Gateways Configuration
             </h3>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(400px, 1fr)); gap: 20px;">
                 <!-- PayPal -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #0070ba; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fab fa-paypal me-2"></i>PayPal</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -184,16 +234,16 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Client ID</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="paypalClientId" placeholder="PayPal Client ID">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_client_id">Client ID</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="paypalClientId" placeholder="PayPal Client ID">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Client Secret</label>
-                            <input type="password" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="paypalClientSecret" placeholder="PayPal Client Secret">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_client_secret">Client Secret</label>
+                            <input type="password" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="paypalClientSecret" placeholder="PayPal Client Secret">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Webhook Secret</label>
-                            <input type="password" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="paypalWebhookSecret" placeholder="Webhook Secret">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_webhook_secret">Webhook Secret</label>
+                            <input type="password" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="paypalWebhookSecret" placeholder="Webhook Secret">
                         </div>
                         <label style="cursor: pointer;">
                             <input type="checkbox" id="paypalSandbox" checked style="margin-right: 5px;">Sandbox Mode
@@ -202,7 +252,7 @@
                 </div>
 
                 <!-- Stripe -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #635bff; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fab fa-stripe me-2"></i>Stripe</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -211,16 +261,16 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Publishable Key</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="stripePublishableKey" placeholder="pk_...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">Publishable Key</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="stripePublishableKey" placeholder="pk_...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Secret Key</label>
-                            <input type="password" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="stripeSecretKey" placeholder="sk_...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_secret_key">Secret Key</label>
+                            <input type="password" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="stripeSecretKey" placeholder="sk_...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Webhook Secret</label>
-                            <input type="password" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="stripeWebhookSecret" placeholder="whsec_...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_webhook_secret">Webhook Secret</label>
+                            <input type="password" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="stripeWebhookSecret" placeholder="whsec_...">
                         </div>
                         <label style="cursor: pointer;">
                             <input type="checkbox" id="stripeSandbox" checked style="margin-right: 5px;">Test Mode
@@ -229,7 +279,7 @@
                 </div>
 
                 <!-- Bitcoin -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #f7931a; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fab fa-bitcoin me-2"></i>Bitcoin</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -238,22 +288,22 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Bitcoin Address</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="bitcoinAddress" placeholder="bc1q...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">Bitcoin Address</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="bitcoinAddress" placeholder="bc1q...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Minimum Confirmations</label>
-                            <input type="number" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="bitcoinConfirmations" value="3" min="1" max="10">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_min_confirmations">Minimum Confirmations</label>
+                            <input type="number" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="bitcoinConfirmations" value="3" min="1" max="10">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Expiration Time (minutes)</label>
-                            <input type="number" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="bitcoinExpiration" value="120" min="15" max="1440">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">Expiration Time (minutes)</label>
+                            <input type="number" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="bitcoinExpiration" value="120" min="15" max="1440">
                         </div>
                     </div>
                 </div>
 
                 <!-- Ethereum -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #627eea; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fab fa-ethereum me-2"></i>Ethereum (ETH)</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -262,16 +312,16 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">ETH Wallet Address</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="ethAddress" placeholder="0x...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">ETH Wallet Address</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="ethAddress" placeholder="0x...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Minimum Confirmations</label>
-                            <input type="number" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="ethConfirmations" value="12" min="1" max="50">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_min_confirmations">Minimum Confirmations</label>
+                            <input type="number" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="ethConfirmations" value="12" min="1" max="50">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Chain ID</label>
-                            <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="ethChainId">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">Chain ID</label>
+                            <select style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="ethChainId">
                                 <option value="1">Ethereum Mainnet</option>
                                 <option value="5">Goerli Testnet</option>
                                 <option value="11155111">Sepolia Testnet</option>
@@ -281,7 +331,7 @@
                 </div>
 
                 <!-- USDT -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #26a17b; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fas fa-dollar-sign me-2"></i>Tether (USDT)</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -290,12 +340,12 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">USDT Wallet Address</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdtAddress" placeholder="0x...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">USDT Wallet Address</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdtAddress" placeholder="0x...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Network</label>
-                            <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdtNetwork">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_network">Network</label>
+                            <select style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdtNetwork">
                                 <option value="erc20">ERC20 (Ethereum)</option>
                                 <option value="trc20">TRC20 (Tron)</option>
                                 <option value="bep20">BEP20 (BSC)</option>
@@ -303,14 +353,14 @@
                             </select>
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Minimum Confirmations</label>
-                            <input type="number" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdtConfirmations" value="3" min="1" max="50">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_min_confirmations">Minimum Confirmations</label>
+                            <input type="number" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdtConfirmations" value="3" min="1" max="50">
                         </div>
                     </div>
                 </div>
 
                 <!-- USDC -->
-                <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; overflow: hidden;">
+                <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; overflow: hidden;">
                     <div style="background: #2775ca; color: white; padding: 15px; display: flex; justify-content: space-between; align-items: center;">
                         <h6 style="margin: 0;"><i class="fas fa-coins me-2"></i>USD Coin (USDC)</h6>
                         <label style="margin: 0; cursor: pointer;">
@@ -319,12 +369,12 @@
                     </div>
                     <div style="padding: 15px;">
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">USDC Wallet Address</label>
-                            <input type="text" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdcAddress" placeholder="0x...">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);">USDC Wallet Address</label>
+                            <input type="text" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdcAddress" placeholder="0x...">
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Network</label>
-                            <select style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdcNetwork">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_network">Network</label>
+                            <select style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdcNetwork">
                                 <option value="erc20">ERC20 (Ethereum)</option>
                                 <option value="solana">Solana</option>
                                 <option value="bep20">BEP20 (BSC)</option>
@@ -332,8 +382,8 @@
                             </select>
                         </div>
                         <div style="margin-bottom: 15px;">
-                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0;">Minimum Confirmations</label>
-                            <input type="number" style="width: 100%; padding: 8px; border: 1px solid #0f3460; border-radius: 3px; background: #16213e; color: #e0e0e0;" id="usdcConfirmations" value="3" min="1" max="50">
+                            <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text);" data-i18n="payments_page.lbl_min_confirmations">Minimum Confirmations</label>
+                            <input type="number" style="width: 100%; padding: 8px; border:1px solid var(--color-border); border-radius: 3px; background: var(--bg-panel); color: var(--color-text);" id="usdcConfirmations" value="3" min="1" max="50">
                         </div>
                     </div>
                 </div>
@@ -345,34 +395,34 @@
         </div>
 
         <!-- Price Sources Configuration -->
-        <div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #f39c12;">
-                <i class="fas fa-chart-line me-2"></i>Crypto Price Sources
+                <i class="fas fa-chart-line me-2"></i><span data-i18n="payments_page.crypto_prices">Crypto Price Sources</span>
             </h3>
             
-            <div style="margin-bottom: 15px; color: #e0e0e0;">
+            <div style="margin-bottom: 15px; color: var(--color-text);">
                 Select which exchanges to use for cryptocurrency price aggregation:
             </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
                     <input type="checkbox" id="priceCoinbase" checked style="margin-right: 10px; width: 20px; height: 20px;">
-                    <span style="color: #e0e0e0; font-weight: 500;">Coinbase</span>
+                    <span style="color: var(--color-text); font-weight: 500;">Coinbase</span>
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
                     <input type="checkbox" id="priceBinance" checked style="margin-right: 10px; width: 20px; height: 20px;">
-                    <span style="color: #e0e0e0; font-weight: 500;">Binance</span>
+                    <span style="color: var(--color-text); font-weight: 500;">Binance</span>
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center;">
                     <input type="checkbox" id="priceKraken" checked style="margin-right: 10px; width: 20px; height: 20px;">
-                    <span style="color: #e0e0e0; font-weight: 500;">Kraken</span>
+                    <span style="color: var(--color-text); font-weight: 500;">Kraken</span>
                 </label>
             </div>
             
             <!-- Live Crypto Prices Display -->
-            <div style="margin-bottom: 20px; padding: 20px; background: #1a1a2e; border-radius: 8px; border-left: 4px solid #4a9eff;">
+            <div style="margin-bottom: 20px; padding: 20px; background: var(--bg-page); border-radius: 8px; border-left: 4px solid #4a9eff;">
                 <div style="color: #4a9eff; font-weight: bold; margin-bottom: 15px; display: flex; align-items: center;">
                     <i class="fas fa-coins me-2"></i>Live Cryptocurrency Prices
                     <button onclick="refreshCryptoPrices()" style="margin-left: auto; background: transparent; border: 1px solid #4a9eff; color: #4a9eff; padding: 5px 15px; border-radius: 5px; cursor: pointer; font-size: 12px;">
@@ -381,31 +431,31 @@
                 </div>
                 
                 <!-- Bitcoin -->
-                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #f7931a;">
+                <div style="margin-bottom: 20px; padding: 15px; background: var(--bg-panel); border-radius: 8px; border-left: 3px solid #f7931a;">
                     <div style="color: #f7931a; font-weight: bold; margin-bottom: 10px;">
                         <i class="fab fa-bitcoin me-2"></i>Bitcoin (BTC)
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Coinbase</div>
                             <div id="priceBtcCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Binance</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Binance</div>
                             <div id="priceBtcBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Kraken</div>
                             <div id="priceBtcKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
                     </div>
-                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #f7931a;">
+                    <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px; border: 2px solid #f7931a;">
                         <div style="color: #f7931a; font-size: 12px; font-weight: bold;">Average (Applied)</div>
                         <div id="priceBtcAverage" style="color: #f7931a; font-size: 20px; font-weight: bold;">
                             <i class="fas fa-spinner fa-spin"></i>
@@ -414,31 +464,31 @@
                 </div>
                 
                 <!-- Ethereum -->
-                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #627eea;">
+                <div style="margin-bottom: 20px; padding: 15px; background: var(--bg-panel); border-radius: 8px; border-left: 3px solid #627eea;">
                     <div style="color: #627eea; font-weight: bold; margin-bottom: 10px;">
                         <i class="fab fa-ethereum me-2"></i>Ethereum (ETH)
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Coinbase</div>
                             <div id="priceEthCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Binance</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Binance</div>
                             <div id="priceEthBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Kraken</div>
                             <div id="priceEthKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
                     </div>
-                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #627eea;">
+                    <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px; border: 2px solid #627eea;">
                         <div style="color: #627eea; font-size: 12px; font-weight: bold;">Average (Applied)</div>
                         <div id="priceEthAverage" style="color: #627eea; font-size: 20px; font-weight: bold;">
                             <i class="fas fa-spinner fa-spin"></i>
@@ -447,31 +497,31 @@
                 </div>
                 
                 <!-- USDT -->
-                <div style="margin-bottom: 20px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #26a17b;">
+                <div style="margin-bottom: 20px; padding: 15px; background: var(--bg-panel); border-radius: 8px; border-left: 3px solid #26a17b;">
                     <div style="color: #26a17b; font-weight: bold; margin-bottom: 10px;">
                         <i class="fas fa-dollar-sign me-2"></i>Tether (USDT)
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Coinbase</div>
                             <div id="priceUsdtCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Binance</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Binance</div>
                             <div id="priceUsdtBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Kraken</div>
                             <div id="priceUsdtKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
                     </div>
-                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #26a17b;">
+                    <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px; border: 2px solid #26a17b;">
                         <div style="color: #26a17b; font-size: 12px; font-weight: bold;">Average (Applied)</div>
                         <div id="priceUsdtAverage" style="color: #26a17b; font-size: 20px; font-weight: bold;">
                             <i class="fas fa-spinner fa-spin"></i>
@@ -480,31 +530,31 @@
                 </div>
                 
                 <!-- USDC -->
-                <div style="margin-bottom: 15px; padding: 15px; background: #16213e; border-radius: 8px; border-left: 3px solid #2775ca;">
+                <div style="margin-bottom: 15px; padding: 15px; background: var(--bg-panel); border-radius: 8px; border-left: 3px solid #2775ca;">
                     <div style="color: #2775ca; font-weight: bold; margin-bottom: 10px;">
                         <i class="fas fa-coins me-2"></i>USD Coin (USDC)
                     </div>
                     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 10px;">
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Coinbase</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Coinbase</div>
                             <div id="priceUsdcCoinbase" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Binance</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Binance</div>
                             <div id="priceUsdcBinance" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
-                        <div style="background: #0f3460; padding: 10px; border-radius: 5px;">
-                            <div style="color: #888; font-size: 11px;">Kraken</div>
+                        <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px;">
+                            <div style="color: var(--color-subtle); font-size: 11px;">Kraken</div>
                             <div id="priceUsdcKraken" style="color: #4a9eff; font-size: 16px; font-weight: bold;">
                                 <i class="fas fa-spinner fa-spin"></i>
                             </div>
                         </div>
                     </div>
-                    <div style="background: #0f3460; padding: 10px; border-radius: 5px; border: 2px solid #2775ca;">
+                    <div style="background:var(--bg-accent); padding: 10px; border-radius: 5px; border: 2px solid #2775ca;">
                         <div style="color: #2775ca; font-size: 12px; font-weight: bold;">Average (Applied)</div>
                         <div id="priceUsdcAverage" style="color: #2775ca; font-size: 20px; font-weight: bold;">
                             <i class="fas fa-spinner fa-spin"></i>
@@ -512,7 +562,7 @@
                     </div>
                 </div>
                 
-                <div style="color: #888; font-size: 12px; text-align: center;">
+                <div style="color: var(--color-subtle); font-size: 12px; text-align: center;">
                     Last updated: <span id="priceLastUpdated">-</span>
                 </div>
             </div>
@@ -523,26 +573,26 @@
         </div>
 
         <!-- Blockchain Monitoring -->
-        <div style="background: #16213e; border: 2px solid #9b59b6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #9b59b6; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #9b59b6;">
                 <i class="fas fa-cube me-2"></i>Blockchain Monitoring
             </h3>
             
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">Monitoring Mode</label>
-                <select id="blockchainMode" style="width: 100%; max-width: 400px; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                <label style="display: block; margin-bottom: 10px; color: var(--color-text); font-weight: 500;">Monitoring Mode</label>
+                <select id="blockchainMode" style="width: 100%; max-width: 400px; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
                     <option value="api">API Polling (Recommended)</option>
                     <option value="webhook">Webhook (Requires public URL)</option>
                 </select>
-                <div style="margin-top: 10px; color: #888; font-size: 14px;">
+                <div style="margin-top: 10px; color: var(--color-subtle); font-size: 14px;">
                     API Polling: Checks blockchain APIs every minute for new transactions<br>
                     Webhook: Receives instant notifications (requires webhook setup)
                 </div>
             </div>
             
             <div style="margin-bottom: 20px;">
-                <label style="display: block; margin-bottom: 10px; color: #e0e0e0; font-weight: 500;">Polling Interval (seconds)</label>
-                <input type="number" id="pollingInterval" value="60" min="30" max="300" style="width: 100%; max-width: 400px; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                <label style="display: block; margin-bottom: 10px; color: var(--color-text); font-weight: 500;">Polling Interval (seconds)</label>
+                <input type="number" id="pollingInterval" value="60" min="30" max="300" style="width: 100%; max-width: 400px; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
             </div>
             
             <button type="button" class="btn" onclick="saveBlockchainConfig()" style="background: #9b59b6; color: white;">
@@ -551,43 +601,43 @@
         </div>
 
         <!-- Email Notifications -->
-        <div style="background: #16213e; border: 2px solid #27ae60; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #27ae60; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #27ae60;">
                 <i class="fas fa-envelope me-2"></i>Email Notifications
             </h3>
             
-            <div style="margin-bottom: 15px; color: #e0e0e0;">
+            <div style="margin-bottom: 15px; color: var(--color-text);">
                 Enable or disable email notifications for payment events:
             </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Payment Success</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Payment Success</span>
                     <input type="checkbox" id="emailPaymentSuccess" checked style="width: 20px; height: 20px;">
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Payment Failed</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Payment Failed</span>
                     <input type="checkbox" id="emailPaymentFailed" checked style="width: 20px; height: 20px;">
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Subscription Upgraded</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Subscription Upgraded</span>
                     <input type="checkbox" id="emailSubscriptionUpgraded" checked style="width: 20px; height: 20px;">
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Subscription Downgraded</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Subscription Downgraded</span>
                     <input type="checkbox" id="emailSubscriptionDowngraded" checked style="width: 20px; height: 20px;">
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Subscription Cancelled</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Subscription Cancelled</span>
                     <input type="checkbox" id="emailSubscriptionCancelled" checked style="width: 20px; height: 20px;">
                 </label>
                 
-                <label style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
-                    <span style="color: #e0e0e0;">Payment Retry</span>
+                <label style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px; cursor: pointer; display: flex; align-items: center; justify-content: space-between;">
+                    <span style="color: var(--color-text);">Payment Retry</span>
                     <input type="checkbox" id="emailPaymentRetry" checked style="width: 20px; height: 20px;">
                 </label>
             </div>
@@ -598,42 +648,42 @@
         </div>
 
         <!-- Consolidation Settings -->
-        <div style="background: #16213e; border: 2px solid #e67e22; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #e67e22; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #e67e22;">
                 <i class="fas fa-compress-arrows-alt me-2"></i>Wallet Consolidation
             </h3>
             
-            <div style="margin-bottom: 15px; color: #e0e0e0;">
+            <div style="margin-bottom: 15px; color: var(--color-text);">
                 Set minimum balance thresholds for automatic consolidation to admin addresses:
             </div>
             
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
                 <div>
-                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-text); font-weight: 500;">
                         <i class="fab fa-bitcoin me-2"></i>Bitcoin (BTC)
                     </label>
-                    <input type="number" id="consolidationBTC" value="0.01" step="0.001" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                    <input type="number" id="consolidationBTC" value="0.01" step="0.001" min="0" style="width: 100%; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
                 </div>
                 
                 <div>
-                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-text); font-weight: 500;">
                         <i class="fab fa-ethereum me-2"></i>Ethereum (ETH)
                     </label>
-                    <input type="number" id="consolidationETH" value="0.1" step="0.01" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                    <input type="number" id="consolidationETH" value="0.1" step="0.01" min="0" style="width: 100%; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
                 </div>
                 
                 <div>
-                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-text); font-weight: 500;">
                         <i class="fas fa-dollar-sign me-2"></i>USDT
                     </label>
-                    <input type="number" id="consolidationUSDT" value="100" step="10" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                    <input type="number" id="consolidationUSDT" value="100" step="10" min="0" style="width: 100%; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
                 </div>
                 
                 <div>
-                    <label style="display: block; margin-bottom: 5px; color: #e0e0e0; font-weight: 500;">
+                    <label style="display: block; margin-bottom: 5px; color: var(--color-text); font-weight: 500;">
                         <i class="fas fa-coins me-2"></i>USDC
                     </label>
-                    <input type="number" id="consolidationUSDC" value="100" step="10" min="0" style="width: 100%; padding: 10px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0;">
+                    <input type="number" id="consolidationUSDC" value="100" step="10" min="0" style="width: 100%; padding: 10px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text);">
                 </div>
             </div>
             
@@ -644,7 +694,7 @@
 
         <!-- Back Button -->
         <div style="margin-top: 30px;">
-            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" class="btn" style="background: #0f3460; color: #4a9eff; border: 1px solid #4a9eff;">
+            <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" class="btn" style="background:var(--bg-accent); color: #4a9eff; border: 1px solid #4a9eff;">
                 <i class="fas fa-arrow-left me-2"></i>Back to Tiers
             </a>
         </div>
@@ -765,7 +815,7 @@ async function loadSystemStatus() {
         // Update master keys status
         const masterKeysEl = document.getElementById('masterKeysStatus');
         if (data.master_keys_initialized) {
-            masterKeysEl.innerHTML = '<i class="fas fa-check-circle" style="color: #27ae60;"></i> ' + data.master_keys_count + ' Keys Active';
+            masterKeysEl.innerHTML = '<i class="fas fa-check-circle" style="color: #27ae60;"></i> ' + data.master_keys_count + ' ' + window.i18n.t('payments.keys_active');
         } else {
             masterKeysEl.innerHTML = '<i class="fas fa-exclamation-triangle" style="color: #e74c3c;"></i> Not Initialized';
         }
@@ -1206,7 +1256,7 @@ function updateCryptoPrice(crypto, priceData, currencySymbol) {
         document.getElementById(`price${crypto}Coinbase`).textContent = currencySymbol + priceData.coinbase.toFixed(2);
         document.getElementById(`price${crypto}Coinbase`).style.color = '#27ae60';
     } else {
-        document.getElementById(`price${crypto}Coinbase`).innerHTML = '<span style="color: #888;">Disabled</span>';
+        document.getElementById(`price${crypto}Coinbase`).innerHTML = '<span style="color: var(--color-subtle);">Disabled</span>';
     }
     
     // Update Binance
@@ -1214,7 +1264,7 @@ function updateCryptoPrice(crypto, priceData, currencySymbol) {
         document.getElementById(`price${crypto}Binance`).textContent = currencySymbol + priceData.binance.toFixed(2);
         document.getElementById(`price${crypto}Binance`).style.color = '#27ae60';
     } else {
-        document.getElementById(`price${crypto}Binance`).innerHTML = '<span style="color: #888;">Disabled</span>';
+        document.getElementById(`price${crypto}Binance`).innerHTML = '<span style="color: var(--color-subtle);">Disabled</span>';
     }
     
     // Update Kraken
@@ -1222,7 +1272,7 @@ function updateCryptoPrice(crypto, priceData, currencySymbol) {
         document.getElementById(`price${crypto}Kraken`).textContent = currencySymbol + priceData.kraken.toFixed(2);
         document.getElementById(`price${crypto}Kraken`).style.color = '#27ae60';
     } else {
-        document.getElementById(`price${crypto}Kraken`).innerHTML = '<span style="color: #888;">Disabled</span>';
+        document.getElementById(`price${crypto}Kraken`).innerHTML = '<span style="color: var(--color-subtle);">Disabled</span>';
     }
     
     // Update Average
@@ -1242,6 +1292,25 @@ function loadCurrencySettings() {
             document.getElementById('currencyDecimals').value = settings.currency_decimals;
         });
 }
+
+const CURRENCY_SYMBOLS = {
+    USD: '$', EUR: '€', GBP: '£', JPY: '¥', CAD: 'CA$',
+    AUD: 'A$', CHF: 'Fr', CNY: '¥', INR: '₹', BRL: 'R$',
+    MXN: '$', SGD: 'S$', HKD: 'HK$', NOK: 'kr', SEK: 'kr',
+    DKK: 'kr', NZD: 'NZ$', ZAR: 'R', RUB: '₽', TRY: '₺',
+    KRW: '₩', IDR: 'Rp', MYR: 'RM', THB: '฿', PHP: '₱',
+    VND: '₫', PKR: '₨', BDT: '৳', EGP: 'E£', NGN: '₦',
+    KES: 'KSh', GHS: 'GH₵', MAD: 'د.م.', TND: 'د.ت', DZD: 'د.ج',
+    SAR: '﷼', AED: 'د.إ', QAR: '﷼', KWD: 'د.ك', BHD: '.د.ب',
+    OMR: '﷼', ILS: '₪', PLN: 'zł', CZK: 'Kč', HUF: 'Ft',
+    RON: 'lei', BGN: 'лв', HRK: 'kn', RSD: 'din', UAH: '₴',
+    ARS: '$', CLP: '$', COP: '$', PEN: 'S/', UYU: '$U',
+    TWD: 'NT$', LKR: '₨', NPR: '₨', MMK: 'K', KZT: '₸'
+};
+document.getElementById('currencyCode').addEventListener('change', function() {
+    const sym = CURRENCY_SYMBOLS[this.value];
+    if (sym) document.getElementById('currencySymbol').value = sym;
+});
 
 document.getElementById('currencySettingsForm').addEventListener('submit', function(e) {
     e.preventDefault();

@@ -5,7 +5,7 @@
 {% block content %}
 <div class="container">
     <h1 style="color: #f44336;">Delete Account</h1>
-    <p>This action cannot be undone. All your data will be permanently deleted.</p>
+    <p data-i18n="delete_page.warning">This action cannot be undone. All your data will be permanently deleted.</p>
 
     {% if error %}
     <div class="alert alert-error">{{ error }}</div>
@@ -25,7 +25,7 @@
     {% endif %}
 
     <div class="card danger-card">
-        <h2>Confirm Account Deletion</h2>
+        <h2 data-i18n="delete_page.confirm_title">Confirm Account Deletion</h2>
         
         <div class="warning-box">
             <h3>⚠️ This will permanently delete:</h3>
@@ -43,17 +43,17 @@
         
         <form method="POST" action="{{ url_for(request, '/dashboard/delete-account') }}" onsubmit="return confirmDeletion()">
             <div class="form-group">
-                <label for="password">Enter Your Password to Confirm</label>
+                <label for="password" data-i18n="delete_page.password">Enter Your Password to Confirm</label>
                 <input type="password" id="password" name="password" required>
             </div>
 
             <div class="form-group">
-                <label for="confirmation">Type "DELETE" to confirm</label>
+                <label for="confirmation" data-i18n="delete_page.type_delete">Type "DELETE" to confirm</label>
                 <input type="text" id="confirmation" name="confirmation" required placeholder="DELETE">
             </div>
 
             <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
-                <button type="submit" class="btn btn-danger">Delete My Account Permanently</button>
+                <button type="submit" class="btn btn-danger" data-i18n="delete_page.submit">Delete My Account Permanently</button>
                 <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary">Cancel</a>
             </div>
         </form>

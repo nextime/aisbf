@@ -30,6 +30,7 @@ from fastapi.responses import JSONResponse, StreamingResponse, HTMLResponse, Red
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.exceptions import RequestValidationError
 from fastapi.templating import Jinja2Templates
+from fastapi.staticfiles import StaticFiles
 from jinja2 import Environment, FileSystemLoader
 from aisbf.models import ChatCompletionRequest, ChatCompletionResponse
 from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
@@ -561,6 +562,11 @@ app = FastAPI(
     title="AI Proxy Server",
     max_request_size=100 * 1024 * 1024  # 100MB max request size
 )
+
+# Serve static files (i18n.js, i18n/*.json, extension assets, etc.)
+_static_dir = Path(__file__).parent / 'static'
+_static_dir.mkdir(parents=True, exist_ok=True)
+app.mount("/dashboard/static", StaticFiles(directory=str(_static_dir)), name="static")
 
 # Note: ProxyHeadersMiddleware will be added LAST (after all other middleware)
 # so it executes FIRST and processes proxy headers before other middleware
@@ -2068,6 +2074,16 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         content={"detail": exc.errors(), "body": body_data}
     )
 
+@app.exception_handler(404)
+async def not_found_handler(request: Request, exc):
+    """Serve a custom 404 page for browser requests, JSON for API clients."""
+    accept = request.headers.get("accept", "")
+    if "text/html" in accept:
+        from fastapi.responses import HTMLResponse
+        with open(Path(__file__).parent / "templates" / "404.html", encoding="utf-8") as f:
+            return HTMLResponse(content=f.read(), status_code=404)
+    return JSONResponse(status_code=404, content={"detail": "Not found"})
+
 # CORS middleware — wildcard origins are incompatible with allow_credentials=True
 # (browsers reject credentialed cross-origin requests to "*"). API clients
 # (curl, SDK) never send cookies, so credentials are not needed here.
@@ -2125,6 +2141,35 @@ def _get_client_ip(request: Request) -> Optional[str]:
         return client[0]
     return None
 
+_LOCAL_IPS = {"127.0.0.1", "::1", "localhost"}
+
+def _is_local_client(request: Request) -> bool:
+    """
+    Return True only when the real end-user browser is on localhost.
+
+    Handles the case where a local reverse-proxy (nginx/caddy on 127.0.0.1)
+    forwards requests: if X-Forwarded-For is absent but X-Forwarded-Host
+    points to a non-localhost host, the client is remote even though the
+    TCP peer is 127.0.0.1.
+    """
+    # If X-Forwarded-For is present, trust it (ProxyHeadersMiddleware already
+    # rewrites scope["client"] with it, but we check explicitly for clarity).
+    xff = request.headers.get("X-Forwarded-For")
+    if xff:
+        return xff.split(",")[0].strip() in _LOCAL_IPS
+
+    # No XFF — check whether a proxy header reveals a non-local origin host.
+    forwarded_host = request.headers.get("X-Forwarded-Host") or request.headers.get("X-Real-IP")
+    if forwarded_host:
+        # X-Forwarded-Host is a hostname, not an IP, but if it's not localhost it's remote.
+        host = forwarded_host.split(":")[0].strip()
+        if host not in _LOCAL_IPS:
+            return False
+
+    # Fall back to the direct TCP peer IP.
+    ip = _get_client_ip(request)
+    return ip in _LOCAL_IPS if ip else False
+
 
 async def _check_server_ip_country() -> None:
     """Fetch the server's own public IP at startup and set _server_ip_blocked if Israeli."""
@@ -2160,7 +2205,7 @@ class GenocidalBlockingMiddleware(BaseHTTPMiddleware):
     """
 
     async def dispatch(self, request: Request, call_next):
-        if request.url.path == "/blocked":
+        if request.url.path == "/dashboard/blocked":
             return await call_next(request)
 
         if await self._should_block(request):
@@ -2188,7 +2233,7 @@ class GenocidalBlockingMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path.startswith("/api") or path.startswith("/mcp"):
             return JSONResponse(status_code=403, content={"error": _BLOCK_MESSAGE})
-        return RedirectResponse(url=f"{get_base_url(request)}/blocked", status_code=302)
+        return RedirectResponse(url=f"{get_base_url(request)}/dashboard/blocked", status_code=302)
 
 
 # Middleware execution order: last added = first executed (outermost layer).
@@ -4516,6 +4561,7 @@ async def dashboard_providers(request: Request):
             "__version__": __version__,
             "providers_json": json.dumps(providers_data),
             "claude_cli_mode": _claude_cli_mode,
+            "is_local_client": _is_local_client(request),
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -4531,6 +4577,7 @@ async def dashboard_providers(request: Request):
             "user_providers_json": json.dumps(providers_data),
             "user_id": current_user_id,
             "claude_cli_mode": _claude_cli_mode,
+            "is_local_client": _is_local_client(request),
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -4739,6 +4786,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
                     "claude_cli_mode": _claude_cli_mode,
+                    "is_local_client": _is_local_client(request),
                     "success": success_msg
                 }
             )
@@ -4755,6 +4803,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "user_providers_json": json.dumps(providers_data),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
+                    "is_local_client": _is_local_client(request),
                     "success": success_msg
                 }
             )
@@ -4785,6 +4834,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
                     "claude_cli_mode": _claude_cli_mode,
+                    "is_local_client": _is_local_client(request),
                     "error": f"Invalid JSON: {str(e)}"
                 }
             )
@@ -4802,6 +4852,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "user_providers_json": json.dumps(user_providers),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
+                    "is_local_client": _is_local_client(request),
                     "error": f"Invalid JSON: {str(e)}"
                 }
             )
@@ -9497,7 +9548,7 @@ async def dashboard_wallet(request: Request):
         return HTMLResponse("Wallet functionality not available", status_code=503)
     except Exception as e:
         logger.error(f"Failed to load wallet page: {e}")
-        return templates.TemplateResponse("dashboard/error.html", {
+        return templates.TemplateResponse(request=request, name="dashboard/error.html", context={
             "request": request,
             "error": "Failed to load wallet. Please try again later."
         }, status_code=500)
@@ -10535,10 +10586,10 @@ async def dashboard_license(request: Request):
     )
 
 
-@app.get("/blocked", response_class=HTMLResponse)
+@app.get("/dashboard/blocked", response_class=HTMLResponse)
 async def blocked_page(request: Request):
     """Display blocked access page."""
-    return templates.TemplateResponse("blocked.html", {"request": request})
+    return templates.TemplateResponse(request=request, name="blocked.html", context={"request": request})
 
 
 def parse_provider_from_model(model: str) -> tuple[str, str]:

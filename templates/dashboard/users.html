@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}User Management - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">User Management</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="users_page.title">User Management</h2>
 
 <div id="url-data" data-base-url="{{ url_for(request, '/dashboard/users/') }}" style="display:none;"></div>
 
@@ -32,24 +32,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
 
 <!-- Add New User Form -->
-<div style="margin-bottom: 30px; padding: 20px; background: #0f3460; border-radius: 8px;">
-    <h3 style="margin-bottom: 15px;">Add New User</h3>
+<div style="margin-bottom: 30px; padding: 20px; background: var(--bg-accent); border-radius: 8px;">
+    <h3 style="margin-bottom: 15px;" data-i18n="users_page.add_user">Add New User</h3>
     <form method="POST" action="{{ url_for(request, '/dashboard/users/add') }}" style="display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end;">
         <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
-            <label for="username">Username</label>
-            <input type="text" id="username" name="username" required style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
+            <label for="username" data-i18n="users_page.username">Username</label>
+            <input type="text" id="username" name="username" required style="width: 100%; background: var(--bg-page) !important; color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px;">
         </div>
         <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
-            <label for="email">Email</label>
-            <input type="email" id="email" name="email" style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
+            <label for="email" data-i18n="users_page.email">Email</label>
+            <input type="email" id="email" name="email" style="width: 100%; background: var(--bg-page) !important; color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px;">
         </div>
         <div class="form-group" style="flex: 1; min-width: 200px; margin-bottom: 0;">
-            <label for="password">Password</label>
-            <input type="password" id="password" name="password" required style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
+            <label for="password" data-i18n="users_page.password">Password</label>
+            <input type="password" id="password" name="password" required style="width: 100%; background: var(--bg-page) !important; color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px;">
         </div>
         <div class="form-group" style="flex: 0 0 150px; margin-bottom: 0;">
-            <label for="role">Role</label>
-            <select id="role" name="role" style="width: 100%; background: #1a1a2e !important; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px;">
+            <label for="role" data-i18n="users_page.role">Role</label>
+            <select id="role" name="role" style="width: 100%; background: var(--bg-page) !important; color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px;">
                 <option value="user">User</option>
                 <option value="admin">Admin</option>
             </select>
@@ -59,56 +59,56 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <!-- Search and Filter Controls -->
-<div style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+<div style="margin-bottom: 20px; padding: 15px; background: var(--bg-accent); border-radius: 8px;">
     <div style="display: flex; gap: 15px; align-items: center; flex-wrap: wrap;">
         <div style="flex: 1; min-width: 200px;">
-            <label for="search-input" style="display: block; margin-bottom: 5px; color: #e0e0e0;">Search Users</label>
-            <input type="text" id="search-input" placeholder="Search by username, email, or display name..."
-                   value="{{ filters.search }}" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+            <label for="search-input" style="display: block; margin-bottom: 5px; color: var(--color-text);" data-i18n="users_page.search_users">Search Users</label>
+            <input type="text" id="search-input" data-i18n="users_page.search_placeholder" placeholder="Search by username, email, or display name..."
+                   value="{{ filters.search }}" style="width: 100%; padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
         </div>
 
         <div style="display: flex; gap: 10px; align-items: center;">
-            <label for="status-filter" style="color: #e0e0e0; margin-right: 5px;">Status:</label>
-            <select id="status-filter" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
-                <option value="">All</option>
-                <option value="active" {% if filters.status_filter == 'active' %}selected{% endif %}>Active</option>
-                <option value="inactive" {% if filters.status_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+            <label for="status-filter" style="color: var(--color-text); margin-right: 5px;" data-i18n="users_page.status">Status:</label>
+            <select id="status-filter" style="padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
+                <option value="" data-i18n="users_page.status_all">All</option>
+                <option value="active" {% if filters.status_filter == 'active' %}selected{% endif %} data-i18n="users_page.status_active">Active</option>
+                <option value="inactive" {% if filters.status_filter == 'inactive' %}selected{% endif %} data-i18n="users_page.status_inactive">Inactive</option>
             </select>
 
-            <label for="role-filter" style="color: #e0e0e0; margin-left: 10px; margin-right: 5px;">Role:</label>
-            <select id="role-filter" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+            <label for="role-filter" style="color: var(--color-text); margin-left: 10px; margin-right: 5px;" data-i18n="users_page.role_filter">Role:</label>
+            <select id="role-filter" style="padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
                 <option value="">All</option>
                 <option value="admin" {% if filters.role_filter == 'admin' %}selected{% endif %}>Admin</option>
                 <option value="user" {% if filters.role_filter == 'user' %}selected{% endif %}>User</option>
             </select>
 
-            <button id="search-btn" class="btn" style="padding: 8px 16px;">Search</button>
-            <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;">Clear</button>
+            <button id="search-btn" class="btn" style="padding: 8px 16px;" data-i18n="users_page.search_btn">Search</button>
+            <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;" data-i18n="users_page.clear_btn">Clear</button>
         </div>
     </div>
 </div>
 
 <!-- Users Table -->
-<h3 style="margin-bottom: 15px;">All Users</h3>
+<h3 style="margin-bottom: 15px;" data-i18n="users_page.all_users">All Users</h3>
 
 <!-- Bulk Actions Bar -->
-<div id="bulk-actions" style="display: none; margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+<div id="bulk-actions" style="display: none; margin-bottom: 20px; padding: 15px; background: var(--bg-accent); border-radius: 8px;">
     <div style="display: flex; justify-content: space-between; align-items: center;">
-        <div style="color: #e0e0e0;">
+        <div style="color: var(--color-text);">
             <span id="selected-count">0</span> users selected
         </div>
 
         <div style="display: flex; gap: 10px; align-items: center;">
-            <select id="bulk-tier-select" style="padding: 8px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+            <select id="bulk-tier-select" style="padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
                 {% for tier in tiers %}
                 <option value="{{ tier.id }}">{{ tier.name }}{% if not tier.is_visible %} (Hidden){% endif %}</option>
                 {% endfor %}
             </select>
-            <button id="bulk-enable" class="btn">Enable Selected</button>
-            <button id="bulk-disable" class="btn">Disable Selected</button>
-            <button id="bulk-delete" class="btn btn-danger">Delete Selected</button>
+            <button id="bulk-enable" class="btn" data-i18n="users_page.enable_selected">Enable Selected</button>
+            <button id="bulk-disable" class="btn" data-i18n="users_page.disable_selected">Disable Selected</button>
+            <button id="bulk-delete" class="btn btn-danger" data-i18n="users_page.delete_selected">Delete Selected</button>
             <button id="bulk-notify" class="btn btn-secondary" style="background:#7c3aed;"><i class="fas fa-bell"></i> Send Notification</button>
-            <button id="bulk-clear" class="btn btn-secondary">Clear Selection</button>
+            <button id="bulk-clear" class="btn btn-secondary" data-i18n="users_page.clear_selection">Clear Selection</button>
         </div>
     </div>
 </div>
@@ -128,10 +128,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     {% endif %}
                 </span>
             </th>
-            <th>Email</th>
-            <th>Role</th>
-            <th>Tier</th>
-            <th>Created By</th>
+            <th data-i18n="users_page.col_email">Email</th>
+            <th data-i18n="users_page.col_role">Role</th>
+            <th data-i18n="users_page.col_tier">Tier</th>
+            <th data-i18n="users_page.col_created_by">Created By</th>
             <th class="sortable" data-column="created_at">
                 Created At
                 <span class="sort-indicator" data-column="created_at">
@@ -148,8 +148,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     {% endif %}
                 </span>
             </th>
-            <th>Active</th>
-            <th>Actions</th>
+            <th data-i18n="users_page.col_active">Active</th>
+            <th data-i18n="users_page.col_actions">Actions</th>
         </tr>
     </thead>
     <tbody>
@@ -164,13 +164,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 <td>{{ user.email or '-' }}</td>
                 <td>
                     {% if user.role == 'admin' %}
-                    <span style="color: #e94560; font-weight: bold;">Admin</span>
+                    <span style="color: #e94560; font-weight: bold;" data-i18n="users_page.role_admin_label">Admin</span>
                     {% else %}
-                    <span style="color: #a0a0a0;">User</span>
+                    <span style="color: var(--color-muted);" data-i18n="users_page.role_user_label">User</span>
                     {% endif %}
                 </td>
                 <td>
-                    <select onchange="updateUserTier({{ user.id }}, this.value)" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 5px; border-radius: 3px;">
+                    <select onchange="updateUserTier({{ user.id }}, this.value)" style="background: var(--bg-page); color: var(--color-text); border: 1px solid var(--bg-accent); padding: 5px; border-radius: 3px;">
                         {% for tier in tiers %}
                         <option value="{{ tier.id }}" {% if user.tier_id == tier.id %}selected{% endif %}>
                             {{ tier.name }}{% if not tier.is_visible %} (Hidden){% endif %}
@@ -183,25 +183,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 <td>{{ user.last_login or 'Never' }}</td>
                 <td>
                     {% if user.is_active %}
-                    <span style="color: #4ade80;">Yes</span>
+                    <span style="color: #4ade80;" data-i18n="users_page.active_yes">Yes</span>
                     {% else %}
                     <span style="color: #f87171;">No</span>
                     {% endif %}
                 </td>
                 <td>
                     <div style="display: flex; gap: 5px; flex-wrap: wrap;">
-                        <button onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.email }}', '{{ user.role }}', {{ user.is_active|lower }})" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin: 0;">Edit</button>
+                        <button onclick="editUser({{ user.id }}, '{{ user.username }}', '{{ user.email }}', '{{ user.role }}', {{ user.is_active|lower }})" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin: 0;" data-i18n="users_page.edit_btn">Edit</button>
                         <button onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})" class="btn btn-warning" style="padding: 5px 10px; font-size: 12px; margin: 0;">
                             {% if user.is_active %}Disable{% else %}Enable{% endif %}
                         </button>
-                        <button onclick="deleteUser({{ user.id }}, '{{ user.username }}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px; margin: 0;">Delete</button>
+                        <button onclick="deleteUser({{ user.id }}, '{{ user.username }}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px; margin: 0;" data-i18n="users_page.delete_btn">Delete</button>
                     </div>
                 </td>
             </tr>
             {% endfor %}
         {% else %}
             <tr>
-                <td colspan="11" style="text-align: center; color: #666;">No users found</td>
+                <td colspan="11" style="text-align: center; color: var(--color-subtle);" data-i18n="users_page.no_users">No users found</td>
             </tr>
         {% endif %}
     </tbody>
@@ -209,15 +209,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <!-- Pagination Controls -->
 {% if pagination.total_pages > 1 %}
-<div id="pagination-controls" style="margin-top: 20px; padding: 15px; background: #0f3460; border-radius: 8px;">
+<div id="pagination-controls" style="margin-top: 20px; padding: 15px; background: var(--bg-accent); border-radius: 8px;">
     <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 15px;">
-        <div style="color: #e0e0e0;">
+        <div style="color: var(--color-text);">
             Showing {{ pagination.start_item }}-{{ pagination.end_item }} of {{ pagination.total_users }} users
         </div>
 
         <div style="display: flex; gap: 10px; align-items: center;">
-            <label for="page-size" style="color: #e0e0e0; margin-right: 5px;">Show:</label>
-            <select id="page-size" style="padding: 5px; border-radius: 4px; border: 1px solid #0f3460; background: #1a1a2e; color: #e0e0e0;">
+            <label for="page-size" style="color: var(--color-text); margin-right: 5px;" data-i18n="users_page.show">Show:</label>
+            <select id="page-size" style="padding: 5px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
                 <option value="10" {% if pagination.limit == 10 %}selected{% endif %}>10</option>
                 <option value="25" {% if pagination.limit == 25 %}selected{% endif %}>25</option>
                 <option value="50" {% if pagination.limit == 50 %}selected{% endif %}>50</option>
@@ -229,7 +229,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     ← Previous
                 </button>
 
-                <span style="color: #e0e0e0; padding: 8px 12px; background: #1a1a2e; border-radius: 4px;">
+                <span style="color: var(--color-text); padding: 8px 12px; background: var(--bg-page); border-radius: 4px;">
                     Page {{ pagination.current_page }} of {{ pagination.total_pages }}
                 </span>
 
@@ -244,38 +244,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <!-- Edit User Modal -->
 <div id="edit-modal" style="display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.7); z-index: 1000;">
-    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: #16213e; padding: 30px; border-radius: 8px; width: 90%; max-width: 500px;">
-        <h3 style="margin-bottom: 20px;">Edit User</h3>
+    <div style="position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: var(--bg-panel); padding: 30px; border-radius: 8px; width: 90%; max-width: 500px;">
+        <h3 style="margin-bottom: 20px;" data-i18n="users_page.edit_title">Edit User</h3>
         <form id="edit-form" method="POST">
             <input type="hidden" id="edit-user-id" name="user_id">
             <div class="form-group">
-                <label for="edit-username">Username</label>
-                <input type="text" id="edit-username" name="username" required style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
+                <label for="edit-username" data-i18n="users_page.username">Username</label>
+                <input type="text" id="edit-username" name="username" required style="background: var(--bg-page); color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px; width: 100%;">
             </div>
             <div class="form-group">
-                <label for="edit-email">Email</label>
-                <input type="email" id="edit-email" name="email" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
+                <label for="edit-email" data-i18n="users_page.email">Email</label>
+                <input type="email" id="edit-email" name="email" style="background: var(--bg-page); color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px; width: 100%;">
             </div>
             <div class="form-group">
-                <label for="edit-password">New Password (leave blank to keep current)</label>
-                <input type="password" id="edit-password" name="password" placeholder="Enter new password" style="background: #1a1a2e; color: #e0e0e0; border: 1px solid #0f3460; padding: 8px; border-radius: 3px; width: 100%;">
+                <label for="edit-password" data-i18n="users_page.new_password">New Password (leave blank to keep current)</label>
+                <input type="password" id="edit-password" name="password" placeholder="Enter new password" style="background: var(--bg-page); color: var(--color-text); border: 1px solid var(--bg-accent); padding: 8px; border-radius: 3px; width: 100%;">
             </div>
             <div class="form-group">
-                <label for="edit-role">Role</label>
+                <label for="edit-role" data-i18n="users_page.role">Role</label>
                 <select id="edit-role" name="role">
-                    <option value="user">User</option>
-                    <option value="admin">Admin</option>
+                    <option value="user" data-i18n="users_page.role_user">User</option>
+                    <option value="admin" data-i18n="users_page.role_admin">Admin</option>
                 </select>
             </div>
             <div class="form-group">
                 <label>
                     <input type="checkbox" id="edit-is-active" name="is_active" value="1">
-                    Active
+                    <span data-i18n="users_page.col_active">Active</span>
                 </label>
             </div>
             <div style="display: flex; gap: 10px;">
-                <button type="submit" class="btn">Save Changes</button>
-                <button type="button" onclick="closeEditModal()" class="btn btn-secondary">Cancel</button>
+                <button type="submit" class="btn" data-i18n="users_page.save_changes">Save Changes</button>
+                <button type="button" onclick="closeEditModal()" class="btn btn-secondary" data-i18n="modal.cancel">Cancel</button>
             </div>
         </form>
     </div>
@@ -300,7 +300,7 @@ function updateUsers(params) {
     // Show loading state
     const tableContainer = document.querySelector('table').parentElement;
     const originalContent = tableContainer.innerHTML;
-    tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e0e0e0;"><div class="spinner"></div> Loading...</div>';
+    tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--color-text);"><div class="spinner"></div> ' + window.i18n.t('users.loading') + '</div>';
 
     // Build query parameters
     const currentParams = new URLSearchParams(window.location.search);
@@ -360,7 +360,7 @@ function updateUsers(params) {
     .catch(error => {
         console.error('Error updating users:', error);
         tableContainer.innerHTML = originalContent;
-        showNotification('Error loading users', 'error');
+        showNotification(window.i18n.t('users.error_loading'), 'error');
     });
 }
 
@@ -380,7 +380,7 @@ document.addEventListener('DOMContentLoaded', function() {
         // Show loading state
         const tableContainer = document.querySelector('table').parentElement;
         const originalContent = tableContainer.innerHTML;
-        tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: #e0e0e0;"><div class="spinner"></div> Loading...</div>';
+        tableContainer.innerHTML = '<div style="text-align: center; padding: 20px; color: var(--color-text);"><div class="spinner"></div> ' + window.i18n.t('users.loading') + '</div>';
 
         // Build query parameters
         const currentParams = new URLSearchParams(window.location.search);
@@ -458,7 +458,7 @@ document.addEventListener('DOMContentLoaded', function() {
         .catch(error => {
             console.error('Error updating users:', error);
             tableContainer.innerHTML = originalContent;
-            showNotification('Error loading users', 'error');
+            showNotification(window.i18n.t('users.error_loading'), 'error');
         });
     }
 
@@ -705,7 +705,7 @@ async function performBulkAction(action, description, destructive = false, extra
     // Show loading state
     const bulkActions = document.getElementById('bulk-actions');
     const originalContent = bulkActions.innerHTML;
-    bulkActions.innerHTML = '<div style="text-align: center; padding: 10px; color: #e0e0e0;"><div class="spinner"></div> Processing...</div>';
+    bulkActions.innerHTML = '<div style="text-align: center; padding: 10px; color: var(--color-text);"><div class="spinner"></div> ' + window.i18n.t('users.processing') + '</div>';
 
     // Prepare request data
     const requestData = {
@@ -809,15 +809,15 @@ function updateUserTier(userId, tierId) {
     .then(data => {
         if (data.success) {
             // Show success notification
-            showNotification('Tier updated successfully', 'success');
+            showNotification(window.i18n.t('users.tier_updated'), 'success');
         } else {
             // Show error notification
-            showNotification(data.error || 'Failed to update tier', 'error');
+            showNotification(data.error || window.i18n.t('users.tier_update_failed'), 'error');
             location.reload(); // Reload to reset dropdown
         }
     })
     .catch(error => {
-        showNotification('Error: ' + error, 'error');
+        showNotification(window.i18n.t('users.network_error'), 'error');
         location.reload(); // Reload to reset dropdown
     });
 }
@@ -879,10 +879,10 @@ table {
 th, td {
     padding: 12px;
     text-align: left;
-    border-bottom: 1px solid #0f3460;
+    border-bottom: 1px solid var(--bg-accent);
 }
 th {
-    background: #0f3460;
+    background: var(--bg-accent);
     font-weight: 600;
 }
 
@@ -894,7 +894,7 @@ th {
 }
 
 .sortable:hover {
-    background: #1a4d7a;
+    background: var(--color-secondary-hover);
 }
 
 .sort-indicator {
@@ -905,7 +905,7 @@ th {
 
 /* Loading spinner */
 .spinner {
-    border: 3px solid #0f3460;
+    border: 3px solid var(--bg-accent);
     border-top: 3px solid #4ade80;
     border-radius: 50%;
     width: 20px;
@@ -962,29 +962,29 @@ input:-webkit-autofill,
 input:-webkit-autofill:hover,
 input:-webkit-autofill:focus,
 input:-webkit-autofill:active {
-    -webkit-box-shadow: 0 0 0 30px #1a1a2e inset !important;
-    -webkit-text-fill-color: #e0e0e0 !important;
+    -webkit-box-shadow: 0 0 0 30px var(--bg-page) inset !important;
+    -webkit-text-fill-color: var(--color-text) !important;
 }
 </style>
 
 <!-- Send Notification Modal -->
 <div id="notify-modal" style="display:none; position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.7); z-index:1000; align-items:center; justify-content:center;">
-    <div style="background:#16213e; padding:30px; border-radius:8px; width:90%; max-width:520px; border:1px solid #0f3460;">
-        <h3 style="margin-bottom:20px;"><i class="fas fa-bell" style="color:#a78bfa;"></i> Send Notification</h3>
-        <p id="notify-target-label" style="color:#a0a0a0; margin-bottom:16px; font-size:13px;"></p>
+    <div style="background:var(--bg-panel); padding:30px; border-radius:8px; width:90%; max-width:520px; border:1px solid var(--bg-accent);">
+        <h3 style="margin-bottom:20px;"><i class="fas fa-bell" style="color:#a78bfa;"></i> <span data-i18n="users_page.send_notification">Send Notification</span></h3>
+        <p id="notify-target-label" style="color:var(--color-muted); margin-bottom:16px; font-size:13px;"></p>
         <div class="form-group">
-            <label for="notify-title">Title</label>
-            <input type="text" id="notify-title" maxlength="200" placeholder="Notification title"
-                   style="background:#1a1a2e; color:#e0e0e0; border:1px solid #0f3460; padding:8px; border-radius:3px; width:100%;">
+            <label for="notify-title" data-i18n="users_page.notify_title">Title</label>
+            <input type="text" id="notify-title" maxlength="200" data-i18n="users_page.notify_title_placeholder" placeholder="Notification title"
+                   style="background:var(--bg-page); color:var(--color-text); border:1px solid var(--bg-accent); padding:8px; border-radius:3px; width:100%;">
         </div>
         <div class="form-group">
-            <label for="notify-message">Message</label>
-            <textarea id="notify-message" rows="4" placeholder="Notification message…"
-                      style="background:#1a1a2e; color:#e0e0e0; border:1px solid #0f3460; padding:8px; border-radius:3px; width:100%; resize:vertical;"></textarea>
+            <label for="notify-message" data-i18n="users_page.notify_message">Message</label>
+            <textarea id="notify-message" rows="4" data-i18n="users_page.notify_message_placeholder" placeholder="Notification message…"
+                      style="background:var(--bg-page); color:var(--color-text); border:1px solid var(--bg-accent); padding:8px; border-radius:3px; width:100%; resize:vertical;"></textarea>
         </div>
         <div style="display:flex; gap:10px; margin-top:10px;">
-            <button class="btn" onclick="submitNotification()"><i class="fas fa-paper-plane"></i> Send</button>
-            <button class="btn btn-secondary" onclick="closeNotifyModal()">Cancel</button>
+            <button class="btn" onclick="submitNotification()"><i class="fas fa-paper-plane"></i> <span data-i18n="users_page.send_btn">Send</span></button>
+            <button class="btn btn-secondary" onclick="closeNotifyModal()" data-i18n="modal.cancel">Cancel</button>
         </div>
         <div id="notify-status" style="margin-top:12px;"></div>
     </div>
@@ -1027,7 +1027,7 @@ async function submitNotification() {
             statusEl.innerHTML = `<div class="alert alert-success">Sent to ${data.sent} user(s).</div>`;
             setTimeout(closeNotifyModal, 1500);
         } else {
-            statusEl.innerHTML = `<div class="alert alert-error">${data.error || 'Failed to send.'}</div>`;
+            statusEl.innerHTML = `<div class="alert alert-error">${data.error || window.i18n.t('users.send_failed')}</div>`;
         }
     } catch (e) {
         statusEl.innerHTML = '<div class="alert alert-error">Network error.</div>';

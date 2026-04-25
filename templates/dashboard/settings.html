@@ -53,38 +53,38 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
 
 <div class="settings-tabs">
-    <div class="settings-tab active" onclick="switchTab('server')"><i class="fas fa-server"></i> Server</div>
-    <div class="settings-tab" onclick="switchTab('auth')"><i class="fas fa-key"></i> Auth &amp; MCP</div>
-    <div class="settings-tab" onclick="switchTab('models')"><i class="fas fa-brain"></i> Models</div>
-    <div class="settings-tab" onclick="switchTab('database')"><i class="fas fa-database"></i> Database</div>
-    <div class="settings-tab" onclick="switchTab('cache')"><i class="fas fa-bolt"></i> Cache</div>
-    <div class="settings-tab" onclick="switchTab('classification')"><i class="fas fa-filter"></i> Classification</div>
-    <div class="settings-tab" onclick="switchTab('tor')"><i class="fas fa-user-secret"></i> TOR</div>
-    <div class="settings-tab" onclick="switchTab('signup')"><i class="fas fa-user-plus"></i> Signup</div>
-    <div class="settings-tab" onclick="switchTab('oauth2')"><i class="fab fa-openid"></i> OAuth2</div>
-    <div class="settings-tab" onclick="switchTab('smtp')"><i class="fas fa-envelope"></i> SMTP</div>
-    <div class="settings-tab" onclick="switchTab('batching')"><i class="fas fa-layer-group"></i> Batching</div>
-    <div class="settings-tab" onclick="switchTab('ratelimit')"><i class="fas fa-tachometer-alt"></i> Rate Limiting</div>
-    <div class="settings-tab" onclick="switchTab('admin')"><i class="fas fa-shield-alt"></i> Admin</div>
+    <div class="settings-tab active" onclick="switchTab('server')"><i class="fas fa-server"></i><span data-i18n="settings_page.tab_server">Server</span></div>
+    <div class="settings-tab" onclick="switchTab('auth')"><i class="fas fa-key"></i><span data-i18n="settings_page.tab_auth">Auth &amp; MCP</span></div>
+    <div class="settings-tab" onclick="switchTab('models')"><i class="fas fa-brain"></i><span data-i18n="settings_page.tab_models">Models</span></div>
+    <div class="settings-tab" onclick="switchTab('database')"><i class="fas fa-database"></i><span data-i18n="settings_page.tab_database">Database</span></div>
+    <div class="settings-tab" onclick="switchTab('cache')"><i class="fas fa-bolt"></i><span data-i18n="settings_page.tab_cache">Cache</span></div>
+    <div class="settings-tab" onclick="switchTab('classification')"><i class="fas fa-filter"></i><span data-i18n="settings_page.tab_classification">Classification</span></div>
+    <div class="settings-tab" onclick="switchTab('tor')"><i class="fas fa-user-secret"></i><span data-i18n="settings_page.tab_tor">TOR</span></div>
+    <div class="settings-tab" onclick="switchTab('signup')"><i class="fas fa-user-plus"></i><span data-i18n="settings_page.tab_signup">Signup</span></div>
+    <div class="settings-tab" onclick="switchTab('oauth2')"><i class="fab fa-openid"></i><span data-i18n="settings_page.tab_oauth2">OAuth2</span></div>
+    <div class="settings-tab" onclick="switchTab('smtp')"><i class="fas fa-envelope"></i><span data-i18n="settings_page.tab_smtp">SMTP</span></div>
+    <div class="settings-tab" onclick="switchTab('batching')"><i class="fas fa-layer-group"></i><span data-i18n="settings_page.tab_batching">Batching</span></div>
+    <div class="settings-tab" onclick="switchTab('ratelimit')"><i class="fas fa-tachometer-alt"></i><span data-i18n="settings_page.tab_ratelimit">Rate Limiting</span></div>
+    <div class="settings-tab" onclick="switchTab('admin')"><i class="fas fa-shield-alt"></i><span data-i18n="settings_page.tab_admin">Admin</span></div>
 </div>
 
 <form method="POST">
     <input type="hidden" name="active_tab" id="active_tab_input" value="{{ active_tab if active_tab else 'server' }}">
     <div class="settings-section active" id="tab-server">
-    <div class="section-title"><i class="fas fa-server"></i> Server Configuration</div>
+    <div class="section-title"><i class="fas fa-server"></i> <span data-i18n="settings_page.section_server">Server Configuration</span></div>
     
     <div class="form-group">
-        <label for="host">Host</label>
+        <label for="host" data-i18n="settings_page.lbl_host">Host</label>
         <input type="text" id="host" name="host" value="{{ config.server.host }}" required>
     </div>
     
     <div class="form-group">
-        <label for="port">Port</label>
+        <label for="port" data-i18n="settings_page.lbl_port">Port</label>
         <input type="number" id="port" name="port" value="{{ config.server.port }}" required>
     </div>
     
     <div class="form-group">
-        <label for="protocol">Protocol</label>
+        <label for="protocol" data-i18n="settings_page.lbl_protocol">Protocol</label>
         <select id="protocol" name="protocol" onchange="toggleSSLFields()">
             <option value="http" {% if config.server.protocol == 'http' %}selected{% endif %}>HTTP</option>
             <option value="https" {% if config.server.protocol == 'https' %}selected{% endif %}>HTTPS</option>
@@ -93,19 +93,19 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     <div id="ssl-fields" style="display: {% if config.server.protocol == 'https' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="public_domain">Public Domain (for Let's Encrypt)</label>
+            <label for="public_domain" data-i18n="settings_page.lbl_public_domain">Public Domain (for Let's Encrypt)</label>
             <input type="text" id="public_domain" name="public_domain" value="{{ config.server.public_domain or '' }}" placeholder="example.com (optional)">
             <small style="color: #666; display: block; margin-top: 5px;">If specified, Let's Encrypt will be used to generate valid SSL certificates. Leave empty to use self-signed certificates.</small>
         </div>
         
         <div class="form-group">
-            <label for="ssl_cert">SSL Certificate Path</label>
+            <label for="ssl_cert" data-i18n="settings_page.lbl_ssl_cert">SSL Certificate Path</label>
             <input type="text" id="ssl_cert" name="ssl_cert" value="{{ config.server.ssl_cert or '' }}" placeholder="~/.aisbf/cert.pem (default)">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SSL certificate file. Leave empty to use default (~/.aisbf/cert.pem). Auto-generated using Let's Encrypt if public domain is set, otherwise self-signed.</small>
         </div>
         
         <div class="form-group">
-            <label for="ssl_key">SSL Key Path</label>
+            <label for="ssl_key" data-i18n="settings_page.lbl_ssl_key">SSL Key Path</label>
             <input type="text" id="ssl_key" name="ssl_key" value="{{ config.server.ssl_key or '' }}" placeholder="~/.aisbf/key.pem (default)">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SSL private key file. Leave empty to use default (~/.aisbf/key.pem). Auto-generated with certificate.</small>
         </div>
@@ -113,48 +113,48 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div><!-- /tab-server -->
     
     <div class="settings-section" id="tab-auth">
-    <div class="section-title"><i class="fas fa-key"></i> Authentication</div>
+    <div class="section-title"><i class="fas fa-key"></i> <span data-i18n="settings_page.section_auth">Authentication</span></div>
     
     <div class="form-group">
         <label>
             <input type="checkbox" name="auth_enabled" {% if config.auth.enabled %}checked{% endif %}>
-            Enable API Authentication
+            <span data-i18n="settings_page.lbl_enable_auth">Enable API Authentication</span>
         </label>
     </div>
     
     <div class="form-group">
-        <label for="auth_tokens">Auth Tokens (one per line)</label>
+        <label for="auth_tokens" data-i18n="settings_page.lbl_auth_tokens">Auth Tokens (one per line)</label>
         <textarea id="auth_tokens" name="auth_tokens" style="min-height: 100px;">{{ '\n'.join(config.auth.tokens) }}</textarea>
     </div>
     
-    <div class="section-title" style="margin-top:28px;"><i class="fas fa-network-wired"></i> MCP Server</div>
+    <div class="section-title" style="margin-top:28px;"><i class="fas fa-network-wired"></i> <span data-i18n="settings_page.section_mcp">MCP Server</span></div>
     
     <div class="form-group">
         <label>
             <input type="checkbox" name="mcp_enabled" {% if config.mcp.enabled %}checked{% endif %}>
-            Enable MCP Server
+            <span data-i18n="settings_page.lbl_enable_mcp">Enable MCP Server</span>
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Model Context Protocol server for remote agent configuration</small>
     </div>
     
     <div class="form-group">
-        <label for="autoselect_tokens">Autoselect Tokens (one per line)</label>
+        <label for="autoselect_tokens" data-i18n="settings_page.lbl_autoselect_tokens">Autoselect Tokens (one per line)</label>
         <textarea id="autoselect_tokens" name="autoselect_tokens" style="min-height: 80px;" placeholder="Tokens for autoselection/autorotation access">{{ '\n'.join(config.mcp.autoselect_tokens) if config.mcp.autoselect_tokens else '' }}</textarea>
         <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to autoselection and autorotation settings + standard APIs</small>
     </div>
     
     <div class="form-group">
-        <label for="fullconfig_tokens">Full Config Tokens (one per line)</label>
+        <label for="fullconfig_tokens" data-i18n="settings_page.lbl_fullconfig_tokens">Full Config Tokens (one per line)</label>
         <textarea id="fullconfig_tokens" name="fullconfig_tokens" style="min-height: 80px;" placeholder="Tokens for full configuration access">{{ '\n'.join(config.mcp.fullconfig_tokens) if config.mcp.fullconfig_tokens else '' }}</textarea>
         <small style="color: #666; display: block; margin-top: 5px;">Tokens that give access to full system configuration + standard APIs</small>
     </div>
     </div><!-- /tab-auth -->
     
     <div class="settings-section" id="tab-models">
-    <div class="section-title"><i class="fas fa-brain"></i> Internal Models</div>
+    <div class="section-title"><i class="fas fa-brain"></i> <span data-i18n="settings_page.section_models">Internal Models</span></div>
 
     <div class="form-group">
-        <label for="condensation_model_id">Condensation Model ID</label>
+        <label for="condensation_model_id" data-i18n="settings_page.lbl_condensation_model">Condensation Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="condensation_model_id" name="condensation_model_id" value="{{ config.internal_model.condensation_model_id }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('condensation_model_id').value, 'condensation', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
@@ -163,7 +163,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="form-group">
-        <label for="autoselect_model_id">Autoselect Model ID</label>
+        <label for="autoselect_model_id" data-i18n="settings_page.lbl_autoselect_model">Autoselect Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="autoselect_model_id" name="autoselect_model_id" value="{{ config.internal_model.autoselect_model_id }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('autoselect_model_id').value, 'autoselect', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
@@ -172,7 +172,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="form-group">
-        <label for="nsfw_classifier">NSFW Classifier Model ID</label>
+        <label for="nsfw_classifier" data-i18n="settings_page.lbl_nsfw_classifier">NSFW Classifier Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="nsfw_classifier" name="nsfw_classifier" value="{{ config.internal_model.nsfw_classifier or 'michelleli99/NSFW_text_classifier' }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('nsfw_classifier').value, 'nsfw', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
@@ -181,7 +181,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="form-group">
-        <label for="privacy_classifier">Privacy Classifier Model ID</label>
+        <label for="privacy_classifier" data-i18n="settings_page.lbl_privacy_classifier">Privacy Classifier Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="privacy_classifier" name="privacy_classifier" value="{{ config.internal_model.privacy_classifier or 'iiiorg/piiranha-v1-detect-personal-information' }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('privacy_classifier').value, 'privacy', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
@@ -190,7 +190,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="form-group">
-        <label for="semantic_vectorization">Semantic Vectorization Model ID</label>
+        <label for="semantic_vectorization" data-i18n="settings_page.lbl_semantic_vectorization">Semantic Vectorization Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="semantic_vectorization" name="semantic_vectorization" value="{{ config.internal_model.semantic_vectorization or 'sentence-transformers/all-MiniLM-L6-v2' }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('semantic_vectorization').value, 'semantic', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
@@ -207,10 +207,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div><!-- /tab-models -->
 
     <div class="settings-section" id="tab-database">
-    <div class="section-title"><i class="fas fa-database"></i> Database Configuration</div>
+    <div class="section-title"><i class="fas fa-database"></i> <span data-i18n="settings_page.section_database">Database Configuration</span></div>
 
     <div class="form-group">
-        <label for="database_type">Database Type</label>
+        <label for="database_type" data-i18n="settings_page.lbl_database_type">Database Type</label>
         <select id="database_type" name="database_type" onchange="toggleDatabaseFields()">
             <option value="sqlite" {% if config.database and config.database.type == 'sqlite' %}selected{% endif %}>SQLite</option>
             <option value="mysql" {% if config.database and config.database.type == 'mysql' %}selected{% endif %}>MySQL</option>
@@ -220,7 +220,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="sqlite-fields" style="display: {% if not config.database or config.database.type == 'sqlite' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="db_sqlite_path">SQLite Database Path</label>
+            <label for="db_sqlite_path" data-i18n="settings_page.lbl_sqlite_path">SQLite Database Path</label>
             <input type="text" id="db_sqlite_path" name="sqlite_path" value="{{ config.database.sqlite_path if config.database and config.database.sqlite_path else '~/.aisbf/aisbf.db' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite database file (supports ~ expansion)</small>
         </div>
@@ -228,31 +228,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="mysql-fields" style="display: {% if config.database and config.database.type == 'mysql' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="mysql_host">MySQL Host</label>
+            <label for="mysql_host" data-i18n="settings_page.lbl_mysql_host">MySQL Host</label>
             <input type="text" id="mysql_host" name="mysql_host" value="{{ config.database.mysql_host if config.database and config.database.mysql_host else 'localhost' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL server hostname or IP address</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_port">MySQL Port</label>
+            <label for="mysql_port" data-i18n="settings_page.lbl_mysql_port">MySQL Port</label>
             <input type="number" id="mysql_port" name="mysql_port" value="{{ config.database.mysql_port if config.database and config.database.mysql_port else 3306 }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL server port (default: 3306)</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_user">MySQL Username</label>
+            <label for="mysql_user" data-i18n="settings_page.lbl_mysql_user">MySQL Username</label>
             <input type="text" id="mysql_user" name="mysql_user" value="{{ config.database.mysql_user if config.database and config.database.mysql_user else 'aisbf' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database username</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_password">MySQL Password</label>
+            <label for="mysql_password" data-i18n="settings_page.lbl_mysql_password">MySQL Password</label>
             <input type="password" id="mysql_password" name="mysql_password" placeholder="Leave blank to keep current">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database password</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_database">MySQL Database Name</label>
+            <label for="mysql_database" data-i18n="settings_page.lbl_mysql_database">MySQL Database Name</label>
             <input type="text" id="mysql_database" name="mysql_database" value="{{ config.database.mysql_database if config.database and config.database.mysql_database else 'aisbf' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database name</small>
         </div>
@@ -260,10 +260,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div><!-- /tab-database -->
 
     <div class="settings-section" id="tab-cache">
-    <div class="section-title"><i class="fas fa-bolt"></i> Cache Configuration</div>
+    <div class="section-title"><i class="fas fa-bolt"></i> <span data-i18n="settings_page.section_cache">Cache Configuration</span></div>
 
     <div class="form-group">
-        <label for="cache_type">Cache Type</label>
+        <label for="cache_type" data-i18n="settings_page.lbl_cache_type">Cache Type</label>
         <select id="cache_type" name="cache_type" onchange="toggleCacheFields()">
             <option value="sqlite" {% if config.cache and config.cache.type == 'sqlite' %}selected{% endif %}>SQLite</option>
             <option value="mysql" {% if config.cache and config.cache.type == 'mysql' %}selected{% endif %}>MySQL</option>
@@ -276,7 +276,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="sqlite-cache-fields" style="display: {% if config.cache and config.cache.type == 'sqlite' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="cache_sqlite_path">SQLite Cache Path</label>
+            <label for="cache_sqlite_path" data-i18n="settings_page.lbl_cache_sqlite_path">SQLite Cache Path</label>
             <input type="text" id="cache_sqlite_path" name="sqlite_path" value="{{ config.cache.sqlite_path if config.cache and config.cache.sqlite_path else '~/.aisbf/cache.db' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Path to SQLite cache database file (supports ~ expansion)</small>
         </div>
@@ -284,31 +284,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="mysql-cache-fields" style="display: {% if config.cache and config.cache.type == 'mysql' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="mysql_cache_host">MySQL Host</label>
+            <label for="mysql_cache_host" data-i18n="settings_page.lbl_mysql_host">MySQL Host</label>
             <input type="text" id="mysql_cache_host" name="mysql_cache_host" value="{{ config.cache.mysql_host if config.cache and config.cache.mysql_host else 'localhost' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL server hostname or IP address</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_cache_port">MySQL Port</label>
+            <label for="mysql_cache_port" data-i18n="settings_page.lbl_mysql_port">MySQL Port</label>
             <input type="number" id="mysql_cache_port" name="mysql_cache_port" value="{{ config.cache.mysql_port if config.cache and config.cache.mysql_port else 3306 }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL server port (default: 3306)</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_cache_user">MySQL Username</label>
+            <label for="mysql_cache_user" data-i18n="settings_page.lbl_mysql_user">MySQL Username</label>
             <input type="text" id="mysql_cache_user" name="mysql_cache_user" value="{{ config.cache.mysql_user if config.cache and config.cache.mysql_user else 'aisbf' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database username</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_cache_password">MySQL Password</label>
+            <label for="mysql_cache_password" data-i18n="settings_page.lbl_mysql_password">MySQL Password</label>
             <input type="password" id="mysql_cache_password" name="mysql_cache_password" placeholder="Leave blank to keep current">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database password</small>
         </div>
 
         <div class="form-group">
-            <label for="mysql_cache_database">MySQL Database Name</label>
+            <label for="mysql_cache_database" data-i18n="settings_page.lbl_mysql_database">MySQL Database Name</label>
             <input type="text" id="mysql_cache_database" name="mysql_cache_database" value="{{ config.cache.mysql_database if config.cache and config.cache.mysql_database else 'aisbf_cache' }}">
             <small style="color: #666; display: block; margin-top: 5px;">MySQL database name for cache</small>
         </div>
@@ -316,31 +316,31 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
     <div id="redis-cache-fields" style="display: {% if config.cache and config.cache.type == 'redis' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="redis_host">Redis Host</label>
+            <label for="redis_host" data-i18n="settings_page.lbl_redis_host">Redis Host</label>
             <input type="text" id="redis_host" name="redis_host" value="{{ config.cache.redis_host if config.cache and config.cache.redis_host else 'localhost' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Redis server hostname or IP address</small>
         </div>
 
         <div class="form-group">
-            <label for="redis_port">Redis Port</label>
+            <label for="redis_port" data-i18n="settings_page.lbl_redis_port">Redis Port</label>
             <input type="number" id="redis_port" name="redis_port" value="{{ config.cache.redis_port if config.cache and config.cache.redis_port else 6379 }}">
             <small style="color: #666; display: block; margin-top: 5px;">Redis server port (default: 6379)</small>
         </div>
 
         <div class="form-group">
-            <label for="redis_db">Redis Database</label>
+            <label for="redis_db" data-i18n="settings_page.lbl_redis_db">Redis Database</label>
             <input type="number" id="redis_db" name="redis_db" value="{{ config.cache.redis_db if config.cache and config.cache.redis_db else 0 }}">
             <small style="color: #666; display: block; margin-top: 5px;">Redis database number (default: 0)</small>
         </div>
 
         <div class="form-group">
-            <label for="redis_password">Redis Password</label>
+            <label for="redis_password" data-i18n="settings_page.lbl_redis_password">Redis Password</label>
             <input type="password" id="redis_password" name="redis_password" placeholder="Leave blank if no password">
             <small style="color: #666; display: block; margin-top: 5px;">Redis password (optional)</small>
         </div>
 
         <div class="form-group">
-            <label for="redis_key_prefix">Redis Key Prefix</label>
+            <label for="redis_key_prefix" data-i18n="settings_page.lbl_redis_key_prefix">Redis Key Prefix</label>
             <input type="text" id="redis_key_prefix" name="redis_key_prefix" value="{{ config.cache.redis_key_prefix if config.cache and config.cache.redis_key_prefix else 'aisbf:' }}">
             <small style="color: #666; display: block; margin-top: 5px;">Prefix for Redis keys (default: aisbf:)</small>
         </div>
@@ -357,7 +357,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
     
     <div class="form-group">
-        <label for="response_cache_backend">Response Cache Backend</label>
+        <label for="response_cache_backend" data-i18n="settings_page.lbl_response_cache_backend">Response Cache Backend</label>
         <select id="response_cache_backend" name="response_cache_backend" onchange="toggleResponseCacheFields()">
             <option value="memory" {% if config.response_cache and config.response_cache.backend == 'memory' %}selected{% endif %}>Memory</option>
             <option value="sqlite" {% if config.response_cache and config.response_cache.backend == 'sqlite' %}selected{% endif %}>SQLite</option>
@@ -368,74 +368,74 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
     
     <div class="form-group">
-        <label for="response_cache_ttl">Cache TTL (seconds)</label>
+        <label for="response_cache_ttl" data-i18n="settings_page.lbl_cache_ttl">Cache TTL (seconds)</label>
         <input type="number" id="response_cache_ttl" name="response_cache_ttl" value="{{ config.response_cache.ttl if config.response_cache else 600 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Time to live for cached responses (default: 600 seconds)</small>
     </div>
     
     <div class="form-group">
-        <label for="response_cache_max_memory">Max Memory Cache Size</label>
+        <label for="response_cache_max_memory" data-i18n="settings_page.lbl_cache_max_memory">Max Memory Cache Size</label>
         <input type="number" id="response_cache_max_memory" name="response_cache_max_memory" value="{{ config.response_cache.max_memory_cache if config.response_cache else 1000 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Maximum number of items in memory cache (default: 1000)</small>
     </div>
     
     <div id="response-cache-redis-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'redis' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="response_cache_redis_host">Redis Host</label>
+            <label for="response_cache_redis_host" data-i18n="settings_page.lbl_redis_host">Redis Host</label>
             <input type="text" id="response_cache_redis_host" name="response_cache_redis_host" value="{{ config.response_cache.redis_host if config.response_cache else 'localhost' }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_redis_port">Redis Port</label>
+            <label for="response_cache_redis_port" data-i18n="settings_page.lbl_redis_port">Redis Port</label>
             <input type="number" id="response_cache_redis_port" name="response_cache_redis_port" value="{{ config.response_cache.redis_port if config.response_cache else 6379 }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_redis_db">Redis Database</label>
+            <label for="response_cache_redis_db" data-i18n="settings_page.lbl_redis_db">Redis Database</label>
             <input type="number" id="response_cache_redis_db" name="response_cache_redis_db" value="{{ config.response_cache.redis_db if config.response_cache else 0 }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_redis_password">Redis Password</label>
+            <label for="response_cache_redis_password" data-i18n="settings_page.lbl_redis_password">Redis Password</label>
             <input type="password" id="response_cache_redis_password" name="response_cache_redis_password" placeholder="Leave blank if no password">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_redis_key_prefix">Redis Key Prefix</label>
+            <label for="response_cache_redis_key_prefix" data-i18n="settings_page.lbl_redis_key_prefix">Redis Key Prefix</label>
             <input type="text" id="response_cache_redis_key_prefix" name="response_cache_redis_key_prefix" value="{{ config.response_cache.redis_key_prefix if config.response_cache else 'aisbf:response:' }}">
         </div>
     </div>
     
     <div id="response-cache-sqlite-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'sqlite' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="response_cache_sqlite_path">SQLite Path</label>
+            <label for="response_cache_sqlite_path" data-i18n="settings_page.lbl_sqlite_path">SQLite Path</label>
             <input type="text" id="response_cache_sqlite_path" name="response_cache_sqlite_path" value="{{ config.response_cache.sqlite_path if config.response_cache else '~/.aisbf/response_cache.db' }}">
         </div>
     </div>
     
     <div id="response-cache-mysql-fields" style="display: {% if config.response_cache and config.response_cache.backend == 'mysql' %}block{% else %}none{% endif %};">
         <div class="form-group">
-            <label for="response_cache_mysql_host">MySQL Host</label>
+            <label for="response_cache_mysql_host" data-i18n="settings_page.lbl_mysql_host">MySQL Host</label>
             <input type="text" id="response_cache_mysql_host" name="response_cache_mysql_host" value="{{ config.response_cache.mysql_host if config.response_cache else 'localhost' }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_mysql_port">MySQL Port</label>
+            <label for="response_cache_mysql_port" data-i18n="settings_page.lbl_mysql_port">MySQL Port</label>
             <input type="number" id="response_cache_mysql_port" name="response_cache_mysql_port" value="{{ config.response_cache.mysql_port if config.response_cache else 3306 }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_mysql_user">MySQL Username</label>
+            <label for="response_cache_mysql_user" data-i18n="settings_page.lbl_mysql_user">MySQL Username</label>
             <input type="text" id="response_cache_mysql_user" name="response_cache_mysql_user" value="{{ config.response_cache.mysql_user if config.response_cache else 'aisbf' }}">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_mysql_password">MySQL Password</label>
+            <label for="response_cache_mysql_password" data-i18n="settings_page.lbl_mysql_password">MySQL Password</label>
             <input type="password" id="response_cache_mysql_password" name="response_cache_mysql_password" placeholder="Leave blank to keep current">
         </div>
         
         <div class="form-group">
-            <label for="response_cache_mysql_database">MySQL Database</label>
+            <label for="response_cache_mysql_database" data-i18n="settings_page.lbl_mysql_database">MySQL Database</label>
             <input type="text" id="response_cache_mysql_database" name="response_cache_mysql_database" value="{{ config.response_cache.mysql_database if config.response_cache else 'aisbf_response_cache' }}">
         </div>
     </div>
@@ -512,7 +512,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div><!-- /tab-classification -->
 
     <div class="settings-section" id="tab-tor">
-    <div class="section-title"><i class="fas fa-user-secret"></i> TOR Hidden Service</div>
+    <div class="section-title"><i class="fas fa-user-secret"></i> <span data-i18n="settings_page.section_tor">TOR Hidden Service</span></div>
     
     <div id="tor-status" style="margin-bottom: 20px; padding: 15px; background: #0f3460; border-radius: 6px; border-left: 4px solid #16213e;">
         <div style="display: flex; align-items: center; gap: 10px; margin-bottom: 10px;">
@@ -528,7 +528,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="form-group">
         <label>
             <input type="checkbox" name="tor_enabled" id="tor_enabled" {% if config.tor and config.tor.enabled %}checked{% endif %} onchange="toggleTorFields()">
-            Enable TOR Hidden Service
+            <span data-i18n="settings_page.lbl_enable_tor">Enable TOR Hidden Service</span>
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Expose AISBF over TOR network as a hidden service</small>
     </div>
@@ -578,25 +578,25 @@ brew services restart tor   # macOS</code></pre>
         </div>
         
         <div class="form-group">
-            <label for="tor_control_host">TOR Control Host</label>
+            <label for="tor_control_host" data-i18n="settings_page.lbl_tor_control_host">TOR Control Host</label>
             <input type="text" id="tor_control_host" name="tor_control_host" value="{{ config.tor.control_host if config.tor else '127.0.0.1' }}">
             <small style="color: #666; display: block; margin-top: 5px;">TOR control port host (default: 127.0.0.1)</small>
         </div>
         
         <div class="form-group">
-            <label for="tor_control_port">TOR Control Port</label>
+            <label for="tor_control_port" data-i18n="settings_page.lbl_tor_control_port">TOR Control Port</label>
             <input type="number" id="tor_control_port" name="tor_control_port" value="{{ config.tor.control_port if config.tor else 9051 }}">
             <small style="color: #666; display: block; margin-top: 5px;">TOR control port (default: 9051) - must match ControlPort in torrc</small>
         </div>
         
         <div class="form-group">
-            <label for="tor_control_password">TOR Control Password</label>
+            <label for="tor_control_password" data-i18n="settings_page.lbl_tor_control_password">TOR Control Password</label>
             <input type="password" id="tor_control_password" name="tor_control_password" value="{{ config.tor.control_password if config.tor and config.tor.control_password else '' }}" placeholder="Enter the password you used to generate the hash">
             <small style="color: #666; display: block; margin-top: 5px;">The password you used with <code>tor --hash-password</code> (NOT the hash itself)</small>
         </div>
         
         <div class="form-group">
-            <label for="tor_hidden_service_dir">Hidden Service Directory</label>
+            <label for="tor_hidden_service_dir" data-i18n="settings_page.lbl_tor_service_dir">Hidden Service Directory</label>
             <div style="display: flex; gap: 10px; align-items: flex-start;">
                 <input type="text" id="tor_hidden_service_dir" name="tor_hidden_service_dir" value="{{ config.tor.hidden_service_dir if config.tor and config.tor.hidden_service_dir else '' }}" placeholder="Leave blank for ephemeral service" style="flex: 1;" onchange="updateTorrcExample()">
                 <button type="button" onclick="createPersistentService()" class="btn btn-secondary" style="white-space: nowrap;">Use Default</button>
@@ -609,19 +609,19 @@ brew services restart tor   # macOS</code></pre>
         </div>
         
         <div class="form-group">
-            <label for="tor_hidden_service_port">Hidden Service Port</label>
+            <label for="tor_hidden_service_port" data-i18n="settings_page.lbl_tor_service_port">Hidden Service Port</label>
             <input type="number" id="tor_hidden_service_port" name="tor_hidden_service_port" value="{{ config.tor.hidden_service_port if config.tor else 80 }}" onchange="updateTorrcExample()">
             <small style="color: #666; display: block; margin-top: 5px;">Port exposed on the onion address (default: 80) - must match HiddenServicePort in torrc for persistent services</small>
         </div>
         
         <div class="form-group">
-            <label for="tor_socks_host">SOCKS Proxy Host</label>
+            <label for="tor_socks_host" data-i18n="settings_page.lbl_socks_host">SOCKS Proxy Host</label>
             <input type="text" id="tor_socks_host" name="tor_socks_host" value="{{ config.tor.socks_host if config.tor else '127.0.0.1' }}">
             <small style="color: #666; display: block; margin-top: 5px;">TOR SOCKS proxy host (default: 127.0.0.1)</small>
         </div>
         
         <div class="form-group">
-            <label for="tor_socks_port">SOCKS Proxy Port</label>
+            <label for="tor_socks_port" data-i18n="settings_page.lbl_socks_port">SOCKS Proxy Port</label>
             <input type="number" id="tor_socks_port" name="tor_socks_port" value="{{ config.tor.socks_port if config.tor else 9050 }}">
             <small style="color: #666; display: block; margin-top: 5px;">TOR SOCKS proxy port (default: 9050)</small>
         </div>
@@ -642,13 +642,13 @@ brew services restart tor   # macOS</code></pre>
     <div class="form-group">
         <label>
             <input type="checkbox" name="signup_require_verification" {% if config.signup and config.signup.require_email_verification %}checked{% endif %}>
-            Require Email Verification
+            <span data-i18n="settings_page.lbl_require_email">Require Email Verification</span>
         </label>
         <small style="color: #666; display: block; margin-top: 5px;">Users must verify their email before they can login</small>
     </div>
     
     <div class="form-group">
-        <label for="verification_token_expiry">Verification Token Expiry (hours)</label>
+        <label for="verification_token_expiry" data-i18n="settings_page.lbl_token_expiry">Verification Token Expiry (hours)</label>
         <input type="number" id="verification_token_expiry" name="verification_token_expiry"
                value="{{ config.signup.verification_token_expiry_hours if config.signup else 24 }}"
                min="1" max="168">
@@ -657,9 +657,9 @@ brew services restart tor   # macOS</code></pre>
     </div><!-- /tab-signup -->
 
     <div class="settings-section" id="tab-oauth2">
-    <div class="section-title"><i class="fab fa-openid"></i> OAuth2 Authentication</div>
+    <div class="section-title"><i class="fab fa-openid"></i> <span data-i18n="settings_page.section_oauth2">OAuth2 Authentication</span></div>
 
-    <div class="section-title" style="font-size:.95em; margin-top:0;"><i class="fab fa-google"></i> Google OAuth2</div>
+    <div class="section-title" style="font-size:.95em; margin-top:0;"><i class="fab fa-google"></i> <span data-i18n="settings_page.section_google_oauth2">Google OAuth2</span></div>
     
     <div class="form-group">
         <label>
@@ -669,12 +669,12 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="oauth2_google_client_id">Google Client ID</label>
+        <label for="oauth2_google_client_id" data-i18n="settings_page.lbl_google_client_id">Google Client ID</label>
         <input type="text" id="oauth2_google_client_id" name="oauth2_google_client_id" value="{{ config.oauth2.google.client_id if config.oauth2 and config.oauth2.google else '' }}" placeholder="Client ID from Google Cloud Console">
     </div>
     
     <div class="form-group">
-        <label for="oauth2_google_client_secret">Google Client Secret</label>
+        <label for="oauth2_google_client_secret" data-i18n="settings_page.lbl_google_client_secret">Google Client Secret</label>
         <input type="password" id="oauth2_google_client_secret" name="oauth2_google_client_secret" value="{{ config.oauth2.google.client_secret if config.oauth2 and config.oauth2.google else '' }}" placeholder="Client Secret from Google Cloud Console">
     </div>
 
@@ -688,12 +688,12 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="oauth2_github_client_id">GitHub Client ID</label>
+        <label for="oauth2_github_client_id" data-i18n="settings_page.lbl_github_client_id">GitHub Client ID</label>
         <input type="text" id="oauth2_github_client_id" name="oauth2_github_client_id" value="{{ config.oauth2.github.client_id if config.oauth2 and config.oauth2.github else '' }}" placeholder="Client ID from GitHub Developer Settings">
     </div>
     
     <div class="form-group">
-        <label for="oauth2_github_client_secret">GitHub Client Secret</label>
+        <label for="oauth2_github_client_secret" data-i18n="settings_page.lbl_github_client_secret">GitHub Client Secret</label>
         <input type="password" id="oauth2_github_client_secret" name="oauth2_github_client_secret" value="{{ config.oauth2.github.client_secret if config.oauth2 and config.oauth2.github else '' }}" placeholder="Client Secret from GitHub Developer Settings">
     </div>
     </div><!-- /tab-oauth2 -->
@@ -710,28 +710,28 @@ brew services restart tor   # macOS</code></pre>
     </div>
 
     <div class="form-group">
-        <label for="smtp_host">SMTP Host</label>
+        <label for="smtp_host" data-i18n="settings_page.lbl_smtp_host">SMTP Host</label>
         <input type="text" id="smtp_host" name="smtp_host"
                value="{{ config.smtp.host if config.smtp else 'localhost' }}" required>
         <small style="color: #666; display: block; margin-top: 5px;">SMTP server hostname (e.g., smtp.gmail.com)</small>
     </div>
     
     <div class="form-group">
-        <label for="smtp_port">SMTP Port</label>
+        <label for="smtp_port" data-i18n="settings_page.lbl_smtp_port">SMTP Port</label>
         <input type="number" id="smtp_port" name="smtp_port"
                value="{{ config.smtp.port if config.smtp else 587 }}" required>
         <small style="color: #666; display: block; margin-top: 5px;">SMTP server port (587 for TLS, 465 for SSL, 25 for no encryption)</small>
     </div>
     
     <div class="form-group">
-        <label for="smtp_username">SMTP Username</label>
+        <label for="smtp_username" data-i18n="settings_page.lbl_smtp_username">SMTP Username</label>
         <input type="text" id="smtp_username" name="smtp_username"
                value="{{ config.smtp.username if config.smtp else '' }}">
         <small style="color: #666; display: block; margin-top: 5px;">SMTP authentication username (leave blank if not required)</small>
     </div>
     
     <div class="form-group">
-        <label for="smtp_password">SMTP Password</label>
+        <label for="smtp_password" data-i18n="settings_page.lbl_smtp_password">SMTP Password</label>
         <input type="password" id="smtp_password" name="smtp_password" placeholder="Leave blank to keep current">
         <small style="color: #666; display: block; margin-top: 5px;">SMTP authentication password</small>
     </div>
@@ -753,14 +753,14 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="smtp_from_email">From Email Address</label>
+        <label for="smtp_from_email" data-i18n="settings_page.lbl_smtp_from_email">From Email Address</label>
         <input type="email" id="smtp_from_email" name="smtp_from_email"
                value="{{ config.smtp.from_email if config.smtp else 'noreply@example.com' }}" required>
         <small style="color: #666; display: block; margin-top: 5px;">Email address to send from</small>
     </div>
     
     <div class="form-group">
-        <label for="smtp_from_name">From Name</label>
+        <label for="smtp_from_name" data-i18n="settings_page.lbl_smtp_from_name">From Name</label>
         <input type="text" id="smtp_from_name" name="smtp_from_name"
                value="{{ config.smtp.from_name if config.smtp else 'AISBF' }}" required>
         <small style="color: #666; display: block; margin-top: 5px;">Display name for sent emails</small>
@@ -773,7 +773,7 @@ brew services restart tor   # macOS</code></pre>
     </div><!-- /tab-smtp -->
 
     <div class="settings-section" id="tab-batching">
-    <div class="section-title"><i class="fas fa-layer-group"></i> Request Batching</div>
+    <div class="section-title"><i class="fas fa-layer-group"></i> <span data-i18n="settings_page.section_batching">Request Batching</span></div>
     
     <div class="form-group">
         <label>
@@ -784,13 +784,13 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="batching_window_ms">Batching Window (milliseconds)</label>
+        <label for="batching_window_ms" data-i18n="settings_page.lbl_batching_window">Batching Window (milliseconds)</label>
         <input type="number" id="batching_window_ms" name="batching_window_ms" value="{{ config.batching.window_ms if config.batching else 100 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Time window to collect requests for batching (default: 100ms)</small>
     </div>
     
     <div class="form-group">
-        <label for="batching_max_batch_size">Max Batch Size</label>
+        <label for="batching_max_batch_size" data-i18n="settings_page.lbl_max_batch_size">Max Batch Size</label>
         <input type="number" id="batching_max_batch_size" name="batching_max_batch_size" value="{{ config.batching.max_batch_size if config.batching else 8 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Maximum number of requests per batch (default: 8)</small>
     </div>
@@ -805,7 +805,7 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="batching_openai_max_batch_size">OpenAI Max Batch Size</label>
+        <label for="batching_openai_max_batch_size" data-i18n="settings_page.lbl_openai_batch_size">OpenAI Max Batch Size</label>
         <input type="number" id="batching_openai_max_batch_size" name="batching_openai_max_batch_size" value="{{ config.batching.provider_settings.openai.max_batch_size if config.batching and config.batching.provider_settings and config.batching.provider_settings.openai else 10 }}" min="1">
     </div>
     
@@ -817,7 +817,7 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="batching_anthropic_max_batch_size">Anthropic Max Batch Size</label>
+        <label for="batching_anthropic_max_batch_size" data-i18n="settings_page.lbl_anthropic_batch_size">Anthropic Max Batch Size</label>
         <input type="number" id="batching_anthropic_max_batch_size" name="batching_anthropic_max_batch_size" value="{{ config.batching.provider_settings.anthropic.max_batch_size if config.batching and config.batching.provider_settings and config.batching.provider_settings.anthropic else 5 }}" min="1">
     </div>
     </div><!-- /tab-batching -->
@@ -834,61 +834,61 @@ brew services restart tor   # macOS</code></pre>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_initial_rate_limit">Initial Rate Limit (requests/second)</label>
+        <label for="adaptive_initial_rate_limit" data-i18n="settings_page.lbl_initial_rate_limit">Initial Rate Limit (requests/second)</label>
         <input type="number" id="adaptive_initial_rate_limit" name="adaptive_initial_rate_limit" value="{{ config.adaptive_rate_limiting.initial_rate_limit if config.adaptive_rate_limiting else 0 }}" min="0" step="0.1">
         <small style="color: #666; display: block; margin-top: 5px;">Starting rate limit (0 = unlimited)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_learning_rate">Learning Rate</label>
+        <label for="adaptive_learning_rate" data-i18n="settings_page.lbl_learning_rate">Learning Rate</label>
         <input type="number" id="adaptive_learning_rate" name="adaptive_learning_rate" value="{{ config.adaptive_rate_limiting.learning_rate if config.adaptive_rate_limiting else 0.1 }}" min="0" max="1" step="0.01">
         <small style="color: #666; display: block; margin-top: 5px;">How quickly to adapt to rate limit changes (0-1, default: 0.1)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_headroom_percent">Headroom Percent</label>
+        <label for="adaptive_headroom_percent" data-i18n="settings_page.lbl_headroom_percent">Headroom Percent</label>
         <input type="number" id="adaptive_headroom_percent" name="adaptive_headroom_percent" value="{{ config.adaptive_rate_limiting.headroom_percent if config.adaptive_rate_limiting else 10 }}" min="0" max="100">
         <small style="color: #666; display: block; margin-top: 5px;">Safety margin below detected limit (default: 10%)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_recovery_rate">Recovery Rate</label>
+        <label for="adaptive_recovery_rate" data-i18n="settings_page.lbl_recovery_rate">Recovery Rate</label>
         <input type="number" id="adaptive_recovery_rate" name="adaptive_recovery_rate" value="{{ config.adaptive_rate_limiting.recovery_rate if config.adaptive_rate_limiting else 0.05 }}" min="0" max="1" step="0.01">
         <small style="color: #666; display: block; margin-top: 5px;">Rate at which limits recover after errors (default: 0.05)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_max_rate_limit">Max Rate Limit (requests/second)</label>
+        <label for="adaptive_max_rate_limit" data-i18n="settings_page.lbl_max_rate_limit">Max Rate Limit (requests/second)</label>
         <input type="number" id="adaptive_max_rate_limit" name="adaptive_max_rate_limit" value="{{ config.adaptive_rate_limiting.max_rate_limit if config.adaptive_rate_limiting else 60 }}" min="0" step="0.1">
         <small style="color: #666; display: block; margin-top: 5px;">Maximum allowed rate limit (default: 60)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_min_rate_limit">Min Rate Limit (requests/second)</label>
+        <label for="adaptive_min_rate_limit" data-i18n="settings_page.lbl_min_rate_limit">Min Rate Limit (requests/second)</label>
         <input type="number" id="adaptive_min_rate_limit" name="adaptive_min_rate_limit" value="{{ config.adaptive_rate_limiting.min_rate_limit if config.adaptive_rate_limiting else 0.1 }}" min="0" step="0.1">
         <small style="color: #666; display: block; margin-top: 5px;">Minimum allowed rate limit (default: 0.1)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_backoff_base">Backoff Base</label>
+        <label for="adaptive_backoff_base" data-i18n="settings_page.lbl_backoff_base">Backoff Base</label>
         <input type="number" id="adaptive_backoff_base" name="adaptive_backoff_base" value="{{ config.adaptive_rate_limiting.backoff_base if config.adaptive_rate_limiting else 2 }}" min="1" step="0.1">
         <small style="color: #666; display: block; margin-top: 5px;">Exponential backoff multiplier (default: 2)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_jitter_factor">Jitter Factor</label>
+        <label for="adaptive_jitter_factor" data-i18n="settings_page.lbl_jitter_factor">Jitter Factor</label>
         <input type="number" id="adaptive_jitter_factor" name="adaptive_jitter_factor" value="{{ config.adaptive_rate_limiting.jitter_factor if config.adaptive_rate_limiting else 0.25 }}" min="0" max="1" step="0.01">
         <small style="color: #666; display: block; margin-top: 5px;">Random jitter to prevent thundering herd (0-1, default: 0.25)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_history_window">History Window (seconds)</label>
+        <label for="adaptive_history_window" data-i18n="settings_page.lbl_history_window">History Window (seconds)</label>
         <input type="number" id="adaptive_history_window" name="adaptive_history_window" value="{{ config.adaptive_rate_limiting.history_window if config.adaptive_rate_limiting else 3600 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Time window for tracking rate limit history (default: 3600)</small>
     </div>
     
     <div class="form-group">
-        <label for="adaptive_consecutive_successes">Consecutive Successes for Recovery</label>
+        <label for="adaptive_consecutive_successes" data-i18n="settings_page.lbl_consecutive_successes">Consecutive Successes for Recovery</label>
         <input type="number" id="adaptive_consecutive_successes" name="adaptive_consecutive_successes" value="{{ config.adaptive_rate_limiting.consecutive_successes_for_recovery if config.adaptive_rate_limiting else 10 }}" min="1">
         <small style="color: #666; display: block; margin-top: 5px;">Number of successful requests before increasing rate limit (default: 10)</small>
     </div>
@@ -898,22 +898,22 @@ brew services restart tor   # macOS</code></pre>
     <div class="section-title"><i class="fas fa-shield-alt"></i> Admin Account &amp; Notifications</div>
 
     <div class="form-group">
-        <label for="dashboard_username">Admin Username</label>
+        <label for="dashboard_username" data-i18n="settings_page.lbl_admin_username">Admin Username</label>
         <input type="text" id="dashboard_username" name="dashboard_username" value="{{ config.dashboard.username }}" required>
     </div>
 
     <div class="form-group">
-        <label for="new_admin_password">New Password</label>
+        <label for="new_admin_password" data-i18n="settings_page.lbl_new_password">New Password</label>
         <input type="password" id="new_admin_password" name="new_admin_password" placeholder="Leave blank to keep current password">
     </div>
 
     <div class="form-group">
-        <label for="confirm_admin_password">Confirm New Password</label>
+        <label for="confirm_admin_password" data-i18n="settings_page.lbl_confirm_password">Confirm New Password</label>
         <input type="password" id="confirm_admin_password" name="confirm_admin_password" placeholder="Confirm new password">
     </div>
 
     <div class="form-group">
-        <label for="dashboard_email">Admin Email Address</label>
+        <label for="dashboard_email" data-i18n="settings_page.lbl_admin_email">Admin Email Address</label>
         <input type="email" id="dashboard_email" name="dashboard_email"
                value="{{ config.dashboard.email if config.dashboard and config.dashboard.email else '' }}"
                placeholder="admin@example.com">
@@ -970,7 +970,7 @@ brew services restart tor   # macOS</code></pre>
     </div><!-- /tab-admin -->
 
     <div style="display: flex; gap: 10px; margin-top: 30px; padding-top: 20px; border-top: 1px solid #0f3460;">
-        <button type="submit" class="btn">Save Settings</button>
+        <button type="submit" class="btn" data-i18n="settings_page.save_btn">Save Settings</button>
         <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
         <button type="button" onclick="testSMTP()" class="btn btn-secondary" style="margin-left: auto;">Test SMTP</button>
     </div>

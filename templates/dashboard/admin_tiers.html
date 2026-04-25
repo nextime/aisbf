@@ -3,64 +3,64 @@
 {% block title %}Account Tiers Management{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;"><i class="fas fa-layer-group" style="color: #4a9eff;"></i> Account Tiers Management</h2>
-<p style="color: #a0a0a0; margin-bottom: 30px;">Configure account tiers, pricing, and usage limits for your users</p>
+<h2 style="margin-bottom: 30px;"><i class="fas fa-layer-group" style="color: #4a9eff;"></i> <span data-i18n="tiers_page.title">Account Tiers Management</span></h2>
+<p style="color: var(--color-muted); margin-bottom: 30px;" data-i18n="tiers_page.subtitle">Configure account tiers, pricing, and usage limits for your users</p>
 
 <!-- Tier List -->
-<div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+<div style="background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
     <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
         <h3 style="margin: 0; color: #4a9eff;">
-            <i class="fas fa-list me-2"></i>Available Tiers
+            <i class="fas fa-list me-2"></i><span data-i18n="tiers_page.available_tiers">Available Tiers</span>
         </h3>
         <a href="{{ url_for(request, '/dashboard/admin/tiers/create') }}" class="btn" style="background: #4a9eff; color: white;">
-            <i class="fas fa-plus me-2"></i>Create New Tier
+            <i class="fas fa-plus me-2"></i><span data-i18n="tiers_page.create_new">Create New Tier</span>
         </a>
     </div>
 
     <div style="overflow-x: auto;">
         <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
             <thead>
-                <tr style="background: #0f3460; color: #e0e0e0;">
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">ID</th>
-                    <th style="padding: 12px; text-align: left; border-bottom: 1px solid #0f3460; font-weight: 600;">Tier Name</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Price (Monthly)</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Price (Yearly)</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Requests / Day</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Requests / Month</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Providers</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Rotations</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Autoselections</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Models / Rotation</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Max Models / Autoselect</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Status</th>
-                    <th style="padding: 12px; text-align: center; border-bottom: 1px solid #0f3460; font-weight: 600;">Actions</th>
+                <tr style="background:var(--bg-accent); color: var(--color-text);">
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">ID</th>
+                    <th style="padding: 12px; text-align: left; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_name">Tier Name</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_price_monthly">Price (Monthly)</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_price_yearly">Price (Yearly)</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_req_day">Max Requests / Day</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_req_month">Max Requests / Month</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_providers">Max Providers</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_rotations">Max Rotations</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_autoselections">Max Autoselections</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_models_rotation">Max Models / Rotation</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_models_autoselect">Max Models / Autoselect</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_status">Status</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_actions">Actions</th>
                 </tr>
             </thead>
-            <tbody id="tiersTableBody" style="color: #e0e0e0;">
+            <tbody id="tiersTableBody" style="color: var(--color-text);">
                 {% for tier in tiers %}
                 <tr class="tier-row">
                     <td>{{ tier.id }}</td>
-                    <td><strong>{{ tier.name }}{% if tier.is_default %} <span class="badge bg-success">Default</span>{% endif %}</strong></td>
+                    <td><strong>{{ tier.name }}{% if tier.is_default %} <span class="badge bg-success" data-i18n="tiers_page.default">Default</span>{% endif %}</strong></td>
                     <td>{{ tier.price_monthly }}</td>
                     <td>{{ tier.price_yearly }}</td>
-                    <td>{% if tier.max_requests_per_day == -1 %}Unlimited{% elif tier.max_requests_per_day == 0 %}Blocked{% else %}{{ tier.max_requests_per_day }}{% endif %}</td>
-                    <td>{% if tier.max_requests_per_month == -1 %}Unlimited{% elif tier.max_requests_per_month == 0 %}Blocked{% else %}{{ tier.max_requests_per_month }}{% endif %}</td>
-                    <td>{% if tier.max_providers == -1 %}Unlimited{% elif tier.max_providers == 0 %}Blocked{% else %}{{ tier.max_providers }}{% endif %}</td>
-                    <td>{% if tier.max_rotations == -1 %}Unlimited{% elif tier.max_rotations == 0 %}Blocked{% else %}{{ tier.max_rotations }}{% endif %}</td>
-                    <td>{% if tier.max_autoselections == -1 %}Unlimited{% elif tier.max_autoselections == 0 %}Blocked{% else %}{{ tier.max_autoselections }}{% endif %}</td>
-                    <td>{% if tier.max_rotation_models == -1 %}Unlimited{% elif tier.max_rotation_models == 0 %}Blocked{% else %}{{ tier.max_rotation_models }}{% endif %}</td>
-                    <td>{% if tier.max_autoselection_models == -1 %}Unlimited{% elif tier.max_autoselection_models == 0 %}Blocked{% else %}{{ tier.max_autoselection_models }}{% endif %}</td>
-                    <td>{% if tier.is_active %}<span class="badge bg-success">Active</span>{% else %}<span class="badge bg-secondary">Inactive</span>{% endif %}</td>
+                    <td>{% if tier.max_requests_per_day == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_requests_per_day == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_requests_per_day }}{% endif %}</td>
+                    <td>{% if tier.max_requests_per_month == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_requests_per_month == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_requests_per_month }}{% endif %}</td>
+                    <td>{% if tier.max_providers == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_providers == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_providers }}{% endif %}</td>
+                    <td>{% if tier.max_rotations == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_rotations == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_rotations }}{% endif %}</td>
+                    <td>{% if tier.max_autoselections == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_autoselections == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_autoselections }}{% endif %}</td>
+                    <td>{% if tier.max_rotation_models == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_rotation_models == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_rotation_models }}{% endif %}</td>
+                    <td>{% if tier.max_autoselection_models == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_autoselection_models == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_autoselection_models }}{% endif %}</td>
+                    <td>{% if tier.is_active %}<span class="badge bg-success" data-i18n="tiers_page.active">Active</span>{% else %}<span class="badge bg-secondary" data-i18n="tiers_page.inactive">Inactive</span>{% endif %}</td>
                     <td style="white-space: nowrap;">
                         <a href="{{ url_for(request, '/dashboard/admin/tiers/edit') }}/{{ tier.id }}" class="btn btn-sm btn-outline-primary me-1" title="Edit this tier">
-                            Edit
+                            <span data-i18n="tiers_page.edit">Edit</span>
                         </a>
                         {% if not tier.is_default %}
                         <button type="button" class="btn btn-sm btn-outline-danger" onclick="deleteTier({{ tier.id }})" title="Delete this tier">
-                            Delete
+                            <span data-i18n="tiers_page.delete">Delete</span>
                         </button>
                         {% else %}
-                        <span style="font-size: 11px; color: #888;">(default)</span>
+                        <span style="font-size: 11px; color: var(--color-subtle);" data-i18n="tiers_page.default_label">(default)</span>
                         {% endif %}
                     </td>
                 </tr>
@@ -73,93 +73,93 @@
 <!-- Create/Edit Tier Modal -->
 <div class="modal fade" id="tierModal" tabindex="-1" aria-labelledby="tierModalLabel" aria-hidden="true" style="display: none;">
     <div class="modal-dialog modal-lg" style="max-width: 90%; max-height: 90vh; margin: 2rem auto; overflow-y: auto;">
-        <div class="modal-content" style="background: #16213e; color: #e0e0e0; border: 2px solid #4a9eff; max-height: 85vh; overflow-y: auto;">
-            <div class="modal-header" style="background: #0f3460; border-bottom: 1px solid #4a9eff; display: flex; justify-content: space-between; align-items: center;">
-                <h5 class="modal-title" id="tierModalLabel" style="color: #4a9eff; margin: 0;">Create New Tier</h5>
+        <div class="modal-content" style="background: var(--bg-panel); color: var(--color-text); border: 2px solid #4a9eff; max-height: 85vh; overflow-y: auto;">
+            <div class="modal-header" style="background:var(--bg-accent); border-bottom: 1px solid #4a9eff; display: flex; justify-content: space-between; align-items: center;">
+                <h5 class="modal-title" id="tierModalLabel" style="color: #4a9eff; margin: 0;" data-i18n="tiers_page.create_new">Create New Tier</h5>
                 <button type="button" class="btn-close btn-close-white" onclick="closeTierModal()" aria-label="Close"></button>
             </div>
-            <div class="modal-body" style="background: #16213e;">
+            <div class="modal-body" style="background: var(--bg-panel);">
                 <form id="tierForm">
                      <input type="hidden" id="tierId" value="">
 
                       <div style="margin-bottom: 20px;">
-                          <label style="display: block; margin-bottom: 5px; font-weight: 500; color: #e0e0e0; font-size: 16px;">Tier Name</label>
-                          <input type="text" style="width: 100%; padding: 12px; border: 1px solid #0f3460; border-radius: 5px; background: #1a1a2e; color: #e0e0e0; font-size: 16px;" id="tierName" required placeholder="e.g. Professional Tier">
+                          <label style="display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text); font-size: 16px;" data-i18n="tiers_page.col_name">Tier Name</label>
+                          <input type="text" style="width: 100%; padding: 12px; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-page); color: var(--color-text); font-size: 16px;" id="tierName" required placeholder="e.g. Professional Tier">
                       </div>
 
                       <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px; margin-bottom: 20px;">
-                          <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                          <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
                               <div style="margin-bottom: 0;">
                                   <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #4a9eff; font-size: 14px;">
                                       <i class="fas fa-calendar-day me-2"></i> Monthly Price
                                   </label>
                                   <div style="display: flex; align-items: center;">
-                                      <span style="background: #0f3460; color: #e0e0e0; padding: 12px; border-radius: 5px 0 0 5px; border: 1px solid #0f3460;">$</span>
-                                      <input type="number" style="flex: 1; padding: 12px; border: 1px solid #0f3460; border-left: none; border-radius: 0 5px 5px 0; background: #16213e; color: #e0e0e0; font-size: 16px;" id="tierPriceMonthly" step="0.01" min="0" value="0.00">
+                                      <span style="background:var(--bg-accent); color: var(--color-text); padding: 12px; border-radius: 5px 0 0 5px; border:1px solid var(--color-border);">$</span>
+                                      <input type="number" style="flex: 1; padding: 12px; border:1px solid var(--color-border); border-left: none; border-radius: 0 5px 5px 0; background: var(--bg-panel); color: var(--color-text); font-size: 16px;" id="tierPriceMonthly" step="0.01" min="0" value="0.00">
                                   </div>
                               </div>
                           </div>
-                          <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; padding: 15px;">
+                          <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; padding: 15px;">
                               <div style="margin-bottom: 0;">
                                   <label style="display: block; margin-bottom: 8px; font-weight: 500; color: #4ade80; font-size: 14px;">
                                       <i class="fas fa-calendar-alt me-2"></i> Yearly Price
                                   </label>
                                   <div style="display: flex; align-items: center;">
-                                      <span style="background: #0f3460; color: #e0e0e0; padding: 12px; border-radius: 5px 0 0 5px; border: 1px solid #0f3460;">$</span>
-                                      <input type="number" style="flex: 1; padding: 12px; border: 1px solid #0f3460; border-left: none; border-radius: 0 5px 5px 0; background: #16213e; color: #e0e0e0; font-size: 16px;" id="tierPriceYearly" step="0.01" min="0" value="0.00">
+                                      <span style="background:var(--bg-accent); color: var(--color-text); padding: 12px; border-radius: 5px 0 0 5px; border:1px solid var(--color-border);">$</span>
+                                      <input type="number" style="flex: 1; padding: 12px; border:1px solid var(--color-border); border-left: none; border-radius: 0 5px 5px 0; background: var(--bg-panel); color: var(--color-text); font-size: 16px;" id="tierPriceYearly" step="0.01" min="0" value="0.00">
                                   </div>
                               </div>
                           </div>
                       </div>
 
-                      <div style="background: #1a1a2e; border: 1px solid #0f3460; border-radius: 8px; margin-bottom: 20px; overflow: hidden;">
-                          <div style="padding: 15px; border-bottom: 1px solid #0f3460;">
-                              <h6 style="margin: 0; color: #e0e0e0; font-weight: 500;"><i class="fas fa-sliders-h me-2"></i> Usage Limits</h6>
-                              <p style="margin: 5px 0 0 0; color: #a0a0a0; font-size: 12px;">Use <code style="background: #0f3460; padding: 2px 4px; border-radius: 3px;">-1</code> for unlimited, <code style="background: #0f3460; padding: 2px 4px; border-radius: 3px;">0</code> to disable, or any positive number for the limit</p>
+                      <div style="background: var(--bg-page); border:1px solid var(--color-border); border-radius: 8px; margin-bottom: 20px; overflow: hidden;">
+                          <div style="padding: 15px; border-bottom:1px solid var(--color-border);">
+                              <h6 style="margin: 0; color: var(--color-text); font-weight: 500;"><i class="fas fa-sliders-h me-2"></i> Usage Limits</h6>
+                              <p style="margin: 5px 0 0 0; color: var(--color-muted); font-size: 12px;">Use <code style="background:var(--bg-accent); padding: 2px 4px; border-radius: 3px;">-1</code> for unlimited, <code style="background:var(--bg-accent); padding: 2px 4px; border-radius: 3px;">0</code> to disable, or any positive number for the limit</p>
                           </div>
                           <div style="padding: 15px;">
                               <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px;">
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxRequestsDay" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Requests per Day</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxRequestsDay" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Requests per Day</label>
                                   </div>
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxRequestsMonth" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Requests per Month</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxRequestsMonth" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Requests per Month</label>
                                   </div>
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxProviders" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Providers</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxProviders" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;" data-i18n="tiers_page.col_max_providers">Max Providers</label>
                                   </div>
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxRotations" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Rotations</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxRotations" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;" data-i18n="tiers_page.col_max_rotations">Max Rotations</label>
                                   </div>
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxAutoselections" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Autoselections</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxAutoselections" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;" data-i18n="tiers_page.col_max_autoselections">Max Autoselections</label>
                                   </div>
                                   <div style="position: relative;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxRotationModels" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Models per Rotation</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxRotationModels" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Models per Rotation</label>
                                   </div>
                                   <div style="position: relative; grid-column: 1 / -1;">
-                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border: 1px solid #0f3460; border-radius: 5px; background: #16213e; color: #e0e0e0; font-size: 14px;" id="tierMaxAutoselectionModels" min="-1" value="-1">
-                                      <label style="position: absolute; top: 12px; left: 0; color: #a0a0a0; font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Models per Autoselection</label>
+                                      <input type="number" style="width: 100%; padding: 12px 12px 12px 0; border:1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" id="tierMaxAutoselectionModels" min="-1" value="-1">
+                                      <label style="position: absolute; top: 12px; left: 0; color: var(--color-muted); font-size: 12px; pointer-events: none; transition: all 0.2s;">Max Models per Autoselection</label>
                                   </div>
                               </div>
                           </div>
                       </div>
 
                       <div style="margin-bottom: 15px;">
-                          <label style="cursor: pointer; font-weight: 500; color: #e0e0e0;">
+                          <label style="cursor: pointer; font-weight: 500; color: var(--color-text);">
                               <input type="checkbox" id="tierIsActive" checked style="margin-right: 10px;">
                               Tier is active and available for users
                           </label>
                       </div>
                  </form>
             </div>
-            <div class="modal-footer" style="background: #0f3460; border-top: 1px solid #4a9eff;">
+            <div class="modal-footer" style="background:var(--bg-accent); border-top: 1px solid #4a9eff;">
                 <button type="button" class="btn" onclick="closeTierModal()" style="background: #6c757d; color: white;">Cancel</button>
                 <button type="button" class="btn" onclick="saveTier()" style="background: #4a9eff; color: white;">Save Tier</button>
             </div>
@@ -172,12 +172,12 @@
 {% block extra_css %}
 <style>
 .tier-row {
-    border-bottom: 1px solid #0f3460;
-    color: #e0e0e0;
+    border-bottom:1px solid var(--color-border);
+    color: var(--color-text);
 }
 
 .tier-row:hover {
-    background: #1a1a2e;
+    background: var(--bg-page);
 }
 </style>
 {% endblock %}
@@ -222,7 +222,7 @@ function renderTiers(tiers) {
         tr.className = 'tier-row';
         tr.innerHTML = `
             <td>${tier.id}</td>
-            <td><strong>${tier.name}</strong>${tier.is_default ? ' <span class="badge bg-success">Default</span>' : ''}</td>
+            <td><strong>${tier.name}</strong>${tier.is_default ? ' <span class="badge bg-success" data-i18n="tiers_page.default">Default</span>' : ''}</td>
             <td>${tier.price_monthly}</td>
             <td>${tier.price_yearly}</td>
             <td>${tier.max_requests_per_day === -1 ? 'Unlimited' : tier.max_requests_per_day === 0 ? 'Blocked' : tier.max_requests_per_day}</td>
@@ -232,7 +232,7 @@ function renderTiers(tiers) {
             <td>${tier.max_autoselections === -1 ? 'Unlimited' : tier.max_autoselections === 0 ? 'Blocked' : tier.max_autoselections}</td>
             <td>${tier.max_rotation_models === -1 ? 'Unlimited' : tier.max_rotation_models === 0 ? 'Blocked' : tier.max_rotation_models}</td>
             <td>${tier.max_autoselection_models === -1 ? 'Unlimited' : tier.max_autoselection_models === 0 ? 'Blocked' : tier.max_autoselection_models}</td>
-            <td>${tier.is_active ? '<span class="badge bg-success">Active</span>' : '<span class="badge bg-secondary">Inactive</span>'}</td>
+            <td>${tier.is_active ? '<span class="badge bg-success" data-i18n="tiers_page.active">Active</span>' : '<span class="badge bg-secondary" data-i18n="tiers_page.inactive">Inactive</span>'}</td>
             <td>
                 <button class="btn btn-sm btn-outline-primary me-1" onclick="editTier(${tier.id})">
                     <i class="fas fa-edit"></i>

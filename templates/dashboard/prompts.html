@@ -42,15 +42,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <input type="hidden" name="prompt_key" id="prompt_key" value="">
     
     <div class="form-group">
-        <label for="prompt_content">Prompt Content:</label>
+        <label for="prompt_content" data-i18n="prompts_page.content">Prompt Content:</label>
         <textarea id="prompt_content" name="prompt_content" style="min-height: 400px;"></textarea>
         <small style="color: #a0a0a0; display: block; margin-top: 5px;">Edit the prompt template. Use markdown formatting as needed.</small>
     </div>
     
     <div style="display: flex; gap: 10px; margin-top: 20px;">
-        <button type="submit" class="btn">Save Prompt</button>
+        <button type="submit" class="btn" data-i18n="prompts_page.save">Save Prompt</button>
         {% if not is_admin %}
-        <button type="button" class="btn btn-secondary" onclick="resetPrompt()">Reset to Default</button>
+        <button type="button" class="btn btn-secondary" onclick="resetPrompt()" data-i18n="prompts_page.reset">Reset to Default</button>
         {% endif %}
         <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
     </div>

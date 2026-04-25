@@ -37,7 +37,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <h2 style="margin-bottom: 30px;">Token Usage Analytics</h2>
 
 <!-- Quick Links Navigation -->
-<div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 30px;">
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn" style="text-decoration: none;">
             📊 Analytics
@@ -52,12 +52,12 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <!-- Date Range Filter Section -->
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-page); padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 15px;">Filter by Date Range</h3>
     <form method="get" action="{{ url_for(request, "/dashboard/analytics") }}" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
         <div style="flex: 1; min-width: 200px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Time Range</label>
-            <select name="time_range" id="timeRangeSelect" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">Time Range</label>
+            <select name="time_range" id="timeRangeSelect" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
                 <option value="1h" {% if selected_time_range == '1h' %}selected{% endif %}>Last 1 Hour</option>
                 <option value="6h" {% if selected_time_range == '6h' %}selected{% endif %}>Last 6 Hours</option>
                 <option value="24h" {% if selected_time_range == '24h' %}selected{% endif %}>Last 24 Hours (Default)</option>
@@ -71,14 +71,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         <div id="customDateRange" style="display: {% if selected_time_range == 'custom' or from_date %}flex{% else %}none{% endif %}; flex-wrap: wrap; gap: 15px; flex: 2;">
             <div style="flex: 1; min-width: 200px;">
-                <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">From Date & Time</label>
+                <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">From Date & Time</label>
                 <input type="datetime-local" name="from_date" value="{{ from_date or '' }}" 
-                       style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                       style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
             </div>
             <div style="flex: 1; min-width: 200px;">
-                <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">To Date & Time</label>
+                <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">To Date & Time</label>
                 <input type="datetime-local" name="to_date" value="{{ to_date or '' }}" 
-                       style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                       style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
             </div>
         </div>
         
@@ -90,15 +90,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </form>
     
     {% if from_date or to_date %}
-    <div style="margin-top: 15px; padding: 10px; background: #0f3460; border-radius: 4px;">
+    <div style="margin-top: 15px; padding: 10px; background:var(--bg-accent); border-radius: 4px;">
         <strong style="color: #60a5fa;">Selected Range: </strong>
-        <span style="color: #e0e0e0;">
+        <span style="color: var(--color-text);">
             {% if from_date %}{{ from_date }}{% else %}Beginning{% endif %}
             to 
             {% if to_date %}{{ to_date }}{% else %}Now{% endif %}
         </span>
         {% if date_range_usage %}
-        <span style="margin-left: 20px; color: #a0a0a0;">
+        <span style="margin-left: 20px; color: var(--color-muted);">
             | Total: {{ format_tokens(date_range_usage.total_tokens) }} tokens | Estimated Cost: {{ currency_symbol }}{{ "%.2f"|format(date_range_usage.estimated_cost) }}
         </span>
         {% endif %}
@@ -107,7 +107,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 
 <!-- Filter by Provider/Model/Rotation/Autoselect -->
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-page); padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 15px;">Filter by Provider, Model, Rotation, Autoselect, or User</h3>
     <form method="get" action="{{ url_for(request, "/dashboard/analytics") }}" style="display: flex; flex-wrap: wrap; gap: 15px; align-items: flex-end;">
         <!-- Preserve date filter parameters -->
@@ -116,9 +116,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% if to_date %}<input type="hidden" name="to_date" value="{{ to_date }}">{% endif %}
         
         <div style="flex: 1; min-width: 150px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Provider</label>
-            <select name="provider_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
-                <option value="">All Providers</option>
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">Provider</label>
+            <select name="provider_filter" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
+                <option value="" data-i18n="analytics_page.all_providers">All Providers</option>
                 {% for provider in available_providers %}
                 <option value="{{ provider }}" {% if selected_provider == provider %}selected{% endif %}>{{ provider }}</option>
                 {% endfor %}
@@ -126,9 +126,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
         
         <div style="flex: 1; min-width: 150px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Model</label>
-            <select name="model_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
-                <option value="">All Models</option>
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">Model</label>
+            <select name="model_filter" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
+                <option value="" data-i18n="analytics_page.all_models">All Models</option>
                 {% for model in available_models %}
                 <option value="{{ model }}" {% if selected_model == model %}selected{% endif %}>{{ model }}</option>
                 {% endfor %}
@@ -136,9 +136,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
         
         <div style="flex: 1; min-width: 150px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Rotation</label>
-            <select name="rotation_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
-                <option value="">All Rotations</option>
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">Rotation</label>
+            <select name="rotation_filter" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
+                <option value="" data-i18n="analytics_page.all_rotations">All Rotations</option>
                 {% for rotation in available_rotations %}
                 <option value="{{ rotation }}" {% if selected_rotation == rotation %}selected{% endif %}>{{ rotation }}</option>
                 {% endfor %}
@@ -146,9 +146,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
         
         <div style="flex: 1; min-width: 150px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">Autoselect</label>
-            <select name="autoselect_filter" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
-                <option value="">All Autoselects</option>
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">Autoselect</label>
+            <select name="autoselect_filter" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
+                <option value="" data-i18n="analytics_page.all_autoselects">All Autoselects</option>
                 {% for autoselect in available_autoselects %}
                 <option value="{{ autoselect }}" {% if selected_autoselect == autoselect %}selected{% endif %}>{{ autoselect }}</option>
                 {% endfor %}
@@ -157,27 +157,27 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         
         {% if is_admin %}
         <div style="flex: 1; min-width: 150px;">
-            <label style="display: block; margin-bottom: 5px; color: #a0a0a0; font-size: 14px;">User</label>
+            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 14px;">User</label>
             {% if available_users|length < 25 %}
-            <select name="user_filter" id="userFilterSelect" style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
-                <option value="">All Users</option>
+            <select name="user_filter" id="userFilterSelect" style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
+                <option value="" data-i18n="analytics_page.all_users">All Users</option>
                 {% for user in available_users %}
                 <option value="{{ user.id }}" {% if selected_user == user.id %}selected{% endif %}>{{ user.username }}{% if user.role == 'admin' %} (admin){% endif %}</option>
                 {% endfor %}
             </select>
             {% else %}
             <div style="position: relative;">
-                <input type="text" id="userSearchInput" placeholder="Search users..." autocomplete="off"
-                       style="width: 100%; padding: 10px; border-radius: 4px; background: #0f3460; color: white; border: 1px solid #2a4a7a;">
+                <input type="text" id="userSearchInput" data-i18n="analytics_page.search_users_placeholder" placeholder="Search users..." autocomplete="off"
+                       style="width: 100%; padding: 10px; border-radius: 4px; background:var(--bg-accent); color: white; border: 1px solid #2a4a7a;">
                 <input type="hidden" name="user_filter" id="userFilterValue" value="{{ selected_user or '' }}">
-                <div id="userSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background: #0f3460; border: 1px solid #2a4a7a; border-top: none; border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto; z-index: 1000;">
+                <div id="userSearchResults" style="display: none; position: absolute; top: 100%; left: 0; right: 0; background:var(--bg-accent); border: 1px solid #2a4a7a; border-top: none; border-radius: 0 0 4px 4px; max-height: 300px; overflow-y: auto; z-index: 1000;">
                 </div>
             </div>
             {% endif %}
         </div>
         
         <div style="flex: 1; min-width: 150px; display: flex; align-items: center;">
-            <label style="display: flex; align-items: center; color: #e0e0e0; cursor: pointer; user-select: none;">
+            <label style="display: flex; align-items: center; color: var(--color-text); cursor: pointer; user-select: none;">
                 <input type="checkbox" name="global_only" value="1" id="globalOnlyCheckbox" {% if global_only == '1' %}checked{% endif %}
                        style="margin-right: 8px; width: 18px; height: 18px; cursor: pointer;">
                 <span style="font-size: 14px;">Global requests only</span>
@@ -201,9 +201,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </form>
     
     {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
-    <div style="margin-top: 15px; padding: 10px; background: #0f3460; border-radius: 4px;">
+    <div style="margin-top: 15px; padding: 10px; background:var(--bg-accent); border-radius: 4px;">
         <strong style="color: #60a5fa;">Active Filters: </strong>
-        <span style="color: #e0e0e0;">
+        <span style="color: var(--color-text);">
             {% if selected_provider %}Provider: {{ selected_provider }}{% endif %}
             {% if selected_model %}{% if selected_provider %} | {% endif %}Model: {{ selected_model }}{% endif %}
             {% if selected_rotation %}{% if selected_provider or selected_model %} | {% endif %}Rotation: {{ selected_rotation }}{% endif %}
@@ -299,7 +299,7 @@ function escHtml(s) {
     // Display search results
     function displayResults(users) {
         if (users.length === 0) {
-            resultsDiv.innerHTML = '<div style="padding: 10px; color: #a0a0a0;">No users found</div>';
+            resultsDiv.innerHTML = '<div style="padding: 10px; color: var(--color-muted);">No users found</div>';
             resultsDiv.style.display = 'block';
             return;
         }
@@ -315,7 +315,7 @@ function escHtml(s) {
         // Add click handlers
         document.querySelectorAll('.user-result-item').forEach(item => {
             item.addEventListener('mouseenter', function() {
-                this.style.background = '#1a4d7a';
+                this.style.background = 'var(--color-secondary-hover)';
             });
             item.addEventListener('mouseleave', function() {
                 this.style.background = '';
@@ -341,11 +341,11 @@ function escHtml(s) {
         
         if (query.length === 0) {
             // Show all users option
-            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username="All Users" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
+            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username=window.i18n.t('analytics.all_users') style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
             resultsDiv.style.display = 'block';
             
             document.querySelector('.user-result-item').addEventListener('mouseenter', function() {
-                this.style.background = '#1a4d7a';
+                this.style.background = 'var(--color-secondary-hover)';
             });
             document.querySelector('.user-result-item').addEventListener('mouseleave', function() {
                 this.style.background = '';
@@ -368,11 +368,11 @@ function escHtml(s) {
     // Handle focus
     searchInput.addEventListener('focus', function() {
         if (this.value.trim().length === 0) {
-            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username="All Users" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
+            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username=window.i18n.t('analytics.all_users') style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
             resultsDiv.style.display = 'block';
             
             document.querySelector('.user-result-item').addEventListener('mouseenter', function() {
-                this.style.background = '#1a4d7a';
+                this.style.background = 'var(--color-secondary-hover)';
             });
             document.querySelector('.user-result-item').addEventListener('mouseleave', function() {
                 this.style.background = '';
@@ -435,7 +435,7 @@ function escHtml(s) {
             {{ rec.type|replace('_', ' ')|title }}
         </strong>
         <p style="margin: 5px 0;">{{ rec.message }}</p>
-        <small style="color: #a0a0a0;">{{ rec.action }}</small>
+        <small style="color: var(--color-muted);">{{ rec.action }}</small>
     </div>
     {% endfor %}
 </div>
@@ -445,18 +445,18 @@ function escHtml(s) {
 {% if provider_stats %}
 <table>
     <tr>
-        <th>Provider</th>
-        <th>Total Requests</th>
-        <th>Success</th>
-        <th>Errors</th>
-        <th>Error Rate</th>
-        <th>Avg Latency</th>
-        <th>Input Tokens</th>
-        <th>Output Tokens</th>
-        <th>Total Tokens</th>
-        <th>Tokens/Min</th>
-        <th>Tokens/Hour</th>
-        <th>Tokens/Day</th>
+        <th data-i18n="analytics_page.col_provider">Provider</th>
+        <th data-i18n="analytics_page.col_total_requests">Total Requests</th>
+        <th data-i18n="analytics_page.col_success">Success</th>
+        <th data-i18n="analytics_page.col_errors">Errors</th>
+        <th data-i18n="analytics_page.col_error_rate">Error Rate</th>
+        <th data-i18n="analytics_page.col_avg_latency">Avg Latency</th>
+        <th data-i18n="analytics_page.col_input_tokens">Input Tokens</th>
+        <th data-i18n="analytics_page.col_output_tokens">Output Tokens</th>
+        <th data-i18n="analytics_page.col_total_tokens">Total Tokens</th>
+        <th data-i18n="analytics_page.col_tpm">Tokens/Min</th>
+        <th data-i18n="analytics_page.col_tph">Tokens/Hour</th>
+        <th data-i18n="analytics_page.col_tpd">Tokens/Day</th>
     </tr>
     {% for provider in provider_stats %}
     <tr>
@@ -479,8 +479,8 @@ function escHtml(s) {
     </tr>
     {% endfor %}
     {% if provider_stats %}
-    <tr style="background: #0f3460; font-weight: bold;">
-        <td><strong>Total</strong></td>
+    <tr style="background:var(--bg-accent); font-weight: bold;">
+        <td><strong data-i18n="analytics_page.total">Total</strong></td>
         <td>{{ provider_stats | sum(attribute='requests.total') }}</td>
         <td>{{ provider_stats | sum(attribute='requests.success') }}</td>
         <td>{{ provider_stats | sum(attribute='requests.error') }}</td>
@@ -516,7 +516,7 @@ function escHtml(s) {
     {% endif %}
 </table>
 {% else %}
-<p style="color: #a0a0a0;">No provider statistics available yet. Make API requests to see analytics.</p>
+<p style="color: var(--color-muted);">No provider statistics available yet. Make API requests to see analytics.</p>
 {% endif %}
 
 <h3 style="margin-top: 30px; margin-bottom: 15px;">Cost Overview</h3>
@@ -535,15 +535,15 @@ function escHtml(s) {
     
     <div style="background: #3498db; color: white; padding: 20px; border-radius: 8px;">
         <h4 style="font-size: 14px; margin-bottom: 10px;">💰 Estimated Savings</h4>
-        <p style="font-size: 28px; font-weight: bold;" id="savings-amount">$0.00</p>
+        <p style="font-size: 28px; font-weight: bold;" id="savings-amount">{{ currency_symbol }}0.00</p>
         <small style="color: rgba(255,255,255,0.8);">From cache hits & optimization</small>
     </div>
     
     {% for pc in cost_overview.providers %}
-    <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
+    <div style="background:var(--bg-accent); padding: 15px; border-radius: 8px;">
         <h4 style="font-size: 14px; margin-bottom: 5px;">{{ pc.provider_id }}</h4>
         <p style="font-size: 20px; font-weight: bold;">${{ "%.2f"|format(pc.estimated_cost) }}</p>
-        <small style="color: #a0a0a0;">{{ format_tokens(pc.tokens_today) }} tokens</small>
+        <small style="color: var(--color-muted);">{{ format_tokens(pc.tokens_today) }} tokens</small>
     </div>
     {% endfor %}
 </div>
@@ -570,12 +570,12 @@ function escHtml(s) {
 {% if optimization_savings.savings_by_type %}
 <table>
     <tr>
-        <th>Optimization Type</th>
-        <th>Count</th>
-        <th>Tokens Saved</th>
-        <th>Cost Saved</th>
-        <th>Avg Tokens/Optimization</th>
-        <th>Max Tokens Saved</th>
+        <th data-i18n="analytics_page.col_opt_type">Optimization Type</th>
+        <th data-i18n="analytics_page.col_count">Count</th>
+        <th data-i18n="analytics_page.col_tokens_saved">Tokens Saved</th>
+        <th data-i18n="analytics_page.col_cost_saved">Cost Saved</th>
+        <th data-i18n="analytics_page.col_avg_tokens_opt">Avg Tokens/Optimization</th>
+        <th data-i18n="analytics_page.col_max_tokens_saved">Max Tokens Saved</th>
     </tr>
     {% for opt_type, stats in optimization_savings.savings_by_type.items() %}
     <tr>
@@ -587,8 +587,8 @@ function escHtml(s) {
         <td>{{ format_tokens(stats.max_tokens_saved) }}</td>
     </tr>
     {% endfor %}
-    <tr style="background: #0f3460; font-weight: bold;">
-        <td><strong>Total</strong></td>
+    <tr style="background:var(--bg-accent); font-weight: bold;">
+        <td><strong data-i18n="analytics_page.total">Total</strong></td>
         <td>{{ optimization_savings.savings_by_type.values() | sum(attribute='count') }}</td>
         <td>{{ format_tokens(optimization_savings.total_tokens_saved) }}</td>
         <td>${{ "%.4f"|format(optimization_savings.total_cost_saved) }}</td>
@@ -598,7 +598,7 @@ function escHtml(s) {
 </table>
 {% endif %}
 {% else %}
-<p style="color: #a0a0a0;">No optimization savings recorded yet. Enable deduplication, condensation, batching, or caching to see savings.</p>
+<p style="color: var(--color-muted);">No optimization savings recorded yet. Enable deduplication, condensation, batching, or caching to see savings.</p>
 {% endif %}
 
 <script>
@@ -610,7 +610,7 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
             // Estimate savings: assume average cost of $0.002 per cached request
             const avgCostPerRequest = 0.002;
             const estimatedSavings = data.hits * avgCostPerRequest;
-            document.getElementById('savings-amount').textContent = '$' + estimatedSavings.toFixed(2);
+            document.getElementById('savings-amount').textContent = '{{ currency_symbol }}' + estimatedSavings.toFixed(2);
         }
     })
     .catch(error => {
@@ -622,15 +622,15 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
 {% if model_performance %}
 <table>
     <tr>
-        <th>Provider</th>
-        <th>Model</th>
-        <th>Type</th>
-        <th>Context Size</th>
+        <th data-i18n="analytics_page.col_provider">Provider</th>
+        <th data-i18n="analytics_page.col_model">Model</th>
+        <th data-i18n="analytics_page.col_type">Type</th>
+        <th data-i18n="analytics_page.col_context_size">Context Size</th>
         <th>Condense %</th>
-        <th>Condense Method</th>
-        <th>Tokens/Day</th>
-        <th>Error Rate</th>
-        <th>Avg Latency</th>
+        <th data-i18n="analytics_page.col_condense_method">Condense Method</th>
+        <th data-i18n="analytics_page.col_tpd">Tokens/Day</th>
+        <th data-i18n="analytics_page.col_error_rate">Error Rate</th>
+        <th data-i18n="analytics_page.col_avg_latency">Avg Latency</th>
     </tr>
     {% for model in model_performance %}
     <tr>
@@ -659,7 +659,7 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
     {% endfor %}
 </table>
 {% else %}
-<p style="color: #a0a0a0;">No model performance data available yet.</p>
+<p style="color: var(--color-muted);">No model performance data available yet.</p>
 {% endif %}
 
 <h3 style="margin-top: 30px; margin-bottom: 15px;">
@@ -685,7 +685,7 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
     {% endif %}
 </h3>
 {% if token_over_time != '[]' %}
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+<div style="background: var(--bg-page); padding: 20px; border-radius: 8px;">
     <canvas id="tokenChart" style="width: 100%; height: 300px;"></canvas>
 </div>
 <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
@@ -762,11 +762,11 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
     }
 </script>
 {% else %}
-<p style="color: #a0a0a0;">No token usage data available for the selected period.</p>
+<p style="color: var(--color-muted);">No token usage data available for the selected period.</p>
 {% endif %}
 
 <div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">
-    <a href="/dashboard" class="btn btn-secondary">Back to Dashboard</a>
+    <a href="/dashboard" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>
     {% if is_admin %}
     <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn">Rate Limits</a>
     <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn">Response Cache</a>
