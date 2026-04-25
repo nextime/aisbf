@@ -210,10 +210,6 @@ class KiloProviderHandler(BaseProviderHandler):
         import logging
         logger = logging.getLogger(__name__)
         
-        # DEBUG: Check self.oauth2 before using it
-        logger.info(f"KiloProviderHandler._ensure_authenticated: self.oauth2 type={type(self.oauth2)}, value={self.oauth2}")
-        logger.info(f"KiloProviderHandler._ensure_authenticated: self._use_api_key_auth={self._use_api_key_auth}")
-        
         # If API key authentication is configured, use it directly - NO OAUTH EVER
         if self._use_api_key_auth:
             logger.info("KiloProviderHandler: Using configured API key authentication - skipping OAuth2 flow")
@@ -222,23 +218,12 @@ class KiloProviderHandler(BaseProviderHandler):
                 "token": self.api_key
             }
 
-        logger.info(f"KiloProviderHandler._ensure_authenticated: About to call self.oauth2.get_valid_token()")
-        token = self.oauth2.get_valid_token()  # NOT async - don't await
+        # Try to get valid token with automatic refresh
+        logger.info(f"KiloProviderHandler._ensure_authenticated: Calling get_valid_token_with_refresh()")
+        token = await self.oauth2.get_valid_token_with_refresh()
 
         if token:
-            logger.info("KiloProviderHandler: Using existing OAuth2 token")
-            return {
-                "status": "authenticated",
-                "token": token
-            }
-            
-        # Try to reload credentials one more time - this handles the case where credentials
-        # were saved by another process/handler instance after this handler was created
-        self.oauth2._load_credentials()
-        token = self.oauth2.get_valid_token()  # NOT async - don't await
-        
-        if token:
-            logger.info("KiloProviderHandler: Found OAuth2 token after reloading credentials")
+            logger.info("KiloProviderHandler: Using OAuth2 token (valid or refreshed)")
             return {
                 "status": "authenticated",
                 "token": token
