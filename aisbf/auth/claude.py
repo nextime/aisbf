@@ -311,26 +311,43 @@ class ClaudeAuth:
         logger.error(f"Token refresh failed after {max_retries} attempts")
         return False
     
-    async def get_valid_token(self, auto_login: bool = False) -> str:
+    def get_valid_token(self) -> Optional[str]:
+        """
+        Get a valid access token without attempting refresh.
+        
+        This is a quick check method that returns the token if valid,
+        or None if expired. It does NOT attempt to refresh the token.
+        
+        Returns:
+            Valid access token or None if expired/not authenticated
+        """
+        if not self.tokens:
+            return None
+        
+        # Check if token is expired (with 5 minute buffer)
+        if time.time() > (self.tokens.get('expires_at', 0) - 300):
+            return None
+        
+        return self.tokens.get('access_token')
+
+    async def get_valid_token_with_refresh(self, auto_login: bool = False) -> Optional[str]:
         """
         Get a valid access token, refreshing it if necessary.
         
         Args:
             auto_login: If True, automatically trigger login flow when no credentials exist.
-                       If False, raise an exception instead (default: False for security).
+                       If False, return None instead (default: False for security).
         
         Returns:
-            Valid access token
-            
-        Raises:
-            Exception: If no credentials exist and auto_login is False
+            Valid access token or None if refresh fails
         """
         if not self.tokens:
             if not auto_login:
                 logger.error("No Claude credentials available. Please authenticate via dashboard or MCP.")
-                raise Exception("Claude authentication required. Please authenticate via /dashboard/claude/auth/start or MCP tool.")
+                return None
             logger.info("No tokens available, starting login flow")
             self.login()
+            return self.tokens.get('access_token') if self.tokens else None
         
         # Refresh if less than 5 minutes remain
         if time.time() > (self.tokens.get('expires_at', 0) - 300):
@@ -338,11 +355,12 @@ class ClaudeAuth:
             if not await self.refresh_token():
                 if not auto_login:
                     logger.error("Token refresh failed and auto_login is disabled")
-                    raise Exception("Claude token refresh failed. Please re-authenticate via /dashboard/claude/auth/start or MCP tool.")
+                    return None
                 logger.warning("Refresh failed, re-authenticating...")
                 self.login()
+                return self.tokens.get('access_token') if self.tokens else None
         
-        return self.tokens['access_token']
+        return self.tokens.get('access_token')
 
     def get_account_id(self) -> Optional[str]:
         """
