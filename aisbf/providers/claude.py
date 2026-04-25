@@ -951,11 +951,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
         import logging
         logger = logging.getLogger(__name__)
 
-        access_token = await self.auth.get_valid_token()
+        access_token = await self.auth.get_valid_token_with_refresh()
         
         if not access_token:
             logger.error("ClaudeProviderHandler: No OAuth2 access token available")
-            raise Exception("No OAuth2 access token. Please re-authenticate with /login")
+            raise Exception("Claude authentication required. Token refresh failed. Please re-authenticate via /dashboard/claude/auth/start")
         
         self._sdk_client = Anthropic(
             auth_token=access_token,
@@ -973,7 +973,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
         import platform
         logger = logging.getLogger(__name__)
 
-        access_token = await self.auth.get_valid_token()
+        access_token = await self.auth.get_valid_token_with_refresh()
+        
+        if not access_token:
+            raise Exception("Claude authentication required. Token refresh failed. Please re-authenticate via /dashboard/claude/auth/start")
         
         if not self.session_state.get('session_id'):
             self.session_state['session_id'] = str(uuid.uuid4())
