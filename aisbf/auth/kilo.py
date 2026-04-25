@@ -479,6 +479,25 @@ class KiloOAuth2:
         
         return self.credentials.get("access")
     
+    async def get_valid_token_with_refresh(self) -> Optional[str]:
+        """
+        Get a valid access token, attempting refresh if expired.
+        
+        Note: Kilo uses long-lived tokens (1 year) with the same value for
+        access and refresh. There is no separate refresh endpoint - when tokens
+        expire, users must complete device flow again.
+        
+        Returns:
+            Access token string or None if expired/not authenticated
+        """
+        self._load_credentials()
+        
+        if self.credentials and self.credentials.get('expires', 0) > time.time():
+            return self.credentials.get('access')
+        
+        logger.error("KiloOAuth2: Token expired, re-authentication required")
+        return None
+    
     def is_authenticated(self) -> bool:
         """Check if user is authenticated with valid token."""
         # get_valid_token() already handles credential reloading
