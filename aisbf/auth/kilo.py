@@ -491,7 +491,7 @@ class KiloOAuth2:
         if self.credentials and self.credentials.get('expires', 0) > time.time():
             return self.credentials.get('access')
         
-        logger.error("KiloOAuth2: Token expired")
+        logger.warning("KiloOAuth2: Token expired")
         return None
     
     def is_authenticated(self) -> bool:

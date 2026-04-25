@@ -54,7 +54,7 @@ async def test_get_valid_token_with_refresh_returns_valid_token(temp_credentials
 
 
 @pytest.mark.asyncio
-async def test_get_valid_token_with_refresh_returns_none_when_expired(temp_credentials_file, expired_credentials):
+async def test_get_valid_token_with_refresh_returns_none_when_expired(temp_credentials_file, expired_credentials, caplog):
     """Test that get_valid_token_with_refresh returns None when token expired."""
     with open(temp_credentials_file, 'w') as f:
         json.dump(expired_credentials, f)
@@ -64,3 +64,4 @@ async def test_get_valid_token_with_refresh_returns_none_when_expired(temp_crede
     token = await oauth2.get_valid_token_with_refresh()
     
     assert token is None
+    assert "Token expired" in caplog.text
