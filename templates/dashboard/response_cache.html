@@ -6,7 +6,7 @@
 <h2 style="margin-bottom: 30px;">Response Cache Management</h2>
 
 <!-- Quick Links Navigation -->
-<div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 30px;">
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
             📊 Analytics
@@ -21,58 +21,58 @@
 </div>
 
 <!-- Cache Statistics -->
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-panel); padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     {% if is_admin %}
     <h3 style="margin-bottom: 20px;">Global Cache Statistics</h3>
     {% else %}
     <h3 style="margin-bottom: 20px;">Your Personal Cache Impact</h3>
-    <p style="color: #a0a0a0; margin-bottom: 20px;">These statistics show how the response cache has benefited your requests personally.</p>
+    <p style="color: var(--color-muted); margin-bottom: 20px;">These statistics show how the response cache has benefited your requests personally.</p>
     {% endif %}
     
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 20px;">
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Status</div>
-            <div style="font-size: 24px; font-weight: bold; color: {% if stats.enabled %}#4ade80{% else %}#ef4444{% endif %};">
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Status</div>
+            <div style="font-size: 24px; font-weight: bold; color: {% if stats.enabled %}#4ade80{% else %}var(--alert-error-fg){% endif %};">
                 {% if stats.enabled %}Enabled{% else %}Disabled{% endif %}
             </div>
         </div>
         
         {% if is_admin %}
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Backend</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Backend</div>
             <div style="font-size: 24px; font-weight: bold;">{{ stats.backend|upper }}</div>
         </div>
         {% endif %}
         
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Hits{% else %}Your Cache Hits{% endif %}</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Hits{% else %}Your Cache Hits{% endif %}</div>
             <div style="font-size: 24px; font-weight: bold; color: #4ade80;">{{ stats.hits }}</div>
         </div>
         
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Misses{% else %}Your Cache Misses{% endif %}</div>
-            <div style="font-size: 24px; font-weight: bold; color: #ef4444;">{{ stats.misses }}</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Cache Misses{% else %}Your Cache Misses{% endif %}</div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--alert-error-fg);">{{ stats.misses }}</div>
         </div>
         
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Hit Rate{% else %}Your Hit Rate{% endif %}</div>
-            <div style="font-size: 24px; font-weight: bold; color: #60a5fa;">{{ "%.1f"|format(stats.hit_rate * 100) }}%</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">{% if is_admin %}Hit Rate{% else %}Your Hit Rate{% endif %}</div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--color-link);">{{ "%.1f"|format(stats.hit_rate * 100) }}%</div>
         </div>
         
         {% if is_admin %}
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Cache Size</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Cache Size</div>
             <div style="font-size: 24px; font-weight: bold;">{{ stats.size }}</div>
         </div>
         
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Evictions</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Evictions</div>
             <div style="font-size: 24px; font-weight: bold; color: #f59e0b;">{{ stats.evictions }}</div>
         </div>
         {% else %}
-        <div style="background: #0f3460; padding: 15px; border-radius: 8px;">
-            <div style="color: #a0a0a0; font-size: 14px; margin-bottom: 5px;">Total Requests</div>
-            <div style="font-size: 24px; font-weight: bold; color: #a78bfa;">{{ stats.total_requests }}</div>
+        <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px;">
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Total Requests</div>
+            <div style="font-size: 24px; font-weight: bold; color: var(--color-link);">{{ stats.total_requests }}</div>
         </div>
         {% endif %}
     </div>
@@ -80,7 +80,7 @@
 
 {% if is_admin %}
 <!-- Cache Actions -->
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
+<div style="background: var(--bg-panel); padding: 20px; border-radius: 8px; margin-bottom: 30px;">
     <h3 style="margin-bottom: 20px;">Cache Actions</h3>
     
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
@@ -97,20 +97,20 @@
 
 <!-- Error Display -->
 {% if stats.error %}
-<div style="background: #7f1d1d; padding: 15px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid #ef4444;">
-    <strong style="color: #fca5a5;">Error:</strong>
-    <span style="color: #e0e0e0;">{{ stats.error }}</span>
+<div style="background: var(--alert-error-bg); padding: 15px; border-radius: 8px; margin-bottom: 30px; border-left: 4px solid var(--alert-error-border);">
+    <strong style="color: var(--alert-error-fg);">Error:</strong>
+    <span style="color: var(--color-text);">{{ stats.error }}</span>
 </div>
 {% endif %}
 
 <!-- Cache Information -->
-<div style="background: #1a1a2e; padding: 20px; border-radius: 8px;">
+<div style="background: var(--bg-panel); padding: 20px; border-radius: 8px;">
     <h3 style="margin-bottom: 15px;">About Response Cache</h3>
-    <p style="color: #a0a0a0; line-height: 1.6;">
+    <p style="color: var(--color-muted); line-height: 1.6;">
         The response cache stores API responses to reduce redundant requests and improve performance. 
         When enabled, identical requests will be served from cache instead of making new API calls.
     </p>
-    <ul style="color: #a0a0a0; line-height: 1.8; margin-top: 15px;">
+    <ul style="color: var(--color-muted); line-height: 1.8; margin-top: 15px;">
         <li><strong>Hit Rate:</strong> Percentage of requests served from cache</li>
         <li><strong>Cache Size:</strong> Number of cached responses currently stored</li>
         <li><strong>Evictions:</strong> Number of entries removed due to cache size limits</li>

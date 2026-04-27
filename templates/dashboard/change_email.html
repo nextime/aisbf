@@ -17,7 +17,7 @@
 
     <div class="card">
         <h2 data-i18n="email_page.current">Current Email</h2>
-        <p style="color: #a0a0a0; margin-bottom: 2rem;">{{ session.email }}</p>
+        <p style="color: var(--color-muted); margin-bottom: 2rem;">{{ session.email }}</p>
         
         <form method="POST" action="{{ url_for(request, '/dashboard/change-email') }}">
             <div class="form-group">
@@ -28,12 +28,12 @@
             <div class="form-group">
                 <label for="password" data-i18n="email_page.password">Current Password</label>
                 <input type="password" id="password" name="password" required>
-                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Confirm your password to proceed</small>
+                <small style="color: var(--color-muted); display: block; margin-top: 0.5rem;" data-i18n="email_page.password_hint">Confirm your password to proceed</small>
             </div>
 
             <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
                 <button type="submit" class="btn btn-primary" data-i18n="email_page.submit">Send Verification Email</button>
-                <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary">Cancel</a>
+                <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary" data-i18n="email_page.cancel">Cancel</a>
             </div>
         </form>
     </div>
@@ -47,7 +47,7 @@
 }
 
 .card {
-    background: #16213e;
+    background: var(--bg-panel);
     padding: 2rem;
     border-radius: 8px;
     margin-top: 1.5rem;
@@ -55,7 +55,7 @@
 
 .card h2 {
     margin-bottom: 1.5rem;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .form-group {
@@ -66,22 +66,22 @@
     display: block;
     margin-bottom: 0.5rem;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .form-group input {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--color-border);
     border-radius: 4px;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg-page);
+    color: var(--color-text);
     font-size: 1rem;
 }
 
 .form-group input:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--color-link);
 }
 
 .alert {
@@ -91,15 +91,15 @@
 }
 
 .alert-success {
-    background: #1b5e20;
-    color: #a5d6a7;
-    border: 1px solid #2e7d32;
+    background: var(--alert-success-bg);
+    color: var(--alert-success-fg);
+    border: 1px solid var(--alert-success-border);
 }
 
 .alert-error {
-    background: #b71c1c;
-    color: #ef9a9a;
-    border: 1px solid #c62828;
+    background: var(--alert-error-bg);
+    color: var(--alert-error-fg);
+    border: 1px solid var(--alert-error-border);
 }
 
 .btn {
@@ -113,21 +113,21 @@
 }
 
 .btn-primary {
-    background: #667eea;
+    background: var(--color-primary);
     color: white;
 }
 
 .btn-primary:hover {
-    background: #5568d3;
+    background: var(--color-primary-hover);
 }
 
 .btn-secondary {
-    background: #0f3460;
-    color: #e0e0e0;
+    background: var(--bg-accent);
+    color: var(--color-text);
 }
 
 .btn-secondary:hover {
-    background: #16213e;
+    background: var(--bg-panel);
 }
 </style>
 {% endblock %}

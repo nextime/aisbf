@@ -739,6 +739,47 @@ def _login_record_failure(ip: str, username: str) -> None:
 def _login_clear_failures(ip: str, username: str) -> None:
     _login_failures.pop(f"{ip}:{username.lower()}", None)
 
+
+# --- Client rate limiter (inbound request flooding protection) ---
+# Sliding-window counters keyed by (client_key, window).  Pure in-memory.
+_client_rl_state: dict = {}
+_client_rl_lock = threading.Lock()
+
+def _client_rl_key(request: Request, category: str) -> str:
+    """Return a rate-limit bucket key for this request."""
+    if category == 'api':
+        auth_hdr = request.headers.get('Authorization', '')
+        if auth_hdr.startswith('Bearer '):
+            token = auth_hdr[7:].strip()
+            if token:
+                return f"token:{token}"
+    ip = _get_real_client_ip(request)
+    return f"ip:{ip}"
+
+def _get_real_client_ip(request: Request) -> str:
+    xff = request.headers.get('X-Forwarded-For', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    client = request.scope.get('client')
+    return client[0] if client else 'unknown'
+
+def _client_rl_check(bucket: str, window_seconds: int, max_requests: int) -> tuple:
+    """Sliding-window check. Returns (allowed: bool, retry_after: int)."""
+    if max_requests <= 0:
+        return True, 0
+    now = time.time()
+    cutoff = now - window_seconds
+    with _client_rl_lock:
+        ts = _client_rl_state.get(bucket, [])
+        ts = [t for t in ts if t > cutoff]
+        if len(ts) >= max_requests:
+            retry_after = int(ts[0] + window_seconds - now) + 1
+            _client_rl_state[bucket] = ts
+            return False, retry_after
+        ts.append(now)
+        _client_rl_state[bucket] = ts
+        return True, 0
+
 # These will be initialized in startup event or main() after config is loaded
 request_handler = None
 rotation_handler = None
@@ -2023,6 +2064,36 @@ async def record_token_usage_async(user_id: int, token_id: int):
     except Exception as e:
         logger.warning(f"Failed to record token usage: {e}")
 
+
+async def _refresh_provider_usage_if_stale(provider_id: str, user_id):
+    """Refresh provider usage in the background if last update was >2 minutes ago."""
+    try:
+        import datetime as _dt
+        db = DatabaseRegistry.get_config_database()
+        cached = db.get_provider_usage(user_id, provider_id)
+        now = _dt.datetime.utcnow()
+        if cached:
+            lu = cached.get('last_updated')
+            if lu:
+                if hasattr(lu, 'utcoffset'):
+                    lu = lu.replace(tzinfo=None)
+                if isinstance(lu, str):
+                    try:
+                        lu = _dt.datetime.fromisoformat(lu)
+                    except Exception:
+                        lu = None
+                if lu and (now - lu).total_seconds() < 120:
+                    return  # Not stale yet
+        from aisbf.providers import get_provider_handler
+        handler = get_provider_handler(provider_id, user_id=user_id)
+        if not handler.supports_usage():
+            return
+        usage_data = await handler.get_usage()
+        if usage_data:
+            db.save_provider_usage(user_id, provider_id, usage_data)
+    except Exception as e:
+        logger.debug(f"Background usage refresh failed for {provider_id}: {e}")
+
 # Exception handler for validation errors
 @app.exception_handler(RequestValidationError)
 async def validation_exception_handler(request: Request, exc: RequestValidationError):
@@ -2118,6 +2189,58 @@ async def dashboard_context_middleware(request: Request, call_next):
     
     response = await call_next(request)
     return response
+
+
+# Client rate limiting middleware — runs before auth so flooding is dropped cheaply
+@app.middleware("http")
+async def client_rate_limiting_middleware(request: Request, call_next):
+    """Enforce per-client request-rate limits for API/MCP vs all other routes."""
+    path = request.url.path
+
+    # Never rate-limit health check or static assets
+    if path in ('/health', '/favicon.ico') or path.startswith('/static/'):
+        return await call_next(request)
+
+    aisbf_conf = config.get_aisbf_config()
+    rl_cfg = getattr(aisbf_conf, 'client_rate_limiting', None) if aisbf_conf else None
+    if not rl_cfg or not rl_cfg.enabled:
+        return await call_next(request)
+
+    is_api_mcp = (
+        path.startswith('/api/') or
+        path.startswith('/mcp/') or
+        path in ('/v1/chat/completions', '/v1/models', '/api/models', '/api/v1/models')
+    )
+    category = 'api' if is_api_mcp else 'general'
+    limit_cfg = rl_cfg.api if is_api_mcp else rl_cfg.general
+
+    client_key = _client_rl_key(request, category)
+
+    # Per-minute window
+    allowed, retry_after = _client_rl_check(
+        f"{client_key}:{category}:min", 60, limit_cfg.requests_per_minute
+    )
+    if not allowed:
+        logger.warning(f"Client rate limit (per-minute) hit: key={client_key} category={category}")
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Too many requests", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    # Per-hour window
+    allowed, retry_after = _client_rl_check(
+        f"{client_key}:{category}:hour", 3600, limit_cfg.requests_per_hour
+    )
+    if not allowed:
+        logger.warning(f"Client rate limit (per-hour) hit: key={client_key} category={category}")
+        return JSONResponse(
+            status_code=429,
+            content={"error": "Too many requests", "retry_after": retry_after},
+            headers={"Retry-After": str(retry_after)}
+        )
+
+    return await call_next(request)
 
 
 # Add session middleware AFTER the @app.middleware decorators
@@ -2603,7 +2726,7 @@ async def dashboard_analytics(
     available_providers = list(config.providers.keys()) if config else []
     available_rotations = list(config.rotations.keys()) if config else []
     available_autoselects = list(config.autoselect.keys()) if config else []
-    
+
     # Get models from providers
     available_models = []
     if config and hasattr(config, 'providers'):
@@ -2611,35 +2734,57 @@ async def dashboard_analytics(
             if hasattr(provider_config, 'models') and provider_config.models:
                 for model in provider_config.models:
                     available_models.append(f"{provider_id}/{model.name}")
+
+    # model_filter arrives as "provider/model" — split into provider + model components
+    effective_provider_filter = provider_filter
+    effective_model_filter = model_filter
+    if model_filter and '/' in model_filter:
+        _p, _m = model_filter.split('/', 1)
+        effective_provider_filter = effective_provider_filter or _p
+        effective_model_filter = _m
     
-    # Get provider statistics (with optional filter)
-    if provider_filter:
-        provider_stats = [analytics.get_provider_stats(provider_filter, from_datetime, to_datetime, user_filter=user_filter_int)]
-    else:
-        provider_stats = analytics.get_all_providers_stats(from_datetime, to_datetime, user_filter=user_filter_int)
-    
-    # Get token usage over time (with optional filters)
+    # Get provider statistics (with all filters)
+    provider_stats = analytics.get_all_providers_stats(
+        from_datetime, to_datetime,
+        user_filter=user_filter_int,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter
+    )
+
+    # Get token usage over time (with all filters)
     token_over_time = analytics.get_token_usage_over_time(
-        provider_id=provider_filter,
+        provider_id=effective_provider_filter,
         time_range=time_range,
         from_datetime=from_datetime,
         to_datetime=to_datetime,
-        user_filter=user_filter_int
+        user_filter=user_filter_int,
+        model_filter=effective_model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter
     )
-    
-    # Get model performance (with optional filters)
+
+    # Get model performance (with all filters)
     model_performance = analytics.get_model_performance(
-        provider_filter=provider_filter,
-        model_filter=model_filter,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
         rotation_filter=rotation_filter,
         autoselect_filter=autoselect_filter,
         user_filter=user_filter_int,
         from_datetime=from_datetime,
         to_datetime=to_datetime
     )
-    
-    # Get cost overview
-    cost_overview = analytics.get_cost_overview(from_datetime, to_datetime, user_filter=user_filter_int)
+
+    # Get cost overview (with all filters)
+    cost_overview = analytics.get_cost_overview(
+        from_datetime, to_datetime,
+        user_filter=user_filter_int,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter
+    )
     
     # Placeholder for recommendations and optimization savings (not yet implemented)
     recommendations = []
@@ -2650,7 +2795,7 @@ async def dashboard_analytics(
     if from_datetime or to_datetime:
         start = from_datetime or (datetime.now() - timedelta(days=1))
         end = to_datetime or datetime.now()
-        date_range_usage = analytics.get_token_usage_by_date_range(provider_filter, start, end, user_filter=user_filter_int)
+        date_range_usage = analytics.get_token_usage_by_date_range(effective_provider_filter, start, end, user_filter=user_filter_int)
 
     # Handle Decimal values from MySQL for JSON serialization
     def decimal_default(obj):
@@ -5152,15 +5297,17 @@ async def dashboard_rotations(request: Request):
     if is_config_admin:
         # Admin: use global providers
         available_providers = list(config.providers.keys()) if config else []
+        providers_meta = {k: {"type": getattr(v, 'type', 'openai')} for k, v in (config.providers.items() if config else {}.items())}
     else:
         # Database user: use ONLY their own providers
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
         available_providers = [p['provider_id'] for p in user_providers]
-    
+        providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in user_providers}
+
     # Check for success parameter
     success = request.query_params.get('success')
-    
+
     if is_config_admin:
         # Config admin: use admin template
         return templates.TemplateResponse(
@@ -5171,6 +5318,7 @@ async def dashboard_rotations(request: Request):
             "session": request.session,
             "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
+            "providers_meta": json.dumps(providers_meta),
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -5185,6 +5333,7 @@ async def dashboard_rotations(request: Request):
             "__version__": __version__,
             "rotations_json": json.dumps(rotations_data),
             "available_providers": json.dumps(available_providers),
+            "providers_meta": json.dumps(providers_meta),
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -5380,12 +5529,14 @@ async def dashboard_autoselect(request: Request):
         if not providers_path.exists():
             providers_path = Path(__file__).parent / 'config' / 'providers.json'
         
+        admin_providers_meta = {}
         if providers_path.exists():
             with open(providers_path) as f:
                 providers_config = json.load(f)
                 providers_data = providers_config.get('providers', {})
-                
+
                 for provider_id, provider in providers_data.items():
+                    admin_providers_meta[provider_id] = {"type": provider.get('type', 'openai')}
                     if 'models' in provider and isinstance(provider['models'], list):
                         for model in provider['models']:
                             model_id = f"{provider_id}/{model['name']}"
@@ -5394,7 +5545,7 @@ async def dashboard_autoselect(request: Request):
                                 'name': f"{model_id} (provider model)",
                                 'type': 'provider'
                             })
-        
+
         # Config admin: use admin template
         return templates.TemplateResponse(
             request=request,
@@ -5405,6 +5556,7 @@ async def dashboard_autoselect(request: Request):
             "autoselect_json": json.dumps(autoselect_data),
             "available_rotations": json.dumps(available_rotations),
             "available_models": json.dumps(available_models),
+            "providers_meta": json.dumps(admin_providers_meta),
             "success": "Configuration saved successfully!" if success else None
         }
         )
@@ -5412,15 +5564,16 @@ async def dashboard_autoselect(request: Request):
         # Database user: use ONLY their own rotations and providers
         db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
-        
+
         # Get only user's own rotations
         user_rotations = db.get_user_rotations(current_user_id)
         available_rotations = [rot['rotation_id'] for rot in user_rotations]
-        
+
         # Get only user's own providers
         user_providers = db.get_user_providers(current_user_id)
         available_models = []
-        
+        user_providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in user_providers}
+
         # Add user rotation IDs
         for rotation_id in available_rotations:
             available_models.append({
@@ -5428,7 +5581,7 @@ async def dashboard_autoselect(request: Request):
                 'name': f'{rotation_id} (rotation)',
                 'type': 'rotation'
             })
-        
+
         # Add user provider models
         for provider in user_providers:
             provider_config = provider['config']
@@ -5440,7 +5593,7 @@ async def dashboard_autoselect(request: Request):
                         'name': f"{model_id} (provider model)",
                         'type': 'provider'
                     })
-    
+
         # Database user: use user template
         return templates.TemplateResponse(
             request=request,
@@ -5452,6 +5605,7 @@ async def dashboard_autoselect(request: Request):
             "autoselect_json": json.dumps(autoselect_data),
             "available_rotations": json.dumps(available_rotations),
             "available_models": json.dumps(available_models),
+            "providers_meta": json.dumps(user_providers_meta),
             "user_id": current_user_id,
             "success": "Configuration saved successfully!" if success else None
         }
@@ -5470,7 +5624,19 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     
     try:
         autoselect_data = json.loads(config)
-        
+
+        # Sanitize every autoselect entry before saving
+        for key, cfg in autoselect_data.items():
+            # Strip available_models with empty model_id
+            original = cfg.get('available_models', [])
+            valid = [m for m in original if (m.get('model_id') or '').strip()]
+            if len(valid) != len(original):
+                logger.warning(f"dashboard_autoselect_save: stripped {len(original) - len(valid)} empty model_id entry(s) from '{key}'")
+                cfg['available_models'] = valid
+            # Default selection_model to "internal" when blank
+            if not (cfg.get('selection_model') or '').strip():
+                cfg['selection_model'] = 'internal'
+
         if is_config_admin:
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'autoselect.json'
@@ -5780,6 +5946,59 @@ async def api_provider_delete(request: Request, provider_id: str):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+@app.get("/dashboard/api/provider/{provider_id:path}/usage")
+async def api_provider_usage(request: Request, provider_id: str):
+    """Return cached usage data for a provider, refreshing from source if stale (>5 min)."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+
+    STALE_SECONDS = 300  # 5 minutes
+
+    # Check DB cache
+    cached = db.get_provider_usage(current_user_id, provider_id)
+    now = __import__('datetime').datetime.utcnow()
+
+    def _age_seconds(last_updated):
+        if last_updated is None:
+            return float('inf')
+        if hasattr(last_updated, 'utcoffset'):
+            import datetime as _dt
+            last_updated = last_updated.replace(tzinfo=None)
+        if isinstance(last_updated, str):
+            import datetime as _dt
+            try:
+                last_updated = _dt.datetime.fromisoformat(last_updated)
+            except Exception:
+                return float('inf')
+        return (now - last_updated).total_seconds()
+
+    if cached and _age_seconds(cached.get('last_updated')) < STALE_SECONDS:
+        return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data']})
+
+    # Fetch fresh data
+    try:
+        from aisbf.providers import get_provider_handler
+        handler = get_provider_handler(provider_id, user_id=current_user_id)
+        if not handler.supports_usage():
+            return JSONResponse({"success": True, "supported": False})
+        usage_data = await handler.get_usage()
+        if usage_data is None:
+            if cached:
+                return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data'], "stale": True})
+            return JSONResponse({"success": True, "supported": True, "usage": None})
+        db.save_provider_usage(current_user_id, provider_id, usage_data)
+        return JSONResponse({"success": True, "supported": True, "usage": usage_data})
+    except Exception as e:
+        logger.warning(f"api_provider_usage error for {provider_id}: {e}")
+        if cached:
+            return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data'], "stale": True})
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 @app.post("/dashboard/api/rotation")
 async def api_rotation_save(request: Request):
     """Create or update a single rotation"""
@@ -5870,6 +6089,19 @@ async def api_autoselect_save(request: Request):
 
         if not autoselect_id:
             return JSONResponse({"success": False, "error": "autoselect_id required"}, status_code=400)
+
+        # Reject entries with empty model_id
+        available_models = autoselect_config.get('available_models', [])
+        invalid = [m for m in available_models if not (m.get('model_id') or '').strip()]
+        if invalid:
+            return JSONResponse(
+                {"success": False, "error": f"{len(invalid)} model(s) have an empty model_id — please select a model for each entry before saving."},
+                status_code=400
+            )
+
+        # Default selection_model to "internal" when blank
+        if not (autoselect_config.get('selection_model') or '').strip():
+            autoselect_config['selection_model'] = 'internal'
 
         if is_config_admin:
             config_path = _autoselect_json_path()
@@ -6238,7 +6470,12 @@ async def dashboard_settings_save(
    admin_notify_wallet_topup: bool = Form(False),
    admin_notify_user_deleted_account: bool = Form(False),
    new_admin_password: str = Form(""),
-   confirm_admin_password: str = Form("")
+   confirm_admin_password: str = Form(""),
+   client_rl_enabled: bool = Form(False),
+   client_rl_api_rpm: int = Form(60),
+   client_rl_api_rph: int = Form(1000),
+   client_rl_general_rpm: int = Form(120),
+   client_rl_general_rph: int = Form(3000)
 ):
     """Save server settings"""
     auth_check = require_admin(request)
@@ -6455,6 +6692,19 @@ async def dashboard_settings_save(
     aisbf_config['adaptive_rate_limiting']['jitter_factor'] = adaptive_jitter_factor
     aisbf_config['adaptive_rate_limiting']['history_window'] = adaptive_history_window
     aisbf_config['adaptive_rate_limiting']['consecutive_successes_for_recovery'] = adaptive_consecutive_successes
+
+    # Update client rate limiting config
+    if 'client_rate_limiting' not in aisbf_config:
+        aisbf_config['client_rate_limiting'] = {}
+    aisbf_config['client_rate_limiting']['enabled'] = client_rl_enabled
+    aisbf_config['client_rate_limiting']['api'] = {
+        'requests_per_minute': max(0, client_rl_api_rpm),
+        'requests_per_hour': max(0, client_rl_api_rph)
+    }
+    aisbf_config['client_rate_limiting']['general'] = {
+        'requests_per_minute': max(0, client_rl_general_rpm),
+        'requests_per_hour': max(0, client_rl_general_rph)
+    }
 
     # Save config
     config_path = Path.home() / '.aisbf' / 'aisbf.json'
@@ -7537,19 +7787,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 claude_config = provider_config.get('claude_config', {})
             else:
                 claude_config = provider_config.claude_config or {}
-            
+
             if current_user_id is None:
-                # Admin user: load from file
+                # Admin user: load from file (ClaudeAuth saves back to file automatically)
                 auth = ClaudeAuth(credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'))
             else:
-                # Regular user: load from database
+                # Regular user: load from database; wire up a save-callback so any
+                # token refresh is persisted back to the database immediately.
+                db = DatabaseRegistry.get_config_database()
+                def _save_claude_to_db(creds):
+                    try:
+                        db.save_user_oauth2_credentials(
+                            user_id=current_user_id,
+                            provider_id=provider_name,
+                            auth_type='claude_oauth2',
+                            credentials=creds,
+                        )
+                    except Exception as _e:
+                        logger.warning(f"Failed to save refreshed Claude credentials to database: {_e}")
+
                 auth = ClaudeAuth(
                     credentials_file=claude_config.get('credentials_file', '~/.claude_credentials.json'),
-                    skip_initial_load=True
+                    skip_initial_load=True,
+                    save_callback=_save_claude_to_db,
                 )
-                # Load credentials from database
                 try:
-                    db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
                             user_id=current_user_id,
@@ -7558,17 +7820,28 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                         )
                         if db_creds and db_creds.get('credentials'):
                             auth.tokens = db_creds['credentials'].get('tokens', {})
-                            # Add expires_at if missing (for existing credentials saved before fix)
                             if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
                                 auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
                 except Exception as e:
                     logger.warning(f"Failed to load Claude credentials from database: {e}")
-            
-            is_auth = auth.is_authenticated()
-            result = {"authenticated": is_auth}
-            if is_auth and auth.tokens and 'expires_at' in auth.tokens:
-                result["expires_at"] = auth.tokens['expires_at']
-            return JSONResponse(result)
+
+            if not auth.is_authenticated():
+                return JSONResponse({"authenticated": False})
+
+            # Auto-refresh if expired (or expiring within 5 minutes)
+            expires_at = auth.tokens.get('expires_at', 0)
+            if time.time() >= (expires_at - 300):
+                logger.info(f"Claude token expired/expiring for provider {provider_name}, attempting refresh")
+                refreshed = await auth.refresh_token()
+                if not refreshed:
+                    logger.warning(f"Claude token refresh failed for provider {provider_name}")
+                    return JSONResponse({"authenticated": False, "error": "Token expired and refresh failed. Please re-authenticate."})
+                logger.info(f"Claude token refreshed successfully for provider {provider_name}")
+
+            return JSONResponse({
+                "authenticated": True,
+                "expires_at": auth.tokens.get('expires_at', 0),
+            })
 
         elif provider_type == 'kilocode':
             from aisbf.auth.kilo import KiloOAuth2
@@ -7616,19 +7889,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 qwen_config = provider_config.get('qwen_config', {})
             else:
                 qwen_config = provider_config.qwen_config or {}
-            
+
             if current_user_id is None:
                 # Admin user: load from file
                 auth = QwenOAuth2(credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'))
             else:
-                # Regular user: load from database
+                # Regular user: load from database with save_callback so refreshed tokens persist
+                db = DatabaseRegistry.get_config_database()
+                def _save_qwen_to_db(creds):
+                    try:
+                        if db:
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_name,
+                                auth_type='qwen_oauth2',
+                                credentials=creds
+                            )
+                    except Exception as _e:
+                        logger.warning(f"Failed to save refreshed Qwen credentials to database: {_e}")
                 auth = QwenOAuth2(
                     credentials_file=qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json'),
-                    skip_initial_load=True
+                    skip_initial_load=True,
+                    save_callback=_save_qwen_to_db
                 )
                 # Load credentials from database
                 try:
-                    db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
                             user_id=current_user_id,
@@ -7639,8 +7924,14 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                             auth.credentials = db_creds['credentials']
                 except Exception as e:
                     logger.warning(f"Failed to load Qwen credentials from database: {e}")
-            
+
             is_auth = auth.is_authenticated()
+            if not is_auth and auth.credentials and auth.credentials.get('refresh_token'):
+                refreshed = await auth.refresh_tokens()
+                if refreshed:
+                    is_auth = True
+                else:
+                    return JSONResponse({"authenticated": False, "error": "Token expired and refresh failed. Please re-authenticate."})
             result = {"authenticated": is_auth}
             if is_auth and auth.credentials:
                 expiry_date = auth.credentials.get('expiry_date', 0)
@@ -7656,19 +7947,31 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                 codex_config = provider_config.get('codex_config', {})
             else:
                 codex_config = provider_config.codex_config or {}
-            
+
             if current_user_id is None:
                 # Admin user: load from file
                 auth = CodexOAuth2(credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'))
             else:
-                # Regular user: load from database
+                # Regular user: load from database with save_callback so refreshed tokens persist
+                db = DatabaseRegistry.get_config_database()
+                def _save_codex_to_db(creds):
+                    try:
+                        if db:
+                            db.save_user_oauth2_credentials(
+                                user_id=current_user_id,
+                                provider_id=provider_name,
+                                auth_type='codex_oauth2',
+                                credentials=creds
+                            )
+                    except Exception as _e:
+                        logger.warning(f"Failed to save refreshed Codex credentials to database: {_e}")
                 auth = CodexOAuth2(
                     credentials_file=codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json'),
-                    skip_initial_load=True
+                    skip_initial_load=True,
+                    save_callback=_save_codex_to_db
                 )
                 # Load credentials from database
                 try:
-                    db = DatabaseRegistry.get_config_database()
                     if db:
                         db_creds = db.get_user_oauth2_credentials(
                             user_id=current_user_id,
@@ -7679,10 +7982,15 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                             auth.credentials = db_creds['credentials']
                 except Exception as e:
                     logger.warning(f"Failed to load Codex credentials from database: {e}")
-            
-            is_auth = auth.is_authenticated()
-            result = {"authenticated": is_auth}
-            if is_auth and auth.credentials:
+
+            # get_valid_token_with_refresh handles expiry check and refresh atomically
+            token = await auth.get_valid_token_with_refresh()
+            if not token:
+                if auth.credentials:
+                    return JSONResponse({"authenticated": False, "error": "Token expired and refresh failed. Please re-authenticate."})
+                return JSONResponse({"authenticated": False})
+            result = {"authenticated": True}
+            if auth.credentials:
                 expires = auth.credentials.get('expires', 0)
                 if expires:
                     result["expires_at"] = expires
@@ -9401,11 +9709,17 @@ async def dashboard_usage(request: Request):
     rotations_count = 0
     autoselects_count = 0
 
+    now = datetime.now()
+    today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    # Exact reset timestamps as JS-compatible millisecond Unix timestamps
+    daily_reset_ts  = int((today_start + timedelta(days=1)).timestamp() * 1000)
+    monthly_reset_ts = int((month_start + timedelta(days=32)).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0).timestamp() * 1000)
+
     if user_id:
         token_usage = db.get_user_token_usage(user_id)
-        now = datetime.now()
-        today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         day_ago = now - timedelta(days=1)
 
         for row in token_usage:
@@ -9456,6 +9770,8 @@ async def dashboard_usage(request: Request):
             "autoselects_count": autoselects_count,
             "upgrade_tiers": upgrade_tiers,
             "currency_symbol": currency_symbol,
+            "daily_reset_ts": daily_reset_ts,
+            "monthly_reset_ts": monthly_reset_ts,
         }
     )
 
@@ -11473,12 +11789,17 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
     try:
         if body.stream:
             logger.debug("Handling streaming chat completion")
-            return await handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+            result = await handler.handle_streaming_chat_completion(request, provider_id, body_dict)
         else:
             logger.debug("Handling non-streaming chat completion")
             result = await handler.handle_chat_completion(request, provider_id, body_dict)
             logger.debug(f"Response result: {result}")
-            return result
+        # Fire background usage refresh for providers that support it
+        import asyncio as _asyncio
+        _t = _asyncio.create_task(_refresh_provider_usage_if_stale(provider_id, user_id))
+        _background_tasks.add(_t)
+        _t.add_done_callback(_background_tasks.discard)
+        return result
     except Exception as e:
         logger.error(f"Error handling chat_completions: {str(e)}", exc_info=True)
         raise
@@ -11956,11 +12277,19 @@ Examples:
             host=host,
             port=port,
             ssl_certfile=ssl_certfile,
-            ssl_keyfile=ssl_keyfile
+            ssl_keyfile=ssl_keyfile,
+            timeout_keep_alive=300,
+            timeout_graceful_shutdown=30
         )
     else:
         logger.info(f"Starting AI Proxy Server on http://{host}:{port}")
-        uvicorn.run(app, host=host, port=port)
+        uvicorn.run(
+            app,
+            host=host,
+            port=port,
+            timeout_keep_alive=300,
+            timeout_graceful_shutdown=30
+        )
 
 # MCP (Model Context Protocol) endpoints
 # These endpoints allow remote agents to configure the system and make model requests
@@ -14702,7 +15031,7 @@ async def dashboard_claude_auth_status(request: Request):
                 })
             else:
                 # Token expired, try to refresh
-                if auth.refresh_token():
+                if await auth.refresh_token():
                     return JSONResponse({
                         "authenticated": True,
                         "expires_in": auth.tokens.get('expires_at', 0) - time.time()

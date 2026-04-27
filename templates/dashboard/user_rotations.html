@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}My Rotations - AISBF{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">My Rotations Configuration</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="user_rotations_page.title">My Rotations Configuration</h2>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -33,10 +33,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <!-- Rotations list will be rendered here -->
 </div>
 
-<button type="button" class="btn" onclick="addRotation()" style="margin-top: 20px;">Add Rotation</button>
+<button type="button" class="btn" onclick="addRotation()" style="margin-top: 20px;" data-i18n="user_rotations_page.add_rotation">Add Rotation</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
-    <button type="button" class="btn" onclick="saveRotations()">Save Configuration</button>
-    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
+    <button type="button" class="btn" onclick="saveRotations()" data-i18n="user_rotations_page.save_config">Save Configuration</button>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary" data-i18n="user_rotations_page.cancel">Cancel</a>
 </div>
 
 <script>
@@ -52,7 +52,90 @@ const rotationsData = {
 };
 let rotationsConfig = rotationsData.config;
 let availableProviders = rotationsData.providers;
+const providersMeta = {{ providers_meta | default('{}') | safe }};
 let expandedRotations = new Set();
+
+// ===== Provider Usage =====
+const _usageCache = {};
+const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
+
+function _providerSupportsUsage(pid) { return pid && providersMeta[pid] && providersMeta[pid].type === 'codex'; }
+function _fmtSeconds(s) {
+    if (!s || s <= 0) return '0s';
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    if (h > 0) return `${h}h${m > 0 ? ' '+m+'m' : ''}`;
+    if (m > 0) return `${m}m${sec > 0 ? ' '+sec+'s' : ''}`;
+    return `${sec}s`;
+}
+function _windowLabel(seconds) {
+    if (!seconds || seconds <= 0) return 'Window';
+    if (seconds < 120) return 'Session';
+    const MIN = 60, HOUR = 3600, DAY = 86400, WEEK = 604800, MONTH = 2592000;
+    if (seconds % MONTH === 0) return seconds === MONTH ? 'Monthly' : `${seconds/MONTH}mo`;
+    if (seconds % WEEK  === 0) return seconds === WEEK  ? 'Weekly'  : `${seconds/WEEK}wk`;
+    if (seconds % DAY   === 0) return seconds === DAY   ? 'Daily'   : `${seconds/DAY}d`;
+    if (seconds % HOUR  === 0) return seconds === HOUR  ? 'Hourly'  : `${seconds/HOUR}h`;
+    if (seconds % MIN   === 0) return `${seconds/MIN}min`;
+    if (seconds >= MONTH * 0.9) return `${Math.round(seconds/MONTH)}mo`;
+    if (seconds >= WEEK  * 0.9) return 'Weekly';
+    if (seconds >= DAY)         return `${Math.round(seconds/DAY)}d`;
+    if (seconds >= HOUR)        return `${Math.round(seconds/HOUR)}h`;
+    return `${Math.round(seconds/MIN)}min`;
+}
+function _usageBarHtml(pct) {
+    const c = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
+    return `<div style="height:5px;background:var(--color-border);border-radius:2px;overflow:hidden;min-width:50px;flex:1;"><div style="height:100%;width:${Math.min(pct,100)}%;background:${c};"></div></div>`;
+}
+function _renderUsageCompact(usage) {
+    if (!usage) return '';
+    const parts = [];
+    const plan = usage.plan_type ? `<span style="font-size:10px;color:var(--color-muted);text-transform:uppercase;">${usage.plan_type}</span>` : '';
+    const rl = usage.rate_limit;
+    if (rl) {
+        const windows = [];
+        if (rl.primary_window) windows.push(rl.primary_window);
+        if (rl.secondary_window) windows.push(rl.secondary_window);
+        if (Array.isArray(rl.additional_rate_limits)) windows.push(...rl.additional_rate_limits);
+        windows.forEach(w => {
+            const pct = w.used_percent || 0;
+            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%</span></div>`);
+        });
+        if (rl.limit_reached) parts.push('<span style="color:#ef4444;font-size:10px;font-weight:700;">LIMIT</span>');
+    }
+    return `<div style="display:inline-flex;flex-direction:column;gap:2px;vertical-align:middle;margin-left:4px;">${plan}${parts.join('')}</div>`;
+}
+async function fetchProviderUsage(pid) {
+    try {
+        const r = await fetch(`${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(pid)}/usage`);
+        if (!r.ok) return null;
+        const d = await r.json();
+        if (d.supported === false) return null;
+        _usageCache[pid] = {data: d.usage, ts: Date.now()};
+        return d.usage;
+    } catch(e) { return null; }
+}
+function _updateRotationUsageBadges() {
+    Object.keys(_usageCache).forEach(pid => {
+        document.querySelectorAll(`[data-usage-pid="${pid}"]`).forEach(el => {
+            const c = _usageCache[pid];
+            if (c && c.data) el.innerHTML = _renderUsageCompact(c.data);
+        });
+    });
+}
+async function _refreshRotationsUsage() {
+    const pids = new Set();
+    Object.values(rotationsConfig.rotations || {}).forEach(rot => {
+        (rot.providers || []).forEach(p => { if (p.provider_id && _providerSupportsUsage(p.provider_id)) pids.add(p.provider_id); });
+    });
+    for (const pid of pids) {
+        const c = _usageCache[pid];
+        if (c && (Date.now() - c.ts) < 14000) continue;
+        await fetchProviderUsage(pid);
+    }
+    _updateRotationUsageBadges();
+}
+setInterval(_refreshRotationsUsage, 15000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(_refreshRotationsUsage, 500));
 
 // ===== Model Search Modal =====
 let _msAllItems = [], _msDispItems = [], _msCancelled = false, _msCallback = null;
@@ -87,7 +170,7 @@ async function msOpenProvider(providerId, inputId, cb) {
     _msEnsure(); _msCancelled = false; _msAllItems = []; _msDispItems = [];
     _msCallback = function(v) { const e = document.getElementById(inputId); if (e) e.value = v; cb(v); };
     const o = document.getElementById('ms-overlay'); o.style.display = 'flex';
-    document.getElementById('ms-title').textContent = 'Search Models — ' + providerId;
+    document.getElementById('ms-title').textContent = window.i18n.interpolate(window.i18n.t('rotations.search_models_title'), {provider: providerId});
     document.getElementById('ms-filter-input').value = '';
     document.getElementById('ms-status').textContent = window.i18n.t('rotations.checking_models');
     document.getElementById('ms-results').innerHTML = '<p style="color:var(--color-muted);text-align:center;padding:20px;">' + window.i18n.t('rotations.loading') + '</p>';
@@ -114,7 +197,7 @@ function msFilter() {
     const q = document.getElementById('ms-filter-input').value.trim().toLowerCase();
     document.getElementById('ms-status').textContent = window.i18n.t('rotations.searching');
     const filtered = q ? _msAllItems.filter(m => (typeof m === 'string' ? m : m.id + ' ' + m.name).toLowerCase().includes(q)) : _msAllItems;
-    document.getElementById('ms-status').textContent = filtered.length + ' result(s).';
+    document.getElementById('ms-status').textContent = window.i18n.interpolate(window.i18n.t('rotations.result_count'), {n: filtered.length});
     msRenderResults(filtered);
 }
 
@@ -303,9 +386,17 @@ function renderRotationProviders(rotationKey) {
         const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const provSelUid = `prov-sel-${rotationKey}-${providerIndex}`;
 
+        const _pid = provider.provider_id || '';
+        const _usageBadge = _providerSupportsUsage(_pid)
+            ? `<span data-usage-pid="${_pid}" style="margin-left:6px;">${_usageCache[_pid] && _usageCache[_pid].data ? _renderUsageCompact(_usageCache[_pid].data) : ''}</span>`
+            : '';
+
         providerDiv.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>${window.i18n.t('rotations.provider_label')} ${providerIndex + 1}</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap:wrap; gap:6px;">
+                <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+                    <strong>${window.i18n.t('rotations.provider_label')} ${providerIndex + 1}</strong>
+                    ${_usageBadge}
+                </div>
                 <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
@@ -431,11 +522,12 @@ async function saveRotation(key) {
 }
 
 async function copyRotation(sourceKey) {
-    const newKey = await showPrompt(`Copy "${sourceKey}" — enter new rotation key:`, `${sourceKey}_copy`, 'rotation-key', 'Copy Rotation');
+    const newKey = await showPrompt(window.i18n.interpolate(window.i18n.t('rotations.copy_prompt'), {key: sourceKey}), `${sourceKey}_copy`, 'rotation-key', window.i18n.t('rotations.copy_title'));
     if (!newKey) return;
-    if (newKey === sourceKey) { showAlert('New key must be different from the source.', 'Invalid Key', '⚠️', 'warn'); return; }
-    if (rotationsConfig.rotations[newKey]) { showAlert('Rotation key already exists.', 'Duplicate Key', '⚠️', 'warn'); return; }
+    if (newKey === sourceKey) { showAlert(window.i18n.t('rotations.key_different'), window.i18n.t('rotations.invalid_key_title'), '⚠️', 'warn'); return; }
+    if (rotationsConfig.rotations[newKey]) { showAlert(window.i18n.t('rotations.key_exists'), window.i18n.t('rotations.key_exists_title'), '⚠️', 'warn'); return; }
     const cloned = JSON.parse(JSON.stringify(rotationsConfig.rotations[sourceKey]));
+    cloned.model_name = newKey;
     rotationsConfig.rotations[newKey] = cloned;
     try {
         const result = await apiCall('POST', '/dashboard/api/rotation', { rotation_id: newKey, config: cloned });
@@ -454,10 +546,10 @@ async function copyRotation(sourceKey) {
 }
 
 async function addRotation() {
-    const key = await showPrompt('Enter rotation key (e.g., "coding", "general"):', '', 'rotation-key', 'Add Rotation');
+    const key = await showPrompt(window.i18n.t('rotations.add_prompt'), '', 'rotation-key', window.i18n.t('rotations.add_title'));
     if (!key) return;
     if (rotationsConfig.rotations[key]) {
-        showAlert('Rotation key already exists', 'Duplicate Key', '⚠️', 'warn');
+        showAlert(window.i18n.t('rotations.key_exists'), window.i18n.t('rotations.key_exists_title'), '⚠️', 'warn');
         return;
     }
     if (!rotationsConfig.rotations) rotationsConfig.rotations = {};
@@ -480,7 +572,7 @@ async function addRotation() {
 }
 
 async function removeRotation(key) {
-    if (await showDangerConfirm(`Remove rotation "${key}"?`, 'Remove Rotation')) {
+    if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('rotations.remove_confirm'), {key}), window.i18n.t('rotations.remove_title'))) {
         try {
             const result = await apiCall('DELETE', '/dashboard/api/rotation/' + encodeURIComponent(key));
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
@@ -521,7 +613,7 @@ function addRotationProvider(rotationKey) {
 }
 
 async function removeRotationProvider(rotationKey, providerIndex) {
-    if (await showDangerConfirm('Remove this provider?', 'Remove Provider')) {
+    if (await showDangerConfirm(window.i18n.t('rotations.remove_provider_confirm'), window.i18n.t('rotations.remove_provider_title'))) {
         rotationsConfig.rotations[rotationKey].providers.splice(providerIndex, 1);
         renderRotationProviders(rotationKey);
     }
@@ -547,7 +639,7 @@ function addRotationModel(rotationKey, providerIndex) {
 }
 
 async function removeRotationModel(rotationKey, providerIndex, modelIndex) {
-    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
+    if (await showDangerConfirm(window.i18n.t('rotations.remove_model_confirm'), window.i18n.t('rotations.remove_model_title'))) {
         rotationsConfig.rotations[rotationKey].providers[providerIndex].models.splice(modelIndex, 1);
         renderRotationModels(rotationKey, providerIndex);
     }
@@ -586,7 +678,7 @@ async function saveRotations() {
         if (response.ok) {
             window.location.href = rotationsData.successUrl;
         } else {
-            showAlert('Error saving configuration', 'Error', '❌', 'danger');
+            showAlert(window.i18n.t('rotations.error_saving'), 'Error', '❌', 'danger');
         }
     } catch (error) {
         showAlert('Error: ' + error.message, 'Error', '❌', 'danger');

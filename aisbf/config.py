@@ -23,7 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Configuration management for AISBF.
 """
 from typing import Dict, List, Optional, Union
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 import json
 import shutil
 import os
@@ -125,11 +125,19 @@ class AutoselectModelInfo(BaseModel):
     description: str
     nsfw: bool = False  # Model can handle NSFW content
     privacy: bool = False  # Model can handle privacy-sensitive content
+    priority: int = 0  # Escalation tier: higher = more capable, used last
+
+    @field_validator('model_id')
+    @classmethod
+    def model_id_must_not_be_empty(cls, v):
+        if not v or not v.strip():
+            raise ValueError('model_id must not be empty')
+        return v
 
 class AutoselectConfig(BaseModel):
     model_name: str
     description: str
-    selection_model: str = "general"
+    selection_model: str = "internal"
     fallback: str
     available_models: List[AutoselectModelInfo]
     capabilities: Optional[List[str]] = None  # Capabilities for this autoselect configuration
@@ -198,6 +206,17 @@ class BatchingConfig(BaseModel):
     max_batch_size: int = 8  # Maximum number of requests per batch
     provider_settings: Optional[Dict[str, Dict]] = None  # Provider-specific settings
 
+
+class ClientRateLimitConfig(BaseModel):
+    """Per-category client rate limit thresholds."""
+    requests_per_minute: int = 0   # 0 = unlimited
+    requests_per_hour: int = 0     # 0 = unlimited
+
+class ClientRateLimitingConfig(BaseModel):
+    """Inbound client rate limiting to protect against request flooding."""
+    enabled: bool = False
+    api: ClientRateLimitConfig = ClientRateLimitConfig(requests_per_minute=60, requests_per_hour=1000)
+    general: ClientRateLimitConfig = ClientRateLimitConfig(requests_per_minute=120, requests_per_hour=3000)
 
 class AdaptiveRateLimitingConfig(BaseModel):
     """Configuration for adaptive rate limiting"""
@@ -277,6 +296,7 @@ class AISBFConfig(BaseModel):
     response_cache: Optional[ResponseCacheConfig] = None
     batching: Optional[BatchingConfig] = None
     adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
+    client_rate_limiting: Optional[ClientRateLimitingConfig] = None
     signup: Optional[SignupConfig] = None
     smtp: Optional[SMTPConfig] = None
     oauth2: Optional[OAuth2Config] = None
@@ -589,7 +609,19 @@ class Config:
                     logger.error(f"Invalid autoselect.json: empty file")
                     raise ValueError("Invalid autoselect.json: empty file")
                 
-                self.autoselect = {k: AutoselectConfig(**v) for k, v in data.items()}
+                self.autoselect = {}
+                for k, v in data.items():
+                    # Strip available_models entries with empty/invalid model_id before validation
+                    if 'available_models' in v:
+                        valid = [m for m in v['available_models'] if m.get('model_id', '').strip()]
+                        skipped = len(v['available_models']) - len(valid)
+                        if skipped:
+                            logger.warning(f"Autoselect '{k}': skipped {skipped} available_model(s) with empty model_id")
+                        v = dict(v, available_models=valid)
+                    # Default selection_model to "internal" when blank
+                    if not v.get('selection_model', '').strip():
+                        v = dict(v, selection_model='internal')
+                    self.autoselect[k] = AutoselectConfig(**v)
                 self._loaded_files['autoselect'] = str(autoselect_path.absolute())
                 logger.info(f"Loaded {len(self.autoselect)} autoselect configurations: {list(self.autoselect.keys())}")
                 
@@ -843,6 +875,16 @@ class Config:
             adaptive_data = data.get('adaptive_rate_limiting')
             if adaptive_data:
                 data['adaptive_rate_limiting'] = AdaptiveRateLimitingConfig(**adaptive_data)
+            # Parse client_rate_limiting separately if present
+            client_rl_data = data.get('client_rate_limiting')
+            if client_rl_data:
+                api_data = client_rl_data.get('api', {})
+                general_data = client_rl_data.get('general', {})
+                data['client_rate_limiting'] = ClientRateLimitingConfig(
+                    enabled=client_rl_data.get('enabled', False),
+                    api=ClientRateLimitConfig(**api_data) if api_data else ClientRateLimitConfig(),
+                    general=ClientRateLimitConfig(**general_data) if general_data else ClientRateLimitConfig()
+                )
             # Parse signup separately if present
             signup_data = data.get('signup')
             if signup_data:

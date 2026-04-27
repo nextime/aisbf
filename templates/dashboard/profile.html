@@ -27,21 +27,21 @@
             <div class="form-group">
                 <label for="display_name" data-i18n="profile_page.display_name">Display Name</label>
                 <input type="text" id="display_name" name="display_name" value="{{ user.display_name or session.username }}" placeholder="Your display name">
-                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
+                <small style="color: var(--color-muted); display: block; margin-top: 0.5rem;" data-i18n="profile_page.display_name_hint">
                     This is how your name will be displayed throughout the application
                 </small>
             </div>
 
             <div class="form-group">
                 <label for="email" data-i18n="profile_page.email">Email Address</label>
-                <input type="email" id="email" name="email" value="{{ session.email or '' }}" readonly style="background: #0f1419; cursor: not-allowed;">
+                <input type="email" id="email" name="email" value="{{ session.email or '' }}" readonly style="background: var(--bg-page); cursor: not-allowed;">
                 {% if not session.email %}
-                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
-                    No email address set. <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: #667eea;">Add Email</a> (requires verification)
+                <small style="color: var(--color-muted); display: block; margin-top: 0.5rem;">
+                    <span data-i18n="profile_page.no_email">No email address set.</span> <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: var(--color-link);" data-i18n="profile_page.add_email">Add Email</a> <span data-i18n="profile_page.email_requires_verify">(requires verification)</span>
                 </small>
                 {% else %}
-                <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">
-                    <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: #667eea;">Change Email</a> (requires verification)
+                <small style="color: var(--color-muted); display: block; margin-top: 0.5rem;">
+                    <a href="{{ url_for(request, '/dashboard/change-email') }}" style="color: var(--color-link);" data-i18n="profile_page.change_email">Change Email</a> <span data-i18n="profile_page.email_requires_verify">(requires verification)</span>
                 </small>
                 {% endif %}
             </div>
@@ -60,13 +60,13 @@
                     </div>
                     <div style="flex: 1; min-width: 0;">
                         <input type="file" id="profile_pic_file" accept="image/*" style="display: none;">
-                        <button type="button" id="pic-upload-btn" class="btn" style="background: #1a1a2e; border: 1px solid #0f3460; color: #e0e0e0;" onclick="document.getElementById('profile_pic_file').click()">
+                        <button type="button" id="pic-upload-btn" class="btn btn-secondary" onclick="document.getElementById('profile_pic_file').click()" data-i18n="profile_page.upload_image">
                             Upload Image
                         </button>
-                        <small style="color: #a0a0a0; display: block; margin-top: 0.5rem;">Max 5 MB. JPG, PNG, GIF, WebP.</small>
+                        <small style="color: var(--color-muted); display: block; margin-top: 0.5rem;" data-i18n="profile_page.upload_hint">Max 5 MB. JPG, PNG, GIF, WebP.</small>
                         <div id="pic-upload-status" style="margin-top: 0.5rem; font-size: 0.85rem; display: none;"></div>
-                        <div id="pic-progress-bar" style="margin-top: 0.5rem; height: 6px; background: #0f3460; border-radius: 3px; display: none;">
-                            <div id="pic-progress-fill" style="height: 100%; background: #4a9eff; border-radius: 3px; width: 0%; transition: width 0.2s;"></div>
+                        <div id="pic-progress-bar" style="margin-top: 0.5rem; height: 6px; background: var(--bg-accent); border-radius: 3px; display: none;">
+                            <div id="pic-progress-fill" style="height: 100%; background: var(--color-link); border-radius: 3px; width: 0%; transition: width 0.2s;"></div>
                         </div>
                     </div>
                 </div>
@@ -78,28 +78,28 @@
         </form>
     </div>
 
-    <div class="card" style="margin-top: 2rem; border: 1px solid #d32f2f;">
-        <h2 style="color: #f44336;">Danger Zone</h2>
-        <p style="color: #a0a0a0; margin-bottom: 1rem;">Permanently delete your account and all associated data.</p>
-        <a href="{{ url_for(request, '/dashboard/delete-account') }}" class="btn" style="background: #d32f2f; color: white;">Delete Account</a>
+    <div class="card" style="margin-top: 2rem; border: 1px solid var(--alert-error-border);">
+        <h2 style="color: var(--alert-error-fg);" data-i18n="profile_page.danger_zone">Danger Zone</h2>
+        <p style="color: var(--color-muted); margin-bottom: 1rem;" data-i18n="profile_page.danger_zone_desc">Permanently delete your account and all associated data.</p>
+        <a href="{{ url_for(request, '/dashboard/delete-account') }}" class="btn btn-danger" data-i18n="profile_page.delete_account">Delete Account</a>
     </div>
 </div>
 
 <style>
 .card {
-    background: #16213e;
+    background: var(--bg-panel);
     padding: 2rem;
     border-radius: 8px;
     margin-top: 1.5rem;
 }
-.card h2 { margin-bottom: 1.5rem; color: #e0e0e0; }
+.card h2 { margin-bottom: 1.5rem; color: var(--color-text); }
 .form-group { margin-bottom: 1.25rem; }
-.form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: #e0e0e0; }
+.form-group label { display: block; margin-bottom: 0.5rem; font-weight: 500; color: var(--color-text); }
 .form-group input {
-    width: 100%; padding: 0.75rem; border: 1px solid #0f3460; border-radius: 4px;
-    background: #1a1a2e; color: #e0e0e0; font-size: 1rem;
+    width: 100%; padding: 0.75rem; border: 1px solid var(--color-border); border-radius: 4px;
+    background: var(--bg-input); color: var(--color-text); font-size: 1rem;
 }
-.form-group input:focus { outline: none; border-color: #667eea; }
+.form-group input:focus { outline: none; border-color: var(--color-link); }
 </style>
 
 <script>
@@ -122,7 +122,7 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
     const btn       = document.getElementById('pic-upload-btn');
 
     function setStatus(msg, color) {
-        statusEl.style.color = color || '#e0e0e0';
+        statusEl.style.color = color || 'var(--color-text)';
         statusEl.textContent = msg;
         statusEl.style.display = 'block';
     }
@@ -133,14 +133,14 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
 
     // Client-side size check
     if (file.size > MAX_BYTES) {
-        setStatus('Image is too large. Maximum size is 5 MB.', '#f87171');
+        setStatus(window.i18n.t('profile_page.upload_too_large'), '#f87171');
         this.value = '';
         return;
     }
 
     // Client-side type check
     if (!file.type.startsWith('image/')) {
-        setStatus('Invalid file type. Please upload JPG, PNG, GIF or WebP.', '#f87171');
+        setStatus(window.i18n.t('profile_page.upload_invalid_type'), '#f87171');
         this.value = '';
         return;
     }
@@ -152,7 +152,7 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
 
     btn.disabled = true;
     setProgress(0);
-    setStatus('Uploading…', '#4a9eff');
+    setStatus(window.i18n.t('profile_page.uploading'), 'var(--color-link)');
 
     try {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -164,7 +164,7 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
             const pct    = Math.round((i / totalChunks) * 100);
 
             setProgress(pct);
-            setStatus(`Uploading… ${pct}%`, '#4a9eff');
+            setStatus(window.i18n.interpolate(window.i18n.t('profile_page.upload_pct'), {pct}), 'var(--color-link)');
 
             const fd = new FormData();
             fd.append('file_name',     file.name);
@@ -189,7 +189,7 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
 
             if (result.complete) {
                 setProgress(100);
-                setStatus('Profile picture updated!', '#4ade80');
+                setStatus(window.i18n.t('profile_page.upload_success'), '#4ade80');
                 btn.disabled = false;
                 return;
             }
@@ -198,7 +198,7 @@ document.getElementById('profile_pic_file').addEventListener('change', async fun
         // Fallback — shouldn't reach here
         setStatus('Upload complete.', '#4ade80');
     } catch (err) {
-        setStatus('Upload failed: ' + err.message, '#f87171');
+        setStatus(window.i18n.interpolate(window.i18n.t('profile_page.upload_failed'), {error: err.message}), '#f87171');
         barWrap.style.display = 'none';
     } finally {
         btn.disabled = false;

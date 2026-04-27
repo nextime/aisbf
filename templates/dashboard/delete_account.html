@@ -4,7 +4,7 @@
 
 {% block content %}
 <div class="container">
-    <h1 style="color: #f44336;">Delete Account</h1>
+    <h1 style="color: #f44336;" data-i18n="delete_page.title">Delete Account</h1>
     <p data-i18n="delete_page.warning">This action cannot be undone. All your data will be permanently deleted.</p>
 
     {% if error %}
@@ -13,14 +13,14 @@
 
     {% if has_subscription %}
     <div class="alert alert-warning">
-        <strong>⚠️ Warning: Active Subscription Detected</strong>
+        <strong data-i18n="delete_page.sub_warning_title">⚠️ Warning: Active Subscription Detected</strong>
         <p style="margin-top: 0.5rem;">You have an active paid subscription ({{ subscription_tier }}). Deleting your account will:</p>
         <ul style="margin-left: 1.5rem; margin-top: 0.5rem;">
-            <li>Cancel your subscription immediately</li>
-            <li>You will lose access to all premium features</li>
-            <li>No refunds will be issued for remaining subscription time</li>
+            <li data-i18n="delete_page.sub_item_cancel">Cancel your subscription immediately</li>
+            <li data-i18n="delete_page.sub_item_access">You will lose access to all premium features</li>
+            <li data-i18n="delete_page.sub_item_refund">No refunds will be issued for remaining subscription time</li>
         </ul>
-        <p style="margin-top: 0.5rem;">Consider canceling your subscription first if you want to use it until the end of the billing period.</p>
+        <p style="margin-top: 0.5rem;" data-i18n="delete_page.sub_consider">Consider canceling your subscription first if you want to use it until the end of the billing period.</p>
     </div>
     {% endif %}
 
@@ -28,13 +28,13 @@
         <h2 data-i18n="delete_page.confirm_title">Confirm Account Deletion</h2>
         
         <div class="warning-box">
-            <h3>⚠️ This will permanently delete:</h3>
+            <h3 data-i18n="delete_page.will_delete">⚠️ This will permanently delete:</h3>
             <ul>
-                <li>Your account and profile information</li>
-                <li>All your API providers and configurations</li>
-                <li>All your rotation and autoselect settings</li>
-                <li>All your usage history and analytics</li>
-                <li>All your API tokens</li>
+                <li data-i18n="delete_page.item_account">Your account and profile information</li>
+                <li data-i18n="delete_page.item_providers">All your API providers and configurations</li>
+                <li data-i18n="delete_page.item_rotations">All your rotation and autoselect settings</li>
+                <li data-i18n="delete_page.item_history">All your usage history and analytics</li>
+                <li data-i18n="delete_page.item_tokens">All your API tokens</li>
                 {% if has_subscription %}
                 <li><strong>Your active subscription ({{ subscription_tier }})</strong></li>
                 {% endif %}
@@ -54,7 +54,7 @@
 
             <div style="margin-top: 1.5rem; display: flex; gap: 1rem;">
                 <button type="submit" class="btn btn-danger" data-i18n="delete_page.submit">Delete My Account Permanently</button>
-                <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary">Cancel</a>
+                <a href="{{ url_for(request, '/dashboard/profile') }}" class="btn btn-secondary" data-i18n="delete_page.cancel">Cancel</a>
             </div>
         </form>
     </div>
@@ -67,7 +67,7 @@
 }
 
 .card {
-    background: #16213e;
+    background: var(--bg-panel);
     padding: 2rem;
     border-radius: 8px;
     margin-top: 1.5rem;
@@ -83,7 +83,7 @@
 }
 
 .warning-box {
-    background: #1a1a2e;
+    background: var(--bg-page);
     border-left: 4px solid #f44336;
     padding: 1rem;
     margin-bottom: 1.5rem;
@@ -98,7 +98,7 @@
 
 .warning-box ul {
     margin-left: 1.5rem;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .warning-box li {
@@ -113,16 +113,16 @@
     display: block;
     margin-bottom: 0.5rem;
     font-weight: 500;
-    color: #e0e0e0;
+    color: var(--color-text);
 }
 
 .form-group input {
     width: 100%;
     padding: 0.75rem;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--color-border);
     border-radius: 4px;
-    background: #1a1a2e;
-    color: #e0e0e0;
+    background: var(--bg-page);
+    color: var(--color-text);
     font-size: 1rem;
 }
 
@@ -175,12 +175,12 @@
 }
 
 .btn-secondary {
-    background: #0f3460;
-    color: #e0e0e0;
+    background: var(--bg-accent);
+    color: var(--color-text);
 }
 
 .btn-secondary:hover {
-    background: #16213e;
+    background: var(--bg-panel);
 }
 </style>
 
@@ -188,10 +188,10 @@
 async function confirmDeletion() {
     const confirmation = document.getElementById('confirmation').value;
     if (confirmation !== 'DELETE') {
-        showAlert('Please type "DELETE" exactly to confirm account deletion.', 'Validation Error', '⚠️', 'warn');
+        showAlert(window.i18n.t('delete_page.type_delete_confirm'), 'Validation Error', '⚠️', 'warn');
         return false;
     }
-    return await showDangerConfirm('Are you absolutely sure? This action cannot be undone and all your data will be permanently deleted.', 'Delete Account');
+    return await showDangerConfirm(window.i18n.t('delete_page.final_confirm'), window.i18n.t('delete_page.title'));
 }
 </script>
 {% endblock %}

@@ -83,7 +83,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </div>
         
         <div>
-            <button type="submit" style="padding: 10px 20px; background: #e94560; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            <button type="submit" style="padding: 10px 20px; background: var(--color-primary); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 Apply Filter
             </button>
         </div>
@@ -91,7 +91,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     {% if from_date or to_date %}
     <div style="margin-top: 15px; padding: 10px; background:var(--bg-accent); border-radius: 4px;">
-        <strong style="color: #60a5fa;">Selected Range: </strong>
+        <strong style="color: var(--color-link);">Selected Range: </strong>
         <span style="color: var(--color-text);">
             {% if from_date %}{{ from_date }}{% else %}Beginning{% endif %}
             to 
@@ -186,14 +186,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% endif %}
         
         <div>
-            <button type="submit" style="padding: 10px 20px; background: #3498db; color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
+            <button type="submit" style="padding: 10px 20px; background: var(--color-link); color: white; border: none; border-radius: 4px; cursor: pointer; font-weight: bold;">
                 Apply Filters
             </button>
         </div>
         
         {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
         <div>
-            <a href="{{ url_for(request, "/dashboard/analytics?time_range=%s%s%s"|format(selected_time_range, "&from_date=" + from_date if from_date else "", "&to_date=" + to_date if to_date else "")) }}" style="padding: 10px 20px; background: #7f8c8d; color: white; border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
+            <a href="{{ url_for(request, "/dashboard/analytics?time_range=%s%s%s"|format(selected_time_range, "&from_date=" + from_date if from_date else "", "&to_date=" + to_date if to_date else "")) }}" style="padding: 10px 20px; background: var(--color-secondary); color: var(--color-text); border: none; border-radius: 4px; text-decoration: none; display: inline-block;">
                 Clear Filters
             </a>
         </div>
@@ -202,7 +202,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     
     {% if selected_provider or selected_model or selected_rotation or selected_autoselect or selected_user %}
     <div style="margin-top: 15px; padding: 10px; background:var(--bg-accent); border-radius: 4px;">
-        <strong style="color: #60a5fa;">Active Filters: </strong>
+        <strong style="color: var(--color-link);">Active Filters: </strong>
         <span style="color: var(--color-text);">
             {% if selected_provider %}Provider: {{ selected_provider }}{% endif %}
             {% if selected_model %}{% if selected_provider %} | {% endif %}Model: {{ selected_model }}{% endif %}
@@ -307,7 +307,7 @@ function escHtml(s) {
         resultsDiv.innerHTML = users.map(user => `
             <div class="user-result-item" data-user-id="${user.id}" data-username="${escHtml(user.username)}" data-role="${escHtml(user.role)}"
                  style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">
-                ${escHtml(user.username)}${user.role === 'admin' ? ' <span style="color: #60a5fa;">(admin)</span>' : ''}
+                ${escHtml(user.username)}${user.role === 'admin' ? ' <span style="color: var(--color-link);">(admin)</span>' : ''}
             </div>
         `).join('');
         resultsDiv.style.display = 'block';
@@ -446,6 +446,9 @@ function escHtml(s) {
 <table>
     <tr>
         <th data-i18n="analytics_page.col_provider">Provider</th>
+        <th>Model</th>
+        <th>Rotation</th>
+        <th>Autoselect</th>
         <th data-i18n="analytics_page.col_total_requests">Total Requests</th>
         <th data-i18n="analytics_page.col_success">Success</th>
         <th data-i18n="analytics_page.col_errors">Errors</th>
@@ -461,6 +464,9 @@ function escHtml(s) {
     {% for provider in provider_stats %}
     <tr>
         <td><strong>{{ provider.provider_id }}</strong></td>
+        <td>{{ provider.model_name or '' }}</td>
+        <td>{{ provider.rotation_id or '' }}</td>
+        <td>{{ provider.autoselect_id or '' }}</td>
         <td>{{ provider.requests.total }}</td>
         <td>{{ provider.requests.success }}</td>
         <td>{{ provider.requests.error }}</td>
@@ -481,6 +487,7 @@ function escHtml(s) {
     {% if provider_stats %}
     <tr style="background:var(--bg-accent); font-weight: bold;">
         <td><strong data-i18n="analytics_page.total">Total</strong></td>
+        <td></td><td></td><td></td>
         <td>{{ provider_stats | sum(attribute='requests.total') }}</td>
         <td>{{ provider_stats | sum(attribute='requests.success') }}</td>
         <td>{{ provider_stats | sum(attribute='requests.error') }}</td>

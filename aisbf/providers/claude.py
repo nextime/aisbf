@@ -203,21 +203,104 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # Initialize persistent identifiers for metadata
         self._init_session_identifiers()
     
+    @staticmethod
+    def _cli_credentials_to_oauth_tokens(cli_creds: dict) -> Optional[dict]:
+        """
+        Convert Claude CLI .credentials.json format to AISBF OAuth2 token format.
+
+        CLI format:  claudeAiOauth.accessToken/refreshToken/expiresAt(ms)/scopes
+        AISBF format: access_token/refresh_token/expires_at(s)/scope
+        """
+        if not isinstance(cli_creds, dict):
+            return None
+        oauth = cli_creds.get('claudeAiOauth', {})
+        if not isinstance(oauth, dict):
+            return None
+        access_token = oauth.get('accessToken', '')
+        if not access_token:
+            return None
+        expires_at_ms = oauth.get('expiresAt', 0) or 0
+        scopes = oauth.get('scopes', [])
+        return {
+            'access_token': access_token,
+            'refresh_token': oauth.get('refreshToken', ''),
+            'expires_at': expires_at_ms / 1000.0,
+            'scope': ' '.join(scopes) if isinstance(scopes, list) else '',
+            'subscription_type': oauth.get('subscriptionType', 'pro'),
+            'rate_limit_tier': oauth.get('rateLimitTier', 'default_claude_ai'),
+        }
+
+    def _save_auth_to_db(self, credentials: Dict) -> None:
+        """Save OAuth2 credentials back to the database after a token refresh."""
+        if self.user_id is None:
+            return
+        try:
+            from ..database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+            if db:
+                db.save_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=self.provider_id,
+                    auth_type='claude_oauth2',
+                    credentials=credentials
+                )
+                _logging.getLogger(__name__).info(
+                    f"ClaudeProviderHandler: Saved refreshed credentials to DB for user {self.user_id}"
+                )
+        except Exception as e:
+            _logging.getLogger(__name__).warning(
+                f"ClaudeProviderHandler: Failed to save credentials to DB: {e}"
+            )
+
+    def _get_api_token(self) -> Optional[str]:
+        """Return the Anthropic API token if configured, enabling standard API key auth."""
+        if isinstance(self.provider_config, dict):
+            claude_cfg = self.provider_config.get('claude_config', {}) or {}
+        else:
+            claude_cfg = getattr(self.provider_config, 'claude_config', {}) or {}
+        if isinstance(claude_cfg, dict):
+            return claude_cfg.get('api_token') or None
+        return None
+
     def _load_auth_from_db(self, provider_id: str, credentials_file: str):
         """
         Load OAuth2 credentials:
-        - Admin users (user_id=None): ONLY load from file
-        - Regular users: ONLY load from database, NO file fallback
+        - Admin users (user_id=None): load from file, fall back to CLI credentials file
+        - Regular users: load from database (OAuth2 first, then CLI credentials)
         """
         from ..auth.claude import ClaudeAuth
         import logging
-        
+
         if self.user_id is None:
-            # Admin user: ONLY use file-based credentials
+            # Admin: load from OAuth2 credentials file
             logging.getLogger(__name__).info(f"ClaudeProviderHandler: Admin user, loading credentials from file: {credentials_file}")
-            return ClaudeAuth(credentials_file=credentials_file)
-        
-        # Regular user: ONLY use database credentials, NO file fallback
+            auth = ClaudeAuth(credentials_file=credentials_file)
+            # Fallback: if no tokens, try to extract from CLI credentials file
+            if not auth.tokens:
+                if isinstance(self.provider_config, dict):
+                    claude_cfg = self.provider_config.get('claude_config', {}) or {}
+                else:
+                    claude_cfg = getattr(self.provider_config, 'claude_config', {}) or {}
+                cli_file = claude_cfg.get('cli_credentials_file') if isinstance(claude_cfg, dict) else None
+                if cli_file:
+                    expanded = os.path.expanduser(cli_file)
+                    if os.path.exists(expanded):
+                        try:
+                            with open(expanded) as fh:
+                                cli_creds = json.load(fh)
+                            tokens = self._cli_credentials_to_oauth_tokens(cli_creds)
+                            if tokens:
+                                auth.tokens = tokens
+                                logging.getLogger(__name__).info(
+                                    "ClaudeProviderHandler: Admin – loaded OAuth2 tokens from CLI credentials file"
+                                )
+                        except Exception as exc:
+                            logging.getLogger(__name__).warning(
+                                f"ClaudeProviderHandler: Failed to read CLI credentials file for token extraction: {exc}"
+                            )
+            return auth
+
+        # Regular user: try OAuth2 credentials from DB first
         try:
             from ..database import DatabaseRegistry
             db = DatabaseRegistry.get_config_database()
@@ -228,27 +311,47 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     auth_type='claude_oauth2'
                 )
                 if db_creds and db_creds.get('credentials'):
-                    # Create auth instance with skip_initial_load=True to avoid file read
-                    # Pass save callback to save credentials back to database
-                     auth = ClaudeAuth(
-                         credentials_file=credentials_file, 
-                         skip_initial_load=True,
-                         save_callback=lambda creds: self._save_auth_to_db(creds)
-                     )
-                     # Set tokens directly from database
-                     auth.tokens = db_creds['credentials'].get('tokens', {})
-                     # Add expires_at if missing (for existing credentials saved before fix)
-                     if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
-                         import time
-                         auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
-                     import logging
-                     logging.getLogger(__name__).info(f"ClaudeProviderHandler: Loaded credentials from database for user {self.user_id}")
-                     return auth
+                    auth = ClaudeAuth(
+                        credentials_file=credentials_file,
+                        skip_initial_load=True,
+                        save_callback=lambda creds: self._save_auth_to_db(creds)
+                    )
+                    auth.tokens = db_creds['credentials'].get('tokens', {})
+                    if auth.tokens and 'expires_at' not in auth.tokens and 'expires_in' in auth.tokens:
+                        auth.tokens['expires_at'] = time.time() + auth.tokens.get('expires_in', 3600)
+                    logging.getLogger(__name__).info(
+                        f"ClaudeProviderHandler: Loaded OAuth2 credentials from DB for user {self.user_id}"
+                    )
+                    return auth
+
+                # Fallback: extract OAuth2 tokens from uploaded CLI credentials
+                cli_row = db.get_user_oauth2_credentials(
+                    user_id=self.user_id,
+                    provider_id=provider_id,
+                    auth_type='claude_cli_credentials'
+                )
+                if cli_row and cli_row.get('credentials'):
+                    cli_creds = cli_row['credentials'].get('credentials') or cli_row['credentials']
+                    tokens = self._cli_credentials_to_oauth_tokens(cli_creds)
+                    if tokens:
+                        auth = ClaudeAuth(
+                            credentials_file=credentials_file,
+                            skip_initial_load=True,
+                            save_callback=lambda creds: self._save_auth_to_db(creds)
+                        )
+                        auth.tokens = tokens
+                        logging.getLogger(__name__).info(
+                            f"ClaudeProviderHandler: Extracted OAuth2 tokens from CLI credentials for user {self.user_id}"
+                        )
+                        return auth
         except Exception as e:
-            logging.getLogger(__name__).warning(f"ClaudeProviderHandler: Failed to load credentials from database: {e}")
-        
-        # For regular users, NO file fallback - return empty auth instance
-        logging.getLogger(__name__).info(f"ClaudeProviderHandler: No database credentials found for user {self.user_id}, returning unauthenticated instance")
+            logging.getLogger(__name__).warning(
+                f"ClaudeProviderHandler: Failed to load credentials from database: {e}"
+            )
+
+        logging.getLogger(__name__).info(
+            f"ClaudeProviderHandler: No credentials found for user {self.user_id}, returning unauthenticated instance"
+        )
         return ClaudeAuth(credentials_file=credentials_file, skip_initial_load=True)
 
     # ------------------------------------------------------------------ #
@@ -291,11 +394,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
     def _get_cli_credentials(self) -> Optional[dict]:
         """
         Return the Claude CLI .credentials.json content for this user/provider,
-        or None if CLI credentials are not configured.
+        or None if CLI credentials are not available.
 
         Priority order:
         1. Explicit CLI credentials file (admin) or uploaded CLI credentials (DB user)
-        2. If claude_config.use_cli_mode is true, derive from existing OAuth2 tokens
+        2. Derive from existing OAuth2 tokens (access + refresh) if available
         """
         logger = _logging.getLogger(__name__)
 
@@ -303,7 +406,6 @@ class ClaudeProviderHandler(BaseProviderHandler):
             claude_cfg = self.provider_config.get('claude_config', {}) or {}
         else:
             claude_cfg = getattr(self.provider_config, 'claude_config', {}) or {}
-        use_cli_mode = bool(claude_cfg.get('use_cli_mode')) if isinstance(claude_cfg, dict) else False
 
         if self.user_id is None:
             # ── Config admin ──────────────────────────────────────────────
@@ -319,8 +421,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     except Exception as exc:
                         logger.warning(f"ClaudeCliMode: failed to read CLI credentials file: {exc}")
 
-            # Fall back: derive from existing OAuth2 tokens when use_cli_mode is set
-            if use_cli_mode and self.auth and self.auth.tokens:
+            # Fallback: derive from existing OAuth2 tokens
+            if self.auth and self.auth.tokens:
                 logger.info("ClaudeCliMode: building CLI credentials from existing OAuth2 tokens (admin)")
                 return self._oauth_tokens_to_cli_credentials(self.auth.tokens)
 
@@ -341,21 +443,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     if row and row.get('credentials'):
                         return row['credentials'].get('credentials')
 
-                    # 2. Derive from existing OAuth2 tokens when use_cli_mode is set
-                    if use_cli_mode:
-                        oauth_row = db.get_user_oauth2_credentials(
-                            user_id=self.user_id,
-                            provider_id=self.provider_id,
-                            auth_type='claude_oauth2',
-                        )
-                        if oauth_row and oauth_row.get('credentials'):
-                            tokens = oauth_row['credentials'].get('tokens', {})
-                            if tokens:
-                                logger.info(
-                                    f"ClaudeCliMode: building CLI credentials from "
-                                    f"OAuth2 tokens for user {self.user_id}"
-                                )
-                                return self._oauth_tokens_to_cli_credentials(tokens)
+                    # 2. Derive from existing OAuth2 tokens (always, not gated on use_cli_mode)
+                    oauth_row = db.get_user_oauth2_credentials(
+                        user_id=self.user_id,
+                        provider_id=self.provider_id,
+                        auth_type='claude_oauth2',
+                    )
+                    if oauth_row and oauth_row.get('credentials'):
+                        tokens = oauth_row['credentials'].get('tokens', {})
+                        if tokens:
+                            logger.info(
+                                f"ClaudeCliMode: building CLI credentials from "
+                                f"OAuth2 tokens for user {self.user_id}"
+                            )
+                            return self._oauth_tokens_to_cli_credentials(tokens)
             except Exception as exc:
                 logger.warning(f"ClaudeCliMode: failed to load credentials: {exc}")
             return None
@@ -541,7 +642,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
         return models
 
-    async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str):
+    async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str,
+                                             tools: Optional[List[Dict]] = None):
         """
         Spawn a claude CLI subprocess, stream its JSON output, and yield
         OpenAI-compatible SSE chunks.  Multiple parallel calls each get their
@@ -557,14 +659,16 @@ class ClaudeProviderHandler(BaseProviderHandler):
         cmd = [
             'stdbuf', '-oL',
             'claude', '-p',
-            '--input-format', 'stream-json',
             '--output-format', 'stream-json',
-            '--include-partial-messages',
-            '--tools', '',
-            '--dangerously-skip-permissions',
-            '--no-session-persistence',
+            '--input-format', 'stream-json',
             '--verbose',
+            '--include-partial-messages',
+            '--permission-prompt-tool', 'stdio',
+            '--allowedTools', '',
+            '--no-session-persistence',
         ]
+        if tools:
+            cmd += ['--tools', json.dumps(tools, ensure_ascii=False)]
         if clean_model:
             cmd += ['--model', clean_model]
 
@@ -967,23 +1071,40 @@ class ClaudeProviderHandler(BaseProviderHandler):
         return self._sdk_client
     
     async def _get_auth_headers(self, stream: bool = False):
-        """Get HTTP headers with OAuth2 Bearer token."""
+        """Get HTTP headers for the API request.
+
+        When an api_token is configured, returns standard Anthropic API key headers.
+        Otherwise returns OAuth2 Bearer token headers matching the Claude CLI client.
+        """
         import logging
         import uuid
         import platform
         logger = logging.getLogger(__name__)
 
+        # ── Standard Anthropic API key mode ──────────────────────────────
+        api_token = self._get_api_token()
+        if api_token:
+            headers = {
+                'x-api-key': api_token,
+                'anthropic-version': '2023-06-01',
+                'content-type': 'application/json',
+                'accept': 'text/event-stream' if stream else 'application/json',
+            }
+            logger.info("ClaudeProviderHandler: Using standard Anthropic API key authentication")
+            return headers
+
+        # ── OAuth2 Bearer token mode ──────────────────────────────────────
         access_token = await self.auth.get_valid_token_with_refresh()
-        
+
         if not access_token:
             raise Exception("Claude authentication required. Token refresh failed. Please re-authenticate via /dashboard/claude/auth/start")
-        
+
         if not self.session_state.get('session_id'):
             self.session_state['session_id'] = str(uuid.uuid4())
-        
+
         session_id = self.session_state['session_id']
         request_id = str(uuid.uuid4())
-        
+
         headers = {
             'accept': 'application/json',
             'anthropic-beta': 'oauth-2025-04-20,interleaved-thinking-2025-05-14,redact-thinking-2026-02-12,context-management-2025-06-27,prompt-caching-scope-2026-01-05,structured-outputs-2025-12-15',
@@ -1004,16 +1125,16 @@ class ClaudeProviderHandler(BaseProviderHandler):
             'x-stainless-runtime-version': 'v22.22.0',
             'x-stainless-timeout': '600',
         }
-        
+
         if stream:
             headers['accept'] = 'text/event-stream'
             headers['accept-encoding'] = 'identity'
         else:
             headers['accept-encoding'] = 'gzip, deflate, br, zstd'
-        
+
         logger.info("ClaudeProviderHandler: Created auth headers matching claude-cli client")
         logger.debug(f"ClaudeProviderHandler: Session ID: {session_id}, Request ID: {request_id}")
-        
+
         import json
         logger.debug(f"ClaudeProviderHandler: Full headers: {json.dumps(headers, indent=2)}")
         return headers
@@ -1511,19 +1632,19 @@ class ClaudeProviderHandler(BaseProviderHandler):
         import logging
         logger = logging.getLogger(__name__)
 
-        # ── Claude CLI mode ──────────────────────────────────────────────
+        # ── Claude CLI mode (skipped when api_token is configured) ──────
         import aisbf.cli_mode as cli_mode_mod
-        if cli_mode_mod.CLAUDE_CLI_MODE:
+        if cli_mode_mod.CLAUDE_CLI_MODE and not self._get_api_token():
             cli_creds = self._get_cli_credentials()
             if cli_creds is not None:
                 logger.info(f"ClaudeProviderHandler: using CLI subprocess mode for model {model}")
                 anthropic_tools = self._convert_tools_to_anthropic(tools) if tools else None
-                prompt = self._messages_to_cli_prompt(messages, tools=anthropic_tools)
+                prompt = self._messages_to_cli_prompt(messages)
                 config_dir = await ClaudeCliSessionManager.get_config_dir(
                     self.user_id, self.provider_id, cli_creds
                 )
                 if stream:
-                    return self._handle_cli_streaming_request(prompt, model, config_dir)
+                    return self._handle_cli_streaming_request(prompt, model, config_dir, tools=anthropic_tools)
                 else:
                     return await self._handle_cli_request(prompt, model, config_dir, tools=anthropic_tools)
         # ── Fall through to HTTP API mode ────────────────────────────────
@@ -1535,27 +1656,30 @@ class ClaudeProviderHandler(BaseProviderHandler):
         else:
             logger.info(f"ClaudeProviderHandler: Messages count: {len(messages)}")
 
-        await self._ensure_session()
+        using_api_token = bool(self._get_api_token())
+
+        # Session init uses OAuth2-specific headers; skip when using API key
+        if not using_api_token:
+            await self._ensure_session()
         await self.apply_rate_limit()
-        
+
         validated_messages = self._validate_messages(messages)
-        
+
         system_message, anthropic_messages = self._convert_messages_to_anthropic(validated_messages)
-        
+
         # Apply prompt caching based on user and provider settings
         cache_config = self._get_cache_config(
             user_id=getattr(self, 'user_id', None),
             provider_id=self.provider_id,
             model_name=model
         )
-        
+
         if cache_config['enabled']:
             anthropic_messages = self._apply_cache_control(anthropic_messages)
-        
+
         # Sanitize system message to avoid Claude's unofficial client detection
-        # Replace "You are Kilo," or "You are Kiro," with "You are" to prevent
-        # contradiction with "You are Claude Code" that triggers detection
-        if system_message:
+        # (only relevant for OAuth2 mode where we impersonate the CLI)
+        if system_message and not using_api_token:
             import re
             system_message = re.sub(
                 r'\bYou are (Kilo|Kiro),',
@@ -1563,38 +1687,46 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 system_message,
                 flags=re.IGNORECASE
             )
-        
+
         payload = {
             'model': model,
             'messages': anthropic_messages,
             'max_tokens': max_tokens or 4096,
         }
-        
+
         if temperature is not None and temperature > 0:
             payload['temperature'] = temperature
-        
+
         if system_message:
-            billing_header = {
-                'type': 'text',
-                'text': 'x-anthropic-billing-header: cc_version=99.0.0.e8c; cc_entrypoint=cli;'
-            }
-            claude_intro = {
-                'type': 'text',
-                'text': 'You are Claude Code, Anthropic\'s official CLI for Claude.'
-            }
-            user_system = {
-                'type': 'text',
-                'text': system_message
-            }
-            payload['system'] = [billing_header, claude_intro, user_system]
+            if using_api_token:
+                # Standard Anthropic API: plain system string
+                payload['system'] = system_message
+            else:
+                # OAuth2 / CLI mode: include billing and identity headers
+                payload['system'] = [
+                    {
+                        'type': 'text',
+                        'text': 'x-anthropic-billing-header: cc_version=99.0.0.e8c; cc_entrypoint=cli;'
+                    },
+                    {
+                        'type': 'text',
+                        'text': "You are Claude Code, Anthropic's official CLI for Claude."
+                    },
+                    {
+                        'type': 'text',
+                        'text': system_message
+                    },
+                ]
         
-        payload['metadata'] = {
-            'user_id': json.dumps({
-                'device_id': self.session_state['device_id'],
-                'account_uuid': self.session_state['account_uuid'],
-                'session_id': self.session_state['session_id']
-            })
-        }
+        # Metadata with session identifiers is OAuth2/CLI specific
+        if not using_api_token:
+            payload['metadata'] = {
+                'user_id': json.dumps({
+                    'device_id': self.session_state['device_id'],
+                    'account_uuid': self.session_state['account_uuid'],
+                    'session_id': self.session_state['session_id']
+                })
+            }
         
         if tools:
             anthropic_tools = self._convert_tools_to_anthropic(tools)
@@ -1607,7 +1739,11 @@ class ClaudeProviderHandler(BaseProviderHandler):
                 payload['tool_choice'] = anthropic_tool_choice
         
         headers = await self._get_auth_headers(stream=stream)
-        api_url = 'https://api.anthropic.com/v1/messages?beta=true'
+        # Standard Anthropic API when api_token is set; OAuth2 endpoint otherwise
+        if self._get_api_token():
+            api_url = 'https://api.anthropic.com/v1/messages'
+        else:
+            api_url = 'https://api.anthropic.com/v1/messages?beta=true'
         
         logger.info(f"ClaudeProviderHandler: Request payload keys: {list(payload.keys())}")
         if AISBF_DEBUG:

@@ -35,6 +35,13 @@ from ..batching import get_request_batcher
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
 
+class RateLimitError(Exception):
+    """Raised when a provider signals a rate limit, regardless of HTTP status code (e.g. 429, 402)."""
+    def __init__(self, message: str, status_code: int = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
 class AnthropicFormatConverter:
     """
     Shared utility class for converting between OpenAI and Anthropic message formats.
@@ -974,6 +981,54 @@ class BaseProviderHandler:
         logger.error(f"Provider will be automatically re-enabled after cooldown")
         logger.error("=== END 429 RATE LIMIT ERROR ===")
 
+    _RATE_LIMIT_REASON_KEYWORDS = ('limit', 'quota', 'count', 'exceeded', 'reached', 'allowance', 'throttl')
+
+    def is_rate_limit_response(self, status_code: int, response_data: Union[Dict, str] = None, headers: Dict = None) -> bool:
+        """
+        Return True if the response should be treated as a rate limit regardless of status code.
+
+        Handles status 429 (always) and status 402 / other codes when the body contains
+        a recognisable limit/quota reason.
+        """
+        if status_code == 429:
+            return True
+
+        if isinstance(response_data, dict):
+            message = response_data.get('message', '') or ''
+            reason  = response_data.get('reason', '')  or ''
+            error   = response_data.get('error', '')   or ''
+            if isinstance(error, dict):
+                error = error.get('message', '') or ''
+            combined = (message + ' ' + reason + ' ' + error).lower()
+            if any(kw in combined for kw in self._RATE_LIMIT_REASON_KEYWORDS):
+                return True
+
+        return False
+
+    def handle_rate_limit_response(self, status_code: int, response_data: Union[Dict, str] = None, headers: Dict = None):
+        """
+        Detect a non-429 rate-limit response, disable the provider, and raise RateLimitError.
+
+        Use this instead of handle_429_error when the status code may differ (e.g. 402).
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+
+        reason_str = ''
+        if isinstance(response_data, dict):
+            reason_str = f" reason={response_data.get('reason', '')} message={response_data.get('message', '')}"
+
+        logger.warning(f"=== RATE LIMIT DETECTED (HTTP {status_code}) ===")
+        logger.warning(f"Provider: {self.provider_id}{reason_str}")
+        logger.warning(f"Treating HTTP {status_code} as rate limit — disabling provider")
+
+        self.handle_429_error(response_data, headers)
+
+        raise RateLimitError(
+            f"Provider {self.provider_id} rate limited (HTTP {status_code}){reason_str}",
+            status_code=status_code
+        )
+
     def _auto_configure_rate_limits(self, headers: Dict = None):
         """
         Auto-configure rate limits from response headers if not already configured.
@@ -1290,6 +1345,14 @@ class BaseProviderHandler:
         else:
             logger.info(f"Provider remains active")
         logger.info(f"=== END SUCCESS RECORDING ===")
+
+    def supports_usage(self) -> bool:
+        """Return True if this provider supports a usage/quota endpoint."""
+        return False
+
+    async def get_usage(self) -> Optional[Dict]:
+        """Fetch current usage/quota data from the provider. Returns None if unsupported."""
+        return None
 
     async def handle_request_with_batching(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,

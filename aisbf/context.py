@@ -76,9 +76,33 @@ class ContextManager:
                 # Check for "internal" keyword
                 if model_value == "internal":
                     logger = logging.getLogger(__name__)
-                    logger.info(f"Condensation model is 'internal' - will use local HuggingFace model")
-                    self._use_internal_model = True
-                    # Set default max_context for internal model if not specified
+                    # Resolve: if the configured model_id maps to a known provider, use it remotely
+                    aisbf_conf = config.get_aisbf_config()
+                    actual_condensation_model_id = (
+                        (aisbf_conf.internal_model or {}).get('condensation_model_id', '')
+                        if aisbf_conf else ''
+                    )
+                    resolved_to_provider = False
+                    if actual_condensation_model_id and '/' in actual_condensation_model_id:
+                        internal_provider_id = actual_condensation_model_id.split('/', 1)[0]
+                        try:
+                            provider_config = config.get_provider(internal_provider_id, warn=False)
+                            if provider_config:
+                                internal_model_name = actual_condensation_model_id.split('/', 1)[1]
+                                self.condensation_handler = get_provider_handler(
+                                    internal_provider_id, provider_config.api_key
+                                )
+                                self.condensation_model = internal_model_name
+                                resolved_to_provider = True
+                                logger.info(
+                                    f"Internal condensation model '{actual_condensation_model_id}'"
+                                    f" → provider '{internal_provider_id}'"
+                                )
+                        except Exception:
+                            pass
+                    if not resolved_to_provider:
+                        logger.info(f"Condensation model is 'internal' - will use local HuggingFace model")
+                        self._use_internal_model = True
                     if not self.condensation_max_context:
                         self.condensation_max_context = 4000  # Conservative default for small models
                 else:
@@ -253,31 +277,84 @@ class ContextManager:
             logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
             raise
     
-    async def _run_internal_model_condensation(self, prompt: str) -> str:
+    def _compact_for_model(self, messages: List[Dict], max_tokens: int = 7500) -> str:
+        """
+        Return a compact text representation of messages that fits within max_tokens.
+        Keeps the first HEAD + last TAIL verbatim; the dropped middle is replaced
+        by a one-liner summary so no context is silently lost.
+        """
+        effective_max = min(self.condensation_max_context or max_tokens, max_tokens)
+
+        def _tok(text: str) -> int:
+            return len(text) // 4
+
+        def _fmt(msg: dict) -> str:
+            role = msg.get('role', '?')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                content = str(content)
+            return f"{role}: {content}\n"
+
+        full = "".join(_fmt(m) for m in messages)
+        if _tok(full) <= effective_max:
+            return full
+
+        HEAD, TAIL = 2, 3
+        head = messages[:HEAD]
+        tail = messages[-TAIL:] if len(messages) > HEAD + TAIL else []
+        middle = messages[HEAD: len(messages) - TAIL] if len(messages) > HEAD + TAIL else messages[HEAD:]
+
+        head_text = "".join(_fmt(m) for m in head)
+        tail_text = "".join(_fmt(m) for m in tail)
+        fixed = _tok(head_text) + _tok(tail_text)
+
+        summary_block = ""
+        if middle:
+            snippets = [
+                f"{m.get('role','?')}: {str(m.get('content','')).replace(chr(10), ' ').strip()[:80]}"
+                for m in middle
+            ]
+            summary_line = "; ".join(snippets)
+            summary_block = f"[... {len(middle)} omitted — summary: {summary_line} ...]\n"
+            avail = effective_max - fixed
+            if _tok(summary_block) > avail > 0:
+                summary_block = summary_block[: avail * 4 - 5] + "...]\n"
+
+        return head_text + summary_block + tail_text
+
+    async def _run_internal_model_condensation(self, messages: list) -> str:
         """Run the internal model for condensation in a separate thread"""
         import logging
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
         logger = logging.getLogger(__name__)
-        
+
         # Initialize model if needed
         if self._internal_model is None:
             self._initialize_internal_model()
-        
+
         def run_inference():
-            """Run inference in a separate thread"""
             with self._internal_model_lock:
                 try:
                     import torch
-                    
-                    # Tokenize input
+
+                    # Apply chat template for instruct models; fall back to raw concat
+                    has_chat_template = (
+                        getattr(self._internal_tokenizer, 'chat_template', None) is not None
+                    )
+                    if has_chat_template:
+                        prompt = self._internal_tokenizer.apply_chat_template(
+                            messages, tokenize=False, add_generation_prompt=True
+                        )
+                    else:
+                        prompt = "\n\n".join(m["content"] for m in messages) + "\n"
+
                     inputs = self._internal_tokenizer(prompt, return_tensors="pt")
-                    
-                    # Move to same device as model
+                    input_length = inputs['input_ids'].shape[1]
+
                     device = next(self._internal_model.parameters()).device
                     inputs = {k: v.to(device) for k, v in inputs.items()}
-                    
-                    # Generate response
+
                     with torch.no_grad():
                         outputs = self._internal_model.generate(
                             **inputs,
@@ -288,24 +365,20 @@ class ContextManager:
                             do_sample=True,
                             pad_token_id=self._internal_tokenizer.eos_token_id
                         )
-                    
-                    # Decode response
-                    response = self._internal_tokenizer.decode(outputs[0], skip_special_tokens=True)
-                    
-                    # Extract only the generated part (remove the prompt)
-                    if response.startswith(prompt):
-                        response = response[len(prompt):].strip()
-                    
+
+                    # Decode only the newly generated tokens
+                    response = self._internal_tokenizer.decode(
+                        outputs[0][input_length:], skip_special_tokens=True
+                    ).strip()
                     return response
                 except Exception as e:
                     logger.error(f"Error during internal model inference: {e}", exc_info=True)
                     return None
-        
-        # Run in thread pool to avoid blocking
+
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as executor:
             result = await loop.run_in_executor(executor, run_inference)
-        
+
         return result
     
     def should_condense(self, messages: List[Dict], model: str) -> bool:
@@ -535,28 +608,26 @@ class ContextManager:
         
         # Load system prompt from markdown file
         system_prompt = self._load_system_prompt('conversational')
-        
-        # Build conversation text
-        conversation_text = ""
-        for msg in messages_to_summarize:
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            if content:
-                conversation_text += f"{role}: {content}\n"
-        
-        # Build summary prompt
-        summary_prompt = f"{system_prompt}\n\nConversation to summarize:\n{conversation_text}"
-        
+
+        # Compact conversation text to fit within the model's context window
+        conversation_text = self._compact_for_model(messages_to_summarize)
+
+        # Build structured messages: system prompt + user content to summarize
+        condensation_messages = [
+            *(([{"role": "system", "content": system_prompt}]) if system_prompt else []),
+            {"role": "user", "content": f"Conversation to summarize:\n{conversation_text}"}
+        ]
+
         try:
             summary_content = None
-            
+
             if self._use_internal_model:
                 logger.info("Using internal model for conversational summarization")
-                summary_content = await self._run_internal_model_condensation(summary_prompt)
+                summary_content = await self._run_internal_model_condensation(condensation_messages)
             elif self._rotation_handler and not self.condensation_model:
                 # Use rotation handler
                 condensation_request = {
-                    "messages": [{"role": "user", "content": summary_prompt}],
+                    "messages": condensation_messages,
                     "temperature": 0.3,
                     "max_tokens": 1000,
                     "stream": False
@@ -569,10 +640,9 @@ class ContextManager:
                 handler = self.condensation_handler if self.condensation_handler else self.provider_handler
                 if handler:
                     condense_model = self.condensation_model if self.condensation_model else model
-                    summary_messages = [{"role": "user", "content": summary_prompt}]
                     summary_response = await handler.handle_request(
                         model=condense_model,
-                        messages=summary_messages,
+                        messages=condensation_messages,
                         max_tokens=1000,
                         temperature=0.3,
                         stream=False
@@ -629,42 +699,39 @@ class ContextManager:
         if not conversation:
             return messages
         
-        # Build conversation text
-        conversation_text = ""
-        for msg in conversation:
-            role = msg.get('role', 'unknown')
-            content = msg.get('content', '')
-            if content:
-                conversation_text += f"{role}: {content}\n"
-        
-        # Build pruning prompt
+        # Compact conversation text to fit within the model's context window
+        conversation_text = self._compact_for_model(conversation)
+
+        # Build structured messages: instruction as system, content as user
         if current_query:
-            prune_prompt = f"""Given the current query: '{current_query}'
-
-Extract ONLY the relevant facts from this conversation history. Ignore everything else that is not directly related to answering the current query.
-
-Conversation History:
-{conversation_text}
-
-Provide only the relevant information in a concise format."""
+            system_content = (
+                f"Given the current query: '{current_query}'\n\n"
+                "Extract ONLY the relevant facts from the conversation history. "
+                "Ignore everything not directly related to answering the query. "
+                "Provide only the relevant information in a concise format."
+            )
         else:
-            prune_prompt = f"""Extract the most important and relevant information from this conversation history. Focus on key facts, decisions, and context that would be needed for future queries.
+            system_content = (
+                "Extract the most important and relevant information from the conversation history. "
+                "Focus on key facts, decisions, and context needed for future queries. "
+                "Provide only the relevant information in a concise format."
+            )
 
-Conversation History:
-{conversation_text}
+        condensation_messages = [
+            {"role": "system", "content": system_content},
+            {"role": "user", "content": f"Conversation History:\n{conversation_text}"}
+        ]
 
-Provide only the relevant information in a concise format."""
-        
         try:
             pruned_content = None
-            
+
             if self._use_internal_model:
                 logger.info("Using internal model for semantic pruning")
-                pruned_content = await self._run_internal_model_condensation(prune_prompt)
+                pruned_content = await self._run_internal_model_condensation(condensation_messages)
             elif self._rotation_handler and not self.condensation_model:
                 # Use rotation handler
                 condensation_request = {
-                    "messages": [{"role": "user", "content": prune_prompt}],
+                    "messages": condensation_messages,
                     "temperature": 0.2,
                     "max_tokens": 2000,
                     "stream": False
@@ -677,10 +744,9 @@ Provide only the relevant information in a concise format."""
                 handler = self.condensation_handler if self.condensation_handler else self.provider_handler
                 if handler:
                     condense_model = self.condensation_model if self.condensation_model else model
-                    prune_messages = [{"role": "user", "content": prune_prompt}]
                     prune_response = await handler.handle_request(
                         model=condense_model,
-                        messages=prune_messages,
+                        messages=condensation_messages,
                         max_tokens=2000,
                         temperature=0.2,
                         stream=False

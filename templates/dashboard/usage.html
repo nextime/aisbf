@@ -7,25 +7,25 @@
 <!-- Plan Header -->
 <div class="plan-header">
     <div class="plan-header-left">
-        <div class="plan-badge"><i class="fas fa-layer-group"></i> Current Plan</div>
+        <div class="plan-badge"><i class="fas fa-layer-group"></i> <span data-i18n="usage_page.current_plan">Current Plan</span></div>
         <div class="plan-name">{{ current_tier.name if current_tier else 'Free Tier' }}</div>
         <div class="plan-subtitle">
             {% if current_tier and not current_tier.is_default %}
-            <a href="{{ url_for(request, '/dashboard/subscription') }}" class="plan-link">Manage subscription</a>
+            <a href="{{ url_for(request, '/dashboard/subscription') }}" class="plan-link" data-i18n="usage_page.manage_subscription">Manage subscription</a>
             {% else %}
-            <a href="{{ url_for(request, '/dashboard/pricing') }}" class="plan-link upgrade">Upgrade plan</a>
+            <a href="{{ url_for(request, '/dashboard/pricing') }}" class="plan-link upgrade" data-i18n="usage_page.upgrade">Upgrade plan</a>
             {% endif %}
         </div>
     </div>
     <div class="plan-header-right">
         <div class="plan-stat">
             <div class="plan-stat-value">{{ "{:,}".format(requests_today) }}</div>
-            <div class="plan-stat-label">requests today</div>
+            <div class="plan-stat-label" data-i18n="usage_page.requests_today">requests today</div>
         </div>
         <div class="plan-stat-divider"></div>
         <div class="plan-stat">
             <div class="plan-stat-value">{{ "{:,}".format(requests_month) }}</div>
-            <div class="plan-stat-label">requests this month</div>
+            <div class="plan-stat-label" data-i18n="usage_page.requests_month">requests this month</div>
         </div>
         <div class="plan-stat-divider"></div>
         <div class="plan-stat">
@@ -34,33 +34,33 @@
                 {% elif tokens_24h >= 1000 %}{{ "%.1f"|format(tokens_24h / 1000) }}K
                 {% else %}{{ tokens_24h }}{% endif %}
             </div>
-            <div class="plan-stat-label">tokens (24h)</div>
+            <div class="plan-stat-label" data-i18n="usage_page.tokens_24h">tokens (24h)</div>
         </div>
     </div>
 </div>
 
 <!-- Activity Quotas -->
 <div class="section-header">
-    <div class="section-title"><i class="fas fa-chart-line" style="color:#60a5fa;"></i> Activity Quotas</div>
-    <div class="section-subtitle">Time-based limits that reset automatically</div>
+    <div class="section-title"><i class="fas fa-chart-line" style="color:var(--color-link);"></i> <span data-i18n="usage_page.activity_quotas">Activity Quotas</span></div>
+    <div class="section-subtitle" data-i18n="usage_page.activity_quotas_desc">Time-based limits that reset automatically</div>
 </div>
 
 <div class="activity-grid">
 
     <!-- Requests Today -->
     {% set daily_pct = (requests_today / max_requests_per_day * 100) if max_requests_per_day and max_requests_per_day > 0 else -1 %}
-    {% set daily_clr = '#ef4444' if daily_pct >= 90 else ('#fbbf24' if daily_pct >= 75 else '#60a5fa') %}
+    {% set daily_clr = '#ef4444' if daily_pct >= 90 else ('#fbbf24' if daily_pct >= 75 else 'var(--color-link)') %}
     <div class="gauge-card">
         <div class="gauge-header">
-            <div class="gauge-icon" style="background:rgba(96,165,250,.12); color:#60a5fa;"><i class="fas fa-bolt"></i></div>
+            <div class="gauge-icon" style="background:rgba(96,165,250,.12); color:var(--color-link);"><i class="fas fa-bolt"></i></div>
             <div>
-                <div class="gauge-label">Requests Today</div>
-                <div class="gauge-sublabel" id="daily-reset">Resets at midnight UTC</div>
+                <div class="gauge-label" data-i18n="usage_page.requests_today">Requests Today</div>
+                <div class="gauge-sublabel" data-reset-ts="{{ daily_reset_ts }}" data-i18n="usage_page.resets_midnight">Resets at midnight UTC</div>
             </div>
         </div>
         <div class="gauge-wrap">
             {% if max_requests_per_day == -1 or max_requests_per_day is none or max_requests_per_day <= 0 %}
-            <div class="gauge-unlimited" style="color:#60a5fa;"><i class="fas fa-infinity"></i></div>
+            <div class="gauge-unlimited" style="color:var(--color-link);"><i class="fas fa-infinity"></i></div>
             {% else %}
             <svg class="gauge-svg" viewBox="0 0 120 120">
                 <circle class="gauge-track" cx="60" cy="60" r="48"/>
@@ -73,7 +73,7 @@
                 {% if max_requests_per_day and max_requests_per_day > 0 %}
                 <div class="gauge-of">of {{ "{:,}".format(max_requests_per_day) }}</div>
                 {% elif max_requests_per_day == -1 %}
-                <div class="gauge-of">unlimited</div>
+                <div class="gauge-of" data-i18n="usage_page.unlimited">unlimited</div>
                 {% endif %}
             </div>
         </div>
@@ -81,29 +81,29 @@
             {% if daily_pct >= 0 %}
                 {% set rem = max_requests_per_day - requests_today %}
                 {% if rem > 0 %}<span class="gauge-remaining">{{ "{:,}".format(rem) }} remaining</span>
-                {% else %}<span class="gauge-remaining" style="color:#ef4444;">Quota reached</span>{% endif %}
-                {% if daily_pct >= 90 %}<span class="usage-badge danger">Near limit</span>
-                {% elif daily_pct >= 75 %}<span class="usage-badge warn">Getting close</span>{% endif %}
+                {% else %}<span class="gauge-remaining" style="color:#ef4444;" data-i18n="usage_page.quota_reached">Quota reached</span>{% endif %}
+                {% if daily_pct >= 90 %}<span class="usage-badge danger" data-i18n="usage_page.near_limit">Near limit</span>
+                {% elif daily_pct >= 75 %}<span class="usage-badge warn" data-i18n="usage_page.getting_close">Getting close</span>{% endif %}
             {% else %}
-                <span class="gauge-remaining unlim">No daily cap</span>
+                <span class="gauge-remaining unlim" data-i18n="usage_page.no_daily_cap">No daily cap</span>
             {% endif %}
         </div>
     </div>
 
     <!-- Requests This Month -->
     {% set monthly_pct = (requests_month / max_requests_per_month * 100) if max_requests_per_month and max_requests_per_month > 0 else -1 %}
-    {% set monthly_clr = '#ef4444' if monthly_pct >= 90 else ('#fbbf24' if monthly_pct >= 75 else '#667eea') %}
+    {% set monthly_clr = '#ef4444' if monthly_pct >= 90 else ('#fbbf24' if monthly_pct >= 75 else 'var(--color-link)') %}
     <div class="gauge-card">
         <div class="gauge-header">
-            <div class="gauge-icon" style="background:rgba(102,126,234,.12); color:#667eea;"><i class="fas fa-calendar-days"></i></div>
+            <div class="gauge-icon" style="background:rgba(102,126,234,.12); color:var(--color-link);"><i class="fas fa-calendar-days"></i></div>
             <div>
-                <div class="gauge-label">Requests This Month</div>
-                <div class="gauge-sublabel" id="monthly-reset">Resets on the 1st</div>
+                <div class="gauge-label" data-i18n="usage_page.requests_month">Requests This Month</div>
+                <div class="gauge-sublabel" data-reset-ts="{{ monthly_reset_ts }}" data-i18n="usage_page.resets_on_1st">Resets on the 1st</div>
             </div>
         </div>
         <div class="gauge-wrap">
             {% if max_requests_per_month == -1 or max_requests_per_month is none or max_requests_per_month <= 0 %}
-            <div class="gauge-unlimited" style="color:#667eea;"><i class="fas fa-infinity"></i></div>
+            <div class="gauge-unlimited" style="color:var(--color-link);"><i class="fas fa-infinity"></i></div>
             {% else %}
             <svg class="gauge-svg" viewBox="0 0 120 120">
                 <circle class="gauge-track" cx="60" cy="60" r="48"/>
@@ -116,7 +116,7 @@
                 {% if max_requests_per_month and max_requests_per_month > 0 %}
                 <div class="gauge-of">of {{ "{:,}".format(max_requests_per_month) }}</div>
                 {% elif max_requests_per_month == -1 %}
-                <div class="gauge-of">unlimited</div>
+                <div class="gauge-of" data-i18n="usage_page.unlimited">unlimited</div>
                 {% endif %}
             </div>
         </div>
@@ -124,11 +124,11 @@
             {% if monthly_pct >= 0 %}
                 {% set rem = max_requests_per_month - requests_month %}
                 {% if rem > 0 %}<span class="gauge-remaining">{{ "{:,}".format(rem) }} remaining</span>
-                {% else %}<span class="gauge-remaining" style="color:#ef4444;">Quota reached</span>{% endif %}
-                {% if monthly_pct >= 90 %}<span class="usage-badge danger">Near limit</span>
-                {% elif monthly_pct >= 75 %}<span class="usage-badge warn">Getting close</span>{% endif %}
+                {% else %}<span class="gauge-remaining" style="color:#ef4444;" data-i18n="usage_page.quota_reached">Quota reached</span>{% endif %}
+                {% if monthly_pct >= 90 %}<span class="usage-badge danger" data-i18n="usage_page.near_limit">Near limit</span>
+                {% elif monthly_pct >= 75 %}<span class="usage-badge warn" data-i18n="usage_page.getting_close">Getting close</span>{% endif %}
             {% else %}
-                <span class="gauge-remaining unlim">No monthly cap</span>
+                <span class="gauge-remaining unlim" data-i18n="usage_page.no_monthly_cap">No monthly cap</span>
             {% endif %}
         </div>
     </div>
@@ -136,25 +136,25 @@
     <!-- Tokens 24h -->
     <div class="gauge-card">
         <div class="gauge-header">
-            <div class="gauge-icon" style="background:rgba(34,211,238,.12); color:#22d3ee;"><i class="fas fa-coins"></i></div>
+            <div class="gauge-icon" style="background:rgba(34,211,238,.12); color:var(--color-link);"><i class="fas fa-coins"></i></div>
             <div>
-                <div class="gauge-label">Tokens (last 24h)</div>
-                <div class="gauge-sublabel">Input + output combined</div>
+                <div class="gauge-label" data-i18n="usage_page.tokens_24h">Tokens (last 24h)</div>
+                <div class="gauge-sublabel" data-i18n="usage_page.tokens_combined">Input + output combined</div>
             </div>
         </div>
         <div class="gauge-wrap">
-            <div class="gauge-unlimited" style="color:#22d3ee;"><i class="fas fa-infinity"></i></div>
+            <div class="gauge-unlimited" style="color:var(--color-link);"><i class="fas fa-infinity"></i></div>
             <div class="gauge-center">
-                <div class="gauge-big" style="color:#22d3ee;">
+                <div class="gauge-big" style="color:var(--color-link);">
                     {% if tokens_24h >= 1000000 %}{{ "%.1f"|format(tokens_24h / 1000000) }}M
                     {% elif tokens_24h >= 1000 %}{{ "%.1f"|format(tokens_24h / 1000) }}K
                     {% else %}{{ tokens_24h }}{% endif %}
                 </div>
-                <div class="gauge-of">tokens used</div>
+                <div class="gauge-of" data-i18n="usage_page.tokens_used">tokens used</div>
             </div>
         </div>
         <div class="gauge-footer">
-            <span class="gauge-remaining unlim">No token cap on this plan</span>
+            <span class="gauge-remaining unlim" data-i18n="usage_page.no_token_cap">No token cap on this plan</span>
         </div>
     </div>
 
@@ -162,8 +162,8 @@
 
 <!-- Configuration Limits -->
 <div class="section-header" style="margin-top:32px;">
-    <div class="section-title"><i class="fas fa-sliders" style="color:#a78bfa;"></i> Configuration Limits</div>
-    <div class="section-subtitle">Persistent resource allocations for your account</div>
+    <div class="section-title"><i class="fas fa-sliders" style="color:var(--color-link);"></i> <span data-i18n="usage_page.config_limits">Configuration Limits</span></div>
+    <div class="section-subtitle" data-i18n="usage_page.config_limits_desc">Persistent resource allocations for your account</div>
 </div>
 
 <div class="resource-grid">
@@ -174,8 +174,8 @@
         <div class="resource-top">
             <div class="resource-icon" style="background:rgba(74,222,128,.12); color:#4ade80;"><i class="fas fa-plug"></i></div>
             <div class="resource-info">
-                <div class="resource-label">AI Providers</div>
-                <div class="resource-sublabel">Configured provider integrations</div>
+                <div class="resource-label" data-i18n="usage_page.ai_providers">AI Providers</div>
+                <div class="resource-sublabel" data-i18n="usage_page.ai_providers_desc">Configured provider integrations</div>
             </div>
             <div class="resource-count">
                 <span class="resource-used">{{ providers_count }}</span>
@@ -191,7 +191,7 @@
         <div class="resource-bar-label">{{ "%.0f"|format([prov_pct, 100]|min) }}% used &middot; {{ free }} slot{{ 's' if free != 1 else '' }} free</div>
         {% else %}
         <div class="resource-bar-wrap unlimited-bar"></div>
-        <div class="resource-bar-label unlim">Unlimited slots available</div>
+        <div class="resource-bar-label unlim" data-i18n="usage_page.unlimited_slots">Unlimited slots available</div>
         {% endif %}
     </div>
 
@@ -201,8 +201,8 @@
         <div class="resource-top">
             <div class="resource-icon" style="background:rgba(251,146,60,.12); color:#fb923c;"><i class="fas fa-rotate"></i></div>
             <div class="resource-info">
-                <div class="resource-label">Rotations</div>
-                <div class="resource-sublabel">Load balancing configurations</div>
+                <div class="resource-label" data-i18n="usage_page.rotations">Rotations</div>
+                <div class="resource-sublabel" data-i18n="usage_page.rotations_desc">Load balancing configurations</div>
             </div>
             <div class="resource-count">
                 <span class="resource-used">{{ rotations_count }}</span>
@@ -218,7 +218,7 @@
         <div class="resource-bar-label">{{ "%.0f"|format([rot_pct, 100]|min) }}% used &middot; {{ free }} slot{{ 's' if free != 1 else '' }} free</div>
         {% else %}
         <div class="resource-bar-wrap unlimited-bar"></div>
-        <div class="resource-bar-label unlim">Unlimited slots available</div>
+        <div class="resource-bar-label unlim" data-i18n="usage_page.unlimited_slots">Unlimited slots available</div>
         {% endif %}
     </div>
 
@@ -228,8 +228,8 @@
         <div class="resource-top">
             <div class="resource-icon" style="background:rgba(192,132,252,.12); color:#c084fc;"><i class="fas fa-wand-magic-sparkles"></i></div>
             <div class="resource-info">
-                <div class="resource-label">Autoselections</div>
-                <div class="resource-sublabel">Smart routing configurations</div>
+                <div class="resource-label" data-i18n="usage_page.autoselections">Autoselections</div>
+                <div class="resource-sublabel" data-i18n="usage_page.autoselections_desc">Smart routing configurations</div>
             </div>
             <div class="resource-count">
                 <span class="resource-used">{{ autoselects_count }}</span>
@@ -245,7 +245,7 @@
         <div class="resource-bar-label">{{ "%.0f"|format([auto_pct, 100]|min) }}% used &middot; {{ free }} slot{{ 's' if free != 1 else '' }} free</div>
         {% else %}
         <div class="resource-bar-wrap unlimited-bar"></div>
-        <div class="resource-bar-label unlim">Unlimited slots available</div>
+        <div class="resource-bar-label unlim" data-i18n="usage_page.unlimited_slots">Unlimited slots available</div>
         {% endif %}
     </div>
 
@@ -256,12 +256,12 @@
     <div class="upgrade-cta-content">
         <i class="fas fa-rocket upgrade-cta-icon"></i>
         <div>
-            <div class="upgrade-cta-title">Need higher limits?</div>
-            <div class="upgrade-cta-sub">Upgrade your plan to unlock more requests, providers, and autoselections.</div>
+            <div class="upgrade-cta-title" data-i18n="usage_page.need_higher_limits">Need higher limits?</div>
+            <div class="upgrade-cta-sub" data-i18n="usage_page.upgrade_desc">Upgrade your plan to unlock more requests, providers, and autoselections.</div>
         </div>
     </div>
     <a href="{{ url_for(request, '/dashboard/pricing') }}" class="upgrade-cta-btn">
-        <i class="fas fa-arrow-up"></i> View Plans
+        <i class="fas fa-arrow-up"></i> <span data-i18n="usage_page.view_plans">View Plans</span>
     </a>
 </div>
 {% endif %}
@@ -276,8 +276,8 @@
     align-items: center;
     justify-content: space-between;
     gap: 20px;
-    background: linear-gradient(135deg, #16213e 0%, #0f2040 100%);
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border: 1px solid var(--color-border);
     border-radius: 12px;
     padding: 24px 28px;
     margin-bottom: 28px;
@@ -287,9 +287,9 @@
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: rgba(102,126,234,.15);
-    color: #667eea;
-    border: 1px solid rgba(102,126,234,.3);
+    background: var(--bg-accent);
+    color: var(--color-link);
+    border: 1px solid var(--color-border);
     border-radius: 20px;
     font-size: 11px;
     font-weight: 600;
@@ -301,14 +301,14 @@
 .plan-name {
     font-size: 1.6rem;
     font-weight: 700;
-    color: #e0e0e0;
+    color: var(--color-text);
     line-height: 1.1;
 }
 .plan-subtitle { margin-top: 6px; }
-.plan-link { font-size: 13px; color: #667eea; text-decoration: none; }
-.plan-link:hover { color: #818cf8; }
-.plan-link.upgrade { color: #4a9eff; }
-.plan-link.upgrade:hover { color: #60b4ff; }
+.plan-link { font-size: 13px; color: var(--color-link); text-decoration: none; }
+.plan-link:hover { color: var(--color-link-hover); }
+.plan-link.upgrade { color: var(--color-link); }
+.plan-link.upgrade:hover { color: var(--color-link-hover); }
 
 .plan-header-right {
     display: flex;
@@ -316,9 +316,9 @@
     flex-shrink: 0;
 }
 .plan-stat { padding: 0 24px; text-align: center; }
-.plan-stat-value { font-size: 1.5rem; font-weight: 700; color: #e0e0e0; line-height: 1; }
-.plan-stat-label { font-size: 11px; color: #666; margin-top: 4px; text-transform: uppercase; letter-spacing: .4px; }
-.plan-stat-divider { width: 1px; height: 40px; background: #1e3a5f; flex-shrink: 0; }
+.plan-stat-value { font-size: 1.5rem; font-weight: 700; color: var(--color-text); line-height: 1; }
+.plan-stat-label { font-size: 11px; color: var(--color-subtle); margin-top: 4px; text-transform: uppercase; letter-spacing: .4px; }
+.plan-stat-divider { width: 1px; height: 40px; background: var(--color-border); flex-shrink: 0; }
 
 /* ── Section headers ─────────────────────────────── */
 .section-header {
@@ -326,11 +326,11 @@
     align-items: baseline;
     gap: 12px;
     margin-bottom: 14px;
-    border-left: 3px solid #1e3a5f;
+    border-left: 3px solid var(--color-border);
     padding-left: 12px;
 }
-.section-title { font-size: 1rem; font-weight: 700; color: #e0e0e0; }
-.section-subtitle { font-size: 13px; color: #555; }
+.section-title { font-size: 1rem; font-weight: 700; color: var(--color-text); }
+.section-subtitle { font-size: 13px; color: var(--color-subtle); }
 
 /* ── Activity gauge cards ────────────────────────── */
 .activity-grid {
@@ -340,8 +340,8 @@
     margin-bottom: 0;
 }
 .gauge-card {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border: 1px solid var(--color-border);
     border-radius: 12px;
     padding: 20px;
     display: flex;
@@ -349,7 +349,7 @@
     gap: 4px;
     transition: border-color .2s, transform .2s;
 }
-.gauge-card:hover { border-color: #2a4a7f; transform: translateY(-2px); }
+.gauge-card:hover { border-color: var(--color-link); transform: translateY(-2px); }
 
 .gauge-header { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
 .gauge-icon {
@@ -358,8 +358,8 @@
     display: flex; align-items: center; justify-content: center;
     font-size: 1rem; flex-shrink: 0;
 }
-.gauge-label { font-size: .9rem; font-weight: 600; color: #e0e0e0; }
-.gauge-sublabel { font-size: .72rem; color: #555; margin-top: 2px; }
+.gauge-label { font-size: .9rem; font-weight: 600; color: var(--color-text); }
+.gauge-sublabel { font-size: .72rem; color: var(--color-subtle); margin-top: 2px; }
 
 .gauge-wrap {
     position: relative;
@@ -370,7 +370,7 @@
     margin: 8px 0;
 }
 .gauge-svg { width: 140px; height: 140px; }
-.gauge-track { fill: none; stroke: #0f3460; stroke-width: 10; }
+.gauge-track { fill: none; stroke: var(--bg-accent); stroke-width: 10; }
 .gauge-prog {
     fill: none;
     stroke-width: 10;
@@ -381,8 +381,8 @@
     transition: stroke-dashoffset .6s ease;
 }
 .gauge-center { position: absolute; text-align: center; }
-.gauge-big { font-size: 1.4rem; font-weight: 700; color: #e0e0e0; line-height: 1; }
-.gauge-of { font-size: .72rem; color: #555; margin-top: 3px; }
+.gauge-big { font-size: 1.4rem; font-weight: 700; color: var(--color-text); line-height: 1; }
+.gauge-of { font-size: .72rem; color: var(--color-subtle); margin-top: 3px; }
 
 .gauge-unlimited {
     font-size: 3rem;
@@ -396,10 +396,10 @@
     align-items: center;
     gap: 8px;
     padding-top: 10px;
-    border-top: 1px solid #0f3460;
+    border-top: 1px solid var(--color-border);
     min-height: 30px;
 }
-.gauge-remaining { font-size: .8rem; color: #a0a0a0; flex: 1; }
+.gauge-remaining { font-size: .8rem; color: var(--color-muted); flex: 1; }
 .gauge-remaining.unlim { color: #4ade80; font-weight: 500; }
 
 /* ── Resource cards (config limits) ─────────────── */
@@ -409,13 +409,13 @@
     gap: 16px;
 }
 .resource-card {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border: 1px solid var(--color-border);
     border-radius: 12px;
     padding: 18px 20px;
     transition: border-color .2s;
 }
-.resource-card:hover { border-color: #2a4a7f; }
+.resource-card:hover { border-color: var(--color-link); }
 
 .resource-top { display: flex; align-items: center; gap: 12px; margin-bottom: 14px; }
 .resource-icon {
@@ -425,16 +425,16 @@
     font-size: 1rem; flex-shrink: 0;
 }
 .resource-info { flex: 1; min-width: 0; }
-.resource-label { font-size: .9rem; font-weight: 600; color: #e0e0e0; }
-.resource-sublabel { font-size: .72rem; color: #555; margin-top: 2px; }
+.resource-label { font-size: .9rem; font-weight: 600; color: var(--color-text); }
+.resource-sublabel { font-size: .72rem; color: var(--color-subtle); margin-top: 2px; }
 
 .resource-count { text-align: right; flex-shrink: 0; }
-.resource-used { font-size: 1.5rem; font-weight: 700; color: #e0e0e0; line-height: 1; display: block; }
-.resource-max { font-size: .78rem; color: #555; display: block; text-align: right; }
+.resource-used { font-size: 1.5rem; font-weight: 700; color: var(--color-text); line-height: 1; display: block; }
+.resource-max { font-size: .78rem; color: var(--color-subtle); display: block; text-align: right; }
 
 .resource-bar-wrap {
     height: 6px;
-    background: #0f3460;
+    background: var(--bg-accent);
     border-radius: 3px;
     overflow: hidden;
     margin-bottom: 6px;
@@ -447,7 +447,7 @@
     );
 }
 .resource-bar { height: 100%; border-radius: 3px; transition: width .6s ease; }
-.resource-bar-label { font-size: .75rem; color: #555; }
+.resource-bar-label { font-size: .75rem; color: var(--color-subtle); }
 .resource-bar-label.unlim { color: #4ade80; font-weight: 500; }
 
 /* ── Badges ──────────────────────────────────────── */
@@ -464,8 +464,8 @@
 /* ── Upgrade CTA ─────────────────────────────────── */
 .upgrade-cta {
     margin-top: 28px;
-    background: linear-gradient(135deg, rgba(74,158,255,.10), rgba(103,126,234,.07));
-    border: 1px solid rgba(74,158,255,.35);
+    background: var(--bg-accent);
+    border: 1px solid var(--color-border);
     border-radius: 12px;
     padding: 20px 24px;
     display: flex;
@@ -475,11 +475,11 @@
     flex-wrap: wrap;
 }
 .upgrade-cta-content { display: flex; align-items: center; gap: 16px; }
-.upgrade-cta-icon { font-size: 1.4rem; color: #4a9eff; flex-shrink: 0; }
-.upgrade-cta-title { font-size: 1rem; font-weight: 700; color: #e0e0e0; margin-bottom: 4px; }
-.upgrade-cta-sub { font-size: 13px; color: #888; }
+.upgrade-cta-icon { font-size: 1.4rem; color: var(--color-link); flex-shrink: 0; }
+.upgrade-cta-title { font-size: 1rem; font-weight: 700; color: var(--color-text); margin-bottom: 4px; }
+.upgrade-cta-sub { font-size: 13px; color: var(--color-muted); }
 .upgrade-cta-btn {
-    background: linear-gradient(135deg, #4a9eff, #667eea);
+    background: var(--color-primary);
     color: white;
     text-decoration: none;
     padding: 10px 20px;
@@ -503,20 +503,45 @@
 {% block extra_js %}
 <script>
 (function () {
-    function updateTimers() {
-        var now = new Date();
-        var midnight = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() + 1));
-        var ms = midnight - now;
+    function ordinalSuffix(n) {
+        var v = n % 100;
+        if (v >= 11 && v <= 13) return 'th';
+        switch (n % 10) {
+            case 1: return 'st';
+            case 2: return 'nd';
+            case 3: return 'rd';
+            default: return 'th';
+        }
+    }
+
+    function resetDateLabel(date) {
+        var day = date.getDate();
+        var month = date.toLocaleString(undefined, {month: 'long'});
+        var hh = String(date.getHours()).padStart(2, '0');
+        var mm = String(date.getMinutes()).padStart(2, '0');
+        return 'and the ' + day + ordinalSuffix(day) + ' of ' + month + ' at ' + hh + ':' + mm;
+    }
+
+    function formatCountdown(ms) {
         var h = Math.floor(ms / 3600000);
         var m = Math.floor((ms % 3600000) / 60000);
-        var el = document.getElementById('daily-reset');
-        if (el) el.textContent = 'Resets in ' + h + 'h ' + m + 'm';
-
-        var nextMonth = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth() + 1, 1));
-        var days = Math.ceil((nextMonth - now) / 86400000);
-        var mel = document.getElementById('monthly-reset');
-        if (mel) mel.textContent = 'Resets in ' + days + ' day' + (days !== 1 ? 's' : '');
+        if (h < 48) {
+            return window.i18n.interpolate(window.i18n.t('usage_page.resets_in'), {h: h, m: m});
+        }
+        var days = Math.ceil(ms / 86400000);
+        return window.i18n.interpolate(days !== 1 ? window.i18n.t('usage_page.resets_in_days_plural') : window.i18n.t('usage_page.resets_in_days'), {n: days});
     }
+
+    function updateTimers() {
+        var now = new Date();
+        document.querySelectorAll('[data-reset-ts]').forEach(function (el) {
+            var reset = new Date(parseInt(el.getAttribute('data-reset-ts'), 10));
+            var ms = reset - now;
+            if (ms <= 0) return;
+            el.textContent = formatCountdown(ms) + ' ' + resetDateLabel(reset);
+        });
+    }
+
     updateTimers();
     setInterval(updateTimers, 30000);
 })();

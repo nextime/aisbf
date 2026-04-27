@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}Rate Limits - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">Adaptive Rate Limits</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="rate_limits_page.title">Adaptive Rate Limits</h2>
 
 <div id="rate-limits-data" data-data-url="{{ url_for(request, '/dashboard/rate-limits/data') }}" style="display:none;"></div>
 
@@ -27,20 +27,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 30px;">
     <div style="display: flex; gap: 15px; flex-wrap: wrap;">
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
-            📊 Analytics
+            📊 <span data-i18n="rate_limits_page.analytics">Analytics</span>
         </a>
         <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn btn-secondary" style="text-decoration: none;">
-            💾 Response Cache
+            💾 <span data-i18n="rate_limits_page.response_cache">Response Cache</span>
         </a>
         <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn" style="text-decoration: none;">
-            ⏱️ Rate Limits
+            ⏱️ <span data-i18n="rate_limits_page.rate_limits">Rate Limits</span>
         </a>
     </div>
 </div>
 
 <div style="margin-bottom: 20px;">
-    <button onclick="loadRateLimits()" class="btn">Refresh</button>
-    <button onclick="clearAllRateLimiters()" class="btn btn-secondary">Reset All Rate Limiters</button>
+    <button onclick="loadRateLimits()" class="btn" data-i18n="rate_limits_page.refresh">Refresh</button>
+    <button onclick="clearAllRateLimiters()" class="btn btn-secondary" data-i18n="rate_limits_page.reset_all">Reset All Rate Limiters</button>
 </div>
 
 <div id="rate-limits-content">
@@ -49,48 +49,36 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <style>
     .rate-limit-card {
-        background: #f8f9fa;
-        border: 1px solid #ddd;
+        background: var(--bg-panel);
+        border: 1px solid var(--color-border);
         border-radius: 8px;
         padding: 15px;
         margin-bottom: 15px;
     }
     .rate-limit-card h4 {
         margin-top: 0;
-        color: #2c3e50;
+        color: var(--color-text);
     }
     .stat-row {
         display: flex;
         justify-content: space-between;
         padding: 5px 0;
-        border-bottom: 1px solid #eee;
+        border-bottom: 1px solid var(--color-border);
     }
     .stat-label {
         font-weight: 500;
-        color: #555;
+        color: var(--color-muted);
     }
     .stat-value {
-        color: #333;
+        color: var(--color-text);
     }
     .status-enabled {
         color: #27ae60;
         font-weight: bold;
     }
     .status-disabled {
-        color: #e74c3c;
+        color: var(--alert-error-fg);
         font-weight: bold;
-    }
-    .btn-danger {
-        background: #e74c3c;
-        color: white;
-        border: none;
-        padding: 5px 10px;
-        border-radius: 4px;
-        cursor: pointer;
-        font-size: 12px;
-    }
-    .btn-danger:hover {
-        background: #c0392b;
     }
 </style>
 
@@ -114,48 +102,48 @@ async function loadRateLimits() {
         
         for (const [providerId, stats] of Object.entries(data)) {
             const enabledClass = stats.enabled ? 'status-enabled' : 'status-disabled';
-            const last429 = stats.last_429_time ? new Date(stats.last_429_time * 1000).toLocaleString() : 'Never';
+            const last429 = stats.last_429_time ? new Date(stats.last_429_time * 1000).toLocaleString() : window.i18n.t('rate_limits_page.never');
             
             html += `
                 <div class="rate-limit-card">
                     <div style="display: flex; justify-content: space-between; align-items: center;">
-                        <h4>Provider: ${providerId}</h4>
-                        <button class="btn-danger" onclick="resetRateLimiter('${providerId}')">Reset</button>
+                        <h4>${window.i18n.t('rate_limits_page.provider_label')} ${providerId}</h4>
+                        <button class="btn-danger" onclick="resetRateLimiter('${providerId}')" data-i18n="rate_limits_page.reset">${window.i18n.t('rate_limits_page.reset')}</button>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Enabled:</span>
-                        <span class="stat-value ${enabledClass}">${stats.enabled ? 'Yes' : 'No'}</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.enabled')}</span>
+                        <span class="stat-value ${enabledClass}">${stats.enabled ? window.i18n.t('rate_limits_page.yes') : window.i18n.t('rate_limits_page.no')}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Current Rate Limit:</span>
-                        <span class="stat-value">${stats.current_rate_limit.toFixed(2)} seconds</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.current_rate_limit')}</span>
+                        <span class="stat-value">${stats.current_rate_limit.toFixed(2)} ${window.i18n.t('rate_limits_page.col_delay').toLowerCase()}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Base Rate Limit:</span>
-                        <span class="stat-value">${stats.base_rate_limit.toFixed(2)} seconds</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.base_rate_limit')}</span>
+                        <span class="stat-value">${stats.base_rate_limit.toFixed(2)} ${window.i18n.t('rate_limits_page.col_delay').toLowerCase()}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Total 429 Count:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.total_429')}</span>
                         <span class="stat-value">${stats.total_429_count}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Total Requests:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.total_requests')}</span>
                         <span class="stat-value">${stats.total_requests}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Consecutive 429s:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.consecutive_429')}</span>
                         <span class="stat-value">${stats.consecutive_429s}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Consecutive Successes:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.consecutive_success')}</span>
                         <span class="stat-value">${stats.consecutive_successes}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Recent 429 Count:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.recent_429')}</span>
                         <span class="stat-value">${stats.recent_429_count}</span>
                     </div>
                     <div class="stat-row">
-                        <span class="stat-label">Last 429 Time:</span>
+                        <span class="stat-label">${window.i18n.t('rate_limits_page.last_429')}</span>
                         <span class="stat-value">${last429}</span>
                     </div>
                 </div>
@@ -169,7 +157,7 @@ async function loadRateLimits() {
 }
 
 async function resetRateLimiter(providerId) {
-    const ok = await showConfirm(`Reset rate limiter for ${providerId}?`, 'Reset Rate Limiter');
+    const ok = await showConfirm(window.i18n.interpolate(window.i18n.t('rate_limits_page.reset_confirm'), {provider: providerId}), window.i18n.t('rate_limits_page.reset_confirm_title'));
     if (!ok) return;
     
     try {
@@ -190,7 +178,7 @@ async function resetRateLimiter(providerId) {
 }
 
 async function clearAllRateLimiters() {
-    const ok = await showDangerConfirm('Reset all rate limiters? This will clear all learned rate limits.', 'Reset All');
+    const ok = await showDangerConfirm(window.i18n.t('rate_limits_page.reset_all_confirm'), window.i18n.t('rate_limits_page.reset_all_title'));
     if (!ok) return;
     
     const content = document.getElementById('rate-limits-content');
@@ -211,7 +199,7 @@ async function clearAllRateLimiters() {
             }
         }
         
-        showAlert('All rate limiters reset successfully', 'Done', '✅', 'info');
+        showAlert(window.i18n.t('rate_limits_page.reset_all_success'), 'Done', '✅', 'info');
         loadRateLimits();
     } catch (error) {
         showAlert('Error: ' + error.message, 'Error', '❌', 'danger');

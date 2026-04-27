@@ -22,7 +22,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <style>
 .overview-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin-bottom: 32px; }
 .stat-card { background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 10px; padding: 20px; display: flex; align-items: center; gap: 16px; transition: border-color .2s; }
-.stat-card:hover { border-color: #e94560; }
+.stat-card:hover { border-color: var(--color-primary); }
 .stat-icon { font-size: 2em; width: 48px; height: 48px; border-radius: 8px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
 .stat-icon.blue  { background: rgba(52,152,219,.15); }
 .stat-icon.green { background: rgba(46,204,113,.15); }
@@ -38,9 +38,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 .info-row:last-child { border-bottom: none; }
 .info-row .val { color: var(--color-text); font-weight: 500; }
 .badge { display: inline-block; padding: 2px 10px; border-radius: 20px; font-size: .8em; font-weight: 600; }
-.badge-green { background: rgba(46,204,113,.15); color: #2ecc71; }
+.badge-green { background: rgba(46,204,113,.15); color: #4ade80; }
 .badge-red   { background: rgba(231,76,60,.15);  color: #e74c3c; }
-.badge-blue  { background: rgba(52,152,219,.15); color: #3498db; }
+.badge-blue  { background: rgba(52,152,219,.15); color: var(--color-link); }
 
 .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; }
 </style>

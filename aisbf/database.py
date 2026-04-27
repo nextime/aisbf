@@ -396,7 +396,9 @@ class DatabaseManager:
         token_id: Optional[int] = None,
         prompt_tokens: Optional[int] = None,
         completion_tokens: Optional[int] = None,
-        actual_cost: Optional[float] = None
+        actual_cost: Optional[float] = None,
+        rotation_id: Optional[str] = None,
+        autoselect_id: Optional[str] = None
     ):
         """
         Record token usage for rate limiting and analytics.
@@ -445,10 +447,10 @@ class DatabaseManager:
                 try:
                     # Try to insert with all columns
                     sql = f'''
-                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, timestamp)
-                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, rotation_id, autoselect_id, timestamp)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
                     '''
-                    params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id)
+                    params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id, rotation_id, autoselect_id)
                     logger.info(f"🔍 Trying full INSERT with {len(params)} parameters")
                     logger.debug(f"🔍 SQL: {sql}")
                     logger.debug(f"🔍 Params: {params}")
@@ -2521,6 +2523,49 @@ class DatabaseManager:
             conn.commit()
             return cursor.rowcount
 
+    # Provider Usage methods
+    def get_provider_usage(self, user_id, provider_id: str) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'''
+                    SELECT usage_data, last_updated FROM user_provider_usage
+                    WHERE user_id IS NULL AND provider_id = {placeholder}
+                ''', (provider_id,))
+            else:
+                cursor.execute(f'''
+                    SELECT usage_data, last_updated FROM user_provider_usage
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder}
+                ''', (user_id, provider_id))
+            row = cursor.fetchone()
+            if row:
+                return {'usage_data': json.loads(row[0]), 'last_updated': row[1]}
+            return None
+
+    def save_provider_usage(self, user_id, provider_id: str, usage_data: Dict):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            timestamp_default = 'CURRENT_TIMESTAMP'
+            data_json = json.dumps(usage_data)
+            if user_id is None:
+                # Admin: delete-then-insert to handle NULL in UNIQUE constraint
+                cursor.execute(f'DELETE FROM user_provider_usage WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+                cursor.execute(f'INSERT INTO user_provider_usage (user_id, provider_id, usage_data, last_updated) VALUES (NULL, {placeholder}, {placeholder}, {timestamp_default})', (provider_id, data_json))
+            elif self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO user_provider_usage (user_id, provider_id, usage_data, last_updated)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {timestamp_default})
+                ''', (user_id, provider_id, data_json))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO user_provider_usage (user_id, provider_id, usage_data, last_updated)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {timestamp_default})
+                    ON DUPLICATE KEY UPDATE usage_data=VALUES(usage_data), last_updated=CURRENT_TIMESTAMP
+                ''', (user_id, provider_id, data_json))
+            conn.commit()
+
     # Account Tier methods
     def get_all_tiers(self) -> List[Dict]:
         """
@@ -3550,6 +3595,8 @@ def DatabaseManager__initialize_database(self):
                     latency_ms INTEGER,
                     error_type VARCHAR(255),
                     token_id INTEGER,
+                    rotation_id VARCHAR(255),
+                    autoselect_id VARCHAR(255),
                     timestamp TIMESTAMP DEFAULT {timestamp_default}
                 )
             ''')
@@ -3567,6 +3614,8 @@ def DatabaseManager__initialize_database(self):
                         ('latency_ms', 'INTEGER'),
                         ('error_type', 'VARCHAR(255)'),
                         ('token_id', 'INTEGER'),
+                        ('rotation_id', 'VARCHAR(255)'),
+                        ('autoselect_id', 'VARCHAR(255)'),
                     ]:
                         if col not in columns:
                             cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
@@ -3585,6 +3634,8 @@ def DatabaseManager__initialize_database(self):
                         ('latency_ms', 'INTEGER'),
                         ('error_type', 'VARCHAR(255)'),
                         ('token_id', 'INTEGER'),
+                        ('rotation_id', 'VARCHAR(255)'),
+                        ('autoselect_id', 'VARCHAR(255)'),
                     ]:
                         if col not in existing:
                             cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
@@ -4243,6 +4294,42 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created context_dimensions table")
     except Exception as e:
         logger.warning(f"Migration check for context_dimensions table: {e}")
+
+    # Migration: Create user_provider_usage table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(user_provider_usage)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE user_provider_usage (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        usage_data TEXT NOT NULL,
+                        last_updated TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_provider_usage table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_provider_usage'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE user_provider_usage (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        usage_data TEXT NOT NULL,
+                        last_updated TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_provider_usage table")
+    except Exception as e:
+        logger.warning(f"Migration check for user_provider_usage table: {e}")
 
     logger.info("✅ All database migrations completed")
 

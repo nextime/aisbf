@@ -25,10 +25,10 @@
     align-items: center;
     gap: 1.5rem;
     padding: 1.5rem 2rem;
-    background: linear-gradient(135deg, #0f3460 0%, #16213e 60%, #1a1a2e 100%);
+    background: var(--bg-panel);
     border-radius: 12px;
     margin-bottom: 1.75rem;
-    border: 1px solid #0f3460;
+    border: 1px solid var(--color-border);
     position: relative;
     overflow: hidden;
 }
@@ -43,14 +43,14 @@
 .hero-avatar img {
     width: 64px; height: 64px;
     border-radius: 50%;
-    border: 3px solid #667eea;
+    border: 3px solid var(--color-link);
     box-shadow: 0 0 16px rgba(103,126,234,.4);
 }
-.hero-text h2 { font-size: 1.5rem; font-weight: 700; color: #e0e0e0; margin-bottom: .25rem; }
-.hero-text p  { color: #a0a0a0; font-size: .9rem; }
+.hero-text h2 { font-size: 1.5rem; font-weight: 700; color: var(--color-text); margin-bottom: .25rem; }
+.hero-text p  { color: var(--color-muted); font-size: .9rem; }
 .hero-badge {
     margin-left: auto;
-    background: linear-gradient(135deg, #667eea, #764ba2);
+    background: var(--color-primary);
     color: white;
     padding: .35rem .9rem;
     border-radius: 20px;
@@ -67,8 +67,8 @@
     margin-bottom: 1.75rem;
 }
 .stat-card {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border: 1px solid var(--color-border);
     border-radius: 10px;
     padding: 1.25rem 1.5rem;
     display: flex;
@@ -76,7 +76,7 @@
     gap: 1rem;
     transition: border-color .2s;
 }
-.stat-card:hover { border-color: #667eea; }
+.stat-card:hover { border-color: var(--color-link); }
 .stat-icon {
     width: 44px; height: 44px;
     border-radius: 10px;
@@ -84,12 +84,12 @@
     font-size: 1.2rem;
     flex-shrink: 0;
 }
-.stat-icon.purple { background: rgba(103,126,234,.15); color: #667eea; }
+.stat-icon.purple { background: rgba(103,126,234,.15); color: var(--color-link); }
 .stat-icon.green  { background: rgba(74,222,128,.12);  color: #4ade80; }
-.stat-icon.blue   { background: rgba(96,165,250,.12);  color: #60a5fa; }
+.stat-icon.blue   { background: rgba(96,165,250,.12);  color: var(--color-link); }
 .stat-icon.orange { background: rgba(251,146,60,.12);  color: #fb923c; }
-.stat-label { font-size: .78rem; color: #888; margin-bottom: .25rem; }
-.stat-value { font-size: 1.6rem; font-weight: 700; color: #e0e0e0; line-height: 1; }
+.stat-label { font-size: .78rem; color: var(--color-muted); margin-bottom: .25rem; }
+.stat-value { font-size: 1.6rem; font-weight: 700; color: var(--color-text); line-height: 1; }
 
 /* ── Two-column layout ──────────────────────────────────────── */
 .dashboard-grid {
@@ -103,8 +103,8 @@
 
 /* ── Section card ───────────────────────────────────────────── */
 .section-card {
-    background: #16213e;
-    border: 1px solid #0f3460;
+    background: var(--bg-panel);
+    border: 1px solid var(--color-border);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -114,16 +114,16 @@
     align-items: center;
     justify-content: space-between;
     padding: .9rem 1.25rem;
-    border-bottom: 1px solid #0f3460;
-    background: rgba(15,52,96,.3);
+    border-bottom: 1px solid var(--color-border);
+    background: var(--bg-accent);
 }
 .section-header h3 {
     font-size: 1rem;
     font-weight: 600;
-    color: #e0e0e0;
+    color: var(--color-text);
     display: flex; align-items: center; gap: .5rem;
 }
-.section-header h3 i { color: #667eea; font-size: .9rem; }
+.section-header h3 i { color: var(--color-link); font-size: .9rem; }
 .section-body { padding: 1.25rem; }
 
 /* ── Quick actions ──────────────────────────────────────────── */
@@ -137,21 +137,21 @@
     align-items: center;
     gap: .75rem;
     padding: .85rem 1rem;
-    background: #1a1a2e;
-    border: 1px solid #0f3460;
+    background: var(--bg-page);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     text-decoration: none;
-    color: #e0e0e0;
+    color: var(--color-text);
     transition: border-color .2s, background .2s, transform .15s;
 }
 .action-card:hover {
-    border-color: #667eea;
-    background: rgba(103,126,234,.08);
+    border-color: var(--color-link);
+    background: var(--bg-accent);
     transform: translateY(-1px);
 }
-.action-card i { font-size: 1.1rem; color: #667eea; width: 20px; text-align: center; }
+.action-card i { font-size: 1.1rem; color: var(--color-link); width: 20px; text-align: center; }
 .action-card span { font-size: .9rem; font-weight: 500; }
-.action-card .arrow { margin-left: auto; color: #444; font-size: .75rem; }
+.action-card .arrow { margin-left: auto; color: var(--color-subtle); font-size: .75rem; }
 
 /* ── Subscription card ──────────────────────────────────────── */
 .sub-row {
@@ -161,7 +161,7 @@
     gap: 1rem;
     flex-wrap: wrap;
 }
-.sub-plan h4 { font-size: 1.1rem; font-weight: 700; color: #e0e0e0; margin-bottom: .3rem; }
+.sub-plan h4 { font-size: 1.1rem; font-weight: 700; color: var(--color-text); margin-bottom: .3rem; }
 .badge {
     display: inline-block;
     padding: .25rem .7rem;
@@ -174,8 +174,8 @@
 .badge-canceled{ background: rgba(255,193,7,.15);  color: #ffc107; border: 1px solid #ffc107; }
 .badge-expired { background: rgba(239,68,68,.15);  color: #ef4444; border: 1px solid #ef4444; }
 .sub-price { font-size: 1.4rem; font-weight: 700; color: #4ade80; }
-.sub-price-sub { font-size: .8rem; color: #888; }
-.renew-label { font-size: .8rem; color: #888; margin-top: .25rem; }
+.sub-price-sub { font-size: .8rem; color: var(--color-muted); }
+.renew-label { font-size: .8rem; color: var(--color-muted); margin-top: .25rem; }
 
 /* ── Activity table ─────────────────────────────────────────── */
 .activity-table { width: 100%; border-collapse: collapse; }
@@ -184,20 +184,20 @@
     font-size: .78rem;
     text-transform: uppercase;
     letter-spacing: .05em;
-    color: #666;
-    border-bottom: 1px solid #0f3460;
+    color: var(--color-subtle);
+    border-bottom: 1px solid var(--color-border);
     text-align: left;
 }
 .activity-table td {
     padding: .7rem .9rem;
     font-size: .88rem;
-    color: #c0c0c0;
-    border-bottom: 1px solid rgba(15,52,96,.5);
+    color: var(--color-muted);
+    border-bottom: 1px solid var(--color-border);
 }
 .activity-table tr:last-child td { border-bottom: none; }
-.activity-table tr:hover td { background: rgba(15,52,96,.25); }
+.activity-table tr:hover td { background: var(--bg-accent); }
 .activity-table .mono { font-family: monospace; font-size: .82rem; }
-.empty-row td { text-align: center; color: #555; padding: 2rem; }
+.empty-row td { text-align: center; color: var(--color-subtle); padding: 2rem; }
 
 /* ── API Endpoints section ──────────────────────────────────── */
 .endpoints-toggle {
@@ -214,7 +214,7 @@
     font-size: .78rem;
     text-transform: uppercase;
     letter-spacing: .08em;
-    color: #667eea;
+    color: var(--color-link);
     margin-bottom: .4rem;
     font-weight: 600;
 }
@@ -222,8 +222,8 @@
     display: flex;
     align-items: flex-start;
     gap: .75rem;
-    background: #1a1a2e;
-    border: 1px solid #0f3460;
+    background: var(--bg-page);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: .6rem .9rem;
     margin-bottom: .4rem;
@@ -241,43 +241,43 @@
     margin-top: .05rem;
 }
 .method-GET  { background: rgba(74,222,128,.18); color: #4ade80; }
-.method-POST { background: rgba(96,165,250,.18); color: #60a5fa; }
-.ep-url { font-family: monospace; font-size: .82rem; color: #c0c0c0; word-break: break-all; }
-.ep-desc { font-size: .8rem; color: #666; margin-top: .15rem; }
+.method-POST { background: rgba(96,165,250,.18); color: var(--color-link); }
+.ep-url { font-family: monospace; font-size: .82rem; color: var(--color-text); word-break: break-all; }
+.ep-desc { font-size: .8rem; color: var(--color-subtle); margin-top: .15rem; }
 
 .code-block {
-    background: #0f1c33;
-    border: 1px solid #0f3460;
+    background: var(--bg-page);
+    border: 1px solid var(--color-border);
     border-radius: 6px;
     padding: .9rem 1rem;
     font-family: monospace;
     font-size: .82rem;
-    color: #c0c0c0;
+    color: var(--color-text);
     overflow-x: auto;
     margin: .75rem 0 0;
 }
 
 .admin-banner {
-    background: linear-gradient(135deg, rgba(103,126,234,.2) 0%, rgba(118,75,162,.2) 100%);
-    border: 1px solid rgba(103,126,234,.4);
+    background: var(--bg-accent);
+    border: 1px solid var(--color-border);
     border-radius: 8px;
     padding: 1rem;
     margin-top: 1rem;
 }
-.admin-banner h4 { color: #a78bfa; margin-bottom: .4rem; font-size: .9rem; }
-.admin-banner p  { color: #c0c0c0; font-size: .85rem; margin: .25rem 0; }
-.admin-banner code { background: rgba(0,0,0,.3); padding: .15rem .4rem; border-radius: 3px; font-size: .8rem; }
+.admin-banner h4 { color: var(--color-link); margin-bottom: .4rem; font-size: .9rem; }
+.admin-banner p  { color: var(--color-muted); font-size: .85rem; margin: .25rem 0; }
+.admin-banner code { background: var(--bg-page); padding: .15rem .4rem; border-radius: 3px; font-size: .8rem; }
 
 .tip-box {
-    background: rgba(15,52,96,.5);
-    border-left: 3px solid #667eea;
+    background: var(--bg-accent);
+    border-left: 3px solid var(--color-link);
     border-radius: 0 6px 6px 0;
     padding: .7rem 1rem;
     font-size: .85rem;
-    color: #a0a0a0;
+    color: var(--color-muted);
     margin-top: .75rem;
 }
-.tip-box a { color: #667eea; }
+.tip-box a { color: var(--color-link); }
 </style>
 
 {% if success %}
@@ -294,7 +294,7 @@
     </div>
     <div class="hero-text">
         <h2>Welcome back, {{ display_name }}!</h2>
-        <p>Manage your AI configurations, track usage, and access your personal API endpoints.</p>
+        <p data-i18n="user_overview.subtitle">Manage your AI configurations, track usage, and access your personal API endpoints.</p>
     </div>
     {% if session.role == 'admin' %}
     <div class="hero-badge">Admin</div>
@@ -306,28 +306,28 @@
     <div class="stat-card">
         <div class="stat-icon purple"><i class="fas fa-coins"></i></div>
         <div>
-            <div class="stat-label">Total Tokens</div>
+            <div class="stat-label" data-i18n="user_overview.stat_total_tokens">Total Tokens</div>
             <div class="stat-value">{{ format_tokens(usage_stats.total_tokens|default(0)) }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon green"><i class="fas fa-bolt"></i></div>
         <div>
-            <div class="stat-label">Requests Today</div>
+            <div class="stat-label" data-i18n="user_overview.stat_requests_today">Requests Today</div>
             <div class="stat-value">{{ usage_stats.requests_today|default(0) }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon blue"><i class="fas fa-plug"></i></div>
         <div>
-            <div class="stat-label">Active Providers</div>
+            <div class="stat-label" data-i18n="user_overview.stat_active_providers">Active Providers</div>
             <div class="stat-value">{{ providers_count|default(0) }}</div>
         </div>
     </div>
     <div class="stat-card">
         <div class="stat-icon orange"><i class="fas fa-rotate"></i></div>
         <div>
-            <div class="stat-label">Active Rotations</div>
+            <div class="stat-label" data-i18n="user_overview.stat_active_rotations">Active Rotations</div>
             <div class="stat-value">{{ rotations_count|default(0) }}</div>
         </div>
     </div>
@@ -339,43 +339,43 @@
     <!-- Quick Actions -->
     <div class="section-card">
         <div class="section-header">
-            <h3><i class="fas fa-grid-2"></i> Quick Actions</h3>
+            <h3><i class="fas fa-grid-2"></i> <span data-i18n="user_overview.quick_actions">Quick Actions</span></h3>
         </div>
         <div class="section-body">
             <div class="actions-grid">
                 <a href="{{ url_for(request, '/dashboard/user/providers') }}" class="action-card">
                     <i class="fas fa-plug"></i>
-                    <span>Providers</span>
+                    <span data-i18n="nav.providers">Providers</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/user/rotations') }}" class="action-card">
                     <i class="fas fa-rotate"></i>
-                    <span>Rotations</span>
+                    <span data-i18n="nav.rotations">Rotations</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/user/autoselect') }}" class="action-card">
                     <i class="fas fa-wand-magic-sparkles"></i>
-                    <span>Autoselect</span>
+                    <span data-i18n="nav.autoselect">Autoselect</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/user/tokens') }}" class="action-card">
                     <i class="fas fa-key"></i>
-                    <span>API Tokens</span>
+                    <span data-i18n="nav.api_tokens">API Tokens</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/analytics') }}" class="action-card">
                     <i class="fas fa-chart-line"></i>
-                    <span>Analytics</span>
+                    <span data-i18n="nav.analytics">Analytics</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/wallet') }}" class="action-card">
                     <i class="fas fa-wallet"></i>
-                    <span>Wallet</span>
+                    <span data-i18n="nav.wallet">Wallet</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
                 <a href="{{ url_for(request, '/dashboard/usage') }}" class="action-card">
                     <i class="fas fa-gauge-high"></i>
-                    <span>Usage</span>
+                    <span data-i18n="nav.usage">Usage</span>
                     <i class="fas fa-chevron-right arrow"></i>
                 </a>
             </div>
@@ -386,9 +386,9 @@
     {% if current_tier %}
     <div class="section-card">
         <div class="section-header">
-            <h3><i class="fas fa-crown"></i> Subscription</h3>
+            <h3><i class="fas fa-crown"></i> <span data-i18n="user_overview.subscription">Subscription</span></h3>
             {% if not current_tier.is_default %}
-            <a href="{{ url_for(request, '/dashboard/subscription') }}" style="font-size:.8rem; color:#667eea; text-decoration:none;">Manage</a>
+            <a href="{{ url_for(request, '/dashboard/subscription') }}" style="font-size:.8rem; color:var(--color-link); text-decoration:none;" data-i18n="user_overview.manage">Manage</a>
             {% endif %}
         </div>
         <div class="section-body">
@@ -396,9 +396,9 @@
                 <div class="sub-plan">
                     <h4>{{ current_tier.name }}</h4>
                     {% if current_tier.is_default %}
-                    <span class="badge badge-free">Free Tier</span>
+                    <span class="badge badge-free" data-i18n="user_overview.free_tier">Free Tier</span>
                     {% else %}
-                    <div class="sub-price">{{ currency_symbol }}{{ "%.2f"|format(current_tier.price_monthly) }}<span style="font-size:.9rem;color:#888;">/mo</span></div>
+                    <div class="sub-price">{{ currency_symbol }}{{ "%.2f"|format(current_tier.price_monthly) }}<span style="font-size:.9rem;color:var(--color-muted);">/mo</span></div>
                     {% if current_tier.price_yearly %}
                     <div class="sub-price-sub">or {{ currency_symbol }}{{ "%.2f"|format(current_tier.price_yearly) }}/year</div>
                     {% endif %}
@@ -414,27 +414,27 @@
                 {% endif %}
             </div>
             {% if not payment_methods or payment_methods|length == 0 %}
-            <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary" style="margin-top:1rem; margin-left:0; display:inline-block;">Add Payment Method</a>
+            <a href="{{ url_for(request, '/dashboard/billing/add-method') }}" class="btn btn-primary" style="margin-top:1rem; margin-left:0; display:inline-block;" data-i18n="user_overview.add_payment_method">Add Payment Method</a>
             {% endif %}
 
             <!-- Upgrade CTA -->
             {% if upgrade_tiers %}
-            <div style="margin-top:1rem; padding:1rem; background:linear-gradient(135deg,rgba(74,158,255,.12),rgba(103,126,234,.08)); border:1px solid rgba(74,158,255,.4); border-radius:8px;">
+            <div style="margin-top:1rem; padding:1rem; background:var(--bg-accent); border:1px solid var(--color-border); border-radius:8px;">
                 <div style="display:flex; align-items:center; justify-content:space-between; gap:.75rem; flex-wrap:wrap;">
                     <div>
-                        <div style="font-size:.9rem; font-weight:600; color:#e0e0e0; margin-bottom:.25rem;">
-                            <i class="fas fa-rocket" style="color:#4a9eff;"></i> Unlock more power
+                        <div style="font-size:.9rem; font-weight:600; color:var(--color-text); margin-bottom:.25rem;">
+                            <i class="fas fa-rocket" style="color:var(--color-link);"></i> <span data-i18n="user_overview.unlock_more_power">Unlock more power</span>
                         </div>
-                        <div style="font-size:.8rem; color:#a0a0a0;">
+                        <div style="font-size:.8rem; color:var(--color-muted);">
                             {% if upgrade_tiers|length == 1 %}
-                            Upgrade to <strong style="color:#4a9eff;">{{ upgrade_tiers[0].name }}</strong> for {{ currency_symbol }}{{ "%.2f"|format(upgrade_tiers[0].price_monthly) }}/mo
+                            Upgrade to <strong style="color:var(--color-link);">{{ upgrade_tiers[0].name }}</strong> for {{ currency_symbol }}{{ "%.2f"|format(upgrade_tiers[0].price_monthly) }}/mo
                             {% else %}
                             {{ upgrade_tiers|length }} higher plans available — more requests, more providers
                             {% endif %}
                         </div>
                     </div>
-                    <a href="{{ url_for(request, '/dashboard/pricing') }}" style="background:linear-gradient(135deg,#4a9eff,#667eea); color:white; text-decoration:none; padding:.5rem 1rem; border-radius:6px; font-size:.85rem; font-weight:600; white-space:nowrap; flex-shrink:0;">
-                        <i class="fas fa-arrow-up me-1"></i> Upgrade Plan
+                    <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn" style="white-space:nowrap; flex-shrink:0;">
+                        <i class="fas fa-arrow-up me-1"></i> <span data-i18n="user_overview.upgrade_plan">Upgrade Plan</span>
                     </a>
                 </div>
             </div>
@@ -446,16 +446,16 @@
     <!-- Recent Activity -->
     <div class="section-card full-width">
         <div class="section-header">
-            <h3><i class="fas fa-clock-rotate-left"></i> Recent Activity</h3>
+            <h3><i class="fas fa-clock-rotate-left"></i> <span data-i18n="user_overview.recent_activity">Recent Activity</span></h3>
         </div>
         <div class="section-body" style="padding:0;">
             <table class="activity-table">
                 <thead>
                     <tr>
-                        <th>Timestamp</th>
-                        <th>Provider</th>
-                        <th>Model</th>
-                        <th>Tokens</th>
+                        <th data-i18n="user_overview.col_timestamp">Timestamp</th>
+                        <th data-i18n="user_overview.col_provider">Provider</th>
+                        <th data-i18n="user_overview.col_model">Model</th>
+                        <th data-i18n="user_overview.col_tokens">Tokens</th>
                     </tr>
                 </thead>
                 <tbody>
@@ -469,7 +469,7 @@
                         </tr>
                         {% endfor %}
                     {% else %}
-                        <tr class="empty-row"><td colspan="4">No recent activity yet. Make your first API request to see usage here.</td></tr>
+                        <tr class="empty-row"><td colspan="4" data-i18n="user_overview.no_activity">No recent activity yet. Make your first API request to see usage here.</td></tr>
                     {% endif %}
                 </tbody>
             </table>
@@ -479,87 +479,87 @@
     <!-- API Endpoints (collapsible) -->
     <div class="section-card full-width">
         <div class="section-header endpoints-toggle" id="epToggle" onclick="toggleEndpoints()">
-            <h3><i class="fas fa-code"></i> Your API Endpoints</h3>
-            <span style="color:#667eea; font-size:.85rem;">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
+            <h3><i class="fas fa-code"></i> <span data-i18n="user_overview.api_endpoints">Your API Endpoints</span></h3>
+            <span style="color:var(--color-link); font-size:.85rem;" data-i18n="user_overview.show_hide">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
         </div>
         <div class="endpoints-body" id="epBody">
             <div class="section-body">
-                <p style="color:#a0a0a0; font-size:.9rem; margin-bottom:1rem;">
-                    Include your API token in the <code style="background:#0f3460; padding:.15rem .4rem; border-radius:3px;">Authorization</code> header:
+                <p style="color:var(--color-muted); font-size:.9rem; margin-bottom:1rem;" id="ep-auth-desc">
+                    Include your API token in the <code style="background:var(--bg-accent); padding:.15rem .4rem; border-radius:3px;">Authorization</code> header:
                 </p>
                 <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
 
                 <div style="display:grid; grid-template-columns:1fr 1fr; gap:1.5rem; margin-top:1.25rem;">
                     <div>
                         <div class="ep-group">
-                            <div class="ep-group-title">Models</div>
+                            <div class="ep-group-title" data-i18n="user_overview.ep_models">Models</div>
                             <div class="ep-row">
                                 <span class="method-badge method-GET">GET</span>
                                 <div>
                                     <div class="ep-url">/api/u/{{ session.username }}/models</div>
-                                    <div class="ep-desc">List all your models</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_list_models">List all your models</div>
                                 </div>
                             </div>
                         </div>
                         <div class="ep-group">
-                            <div class="ep-group-title">Providers</div>
+                            <div class="ep-group-title" data-i18n="user_overview.ep_providers">Providers</div>
                             <div class="ep-row">
                                 <span class="method-badge method-GET">GET</span>
                                 <div>
                                     <div class="ep-url">/api/u/{{ session.username }}/providers</div>
-                                    <div class="ep-desc">List your configured providers</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_list_providers">List your configured providers</div>
                                 </div>
                             </div>
                         </div>
                         <div class="ep-group">
-                            <div class="ep-group-title">Rotations &amp; Autoselect</div>
+                            <div class="ep-group-title" data-i18n="user_overview.ep_rotations_autoselect">Rotations &amp; Autoselect</div>
                             <div class="ep-row">
                                 <span class="method-badge method-GET">GET</span>
                                 <div>
                                     <div class="ep-url">/api/u/{{ session.username }}/rotations</div>
-                                    <div class="ep-desc">List your rotations</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_list_rotations">List your rotations</div>
                                 </div>
                             </div>
                             <div class="ep-row">
                                 <span class="method-badge method-GET">GET</span>
                                 <div>
                                     <div class="ep-url">/api/u/{{ session.username }}/autoselects</div>
-                                    <div class="ep-desc">List your autoselects</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_list_autoselects">List your autoselects</div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     <div>
                         <div class="ep-group">
-                            <div class="ep-group-title">Chat Completions</div>
+                            <div class="ep-group-title" data-i18n="user_overview.ep_chat">Chat Completions</div>
                             <div class="ep-row">
                                 <span class="method-badge method-POST">POST</span>
                                 <div>
                                     <div class="ep-url">/api/u/{{ session.username }}/chat/completions</div>
-                                    <div class="ep-desc">Send chat requests using your configs</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_chat_desc">Send chat requests using your configs</div>
                                 </div>
                             </div>
                         </div>
                         <div class="ep-group">
-                            <div class="ep-group-title">MCP Tools</div>
+                            <div class="ep-group-title" data-i18n="user_overview.ep_mcp">MCP Tools</div>
                             <div class="ep-row">
                                 <span class="method-badge method-GET">GET</span>
                                 <div>
                                     <div class="ep-url">/mcp/u/{{ session.username }}/tools</div>
-                                    <div class="ep-desc">List MCP tools</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_mcp_list">List MCP tools</div>
                                 </div>
                             </div>
                             <div class="ep-row">
                                 <span class="method-badge method-POST">POST</span>
                                 <div>
                                     <div class="ep-url">/mcp/u/{{ session.username }}/tools/call</div>
-                                    <div class="ep-desc">Call MCP tools</div>
+                                    <div class="ep-desc" data-i18n="user_overview.ep_mcp_call">Call MCP tools</div>
                                 </div>
                             </div>
                         </div>
                         <div class="ep-group">
-                            <div class="ep-group-title">Model format examples</div>
-                            <div style="background:#1a1a2e; border:1px solid #0f3460; border-radius:6px; padding:.75rem 1rem; font-family:monospace; font-size:.82rem; color:#a0a0a0; line-height:1.6;">
+                            <div class="ep-group-title" data-i18n="user_overview.ep_model_formats">Model format examples</div>
+                            <div style="background:var(--bg-page); border:1px solid var(--color-border); border-radius:6px; padding:.75rem 1rem; font-family:monospace; font-size:.82rem; color:var(--color-muted); line-height:1.6;">
                                 user-provider/<em>myprovider</em>/<em>mymodel</em><br>
                                 user-rotation/<em>myrotation</em><br>
                                 user-autoselect/<em>myautoselect</em>
@@ -570,16 +570,16 @@
 
                 {% if session.role == 'admin' %}
                 <div class="admin-banner">
-                    <h4><i class="fas fa-shield-halved"></i> Admin Access</h4>
-                    <p>As an admin you also access global configurations via shorter model formats:</p>
+                    <h4><i class="fas fa-shield-halved"></i> <span data-i18n="user_overview.admin_access">Admin Access</span></h4>
+                    <p data-i18n="user_overview.admin_access_desc">As an admin you also access global configurations via shorter model formats:</p>
                     <p><code>provider/model</code> &nbsp;&bull;&nbsp; <code>rotation/myrotation</code> &nbsp;&bull;&nbsp; <code>autoselect/myautoselect</code></p>
                 </div>
                 {% endif %}
 
                 <div class="tip-box">
-                    <i class="fas fa-circle-info" style="color:#667eea;"></i>
-                    &nbsp;Your API token is required for all endpoints.
-                    <a href="{{ url_for(request, '/dashboard/user/tokens') }}">Manage your tokens &rarr;</a>
+                    <i class="fas fa-circle-info" style="color:var(--color-link);"></i>
+                    &nbsp;<span data-i18n="user_overview.token_required">Your API token is required for all endpoints.</span>
+                    <a href="{{ url_for(request, '/dashboard/user/tokens') }}" data-i18n="user_overview.manage_tokens">Manage your tokens &rarr;</a>
                 </div>
             </div>
         </div>

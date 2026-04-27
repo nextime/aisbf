@@ -17,6 +17,12 @@
   "content_scripts": [
     {
       "matches": ["<all_urls>"],
+      "js": ["inject_marker.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["<all_urls>"],
       "js": ["content.js"],
       "run_at": "document_start"
     }

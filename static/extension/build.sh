@@ -25,6 +25,7 @@ zip -r "$OUTPUT_FILE" \
     manifest.json \
     background.js \
     content.js \
+    inject_marker.js \
     popup.html \
     popup.js \
     options.html \

@@ -164,7 +164,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 <td>{{ user.email or '-' }}</td>
                 <td>
                     {% if user.role == 'admin' %}
-                    <span style="color: #e94560; font-weight: bold;" data-i18n="users_page.role_admin_label">Admin</span>
+                    <span style="color: var(--color-primary); font-weight: bold;" data-i18n="users_page.role_admin_label">Admin</span>
                     {% else %}
                     <span style="color: var(--color-muted);" data-i18n="users_page.role_user_label">User</span>
                     {% endif %}
@@ -185,7 +185,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     {% if user.is_active %}
                     <span style="color: #4ade80;" data-i18n="users_page.active_yes">Yes</span>
                     {% else %}
-                    <span style="color: #f87171;">No</span>
+                    <span style="color: var(--alert-error-fg);">No</span>
                     {% endif %}
                 </td>
                 <td>
@@ -900,7 +900,7 @@ th {
 .sort-indicator {
     margin-left: 5px;
     font-size: 10px;
-    color: #16c79a;
+    color: var(--color-link);
 }
 
 /* Loading spinner */
@@ -944,17 +944,17 @@ th {
     }
 }
 
-/* Custom alert styles for dark theme */
+/* Custom alert styles */
 .alert-success {
-    background-color: #10b981 !important;
-    color: #ffffff !important;
-    border-color: #059669 !important;
+    background-color: var(--alert-success-bg) !important;
+    color: var(--alert-success-fg) !important;
+    border-color: var(--alert-success-border) !important;
 }
 
 .alert-error {
-    background-color: #ef4444 !important;
-    color: #ffffff !important;
-    border-color: #dc2626 !important;
+    background-color: var(--alert-error-bg) !important;
+    color: var(--alert-error-fg) !important;
+    border-color: var(--alert-error-border) !important;
 }
 
 /* Prevent browser autofill from overriding dark theme */

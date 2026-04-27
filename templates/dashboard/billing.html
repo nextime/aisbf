@@ -1,20 +1,20 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 style="margin-bottom: 20px;">Billing & Payments</h2>
+<h2 style="margin-bottom: 20px;" data-i18n="billing_page.title">Billing & Payments</h2>
 
 <!-- Wallet Balance Banner -->
-<div style="background: linear-gradient(135deg, #1a4a2e, var(--color-border)); border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+<div style="background: var(--bg-panel); border: 2px solid #28a745; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div>
-            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;">Wallet Balance</div>
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 5px;" data-i18n="billing_page.wallet_balance">Wallet Balance</div>
             <div style="font-size: 32px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ wallet.balance }}</div>
-            <div style="color: var(--color-muted); font-size: 13px; margin-top: 5px;">
+            <div style="color: var(--color-muted); font-size: 13px; margin-top: 5px;" data-i18n="billing_page.wallet_desc">
                 All subscription renewals and payments are automatically charged from your wallet first.
             </div>
         </div>
         <a href="{{ url_for(request, '/dashboard/wallet') }}" class="btn" style="background: #28a745;">
-            <i class="fas fa-wallet me-2"></i>Manage Wallet
+            <i class="fas fa-wallet me-2"></i><span data-i18n="billing_page.manage_wallet">Manage Wallet</span>
         </a>
     </div>
 </div>
@@ -28,9 +28,9 @@
 {% endif %}
 
 <!-- Payment Methods Section -->
-<div style="background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
-        <i class="fas fa-wallet me-2"></i>Payment Methods
+<div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
+        <i class="fas fa-wallet me-2"></i><span data-i18n="billing_page.payment_methods">Payment Methods</span>
     </h3>
 
     {% if payment_methods and payment_methods|length > 0 %}
@@ -65,14 +65,14 @@
                         {% endif %}
                     </div>
                     {% if method.is_default %}
-                    <span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-top: 5px; display: inline-block;">Default</span>
+                    <span style="background: #28a745; color: white; padding: 2px 8px; border-radius: 10px; font-size: 12px; margin-top: 5px; display: inline-block;" data-i18n="billing_page.default_label">Default</span>
                     {% endif %}
                 </div>
                 <div style="display: flex; flex-direction: column; gap: 5px;">
                     {% if not method.is_default %}
-                    <button class="btn btn-secondary set-default-btn" data-method-id="{{ method.id }}" style="background: #17a2b8; border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-block !important; visibility: visible !important;">Set Default</button>
+                    <button class="btn btn-secondary set-default-btn" data-method-id="{{ method.id }}" style="border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 12px; display: inline-block !important; visibility: visible !important;" data-i18n="billing_page.set_default">Set Default</button>
                     {% endif %}
-                    <button class="btn btn-secondary delete-method-btn" data-method-id="{{ method.id }}" data-method-type="{{ method.type }}" style="background: #dc3545; border: none; color: white; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; display: inline-block !important; visibility: visible !important; width: auto; min-width: 40px;" title="Delete payment method">
+                    <button class="btn btn-danger delete-method-btn" data-method-id="{{ method.id }}" data-method-type="{{ method.type }}" style="border: none; padding: 8px 12px; border-radius: 4px; cursor: pointer; font-size: 14px; display: inline-block !important; visibility: visible !important; width: auto; min-width: 40px;" title="Delete payment method">
                         <i class="fas fa-trash"></i>
                     </button>
                 </div>
@@ -83,28 +83,28 @@
     {% else %}
     <div style="text-align: center; padding: 40px; color: var(--color-muted);">
         <i class="fas fa-credit-card fa-4x mb-3"></i>
-        <h4 style="margin-bottom: 15px;">No payment methods configured</h4>
-        <p style="margin-bottom: 20px;">Add a credit card to enable automatic subscription renewals.</p>
+        <h4 style="margin-bottom: 15px;" data-i18n="billing_page.no_payment_methods">No payment methods configured</h4>
+        <p style="margin-bottom: 20px;" data-i18n="billing_page.no_payment_methods_desc">Add a credit card to enable automatic subscription renewals.</p>
         {% if 'stripe' in enabled_gateways %}
-        <button id="stripe-button" class="btn"><i class="fab fa-cc-stripe me-2"></i>Add Credit Card</button>
+        <button id="stripe-button" class="btn"><i class="fab fa-cc-stripe me-2"></i><span data-i18n="billing_page.add_credit_card">Add Credit Card</span></button>
         {% endif %}
     </div>
     {% endif %}
 
     <div style="display: flex; gap: 10px; margin-top: 20px; flex-wrap: wrap; align-items: center;">
         {% if 'stripe' in enabled_gateways %}
-        <button id="stripe-button-bottom" class="btn"><i class="fab fa-cc-stripe me-2"></i>Add Credit Card</button>
+        <button id="stripe-button-bottom" class="btn"><i class="fab fa-cc-stripe me-2"></i><span data-i18n="billing_page.add_credit_card">Add Credit Card</span></button>
         {% endif %}
         <a href="{{ url_for(request, '/dashboard/wallet') }}" class="btn btn-secondary">
-            <i class="fas fa-wallet me-2"></i>Top Up Wallet
+            <i class="fas fa-wallet me-2"></i><span data-i18n="billing_page.top_up_wallet">Top Up Wallet</span>
         </a>
     </div>
 </div>
 
 <!-- Billing History Section -->
-<div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #17a2b8;">
-        <i class="fas fa-history me-2"></i>Billing History
+<div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
+        <i class="fas fa-history me-2"></i><span data-i18n="billing_page.billing_history">Billing History</span>
     </h3>
 
     {% if transactions and transactions|length > 0 %}
@@ -112,12 +112,12 @@
         <table style="width: 100%; border-collapse: collapse; margin-top: 20px;">
             <thead>
                 <tr style="background:var(--bg-accent); color: var(--color-text);">
-                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Date</th>
-                    <th style="padding: 12px; text-align: left; border-bottom:1px solid var(--color-border); font-weight: 600;">Description</th>
-                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Amount</th>
-                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Method</th>
-                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Status</th>
-                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Actions</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_date">Date</th>
+                    <th style="padding: 12px; text-align: left; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_description">Description</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_amount">Amount</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_method">Method</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_status">Status</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="billing_page.col_actions">Actions</th>
                 </tr>
             </thead>
             <tbody>
@@ -132,7 +132,7 @@
                             {% if tx.description %}
                             {{ tx.description }}
                             {% else %}
-                            Plan Payment
+                            <span data-i18n="billing_page.plan_payment">Plan Payment</span>
                             {% endif %}
                         </div>
                         {% if tx.plan_name %}
@@ -151,30 +151,30 @@
                     </td>
                     <td style="padding: 12px; text-align: center;">
                         {% if tx.payment_method == 'paypal' %}
-                        <i class="fab fa-paypal text-primary"></i><br><small>PayPal</small>
+                        <i class="fab fa-paypal text-primary"></i><br><small data-i18n="billing_page.paypal">PayPal</small>
                         {% elif tx.payment_method == 'stripe' %}
-                        <i class="fab fa-cc-stripe text-primary"></i><br><small>Credit Card</small>
+                        <i class="fab fa-cc-stripe text-primary"></i><br><small data-i18n="billing_page.credit_card">Credit Card</small>
                         {% elif tx.payment_method == 'bitcoin' %}
-                        <i class="fab fa-bitcoin text-warning"></i><br><small>Bitcoin</small>
+                        <i class="fab fa-bitcoin text-warning"></i><br><small data-i18n="billing_page.bitcoin">Bitcoin</small>
                         {% elif tx.payment_method == 'eth' or tx.payment_method == 'ethereum' %}
-                        <i class="fab fa-ethereum text-purple"></i><br><small>Ethereum</small>
+                        <i class="fab fa-ethereum text-purple"></i><br><small data-i18n="billing_page.ethereum">Ethereum</small>
                         {% elif tx.payment_method == 'usdt' %}
-                        <i class="fas fa-coins text-success"></i><br><small>USDT</small>
+                        <i class="fas fa-coins text-success"></i><br><small data-i18n="billing_page.usdt">USDT</small>
                         {% elif tx.payment_method == 'usdc' %}
-                        <i class="fas fa-coins text-info"></i><br><small>USDC</small>
+                        <i class="fas fa-coins text-info"></i><br><small data-i18n="billing_page.usdc">USDC</small>
                         {% else %}
                         <i class="fas fa-credit-card text-secondary"></i><br><small>{{ tx.payment_method|title }}</small>
                         {% endif %}
                     </td>
                     <td style="padding: 12px; text-align: center;">
                         {% if tx.status == 'completed' %}
-                        <span style="background: #28a745; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;">✓ Completed</span>
+                        <span style="background: #28a745; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;" data-i18n="billing_page.status_completed">✓ Completed</span>
                         {% elif tx.status == 'pending' %}
-                        <span style="background: #ffc107; color: black; padding: 4px 8px; border-radius: 10px; font-size: 12px;">⏳ Pending</span>
+                        <span style="background: #ffc107; color: black; padding: 4px 8px; border-radius: 10px; font-size: 12px;" data-i18n="billing_page.status_pending">⏳ Pending</span>
                         {% elif tx.status == 'failed' %}
-                        <span style="background: #dc3545; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;">✗ Failed</span>
+                        <span style="background: #dc3545; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;" data-i18n="billing_page.status_failed">✗ Failed</span>
                         {% elif tx.status == 'refunded' %}
-                        <span style="background: #6c757d; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;">↩ Refunded</span>
+                        <span style="background: #6c757d; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;" data-i18n="billing_page.status_refunded">↩ Refunded</span>
                         {% else %}
                         <span style="background: #6c757d; color: white; padding: 4px 8px; border-radius: 10px; font-size: 12px;">{{ tx.status|title }}</span>
                         {% endif %}
@@ -182,7 +182,7 @@
                     <td style="padding: 12px; text-align: center;">
                         {% if tx.invoice_id %}
                         <a href="#" class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px;">
-                            <i class="fas fa-file-pdf me-1"></i>Invoice
+                            <i class="fas fa-file-pdf me-1"></i><span data-i18n="billing_page.invoice">Invoice</span>
                         </a>
                         {% endif %}
                         <button class="btn btn-secondary" style="padding: 5px 10px; font-size: 12px; margin-left: 5px;" title="View Details">
@@ -197,21 +197,21 @@
 
     {% if transactions|length > 10 %}
     <div style="margin-top: 20px; text-align: center;">
-        <button class="btn btn-secondary" style="margin: 0 5px;">Previous</button>
+        <button class="btn btn-secondary" style="margin: 0 5px;" data-i18n="billing_page.prev">Previous</button>
         <button class="btn" style="margin: 0 5px;">1</button>
         <button class="btn btn-secondary" style="margin: 0 5px;">2</button>
-        <button class="btn btn-secondary" style="margin: 0 5px;">Next</button>
+        <button class="btn btn-secondary" style="margin: 0 5px;" data-i18n="billing_page.next">Next</button>
     </div>
     {% endif %}
 
     {% else %}
     <div style="text-align: center; padding: 40px; color: var(--color-muted);">
         <i class="fas fa-receipt fa-4x mb-3"></i>
-        <h4 style="margin-bottom: 15px;">No billing history yet</h4>
-        <p style="margin-bottom: 20px;">You don't have any payment transactions on your account.</p>
-        <p style="margin-bottom: 20px;">Upgrade your plan to get started!</p>
+        <h4 style="margin-bottom: 15px;" data-i18n="billing_page.no_history">No billing history yet</h4>
+        <p style="margin-bottom: 20px;" data-i18n="billing_page.no_history_desc">You don't have any payment transactions on your account.</p>
+        <p style="margin-bottom: 20px;" data-i18n="billing_page.no_history_upgrade">Upgrade your plan to get started!</p>
         <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn">
-            <i class="fas fa-star me-2"></i>View Plans & Pricing
+            <i class="fas fa-star me-2"></i><span data-i18n="billing_page.view_plans">View Plans & Pricing</span>
         </a>
     </div>
     {% endif %}
@@ -231,8 +231,8 @@
 }
 
 .payment-method-card:hover {
-    border-color: #4a9eff;
-    box-shadow: 0 2px 8px rgba(74, 158, 255, 0.2);
+    border-color: var(--color-link);
+    box-shadow: 0 2px 8px var(--shadow);
 }
 
 .payment-method-card.default {
@@ -302,9 +302,9 @@
 
 <!-- Stripe Card Modal -->
 <div id="stripe-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.7);z-index:1000;align-items:center;justify-content:center;">
-    <div style="background:var(--bg-panel);border:2px solid #4a9eff;border-radius:8px;padding:30px;max-width:500px;width:90%;position:relative;">
+    <div style="background:var(--bg-panel);border:2px solid var(--color-link);border-radius:8px;padding:30px;max-width:500px;width:90%;position:relative;">
         <button id="close-stripe-modal" style="position:absolute;top:15px;right:15px;background:transparent;border:none;color:var(--color-text);font-size:24px;cursor:pointer;">&times;</button>
-        <h3 style="margin:0 0 20px 0;color:#4a9eff;"><i class="fab fa-cc-stripe me-2"></i>Add Credit Card</h3>
+        <h3 style="margin:0 0 20px 0;color:var(--color-link);"><i class="fab fa-cc-stripe me-2"></i><span data-i18n="billing_page.add_credit_card">Add Credit Card</span></h3>
         <form id="stripe-card-form">
             <div style="margin-bottom:20px;">
                 <label style="display:block;margin-bottom:8px;color:var(--color-text);font-weight:500;">Card Details</label>
@@ -312,8 +312,8 @@
                 <div id="card-errors" style="color:#dc3545;margin-top:8px;font-size:14px;"></div>
             </div>
             <div style="display:flex;gap:10px;justify-content:flex-end;">
-                <button type="button" id="cancel-stripe" class="btn btn-secondary">Cancel</button>
-                <button type="submit" id="stripe-submit" class="btn"><i class="fas fa-plus me-2"></i>Add Card</button>
+                <button type="button" id="cancel-stripe" class="btn btn-secondary" data-i18n="billing_page.cancel">Cancel</button>
+                <button type="submit" id="stripe-submit" class="btn"><i class="fas fa-plus me-2"></i><span data-i18n="billing_page.add_card">Add Card</span></button>
             </div>
         </form>
     </div>

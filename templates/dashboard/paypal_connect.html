@@ -4,22 +4,22 @@
 
 {% block content %}
 <div style="max-width: 600px; margin: 50px auto; text-align: center;">
-    <div style="background: #16213e; border: 2px solid #ffc107; border-radius: 8px; padding: 40px;">
+    <div style="background: var(--bg-panel); border: 2px solid #ffc107; border-radius: 8px; padding: 40px;">
         <i class="fab fa-paypal" style="font-size: 64px; color: #0070ba; margin-bottom: 20px;"></i>
         
-        <h2 style="margin-bottom: 20px; color: #e0e0e0;">PayPal Connection Error</h2>
+        <h2 style="margin-bottom: 20px; color: var(--color-text);">PayPal Connection Error</h2>
         
-        <div style="background: #1a1a2e; border: 1px solid #ffc107; border-radius: 4px; padding: 20px; margin-bottom: 30px;">
-            <p style="color: #a0a0a0; margin: 0;">
+        <div style="background: var(--bg-page); border: 1px solid #ffc107; border-radius: 4px; padding: 20px; margin-bottom: 30px;">
+            <p style="color: var(--color-muted); margin: 0;">
                 {{ message if message else "Unable to connect to PayPal at this time." }}
             </p>
         </div>
         
-        <div style="color: #a0a0a0; margin-bottom: 30px;">
+        <div style="color: var(--color-muted); margin-bottom: 30px;">
             <p style="margin-bottom: 15px;">You can use these alternative payment methods:</p>
             <ul style="list-style: none; padding: 0;">
                 <li style="margin-bottom: 10px;">
-                    <i class="fab fa-cc-stripe" style="color: #4a9eff;"></i> Credit Card via Stripe
+                    <i class="fab fa-cc-stripe" style="color: var(--color-link);"></i> Credit Card via Stripe
                 </li>
                 <li style="margin-bottom: 10px;">
                     <i class="fab fa-bitcoin" style="color: #ffc107;"></i> Cryptocurrency (Bitcoin, Ethereum, USDT, USDC)

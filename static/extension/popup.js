@@ -23,8 +23,8 @@ document.addEventListener('DOMContentLoaded', async () => {
         if (!response.remoteServer) {
           statusEl.className = 'status warning';
           statusEl.innerHTML = `
-            <strong>Not Configured</strong>
-            <div class="server-info">Click "Configure Server" to set up the AISBF server URL.</div>
+            <strong>Waiting for AISBF page</strong>
+            <div class="server-info">Visit an AISBF providers page — the extension will auto-configure.</div>
           `;
         } else if (response.enabled && response.rulesCount > 0) {
           statusEl.className = 'status active';

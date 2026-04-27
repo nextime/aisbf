@@ -256,11 +256,7 @@ chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => 
 chrome.runtime.onInstalled.addListener(async (details) => {
   console.log('[AISBF] Extension installed:', details.reason);
   await loadConfig();
-  
-  if (details.reason === 'install') {
-    // Open options page on first install
-    chrome.runtime.openOptionsPage();
-  }
+  // No options page on install — extension auto-configures from AISBF providers pages.
 });
 
 // Initialize on startup

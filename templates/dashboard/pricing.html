@@ -14,14 +14,14 @@
 {% endif %}
 
 <div style="text-align: center; margin-bottom: 40px;">
-    <h3 style="margin-bottom: 15px; color: #e0e0e0;">Choose Your Plan</h3>
-    <p style="color: #a0a0a0; font-size: 16px; max-width: 600px; margin: 0 auto;">Select the perfect tier for your AI service needs. All plans include access to all providers, rotations, and autoselection features.</p>
+    <h3 style="margin-bottom: 15px; color: var(--color-text);">Choose Your Plan</h3>
+    <p style="color: var(--color-muted); font-size: 16px; max-width: 600px; margin: 0 auto;">Select the perfect tier for your AI service needs. All plans include access to all providers, rotations, and autoselection features.</p>
     {% if wallet_balance is not none %}
-    <div style="margin-top: 15px; display: inline-flex; align-items: center; gap: 10px; background: #16213e; border: 1px solid #28a745; border-radius: 8px; padding: 10px 20px;">
+    <div style="margin-top: 15px; display: inline-flex; align-items: center; gap: 10px; background: var(--bg-panel); border: 1px solid #28a745; border-radius: 8px; padding: 10px 20px;">
         <i class="fas fa-wallet" style="color: #4ade80;"></i>
-        <span style="color: #a0a0a0;">Wallet balance:</span>
+        <span style="color: var(--color-muted);">Wallet balance:</span>
         <span style="color: #4ade80; font-weight: bold; font-size: 18px;">{{ currency_symbol }}{{ "%.2f"|format(wallet_balance) }}</span>
-        <a href="{{ url_for(request, '/dashboard/wallet') }}" style="color: #4a9eff; font-size: 13px; text-decoration: none;">Top Up</a>
+        <a href="{{ url_for(request, '/dashboard/wallet') }}" style="color: var(--color-link); font-size: 13px; text-decoration: none;">Top Up</a>
     </div>
     {% endif %}
 </div>
@@ -32,17 +32,17 @@
     {% for tier in paid_tiers %}
     <div class="pricing-card {% if tier.is_recommended %}recommended{% endif %}">
         {% if tier.is_recommended %}
-        <div style="background: #4a9eff; color: white; padding: 8px 15px; border-radius: 20px; text-align: center; margin-bottom: 20px; font-weight: bold; text-transform: uppercase; font-size: 12px;">
+        <div style="background: var(--color-link); color: white; padding: 8px 15px; border-radius: 20px; text-align: center; margin-bottom: 20px; font-weight: bold; text-transform: uppercase; font-size: 12px;">
             Recommended
         </div>
         {% endif %}
 
         <div style="text-align: center; margin-bottom: 25px;">
-            <h3 style="margin: 0 0 15px 0; color: #e0e0e0;">{{ tier.name }}</h3>
+            <h3 style="margin: 0 0 15px 0; color: var(--color-text);">{{ tier.name }}</h3>
             <div style="font-size: 32px; font-weight: bold; color: #4ade80; margin-bottom: 5px;">
                 {{ currency_symbol }}{{ "%.2f"|format(tier.price_monthly) }}
             </div>
-            <div style="color: #a0a0a0;">per month</div>
+            <div style="color: var(--color-muted);">per month</div>
             {% if tier.price_yearly > 0 %}
             <div style="color: #4ade80; font-size: 12px; margin-top: 5px;">
                 Save {{ ((1 - tier.price_yearly / (tier.price_monthly * 12)) * 100)|round|int }}% with annual billing
@@ -51,11 +51,11 @@
         </div>
 
         {% if tier.description %}
-        <p style="color: #a0a0a0; font-size: 14px; text-align: center; margin-bottom: 20px; line-height: 1.5;">{{ tier.description }}</p>
+        <p style="color: var(--color-muted); font-size: 14px; text-align: center; margin-bottom: 20px; line-height: 1.5;">{{ tier.description }}</p>
         {% endif %}
 
         <ul style="list-style: none; padding: 0; margin: 0 0 25px 0;">
-            <li style="margin-bottom: 10px; color: #e0e0e0;">
+            <li style="margin-bottom: 10px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
                 {% if tier.max_requests_per_day == -1 %}
                 Unlimited requests per day
@@ -65,7 +65,7 @@
                 {{ "{:,}".format(tier.max_requests_per_day) }} requests per day
                 {% endif %}
             </li>
-            <li style="margin-bottom: 10px; color: #e0e0e0;">
+            <li style="margin-bottom: 10px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
                 {% if tier.max_requests_per_month == -1 %}
                 Unlimited requests per month
@@ -75,7 +75,7 @@
                 {{ "{:,}".format(tier.max_requests_per_month) }} requests per month
                 {% endif %}
             </li>
-            <li style="margin-bottom: 10px; color: #e0e0e0;">
+            <li style="margin-bottom: 10px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
                 {% if tier.max_providers == -1 %}
                 Unlimited providers
@@ -85,7 +85,7 @@
                 Up to {{ tier.max_providers }} providers
                 {% endif %}
             </li>
-            <li style="margin-bottom: 10px; color: #e0e0e0;">
+            <li style="margin-bottom: 10px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
                 {% if tier.max_rotations == -1 %}
                 Unlimited rotations
@@ -95,7 +95,7 @@
                 Up to {{ tier.max_rotations }} rotations
                 {% endif %}
             </li>
-            <li style="margin-bottom: 10px; color: #e0e0e0;">
+            <li style="margin-bottom: 10px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 10px;"></i>
                 {% if tier.max_autoselections == -1 %}
                 Unlimited autoselections
@@ -124,15 +124,15 @@
 
 <!-- Free Tier -->
 <div style="max-width: 500px; margin: 0 auto;">
-    <div style="background: #16213e; border: 2px solid #0f3460; border-radius: 8px; padding: 30px; text-align: center;">
-        <h3 style="margin: 0 0 15px 0; color: #e0e0e0;">Free Tier</h3>
+    <div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 30px; text-align: center;">
+        <h3 style="margin: 0 0 15px 0; color: var(--color-text);">Free Tier</h3>
         <div style="font-size: 36px; font-weight: bold; color: #4ade80; margin-bottom: 10px;">Free Forever</div>
-        <p style="color: #a0a0a0; margin-bottom: 20px;">Perfect for testing and personal use</p>
+        <p style="color: var(--color-muted); margin-bottom: 20px;">Perfect for testing and personal use</p>
 
         <ul style="list-style: none; padding: 0; margin: 0 0 25px 0; text-align: left; max-width: 300px; margin-left: auto; margin-right: auto;">
             {% set free_tier = tiers|selectattr('is_default', 'equalto', True)|first %}
             {% if free_tier %}
-            <li style="margin-bottom: 8px; color: #e0e0e0;">
+            <li style="margin-bottom: 8px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
                 {% if free_tier.max_requests_per_day == -1 %}
                 Unlimited requests per day
@@ -142,7 +142,7 @@
                 Limited requests per day
                 {% endif %}
             </li>
-            <li style="margin-bottom: 8px; color: #e0e0e0;">
+            <li style="margin-bottom: 8px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
                 {% if free_tier.max_requests_per_month == -1 %}
                 Unlimited requests per month
@@ -152,7 +152,7 @@
                 Limited requests per month
                 {% endif %}
             </li>
-            <li style="margin-bottom: 8px; color: #e0e0e0;">
+            <li style="margin-bottom: 8px; color: var(--color-text);">
                 <i class="fas fa-check" style="color: #4ade80; margin-right: 8px;"></i>
                 {% if free_tier.max_providers == -1 %}
                 Unlimited providers
@@ -170,7 +170,7 @@
             <i class="fas fa-check me-2"></i>You are on the Free Plan
         </button>
         {% else %}
-        <button class="btn btn-secondary" onclick="downgradeToFree()" style="width: 100%; padding: 12px; background: #dc3545;">
+        <button class="btn btn-danger" onclick="downgradeToFree()" style="width: 100%; padding: 12px;">
             <i class="fas fa-arrow-down me-2"></i>Downgrade to Free
         </button>
         {% endif %}
@@ -179,34 +179,34 @@
 
 <!-- Payment Methods -->
 {% if enabled_gateways|length > 0 %}
-<div style="background: #16213e; border: 2px solid #17a2b8; border-radius: 8px; padding: 25px; margin-top: 40px; text-align: center;">
-    <h4 style="margin: 0 0 20px 0; color: #17a2b8;">Secure Payment Methods</h4>
+<div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 25px; margin-top: 40px; text-align: center;">
+    <h4 style="margin: 0 0 20px 0; color: var(--color-text);">Secure Payment Methods</h4>
     <div style="display: flex; justify-content: center; align-items: center; gap: 30px; flex-wrap: wrap;">
         {% for gateway in enabled_gateways %}
         <div style="text-align: center;">
             {% if gateway == 'paypal' %}
-            <i class="fab fa-paypal fa-3x" style="color: #4a9eff; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">PayPal</div>
+            <i class="fab fa-paypal fa-3x" style="color: var(--color-link); margin-bottom: 8px;"></i>
+            <div style="color: var(--color-muted); font-size: 14px;">PayPal</div>
             {% elif gateway == 'stripe' %}
             <i class="fab fa-stripe fa-3x" style="color: #4ade80; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">Stripe</div>
+            <div style="color: var(--color-muted); font-size: 14px;">Stripe</div>
             {% elif gateway == 'bitcoin' %}
             <i class="fab fa-bitcoin fa-3x" style="color: #f39c12; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">Bitcoin</div>
+            <div style="color: var(--color-muted); font-size: 14px;">Bitcoin</div>
             {% elif gateway == 'ethereum' or gateway == 'eth' %}
             <i class="fab fa-ethereum fa-3x" style="color: #6f42c1; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">ETH</div>
+            <div style="color: var(--color-muted); font-size: 14px;">ETH</div>
             {% elif gateway == 'usdt' %}
             <i class="fas fa-dollar-sign fa-3x" style="color: #17a2b8; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">USDT</div>
+            <div style="color: var(--color-muted); font-size: 14px;">USDT</div>
             {% elif gateway == 'usdc' %}
-            <i class="fas fa-coins fa-3x" style="color: #4a9eff; margin-bottom: 8px;"></i>
-            <div style="color: #a0a0a0; font-size: 14px;">USDC</div>
+            <i class="fas fa-coins fa-3x" style="color: var(--color-link); margin-bottom: 8px;"></i>
+            <div style="color: var(--color-muted); font-size: 14px;">USDC</div>
             {% endif %}
         </div>
         {% endfor %}
     </div>
-    <p style="color: #a0a0a0; font-size: 14px; margin-top: 15px;">All transactions are secure and encrypted</p>
+    <p style="color: var(--color-muted); font-size: 14px; margin-top: 15px;">All transactions are secure and encrypted</p>
 </div>
 {% endif %}
 {% endblock %}
@@ -242,19 +242,19 @@
 }
 
 .pricing-card {
-    background: #16213e;
-    border: 2px solid #0f3460;
+    background: var(--bg-panel);
+    border: 2px solid var(--color-border);
     border-radius: 8px;
     padding: 25px;
 }
 
 .pricing-card.recommended {
-    border-color: #4a9eff;
-    box-shadow: 0 0 20px rgba(74, 158, 255, 0.3);
+    border-color: var(--color-link);
+    box-shadow: 0 0 20px var(--shadow);
 }
 
 .upgrade-btn {
-    background: #4a9eff;
+    background: var(--color-primary);
 }
 </style>
 {% endblock %}

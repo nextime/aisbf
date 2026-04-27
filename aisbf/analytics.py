@@ -76,11 +76,9 @@ class Analytics:
     def _format_timestamp(self, dt: datetime) -> str:
         """
         Format datetime for database queries.
-        Converts to UTC and formats as 'YYYY-MM-DD HH:MM:SS' for compatibility with SQLite and MySQL.
+        Formats as 'YYYY-MM-DD HH:MM:SS' in local timezone to match how MySQL CURRENT_TIMESTAMP stores data.
         """
-        from datetime import timezone
-        utc_dt = dt.astimezone(timezone.utc)
-        return utc_dt.strftime('%Y-%m-%d %H:%M:%S')
+        return dt.strftime('%Y-%m-%d %H:%M:%S')
     
     def _get_provider_pricing(self, provider_id: str) -> Dict[str, float]:
         """
@@ -182,7 +180,7 @@ class Analytics:
         if tokens_used > 0:
             logger.info(f"Analytics.record_request: Recording to DB - provider={provider_id}, latency_ms={latency_ms}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
             try:
-                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost)
+                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost, rotation_id, autoselect_id)
                 logger.info(f"✅ Analytics recording completed successfully for {provider_id}")
             except Exception as e:
                 logger.error(f"❌ Analytics recording FAILED for {provider_id}: {e}")
@@ -445,32 +443,24 @@ class Analytics:
         self,
         from_datetime: Optional[datetime] = None,
         to_datetime: Optional[datetime] = None,
-        user_filter: Optional[int] = None
+        user_filter: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get statistics for all providers.
-        
-        Args:
-            from_datetime: Optional start datetime for filtering
-            to_datetime: Optional end datetime for filtering
-            user_filter: Optional user ID filter (-1 for global only, None for all, or user ID)
-            
-        Returns:
-            List of provider statistics dictionaries
         """
-        # Get all unique providers from database
-        # Ensure datetimes are in UTC for database queries (timestamps are stored in UTC)
-        from datetime import timezone
-        utc = timezone.utc
-        now_utc = datetime.now(utc)
-        start = (from_datetime.astimezone(utc) if from_datetime else (now_utc - timedelta(days=1)))
-        end = (to_datetime.astimezone(utc) if to_datetime else now_utc)
-        
+        # Use local time to match how MySQL CURRENT_TIMESTAMP stores data
+        now_local = datetime.now()
+        start = (from_datetime if from_datetime else (now_local - timedelta(days=1)))
+        end = (to_datetime if to_datetime else now_local)
+
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
-            
-            # Build query with optional user filter
+
             if user_filter == -1:
                 user_condition = " AND user_id IS NULL"
                 params = [self._format_timestamp(start), self._format_timestamp(end)]
@@ -480,18 +470,98 @@ class Analytics:
             else:
                 user_condition = ""
                 params = [self._format_timestamp(start), self._format_timestamp(end)]
-            
+
+            extra_conditions = ""
+            if provider_filter:
+                extra_conditions += f" AND provider_id = {placeholder}"
+                params.append(provider_filter)
+            if model_filter:
+                extra_conditions += f" AND model_name = {placeholder}"
+                params.append(model_filter)
+            if rotation_filter:
+                extra_conditions += f" AND rotation_id = {placeholder}"
+                params.append(rotation_filter)
+            if autoselect_filter:
+                extra_conditions += f" AND autoselect_id = {placeholder}"
+                params.append(autoselect_filter)
+
             cursor.execute(f'''
-                SELECT DISTINCT provider_id
+                SELECT
+                    provider_id, model_name, rotation_id, autoselect_id,
+                    COUNT(*) as total_requests,
+                    SUM(CASE WHEN success = 1 THEN 1 ELSE 0 END) as success_count,
+                    SUM(CASE WHEN success = 0 THEN 1 ELSE 0 END) as error_count,
+                    AVG(COALESCE(latency_ms, 0)) as avg_latency,
+                    SUM(tokens_used) as total_tokens,
+                    SUM(COALESCE(prompt_tokens, 0)) as total_prompt_tokens,
+                    SUM(COALESCE(completion_tokens, 0)) as total_completion_tokens,
+                    SUM(COALESCE(actual_cost, 0)) as total_actual_cost,
+                    MIN(timestamp) as first_request,
+                    MAX(timestamp) as last_request
                 FROM token_usage
                 WHERE timestamp >= {placeholder}
                   AND timestamp <= {placeholder}
                   {user_condition}
+                  {extra_conditions}
+                GROUP BY provider_id, model_name, rotation_id, autoselect_id
+                ORDER BY provider_id, model_name, rotation_id, autoselect_id
             ''', params)
-            
-            all_providers = [row[0] for row in cursor.fetchall()]
-        
-        return [self.get_provider_stats(pid, from_datetime, to_datetime, user_filter) for pid in sorted(all_providers)]
+
+            rows = cursor.fetchall()
+
+        results = []
+        duration_seconds = (end - start).total_seconds()
+        for row in rows:
+            provider_id, model_name, rotation_id, autoselect_id = row[0], row[1], row[2], row[3]
+            total_requests = row[4] or 0
+            success_count = row[5] or 0
+            error_count = row[6] or 0
+            avg_latency = row[7] or 0
+            total_tokens = row[8] or 0
+            total_prompt_tokens = row[9] or 0
+            total_completion_tokens = row[10] or 0
+            total_actual_cost = row[11] or 0
+            first_request = row[12]
+            last_request = row[13]
+
+            # Calculate time-based rates
+            try:
+                if first_request and last_request and total_tokens > 0:
+                    if isinstance(first_request, datetime):
+                        first_dt, last_dt = first_request, last_request
+                    else:
+                        first_dt = datetime.fromisoformat(first_request)
+                        last_dt = datetime.fromisoformat(last_request)
+                    actual_secs = max((last_dt - first_dt).total_seconds(), 60)
+                else:
+                    actual_secs = max(duration_seconds, 60)
+                tpm = int(total_tokens / (actual_secs / 60)) if actual_secs > 0 else 0
+                tph = int(total_tokens / (actual_secs / 3600)) if actual_secs > 0 else 0
+                tpd = int(total_tokens / (actual_secs / 86400)) if actual_secs > 0 else 0
+            except Exception:
+                tpm = tph = tpd = 0
+
+            error_rate = error_count / total_requests if total_requests > 0 else 0.0
+
+            results.append({
+                'provider_id': provider_id,
+                'model_name': model_name,
+                'rotation_id': rotation_id,
+                'autoselect_id': autoselect_id,
+                'requests': {'total': total_requests, 'success': success_count, 'error': error_count},
+                'latency': {'count': total_requests, 'total_ms': avg_latency * total_requests, 'min_ms': 0, 'max_ms': 0},
+                'tokens': {
+                    'total': total_tokens,
+                    'prompt': total_prompt_tokens,
+                    'completion': total_completion_tokens,
+                    'TPM': tpm, 'TPH': tph, 'TPD': tpd
+                },
+                'actual_cost': total_actual_cost,
+                'error_rate': error_rate,
+                'avg_latency_ms': avg_latency,
+            })
+
+        return results
     
     def _get_token_usage_by_provider(self, provider_id: str) -> Dict[str, int]:
         """
@@ -515,7 +585,10 @@ class Analytics:
         time_range: str = '24h',
         from_datetime: Optional[datetime] = None,
         to_datetime: Optional[datetime] = None,
-        user_filter: Optional[int] = None
+        user_filter: Optional[int] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """
         Get token usage over time for charts.
@@ -587,100 +660,61 @@ class Analytics:
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
-            
-            # Determine date format and time bucket expression based on database type
+
             if self.db.db_type == 'sqlite':
                 date_format = "%Y-%m-%d %H:%M"
                 time_bucket_expr = f"strftime('{date_format}', timestamp)"
             else:
                 date_format = "%Y-%m-%d %H:%i"
                 time_bucket_expr = f"DATE_FORMAT(timestamp, '{date_format}')"
-            
+
             formatted_cutoff = self._format_timestamp(cutoff)
             formatted_end_time = self._format_timestamp(end_time)
-            
+
+            conditions = [f"timestamp >= {placeholder}", f"timestamp <= {placeholder}"]
+            params = [formatted_cutoff, formatted_end_time]
+
+            if user_filter == -1:
+                conditions.append("user_id IS NULL")
+            elif user_filter is not None:
+                conditions.append(f"user_id = {placeholder}")
+                params.append(user_filter)
+
             if provider_id:
-                if user_filter == -1:
-                    # Global requests only
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens
-                        FROM token_usage
-                        WHERE provider_id = {placeholder} AND user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket
-                        ORDER BY time_bucket
-                    ''', (provider_id, formatted_cutoff, formatted_end_time))
-                elif user_filter:
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens
-                        FROM token_usage
-                        WHERE provider_id = {placeholder} AND user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket
-                        ORDER BY time_bucket
-                    ''', (provider_id, user_filter, formatted_cutoff, formatted_end_time))
-                else:
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens
-                        FROM token_usage
-                        WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket
-                        ORDER BY time_bucket
-                    ''', (provider_id, formatted_cutoff, formatted_end_time))
+                conditions.append(f"provider_id = {placeholder}")
+                params.append(provider_id)
+            if model_filter:
+                conditions.append(f"model_name = {placeholder}")
+                params.append(model_filter)
+            if rotation_filter:
+                conditions.append(f"rotation_id = {placeholder}")
+                params.append(rotation_filter)
+            if autoselect_filter:
+                conditions.append(f"autoselect_id = {placeholder}")
+                params.append(autoselect_filter)
+
+            where_clause = " AND ".join(conditions)
+
+            if provider_id:
+                cursor.execute(f'''
+                    SELECT {time_bucket_expr} as time_bucket, SUM(tokens_used) as tokens
+                    FROM token_usage WHERE {where_clause}
+                    GROUP BY time_bucket ORDER BY time_bucket
+                ''', params)
             else:
-                if user_filter == -1:
-                    # Global requests only
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens,
-                            provider_id
-                        FROM token_usage
-                        WHERE user_id IS NULL AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket, provider_id
-                        ORDER BY time_bucket
-                    ''', (formatted_cutoff, formatted_end_time))
-                elif user_filter:
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens,
-                            provider_id
-                        FROM token_usage
-                        WHERE user_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket, provider_id
-                        ORDER BY time_bucket
-                    ''', (user_filter, formatted_cutoff, formatted_end_time))
-                else:
-                    cursor.execute(f'''
-                        SELECT 
-                            {time_bucket_expr} as time_bucket,
-                            SUM(tokens_used) as tokens,
-                            provider_id
-                        FROM token_usage
-                        WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
-                        GROUP BY time_bucket, provider_id
-                        ORDER BY time_bucket
-                    ''', (formatted_cutoff, formatted_end_time))
-            
+                cursor.execute(f'''
+                    SELECT {time_bucket_expr} as time_bucket, SUM(tokens_used) as tokens, provider_id
+                    FROM token_usage WHERE {where_clause}
+                    GROUP BY time_bucket, provider_id ORDER BY time_bucket
+                ''', params)
+
             results = []
             for row in cursor.fetchall():
                 if provider_id:
-                    results.append({
-                        'timestamp': row[0],
-                        'tokens': row[1]
-                    })
+                    results.append({'timestamp': row[0], 'tokens': row[1]})
                 else:
-                    results.append({
-                        'timestamp': row[0],
-                        'tokens': row[1],
-                        'provider_id': row[2]
-                    })
-            
+                    results.append({'timestamp': row[0], 'tokens': row[1], 'provider_id': row[2]})
+
             return results
     
     def get_model_performance(
@@ -963,7 +997,11 @@ class Analytics:
         self,
         from_datetime: Optional[datetime] = None,
         to_datetime: Optional[datetime] = None,
-        user_filter: Optional[int] = None
+        user_filter: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get cost overview for all providers.
@@ -984,7 +1022,8 @@ class Analytics:
         range_usage = self.get_token_usage_by_date_range(None, start, end, user_filter)
         
         # Get providers that have data
-        providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter)
+        providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter,
+                                                  provider_filter, model_filter, rotation_filter, autoselect_filter)
         
         total_cost = 0.0
         provider_costs = []

@@ -117,6 +117,17 @@
     "history_window": 3600,
     "consecutive_successes_for_recovery": 10
   },
+  "client_rate_limiting": {
+    "enabled": false,
+    "api": {
+      "requests_per_minute": 60,
+      "requests_per_hour": 1000
+    },
+    "general": {
+      "requests_per_minute": 120,
+      "requests_per_hour": 3000
+    }
+  },
   "signup": {
     "enabled": false,
     "require_email_verification": true,

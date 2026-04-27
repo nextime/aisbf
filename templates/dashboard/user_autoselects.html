@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}My Autoselects - AISBF{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">My Autoselect Configuration</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="user_autoselects_page.title">My Autoselect Configuration</h2>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -33,10 +33,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <!-- Autoselect list will be rendered here -->
 </div>
 
-<button type="button" class="btn" onclick="addAutoselect()" style="margin-top: 20px;">Add Autoselect</button>
+<button type="button" class="btn" onclick="addAutoselect()" style="margin-top: 20px;" data-i18n="user_autoselects_page.add_autoselect">Add Autoselect</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
-    <button type="button" class="btn" onclick="saveAutoselect()">Save Configuration</button>
-    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
+    <button type="button" class="btn" onclick="saveAutoselect()" data-i18n="user_autoselects_page.save_config">Save Configuration</button>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary" data-i18n="user_autoselects_page.cancel">Cancel</a>
 </div>
 
 <script>
@@ -101,7 +101,7 @@ async function msOpenAll(inputId, cb) {
             const data = await r.json(); const fetched = data.models || [];
             _msAllItems = fetched;
             availableModels = fetched.filter(m => m.type === 'provider');
-            document.getElementById('ms-status').textContent = fetched.length ? fetched.length + ' model(s) found.' : 'No models found.';
+            document.getElementById('ms-status').textContent = fetched.length ? window.i18n.interpolate(window.i18n.t('autoselect.models_found'), {n: fetched.length}) : window.i18n.t('autoselect.no_models_loaded');
             msRenderResults(fetched);
         } catch(e) {
             if (!_msCancelled) { document.getElementById('ms-status').textContent = window.i18n.t('autoselect.error_prefix') + ' ' + e.message; document.getElementById('ms-results').innerHTML = `<p style="color:#f87171;padding:15px;">${window.i18n.t('autoselect.failed_load')}</p>`; }
@@ -113,7 +113,7 @@ function msFilter() {
     const q = document.getElementById('ms-filter-input').value.trim().toLowerCase();
     document.getElementById('ms-status').textContent = window.i18n.t('autoselect.searching');
     const filtered = q ? _msAllItems.filter(m => (typeof m === 'string' ? m : m.id + ' ' + m.name).toLowerCase().includes(q)) : _msAllItems;
-    document.getElementById('ms-status').textContent = filtered.length + ' result(s).';
+    document.getElementById('ms-status').textContent = window.i18n.interpolate(window.i18n.t('autoselect.result_count'), {n: filtered.length});
     msRenderResults(filtered);
 }
 
@@ -149,18 +149,18 @@ function msOpenAllForInput(btn) {
     });
 }
 
-function buildModelSelectHtml(uid, currentValue, allModels, onChangeFn) {
+function buildModelSelectHtml(uid, currentValue, allModels, onChangeExpr) {
     if (allModels.length <= 25) {
         const opts = allModels.map(m =>
             `<option value="${escHtml(m.id)}" ${currentValue === m.id ? 'selected' : ''}>${escHtml(m.name)}</option>`
         ).join('');
-        return `<select id="${uid}" onchange="${onChangeFn}(this.value)" required>
-            <option value="">Select model...</option>${opts}</select>`;
+        return `<select id="${uid}" onchange="${onChangeExpr}" required>
+            <option value="">${window.i18n.t('autoselect.select_model')}</option>${opts}</select>`;
     } else {
         return `<div style="display:flex;gap:5px;align-items:center;">
             <input type="text" id="${escHtml(uid)}" value="${escHtml(currentValue)}"
-                   onchange="${onChangeFn}(this.value)"
-                   placeholder="Model ID…"
+                   onchange="${onChangeExpr}"
+                   placeholder="Rotation…"
                    style="flex:1;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
             <button type="button" class="btn btn-secondary"
                 data-input-id="${escHtml(uid)}"
@@ -180,7 +180,98 @@ const autoselectData = {
 let autoselectConfig = autoselectData.config;
 let availableRotations = autoselectData.rotations;
 let availableModels = autoselectData.models;
+const providersMeta = {{ providers_meta | default('{}') | safe }};
 let expandedAutoselects = new Set();
+
+// ===== Provider Usage =====
+const _usageCache = {};
+const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
+
+function _providerIdFromModel(modelId) {
+    if (!modelId) return null;
+    const parts = modelId.split('/');
+    return parts.length > 1 ? parts[0] : null;
+}
+function _providerSupportsUsage(pid) { return pid && providersMeta[pid] && providersMeta[pid].type === 'codex'; }
+function _fmtSeconds(s) {
+    if (!s || s <= 0) return '0s';
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    if (h > 0) return `${h}h${m > 0 ? ' '+m+'m' : ''}`;
+    if (m > 0) return `${m}m${sec > 0 ? ' '+sec+'s' : ''}`;
+    return `${sec}s`;
+}
+function _windowLabel(seconds) {
+    if (!seconds || seconds <= 0) return 'Window';
+    if (seconds < 120) return 'Session';
+    const MIN = 60, HOUR = 3600, DAY = 86400, WEEK = 604800, MONTH = 2592000;
+    if (seconds % MONTH === 0) return seconds === MONTH ? 'Monthly' : `${seconds/MONTH}mo`;
+    if (seconds % WEEK  === 0) return seconds === WEEK  ? 'Weekly'  : `${seconds/WEEK}wk`;
+    if (seconds % DAY   === 0) return seconds === DAY   ? 'Daily'   : `${seconds/DAY}d`;
+    if (seconds % HOUR  === 0) return seconds === HOUR  ? 'Hourly'  : `${seconds/HOUR}h`;
+    if (seconds % MIN   === 0) return `${seconds/MIN}min`;
+    if (seconds >= MONTH * 0.9) return `${Math.round(seconds/MONTH)}mo`;
+    if (seconds >= WEEK  * 0.9) return 'Weekly';
+    if (seconds >= DAY)         return `${Math.round(seconds/DAY)}d`;
+    if (seconds >= HOUR)        return `${Math.round(seconds/HOUR)}h`;
+    return `${Math.round(seconds/MIN)}min`;
+}
+function _usageBarHtml(pct) {
+    const c = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
+    return `<div style="height:5px;background:var(--color-border);border-radius:2px;overflow:hidden;min-width:50px;flex:1;"><div style="height:100%;width:${Math.min(pct,100)}%;background:${c};"></div></div>`;
+}
+function _renderUsageCompact(usage) {
+    if (!usage) return '';
+    const parts = [];
+    const plan = usage.plan_type ? `<span style="font-size:10px;color:var(--color-muted);text-transform:uppercase;">${usage.plan_type}</span>` : '';
+    const rl = usage.rate_limit;
+    if (rl) {
+        const windows = [];
+        if (rl.primary_window) windows.push(rl.primary_window);
+        if (rl.secondary_window) windows.push(rl.secondary_window);
+        if (Array.isArray(rl.additional_rate_limits)) windows.push(...rl.additional_rate_limits);
+        windows.forEach(w => {
+            const pct = w.used_percent || 0;
+            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%</span></div>`);
+        });
+        if (rl.limit_reached) parts.push('<span style="color:#ef4444;font-size:10px;font-weight:700;">LIMIT</span>');
+    }
+    return `<div style="display:inline-flex;flex-direction:column;gap:2px;vertical-align:middle;margin-left:4px;">${plan}${parts.join('')}</div>`;
+}
+async function fetchProviderUsage(pid) {
+    try {
+        const r = await fetch(`${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(pid)}/usage`);
+        if (!r.ok) return null;
+        const d = await r.json();
+        if (d.supported === false) return null;
+        _usageCache[pid] = {data: d.usage, ts: Date.now()};
+        return d.usage;
+    } catch(e) { return null; }
+}
+function _updateAutoselectUsageBadges() {
+    Object.keys(_usageCache).forEach(pid => {
+        document.querySelectorAll(`[data-usage-pid="${pid}"]`).forEach(el => {
+            const c = _usageCache[pid];
+            if (c && c.data) el.innerHTML = _renderUsageCompact(c.data);
+        });
+    });
+}
+async function _refreshAutoselectUsage() {
+    const pids = new Set();
+    Object.values(autoselectConfig).forEach(as => {
+        (as.available_models || []).forEach(m => {
+            const pid = _providerIdFromModel(m.model_id || m.id || m);
+            if (_providerSupportsUsage(pid)) pids.add(pid);
+        });
+    });
+    for (const pid of pids) {
+        const c = _usageCache[pid];
+        if (c && (Date.now() - c.ts) < 14000) continue;
+        await fetchProviderUsage(pid);
+    }
+    _updateAutoselectUsageBadges();
+}
+setInterval(_refreshAutoselectUsage, 15000);
+document.addEventListener('DOMContentLoaded', () => setTimeout(_refreshAutoselectUsage, 500));
 
 function renderAutoselectList() {
     const container = document.getElementById('autoselect-list');
@@ -411,22 +502,29 @@ function renderAutoselectModels(autoselectKey) {
         const modelDiv = document.createElement('div');
         modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
         const safeKey = autoselectKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-        const allOptions = availableRotations.map(r => ({id: r, name: r})).concat(availableModels);
+        const allOptions = availableRotations.map(r => ({id: r, name: r}));
         const selUid = `asel-mod-${autoselectKey}-${index}`;
 
+        const _modelPid = _providerIdFromModel(model.model_id || '');
+        const _usageBadge = _providerSupportsUsage(_modelPid)
+            ? `<span data-usage-pid="${_modelPid}" style="margin-left:6px;">${_usageCache[_modelPid] && _usageCache[_modelPid].data ? _renderUsageCompact(_usageCache[_modelPid].data) : ''}</span>` : '';
+
         modelDiv.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>${window.i18n.t('autoselect.model_label')} ${index + 1}</strong>
+            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap:wrap; gap:6px;">
+                <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
+                    <strong>${window.i18n.t('autoselect.model_label')} ${index + 1}</strong>
+                    ${_usageBadge}
+                </div>
                 <button type="button" class="btn btn-secondary" onclick="removeAutoselectModel('${safeKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('autoselect.remove')}</button>
             </div>
 
             <div class="form-group">
                 <label>${window.i18n.t('autoselect.model_id')}</label>
                 ${buildModelSelectHtml(selUid, model.model_id || '', allOptions,
-                    `function(v){updateAutoselectModel('${safeKey}',${index},'model_id',v)}`)}
+                    `updateAutoselectModel('${safeKey}',${index},'model_id',this.value)`)}
                 <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.model_id_desc')}</small>
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('autoselect.model_description')}</label>
                 <textarea onchange="updateAutoselectModel('${autoselectKey}', ${index}, 'description', this.value)" style="min-height: 80px;" required>${model.description || ''}</textarea>
@@ -471,11 +569,12 @@ async function saveAutoselectItem(key) {
 }
 
 async function copyAutoselect(sourceKey) {
-    const newKey = await showPrompt(`Copy "${sourceKey}" — enter new autoselect key:`, `${sourceKey}_copy`, 'autoselect-key', 'Copy Autoselect');
+    const newKey = await showPrompt(window.i18n.interpolate(window.i18n.t('autoselect.copy_prompt'), {key: sourceKey}), `${sourceKey}_copy`, 'autoselect-key', window.i18n.t('autoselect.copy_title'));
     if (!newKey) return;
-    if (newKey === sourceKey) { showAlert('New key must be different from the source.', 'Invalid Key', '⚠️', 'warn'); return; }
-    if (autoselectConfig[newKey]) { showAlert('Autoselect key already exists.', 'Duplicate Key', '⚠️', 'warn'); return; }
+    if (newKey === sourceKey) { showAlert(window.i18n.t('autoselect.key_different'), window.i18n.t('autoselect.invalid_key_title'), '⚠️', 'warn'); return; }
+    if (autoselectConfig[newKey]) { showAlert(window.i18n.t('autoselect.key_exists'), window.i18n.t('autoselect.key_exists_title'), '⚠️', 'warn'); return; }
     const cloned = JSON.parse(JSON.stringify(autoselectConfig[sourceKey]));
+    cloned.model_name = newKey;
     autoselectConfig[newKey] = cloned;
     try {
         const result = await apiCall('POST', '/dashboard/api/autoselect', { autoselect_id: newKey, config: cloned });
@@ -494,10 +593,10 @@ async function copyAutoselect(sourceKey) {
 }
 
 async function addAutoselect() {
-    const key = await showPrompt('Enter autoselect key (e.g., "autoselect", "smart-select"):', '', 'e.g. autoselect', 'Add Autoselect');
+    const key = await showPrompt(window.i18n.t('autoselect.add_prompt'), '', 'e.g. autoselect', window.i18n.t('autoselect.add_title'));
     if (!key) return;
     if (autoselectConfig[key]) {
-        showAlert('Autoselect key already exists', 'Duplicate Key', '⚠️', 'warn');
+        showAlert(window.i18n.t('autoselect.key_exists'), window.i18n.t('autoselect.key_exists_title'), '⚠️', 'warn');
         return;
     }
     const newCfg = { model_name: key, description: '', selection_model: '', fallback: '', available_models: [] };
@@ -519,7 +618,7 @@ async function addAutoselect() {
 }
 
 async function removeAutoselect(key) {
-    if (await showDangerConfirm(`Remove autoselect "${key}"?`, 'Remove Autoselect')) {
+    if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('autoselect.remove_confirm'), {key}), window.i18n.t('autoselect.remove_title'))) {
         try {
             const result = await apiCall('DELETE', '/dashboard/api/autoselect/' + encodeURIComponent(key));
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
@@ -560,7 +659,7 @@ function addAutoselectModel(autoselectKey) {
 }
 
 async function removeAutoselectModel(autoselectKey, index) {
-    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
+    if (await showDangerConfirm(window.i18n.t('autoselect.remove_model_confirm'), window.i18n.t('autoselect.remove_model_title'))) {
         autoselectConfig[autoselectKey].available_models.splice(index, 1);
         renderAutoselectModels(autoselectKey);
     }
@@ -583,7 +682,7 @@ async function saveAutoselect() {
         if (response.ok) {
             window.location.href = autoselectData.successUrl;
         } else {
-            showAlert('Error saving configuration', 'Error', '❌', 'danger');
+            showAlert(window.i18n.t('autoselect.error_saving'), 'Error', '❌', 'danger');
         }
     } catch (error) {
         showAlert('Error: ' + error.message, 'Error', '❌', 'danger');

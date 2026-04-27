@@ -30,17 +30,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
 
 <!-- New Provider Form (hidden by default) -->
-<div id="new-provider-form" style="display: none; background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #4a9eff;">Add New Provider</h3>
+<div id="new-provider-form" style="display: none; background: var(--bg-panel); border: 2px solid var(--color-link); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-link);">Add New Provider</h3>
     
     <div class="form-group">
-        <label>Provider Key (unique identifier, e.g., "gemini", "openai", "kiro")</label>
+        <label data-i18n="providers.provider_key_label">Provider Key (unique identifier, e.g., "gemini", "openai", "kiro")</label>
         <input type="text" id="new-provider-key" placeholder="Enter provider key" style="width: 100%;">
         <small style="color: var(--color-muted); display: block; margin-top: 5px;">This will be used as the provider ID in the configuration and API endpoints</small>
     </div>
     
     <div class="form-group">
-        <label>Provider Type</label>
+        <label data-i18n="providers.provider_type">Provider Type</label>
         <select id="new-provider-type" onchange="updateNewProviderDefaults()">
             <option value="openai">OpenAI</option>
             <option value="google">Google</option>
@@ -61,9 +61,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         </p>
     </div>
 
-    <div id="new-provider-claude-warning" style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px; display: none;">
-        <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice for Claude Provider</h4>
-        <p style="margin: 0; color: #2d3436;">
+    <div id="new-provider-claude-warning" style="background: var(--alert-info-bg); border: 2px solid var(--alert-info-border); border-radius: 8px; padding: 20px; margin-bottom: 15px; display: none;">
+        <h4 style="margin: 0 0 10px 0; color: var(--alert-info-fg);">⚠️ Important Notice for Claude Provider</h4>
+        <p style="margin: 0; color: var(--color-text);">
             Claude.ai policies state that unofficial clients are not allowed. By using AISBF in <strong>HTTP API / OAuth2 mode</strong>, you acknowledge that:
             <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
             <br>• Claude.ai detects prompt patterns to identify unofficial client usage, so it may not work with complex agents and prompts
@@ -72,7 +72,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <br><br>✅ <strong>CLI mode is different:</strong> when "Use Claude CLI mode" is enabled, AISBF proxies requests through the official <code>claude</code> binary using <code>claude -p</code>, which is the intended programmatic use of the official Anthropic CLI and is permitted by Claude's terms of service.
         </p>
     </div>
-    
+
+    <div id="new-provider-extension-prompt" style="display: none; background: #2a1a00; border: 2px solid #f59e0b; border-radius: 8px; padding: 15px; margin-bottom: 15px;">
+        <h5 style="margin: 0 0 8px 0; color: #f59e0b;">🧩 Chrome Extension Required for Claude OAuth2</h5>
+        <p style="margin: 0 0 10px 0; color: #fcd34d; font-size: 0.9em;">
+            Claude's OAuth2 flow redirects your browser to <code style="background:#1a1000;padding:1px 4px;border-radius:3px;">http://localhost:54545/callback</code>
+            to deliver the auth token. When you access AISBF remotely, that callback goes to <em>your machine</em>, not the server.
+            <br><br>
+            The AISBF Chrome Extension intercepts that callback and forwards it to this server automatically.
+            Once installed, it self-configures — no setup needed. Reload this page after installing.
+        </p>
+        <a id="new-provider-extension-download" href="" download
+           style="display: inline-block; padding: 8px 16px; background: #2d6a4f; color: #fff; border-radius: 4px; text-decoration: none; font-weight: 600;">
+            ⬇️ Download Chrome Extension (.zip)
+        </a>
+        <small style="color: var(--color-muted); display: block; margin-top: 8px;">
+            In Chrome: go to <strong>chrome://extensions</strong>, enable Developer Mode, click "Load unpacked", and select the extracted folder.
+        </small>
+    </div>
+
     <div style="display: flex; gap: 10px;">
         <button type="button" class="btn" onclick="confirmAddProvider()">Create Provider</button>
         <button type="button" class="btn btn-secondary" onclick="cancelAddProvider()">Cancel</button>
@@ -158,6 +176,8 @@ async function apiCall(method, url, body) {
 const CLAUDE_CLI_MODE = {{ 'true' if claude_cli_mode else 'false' }};
 const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
 const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
+// Marker used by the AISBF Chrome Extension to auto-detect this page and configure itself.
+window.AISBF_PROVIDERS_PAGE = { serverUrl: window.location.origin + BASE_PATH };
 let providersData = {{ providers_json | replace("</script>", "<\\/script>") | safe }};
 let expandedProviders = new Set();
 let currentProviderPage = 0;
@@ -166,6 +186,161 @@ let providerSearchFilter = '';
 
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
 const CHUNK_SIZE = 512 * 1024;
+
+// ===== Provider Usage Indicators =====
+const _usageCache = {};  // provider_id -> {data, ts}
+const USAGE_POLL_INTERVAL = 15000;  // 15 seconds
+
+function _providerSupportsUsage(key) {
+    const p = providersData[key];
+    return p && p.type === 'codex';
+}
+
+function _fmtSeconds(s) {
+    if (!s || s <= 0) return '0s';
+    const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
+    if (h > 0) return `${h}h${m > 0 ? ' '+m+'m' : ''}`;
+    if (m > 0) return `${m}m${sec > 0 ? ' '+sec+'s' : ''}`;
+    return `${sec}s`;
+}
+
+function _windowLabel(seconds) {
+    if (!seconds || seconds <= 0) return 'Window';
+    if (seconds < 120) return 'Session';
+    const MIN = 60, HOUR = 3600, DAY = 86400, WEEK = 604800, MONTH = 2592000;
+    if (seconds % MONTH === 0) return seconds === MONTH ? 'Monthly' : `${seconds/MONTH}mo`;
+    if (seconds % WEEK  === 0) return seconds === WEEK  ? 'Weekly'  : `${seconds/WEEK}wk`;
+    if (seconds % DAY   === 0) return seconds === DAY   ? 'Daily'   : `${seconds/DAY}d`;
+    if (seconds % HOUR  === 0) return seconds === HOUR  ? 'Hourly'  : `${seconds/HOUR}h`;
+    if (seconds % MIN   === 0) return `${seconds/MIN}min`;
+    if (seconds >= MONTH * 0.9) return `${Math.round(seconds/MONTH)}mo`;
+    if (seconds >= WEEK  * 0.9) return 'Weekly';
+    if (seconds >= DAY)         return `${Math.round(seconds/DAY)}d`;
+    if (seconds >= HOUR)        return `${Math.round(seconds/HOUR)}h`;
+    return `${Math.round(seconds/MIN)}min`;
+}
+
+function _fmtResetAt(ts) {
+    if (!ts) return '';
+    const diff = Math.round((new Date(ts * 1000) - Date.now()) / 1000);
+    if (diff <= 0) return 'now';
+    return 'in ' + _fmtSeconds(diff);
+}
+
+function _usageBarHtml(pct, color) {
+    const c = color || (pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e');
+    return `<div style="height:6px;background:var(--color-border);border-radius:3px;overflow:hidden;min-width:60px;flex:1;">
+        <div style="height:100%;width:${Math.min(pct,100)}%;background:${c};transition:width 0.4s;"></div>
+    </div>`;
+}
+
+function _allWindows(rl) {
+    const windows = [];
+    if (rl.primary_window) windows.push(rl.primary_window);
+    if (rl.secondary_window) windows.push(rl.secondary_window);
+    if (Array.isArray(rl.additional_rate_limits)) windows.push(...rl.additional_rate_limits);
+    return windows;
+}
+
+function _renderUsageCompact(usage) {
+    if (!usage) return '<span style="color:var(--color-muted);font-size:11px;">No data</span>';
+    const parts = [];
+    const plan = usage.plan_type ? `<span style="font-size:10px;color:var(--color-muted);text-transform:uppercase;letter-spacing:0.5px;">${escHtmlAttr(usage.plan_type)}</span>` : '';
+    const rl = usage.rate_limit;
+    if (rl) {
+        _allWindows(rl).forEach(w => {
+            const pct = w.used_percent || 0;
+            parts.push(`<div style="display:flex;align-items:center;gap:4px;font-size:11px;">
+                <span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>
+                ${_usageBarHtml(pct)}
+                <span style="color:var(--color-text);white-space:nowrap;">${pct}%</span>
+            </div>`);
+        });
+        if (rl.limit_reached) {
+            parts.push('<span style="color:#ef4444;font-size:11px;font-weight:600;">LIMIT REACHED</span>');
+        }
+    }
+    return `<div style="display:flex;flex-direction:column;gap:3px;min-width:140px;">${plan}${parts.join('')}</div>`;
+}
+
+function _renderUsageFull(usage) {
+    if (!usage) return '<p style="color:var(--color-muted);font-size:13px;">Usage data unavailable.</p>';
+    let html = '';
+    if (usage.plan_type) {
+        html += `<div style="margin-bottom:10px;"><span style="background:var(--color-link);color:#fff;padding:2px 8px;border-radius:3px;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;">${escHtmlAttr(usage.plan_type)}</span></div>`;
+    }
+    const rl = usage.rate_limit;
+    if (rl) {
+        if (rl.limit_reached) {
+            html += `<div style="background:#7f1d1d;color:#fca5a5;padding:8px 12px;border-radius:4px;margin-bottom:10px;font-size:13px;">Rate limit reached${usage.rate_limit_reached_type ? ': ' + escHtmlAttr(usage.rate_limit_reached_type) : ''}</div>`;
+        }
+        const renderWindow = (w) => {
+            if (!w) return '';
+            const pct = w.used_percent || 0;
+            const color = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
+            const label = _windowLabel(w.limit_window_seconds);
+            return `<div style="margin-bottom:12px;">
+                <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+                    <span style="font-size:13px;font-weight:600;">${label}</span>
+                    <span style="font-size:12px;color:${color};font-weight:700;">${pct}%</span>
+                </div>
+                <div style="height:8px;background:var(--color-border);border-radius:4px;overflow:hidden;margin-bottom:4px;">
+                    <div style="height:100%;width:${Math.min(pct,100)}%;background:${color};transition:width 0.4s;border-radius:4px;"></div>
+                </div>
+                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-muted);">
+                    <span>Window: ${_fmtSeconds(w.limit_window_seconds)}</span>
+                    <span>Resets ${_fmtResetAt(w.reset_at)}</span>
+                </div>
+            </div>`;
+        };
+        _allWindows(rl).forEach(w => { html += renderWindow(w); });
+    }
+    const cr = usage.credits;
+    if (cr) {
+        const bal = cr.balance != null ? escHtmlAttr(String(cr.balance)) : (cr.unlimited ? 'Unlimited' : 'None');
+        html += `<div style="font-size:12px;color:var(--color-muted);margin-top:8px;">Credits: ${bal}</div>`;
+    }
+    return html || '<p style="color:var(--color-muted);font-size:13px;">No usage data available.</p>';
+}
+
+async function fetchProviderUsage(key) {
+    try {
+        const resp = await fetch(`${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(key)}/usage`);
+        if (!resp.ok) return null;
+        const data = await resp.json();
+        if (data.supported === false) return {supported: false};
+        _usageCache[key] = {data: data.usage, ts: Date.now()};
+        return data.usage;
+    } catch(e) { return null; }
+}
+
+function updateUsageBadge(key) {
+    // Update collapsed badge
+    const badge = document.getElementById(`usage-badge-${key}`);
+    if (badge) {
+        const cached = _usageCache[key];
+        if (cached && cached.data) badge.innerHTML = _renderUsageCompact(cached.data);
+    }
+    // Update expanded panel
+    const full = document.getElementById(`usage-full-${key}`);
+    if (full) {
+        const cached = _usageCache[key];
+        if (cached && cached.data) full.innerHTML = _renderUsageFull(cached.data);
+    }
+}
+
+async function refreshAllUsage() {
+    for (const key of Object.keys(providersData)) {
+        if (!_providerSupportsUsage(key)) continue;
+        const cached = _usageCache[key];
+        if (cached && (Date.now() - cached.ts) < USAGE_POLL_INTERVAL - 1000) continue;
+        const data = await fetchProviderUsage(key);
+        if (data && data !== null) updateUsageBadge(key);
+    }
+}
+
+// Start polling
+setInterval(refreshAllUsage, USAGE_POLL_INTERVAL);
 
 function showToast(message, type) {
     const alertDiv = document.createElement('div');
@@ -223,7 +398,7 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
     
     const statusPrefix = statusPrefixMap[configObject] || configObject.replace('_config', '');
     const statusEl = document.getElementById(`${statusPrefix}-upload-status-${providerKey}`);
-    statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: 0%</div>`;
+    statusEl.innerHTML = `<div style="color: var(--color-link);">${window.i18n.interpolate(window.i18n.t('providers.uploading_file'), {pct: 0})}</div>`;
     
     try {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
@@ -234,7 +409,7 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             const chunk = file.slice(start, end);
             
             const progress = Math.round((chunkNumber / totalChunks) * 100);
-            statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading file: ${progress}%</div>`;
+            statusEl.innerHTML = `<div style="color: var(--color-link);">${window.i18n.interpolate(window.i18n.t('providers.uploading_file'), {pct: progress})}</div>`;
             
             const formData = new FormData();
             formData.append('provider_key', providerKey);
@@ -273,7 +448,7 @@ async function uploadFileChunked(providerKey, fileType, file, configObject) {
             }
         }
     } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+        statusEl.innerHTML = `<div style="color: #f87171;">${window.i18n.interpolate(window.i18n.t('providers.upload_failed'), {error: e.message})}</div>`;
         showToast(`Upload failed: ${e.message}`, 'danger');
     }
 }
@@ -299,14 +474,14 @@ async function uploadClaudeCliFile(providerKey, file) {
     if (!expandedProviders.has(providerKey)) toggleProvider(providerKey);
     const statusEl = document.getElementById(`claude-cli-upload-status-${providerKey}`);
     if (!statusEl) return;
-    statusEl.innerHTML = '<div style="color: #4a9eff;">Uploading CLI credentials: 0%</div>';
+    statusEl.innerHTML = `<div style="color: var(--color-link);">${window.i18n.interpolate(window.i18n.t('providers.uploading_cli'), {pct: 0})}</div>`;
     try {
         const totalChunks = Math.ceil(file.size / CHUNK_SIZE);
         for (let chunkNumber = 1; chunkNumber <= totalChunks; chunkNumber++) {
             const start = (chunkNumber - 1) * CHUNK_SIZE;
             const chunk = file.slice(start, Math.min(start + CHUNK_SIZE, file.size));
             const progress = Math.round((chunkNumber / totalChunks) * 100);
-            statusEl.innerHTML = `<div style="color: #4a9eff;">Uploading CLI credentials: ${progress}%</div>`;
+            statusEl.innerHTML = `<div style="color: var(--color-link);">${window.i18n.interpolate(window.i18n.t('providers.uploading_cli'), {pct: progress})}</div>`;
             const formData = new FormData();
             formData.append('provider_key', providerKey);
             formData.append('file_type', 'cli_credentials');
@@ -319,13 +494,13 @@ async function uploadClaudeCliFile(providerKey, file) {
             const result = await response.json();
             if (!result.success) throw new Error(result.error || 'Upload failed');
             if (result.complete) {
-                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> CLI credentials saved: <code style="background: var(--bg-panel); padding: 1px 6px; border-radius: 3px; font-size: 0.9em;">${file.name}</code></div>`;
-                showToast(`CLI credentials saved: ${file.name}`, 'success');
+                statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> ${window.i18n.interpolate(window.i18n.t('providers.cli_creds_saved'), {name: file.name})}</div>`;
+                showToast(window.i18n.interpolate(window.i18n.t('providers.cli_creds_saved'), {name: file.name}), 'success');
                 return;
             }
         }
     } catch (e) {
-        statusEl.innerHTML = `<div style="color: #f87171;">Upload failed: ${e.message}</div>`;
+        statusEl.innerHTML = `<div style="color: #f87171;">${window.i18n.interpolate(window.i18n.t('providers.upload_failed'), {error: e.message})}</div>`;
         showToast(`Upload failed: ${e.message}`, 'danger');
     }
 }
@@ -357,7 +532,7 @@ function renderProvidersList() {
     const pageKeys = filteredKeys.slice(currentProviderPage * PROVIDERS_PAGE_SIZE, (currentProviderPage + 1) * PROVIDERS_PAGE_SIZE);
 
     const countEl = document.getElementById('providers-count');
-    if (countEl) countEl.textContent = `${total} provider${total !== 1 ? 's' : ''}`;
+    if (countEl) countEl.textContent = window.i18n.interpolate(window.i18n.t(total !== 1 ? 'providers.provider_count_plural' : 'providers.provider_count_singular'), {n: total});
 
     container.innerHTML = '';
     if (pageKeys.length === 0) {
@@ -372,12 +547,17 @@ function renderProvidersList() {
             const isExpanded = expandedProviders.has(key);
             const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
 
+            const supportsUsage = _providerSupportsUsage(key);
+            const cachedUsage = _usageCache[key];
+            const compactBadge = supportsUsage ? `<div id="usage-badge-${escHtmlAttr(key)}" onclick="event.stopPropagation();" style="margin-left:8px;">${cachedUsage && cachedUsage.data ? _renderUsageCompact(cachedUsage.data) : '<span style="color:var(--color-muted);font-size:11px;">loading…</span>'}</div>` : '';
+
             providerItem.innerHTML = `
-                <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; flex-wrap: wrap; gap: 8px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                         <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                         <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
+                        ${compactBadge}
                     </div>
                     <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>
                 </div>
@@ -507,64 +687,64 @@ function renderProviderDetails(key) {
         // Kiro-specific authentication fields
         authFieldsHtml = `
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kiro Authentication</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">${window.i18n.t('providers.kiro_auth_section')}</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose one authentication method: Kiro IDE credentials (creds_file), kiro-cli database (sqlite_db), or direct credentials (refresh_token + client_id/secret).
                 </small>
                 
                 <div class="form-group">
-                    <label>AWS Region</label>
+                    <label>${window.i18n.t('providers.kiro_aws_region')}</label>
                     <input type="text" value="${kiroConfig.region || 'us-east-1'}" onchange="updateKiroConfig('${key}', 'region', this.value)" placeholder="us-east-1">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">AWS region for Kiro API (default: us-east-1)</small>
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: Kiro IDE Credentials</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kiro_opt1')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.credentials_file')}</label>
                     <input type="text" value="${kiroConfig.creds_file || ''}" onchange="updateKiroConfig('${key}', 'creds_file', this.value)" placeholder="~/.config/Code/User/globalStorage/amazon.q/credentials.json">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">Path to Kiro IDE credentials JSON file</small>
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: kiro-cli Database</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kiro_opt2')}</h5>
                 <div class="form-group">
-                    <label>SQLite Database Path</label>
+                    <label>${window.i18n.t('providers.kiro_sqlite_path')}</label>
                     <input type="text" value="${kiroConfig.sqlite_db || ''}" onchange="updateKiroConfig('${key}', 'sqlite_db', this.value)" placeholder="~/.local/share/kiro-cli/data.sqlite3">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">Path to kiro-cli SQLite database</small>
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 3: Direct Credentials</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kiro_opt3')}</h5>
                 <div class="form-group">
-                    <label>Refresh Token</label>
+                    <label>${window.i18n.t('providers.kiro_refresh_token')}</label>
                     <input type="password" value="${kiroConfig.refresh_token || ''}" onchange="updateKiroConfig('${key}', 'refresh_token', this.value)" placeholder="Enter refresh token">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">Kiro refresh token for direct authentication</small>
                 </div>
                 
                 <div class="form-group">
-                    <label>Profile ARN</label>
+                    <label>${window.i18n.t('providers.kiro_profile_arn')}</label>
                     <input type="text" value="${kiroConfig.profile_arn || ''}" onchange="updateKiroConfig('${key}', 'profile_arn', this.value)" placeholder="arn:aws:codewhisperer:us-east-1:...">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">AWS CodeWhisperer profile ARN (optional)</small>
                 </div>
                 
                 <div class="form-group">
-                    <label>Client ID (for AWS SSO OIDC)</label>
+                    <label>${window.i18n.t('providers.kiro_client_id')}</label>
                     <input type="text" value="${kiroConfig.client_id || ''}" onchange="updateKiroConfig('${key}', 'client_id', this.value)" placeholder="OAuth client ID">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth client ID for AWS SSO OIDC authentication</small>
                 </div>
                 
                 <div class="form-group">
-                    <label>Client Secret (for AWS SSO OIDC)</label>
+                    <label>${window.i18n.t('providers.kiro_client_secret')}</label>
                     <input type="password" value="${kiroConfig.client_secret || ''}" onchange="updateKiroConfig('${key}', 'client_secret', this.value)" placeholder="OAuth client secret">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth client secret for AWS SSO OIDC authentication</small>
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 4: Upload Files</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kiro_opt4')}</h5>
                 <div class="form-group">
-                    <label>Upload Credentials File</label>
+                    <label>${window.i18n.t('providers.kiro_upload_creds')}</label>
                     <input type="file" id="kiro-creds-file-${key}" accept=".json" onchange="uploadKiroFile('${key}', 'creds_file', this.files[0])">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload Kiro IDE credentials JSON file</small>
                 </div>
                 <div class="form-group">
-                    <label>Upload SQLite Database</label>
+                    <label>${window.i18n.t('providers.kiro_upload_sqlite')}</label>
                     <input type="file" id="kiro-db-file-${key}" accept=".sqlite3,.db,.sqlite" onchange="uploadKiroFile('${key}', 'sqlite_db', this.files[0])">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">Upload kiro-cli SQLite database file</small>
                 </div>
@@ -575,19 +755,19 @@ function renderProviderDetails(key) {
         // Kilocode authentication fields - supports both API key and OAuth2
         authFieldsHtml = `
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Kilocode Authentication</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">${window.i18n.t('providers.kilo_auth_section')}</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
                 </small>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key / Auth Token</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">Option 1: API Key / Auth Token</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.api_key')}</label>
                     <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter your Kilocode API key">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">If provided, API key authentication will be used instead of OAuth2</small>
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kilo_opt2')}</h5>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     If no API key is provided, OAuth2 will be used automatically.
                 </small>
@@ -617,7 +797,7 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
                 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="kilo-creds-file-${key}" accept=".json" onchange="uploadKiloFile('${key}', this.files[0])">
@@ -634,7 +814,7 @@ function renderProviderDetails(key) {
 
         authFieldsHtml = `
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Claude OAuth2 Authentication</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">Claude OAuth2 Authentication</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Claude uses OAuth2 authentication. Click "Authenticate" to start the OAuth2 flow in your browser.
                 </small>
@@ -649,7 +829,8 @@ function renderProviderDetails(key) {
                         <br><br>
                         The AISBF Chrome Extension intercepts that localhost callback in your browser and
                         forwards it to this server, completing the OAuth2 flow transparently.
-                        Install it, reload this page, and the Authenticate button will appear.
+                        Once installed, it self-configures automatically — no setup needed.
+                        Reload this page after installing and the Authenticate button will appear.
                     </p>
                     <a href="${BASE_PATH}/dashboard/extension/download" download
                        style="display: inline-block; padding: 8px 16px; background: #2d6a4f; color: #fff; border-radius: 4px; text-decoration: none; font-weight: 600;">
@@ -681,7 +862,7 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="claude-creds-file-${key}" accept=".json" onchange="uploadClaudeFile('${key}', this.files[0])">
@@ -740,9 +921,9 @@ function renderProviderDetails(key) {
                 ` : ''}
             </div>
 
-            <div style="background: #ffdd57; border: 2px solid #ff6b35; border-radius: 8px; padding: 20px; margin-bottom: 15px;">
-                <h4 style="margin: 0 0 10px 0; color: #d63031;">⚠️ Important Notice</h4>
-                <p style="margin: 0; color: #2d3436;">
+            <div style="background: var(--alert-info-bg); border: 2px solid var(--alert-info-border); border-radius: 8px; padding: 20px; margin-bottom: 15px;">
+                <h4 style="margin: 0 0 10px 0; color: var(--alert-info-fg);">⚠️ Important Notice</h4>
+                <p style="margin: 0; color: var(--color-text);">
                     Claude.ai policies state that unofficial clients are not allowed. By using AISBF in <strong>HTTP API / OAuth2 mode</strong>, you acknowledge that:
                     <br><br>• While we do our best to mimic the claude-code CLI, using an unofficial client can lead to account suspension or cancellation
                     <br>• Claude.ai detects prompt patterns to identify unofficial client usage, so it may not work with complex agents and prompts
@@ -766,12 +947,12 @@ function renderProviderDetails(key) {
             </div>
             
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Qwen Authentication</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">Qwen Authentication</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Choose your authentication method: API Key (recommended for simplicity) or OAuth2 Device Authorization Grant.
                 </small>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 1: API Key (Recommended)</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.kilo_opt1')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.api_key')}</label>
                     <input type="password" value="${qwenConfig.api_key || ''}" onchange="updateQwenConfig('${key}', 'api_key', this.value)" placeholder="Enter your Qwen API key">
@@ -779,7 +960,7 @@ function renderProviderDetails(key) {
                 </div>
 
                 <div id="qwen-region-config-${key}" style="display: ${qwenConfig.api_key ? 'block' : 'none'}; margin-top: 15px;">
-                    <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Region Configuration (API Key Mode)</h5>
+                    <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">Region Configuration (API Key Mode)</h5>
                     <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                         Select your preferred region for API key authentication. Different regions have different endpoints.
                     </small>
@@ -798,14 +979,14 @@ function renderProviderDetails(key) {
 
                     <div id="qwen-workspace-config-${key}" style="display: ${qwenConfig.region === 'germany-frankfurt' ? 'block' : 'none'};">
                         <div class="form-group">
-                            <label>Workspace ID</label>
+                            <label>${window.i18n.t('providers.workspace_id')}</label>
                             <input type="text" value="${qwenConfig.workspace_id || 'Default Workspace'}" onchange="updateQwenConfig('${key}', 'workspace_id', this.value)" placeholder="Default Workspace">
                             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Workspace ID for Germany region (default: "Default Workspace")</small>
                         </div>
                     </div>
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">Option 2: OAuth2 Authentication (DISCONTINUED - NOT WORKING)</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.qwen_opt2_discontinued')}</h5>
                 <small style="color: #ff6b35; display: block; margin-bottom: 15px;">
                     ⚠️ OAuth2 authentication is no longer functional. Qwen has discontinued this service. Use API Key instead.
                 </small>
@@ -829,7 +1010,7 @@ function renderProviderDetails(key) {
                     <!-- Auth status will be displayed here -->
                 </div>
 
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="qwen-creds-file-${key}" accept=".json" onchange="uploadQwenFile('${key}', this.files[0])">
@@ -842,7 +1023,7 @@ function renderProviderDetails(key) {
         // Codex OAuth2 authentication fields
         authFieldsHtml = `
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Codex OAuth2 Authentication</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">Codex OAuth2 Authentication</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
                     Codex uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Click "Authenticate" to start the OAuth2 flow.
                 </small>
@@ -854,7 +1035,7 @@ function renderProviderDetails(key) {
                 </div>
                 
                 <div class="form-group">
-                    <label>OAuth2 Issuer URL</label>
+                    <label>${window.i18n.t('providers.oauth2_issuer_url')}</label>
                     <input type="text" value="${codexConfig.issuer || 'https://auth.openai.com'}" onchange="updateCodexConfig('${key}', 'issuer', this.value)" placeholder="https://auth.openai.com">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">OAuth2 issuer URL (default: https://auth.openai.com)</small>
                 </div>
@@ -877,8 +1058,14 @@ function renderProviderDetails(key) {
                 <div id="codex-auth-status-${key}" style="margin-top: 10px; padding: 10px; border-radius: 3px; display: none;">
                     <!-- Auth status will be displayed here -->
                 </div>
-                
-                <h5 style="margin: 20px 0 10px 0; color: #8ec8ff;">${window.i18n.t('providers.upload_credentials_title')}</h5>
+
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">Usage &amp; Quota</h5>
+                <div id="usage-full-${key}" style="margin-bottom: 10px;">
+                    <p style="color:var(--color-muted);font-size:13px;">Loading usage data…</p>
+                </div>
+                <button type="button" class="btn btn-secondary" onclick="(async()=>{document.getElementById('usage-full-${key}').innerHTML='<p style=\\'color:var(--color-muted);font-size:13px;\\'>Refreshing…</p>';_usageCache['${key}']={ts:0};const d=await fetchProviderUsage('${key}');document.getElementById('usage-full-${key}').innerHTML=_renderUsageFull(d);})()" style="font-size:12px;padding:4px 10px;">↺ Refresh usage</button>
+
+                <h5 style="margin: 20px 0 10px 0; color: var(--color-link);">${window.i18n.t('providers.upload_credentials_title')}</h5>
                 <div class="form-group">
                     <label>${window.i18n.t('providers.upload_credentials_label')}</label>
                     <input type="file" id="codex-creds-file-${key}" accept=".json" onchange="uploadCodexFile('${key}', this.files[0])">
@@ -898,7 +1085,7 @@ function renderProviderDetails(key) {
             </div>
             
             <div class="form-group">
-                <label>API Key</label>
+                <label>${window.i18n.t('providers.api_key')}</label>
                 <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter API key">
             </div>
         `;
@@ -911,12 +1098,12 @@ function renderProviderDetails(key) {
         </div>
         
         <div class="form-group">
-            <label>Name</label>
+            <label>${window.i18n.t('providers.provider_name')}</label>
             <input type="text" value="${provider.name}" onchange="updateProvider('${key}', 'name', this.value)" required>
         </div>
         
         <div class="form-group">
-            <label>Endpoint</label>
+            <label>${window.i18n.t('providers.api_base')}</label>
             <input type="text" value="${provider.endpoint}" onchange="updateProvider('${key}', 'endpoint', this.value)" ${(provider.type === 'kilocode' || provider.type === 'qwen' || provider.type === 'claude' || provider.type === 'codex') ? 'readonly style="background: var(--bg-panel); cursor: not-allowed;"' : ''} required>
             ${isKiroProvider ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Typically: https://q.us-east-1.amazonaws.com</small>' : ''}
             ${provider.type === 'kilocode' ? '<small style="color: var(--color-muted); display: block; margin-top: 5px;">Fixed endpoint for Kilocode OAuth2 provider</small>' : ''}
@@ -943,7 +1130,7 @@ function renderProviderDetails(key) {
         ${authFieldsHtml}
         
         <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
-            <h4 style="margin: 0 0 15px 0; color: #4a9eff;">Pricing Configuration</h4>
+            <h4 style="margin: 0 0 15px 0; color: var(--color-link);">${window.i18n.t('providers.pricing_section')}</h4>
             
             <div class="form-group">
                 <label>
@@ -957,7 +1144,7 @@ function renderProviderDetails(key) {
             
             <div id="pricing-fields-${key}" style="display: ${provider.is_subscription ? 'none' : 'block'};">
                 <div class="form-group">
-                    <label>Price per Million Prompt Tokens (USD)</label>
+                    <label>${window.i18n.t('providers.price_prompt')}</label>
                     <input type="number" step="0.01" min="0" value="${provider.price_per_million_prompt || ''}" onchange="updateProvider('${key}', 'price_per_million_prompt', parseFloat(this.value) || null)" placeholder="e.g., 15.00">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $10, Anthropic Claude: $15, Google Gemini: $1.25
@@ -965,7 +1152,7 @@ function renderProviderDetails(key) {
                 </div>
                 
                 <div class="form-group">
-                    <label>Price per Million Completion Tokens (USD)</label>
+                    <label>${window.i18n.t('providers.price_completion')}</label>
                     <input type="number" step="0.01" min="0" value="${provider.price_per_million_completion || ''}" onchange="updateProvider('${key}', 'price_per_million_completion', parseFloat(this.value) || null)" placeholder="e.g., 75.00">
                     <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $30, Anthropic Claude: $75, Google Gemini: $5.00
@@ -981,19 +1168,19 @@ function renderProviderDetails(key) {
         </div>
         
         <div class="form-group">
-            <label>Default Rate Limit TPM (Tokens Per Minute)</label>
+            <label>${window.i18n.t('providers.default_rate_limit_tpm')}</label>
             <input type="number" value="${provider.default_rate_limit_TPM || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per minute for models in this provider</small>
         </div>
         
         <div class="form-group">
-            <label>Default Rate Limit TPH (Tokens Per Hour)</label>
+            <label>${window.i18n.t('providers.default_rate_limit_tph')}</label>
             <input type="number" value="${provider.default_rate_limit_TPH || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per hour for models in this provider</small>
         </div>
         
         <div class="form-group">
-            <label>Default Rate Limit TPD (Tokens Per Day)</label>
+            <label>${window.i18n.t('providers.default_rate_limit_tpd')}</label>
             <input type="number" value="${provider.default_rate_limit_TPD || ''}" onchange="updateProvider('${key}', 'default_rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Default token limit per day for models in this provider</small>
         </div>
@@ -1009,12 +1196,12 @@ function renderProviderDetails(key) {
         </div>
         
         <div class="form-group">
-            <label>Default Condense Context (%)</label>
+            <label>${window.i18n.t('providers.default_condense_context')}</label>
             <input type="number" value="${provider.default_condense_context || ''}" onchange="updateProvider('${key}', 'default_condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 80)">
         </div>
         
         <div class="form-group">
-            <label>Default Condense Method (conversational, semantic, hierarchical, algorithmic)</label>
+            <label>${window.i18n.t('providers.default_condense_method')}</label>
             <input type="text" value="${Array.isArray(provider.default_condense_method) ? provider.default_condense_method.join(', ') : (provider.default_condense_method || '')}" onchange="updateProviderCondenseMethod('${key}', this.value)" placeholder="e.g., semantic, conversational">
         </div>
         
@@ -1032,7 +1219,7 @@ function renderProviderDetails(key) {
             </label>
         </div>
 
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Native Caching</h4>
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.native_caching_section')}</h4>
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
             Provider-native caching features (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs) for cost reduction.
         </small>
@@ -1046,19 +1233,19 @@ function renderProviderDetails(key) {
         </div>
 
         <div class="form-group">
-            <label>Cache TTL (seconds)</label>
+            <label>${window.i18n.t('providers.cache_ttl')}</label>
             <input type="number" value="${provider.cache_ttl || ''}" onchange="updateProvider('${key}', 'cache_ttl', this.value ? parseInt(this.value) : null)" placeholder="Optional (e.g., 3600)">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Cache time-to-live in seconds (Google Context Caching only)</small>
         </div>
 
         <div class="form-group">
-            <label>Min Cacheable Tokens</label>
+            <label>${window.i18n.t('providers.min_cacheable_tokens')}</label>
             <input type="number" value="${provider.min_cacheable_tokens || 1000}" onchange="updateProvider('${key}', 'min_cacheable_tokens', this.value ? parseInt(this.value) : 1000)" placeholder="1000">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Minimum token count for content to be cacheable (default: 1000)</small>
         </div>
 
         <div class="form-group">
-            <label>Prompt Cache Key (OpenAI/Kilo)</label>
+            <label>${window.i18n.t('providers.prompt_cache_key')}</label>
             <input type="text" value="${provider.prompt_cache_key || ''}" onchange="updateProvider('${key}', 'prompt_cache_key', this.value)" placeholder="Optional cache key for load balancer optimization">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
         </div>
@@ -1069,7 +1256,7 @@ function renderProviderDetails(key) {
         </small>
 
         <div class="form-group" style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-            <label>Model Filter (for auto-fetched models)</label>
+            <label>${window.i18n.t('providers.model_filter')}</label>
             <input type="text" value="${provider.model_filter || ''}" onchange="updateProvider('${key}', 'model_filter', this.value)" placeholder="e.g., free, pro, flash">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">
                 When no models are manually configured, only expose models whose ID contains this filter word (case-insensitive wildcard matching).
@@ -1093,6 +1280,21 @@ function renderProviderDetails(key) {
     `;
 
     renderModels(key);
+
+    // Fetch full usage data for codex providers when panel is expanded
+    if (isCodexProvider) {
+        const cached = _usageCache[key];
+        if (cached && cached.data) {
+            const fullEl = document.getElementById(`usage-full-${key}`);
+            if (fullEl) fullEl.innerHTML = _renderUsageFull(cached.data);
+        } else {
+            fetchProviderUsage(key).then(data => {
+                const fullEl = document.getElementById(`usage-full-${key}`);
+                if (fullEl) fullEl.innerHTML = _renderUsageFull(data);
+                updateUsageBadge(key);
+            });
+        }
+    }
 }
 
 function renderModels(providerKey) {
@@ -1136,27 +1338,27 @@ function renderModels(providerKey) {
             </div>
             
             <div class="form-group">
-                <label>Rate Limit TPM (Tokens Per Minute)</label>
+                <label>${window.i18n.t('providers.model_rate_limit_tpm')}</label>
                 <input type="number" value="${model.rate_limit_TPM || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
             
             <div class="form-group">
-                <label>Rate Limit TPH (Tokens Per Hour)</label>
+                <label>${window.i18n.t('providers.model_rate_limit_tph')}</label>
                 <input type="number" value="${model.rate_limit_TPH || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
             
             <div class="form-group">
-                <label>Rate Limit TPD (Tokens Per Day)</label>
+                <label>${window.i18n.t('providers.model_rate_limit_tpd')}</label>
                 <input type="number" value="${model.rate_limit_TPD || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
             
             <div class="form-group">
-                <label>Condense Context (%)</label>
+                <label>${window.i18n.t('providers.model_condense_context')}</label>
                 <input type="number" value="${model.condense_context || ''}" onchange="updateModel('${providerKey}', ${index}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (default: 80)">
             </div>
             
             <div class="form-group">
-                <label>Condense Method (conversational, semantic, hierarchical, algorithmic)</label>
+                <label>${window.i18n.t('providers.model_condense_method')}</label>
                 <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateModelCondenseMethod('${providerKey}', ${index}, this.value)" placeholder="e.g., semantic, conversational">
             </div>
             
@@ -1209,7 +1411,7 @@ function updateNewProviderDefaults() {
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
     };
 
-    descriptionEl.textContent = descriptions[providerType] || 'Standard provider configuration.';
+    descriptionEl.textContent = descriptions[providerType] || window.i18n.t('providers.standard_config');
 
     // Show/hide Claude warning
     const claudeWarningEl = document.getElementById('new-provider-claude-warning');
@@ -1217,6 +1419,18 @@ function updateNewProviderDefaults() {
         claudeWarningEl.style.display = 'block';
     } else {
         claudeWarningEl.style.display = 'none';
+    }
+
+    // Show extension download prompt when Claude is selected on a non-local client without the extension
+    const extensionPromptEl = document.getElementById('new-provider-extension-prompt');
+    if (extensionPromptEl) {
+        if (providerType === 'claude' && !IS_LOCAL_CLIENT && !window.aisbfOAuth2Extension) {
+            const dlLink = document.getElementById('new-provider-extension-download');
+            if (dlLink) dlLink.href = BASE_PATH + '/dashboard/extension/download';
+            extensionPromptEl.style.display = 'block';
+        } else {
+            extensionPromptEl.style.display = 'none';
+        }
     }
 }
 
@@ -1263,7 +1477,7 @@ async function checkClaudeAuth(providerKey) {
     statusDiv.style.display = 'block';
     statusDiv.style.background = '#f0f0f0';
     statusDiv.style.color = '#333';
-    statusDiv.innerHTML = 'Checking Claude authentication status...';
+    statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.checking_auth'), {provider: 'Claude'});
 
     try {
         const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
@@ -1279,16 +1493,16 @@ async function checkClaudeAuth(providerKey) {
             const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
             statusDiv.style.background = '#d4edda';
             statusDiv.style.color = '#155724';
-            statusDiv.innerHTML = `✅ Claude authentication is valid. Expires in: ${expirationText}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_valid'), {provider: 'Claude', expiry: expirationText});
         } else {
             statusDiv.style.background = '#f8d7da';
             statusDiv.style.color = '#721c24';
-            statusDiv.innerHTML = `❌ Claude authentication failed: ${result.error || 'Not authenticated'}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_failed'), {provider: 'Claude', error: result.error || window.i18n.t('providers.not_authenticated')});
         }
     } catch (error) {
         statusDiv.style.background = '#f8d7da';
         statusDiv.style.color = '#721c24';
-        statusDiv.innerHTML = `❌ Error checking Claude auth: ${error.message}`;
+        statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_error'), {provider: 'Claude', error: error.message});
     }
 }
 
@@ -1299,7 +1513,7 @@ async function checkQwenAuth(providerKey) {
     statusDiv.style.display = 'block';
     statusDiv.style.background = '#f0f0f0';
     statusDiv.style.color = '#333';
-    statusDiv.innerHTML = 'Checking Qwen authentication status...';
+    statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.checking_auth'), {provider: 'Qwen'});
 
     try {
         const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
@@ -1315,16 +1529,16 @@ async function checkQwenAuth(providerKey) {
             const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
             statusDiv.style.background = '#d4edda';
             statusDiv.style.color = '#155724';
-            statusDiv.innerHTML = `✅ Qwen authentication is valid. Expires in: ${expirationText}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_valid'), {provider: 'Qwen', expiry: expirationText});
         } else {
             statusDiv.style.background = '#f8d7da';
             statusDiv.style.color = '#721c24';
-            statusDiv.innerHTML = `❌ Qwen authentication failed: ${result.error || 'Not authenticated'}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_failed'), {provider: 'Qwen', error: result.error || window.i18n.t('providers.not_authenticated')});
         }
     } catch (error) {
         statusDiv.style.background = '#f8d7da';
         statusDiv.style.color = '#721c24';
-        statusDiv.innerHTML = `❌ Error checking Qwen auth: ${error.message}`;
+        statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_error'), {provider: 'Qwen', error: error.message});
     }
 }
 
@@ -1335,7 +1549,7 @@ async function checkCodexAuth(providerKey) {
     statusDiv.style.display = 'block';
     statusDiv.style.background = '#f0f0f0';
     statusDiv.style.color = '#333';
-    statusDiv.innerHTML = 'Checking Codex authentication status...';
+    statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.checking_auth'), {provider: 'Codex'});
 
     try {
         const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
@@ -1351,16 +1565,16 @@ async function checkCodexAuth(providerKey) {
             const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
             statusDiv.style.background = '#d4edda';
             statusDiv.style.color = '#155724';
-            statusDiv.innerHTML = `✅ Codex authentication is valid. Expires in: ${expirationText}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_valid'), {provider: 'Codex', expiry: expirationText});
         } else {
             statusDiv.style.background = '#f8d7da';
             statusDiv.style.color = '#721c24';
-            statusDiv.innerHTML = `❌ Codex authentication failed: ${result.error || 'Not authenticated'}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_failed'), {provider: 'Codex', error: result.error || window.i18n.t('providers.not_authenticated')});
         }
     } catch (error) {
         statusDiv.style.background = '#f8d7da';
         statusDiv.style.color = '#721c24';
-        statusDiv.innerHTML = `❌ Error checking Codex auth: ${error.message}`;
+        statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_error'), {provider: 'Codex', error: error.message});
     }
 }
 
@@ -1371,7 +1585,7 @@ async function checkKiloAuth(providerKey) {
     statusDiv.style.display = 'block';
     statusDiv.style.background = '#f0f0f0';
     statusDiv.style.color = '#333';
-    statusDiv.innerHTML = 'Checking Kilocode authentication status...';
+    statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.checking_auth'), {provider: 'Kilocode'});
 
     try {
         const response = await fetch(`${BASE_PATH}/dashboard/providers/${providerKey}/auth/check`, {
@@ -1387,16 +1601,16 @@ async function checkKiloAuth(providerKey) {
             const expirationText = result.expires_at ? formatExpirationTime(result.expires_at) : 'Unknown';
             statusDiv.style.background = '#d4edda';
             statusDiv.style.color = '#155724';
-            statusDiv.innerHTML = `✅ Kilocode authentication is valid. Expires in: ${expirationText}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_valid'), {provider: 'Kilocode', expiry: expirationText});
         } else {
             statusDiv.style.background = '#f8d7da';
             statusDiv.style.color = '#721c24';
-            statusDiv.innerHTML = `❌ Kilocode authentication failed: ${result.error || 'Not authenticated'}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_failed'), {provider: 'Kilocode', error: result.error || window.i18n.t('providers.not_authenticated')});
         }
     } catch (error) {
         statusDiv.style.background = '#f8d7da';
         statusDiv.style.color = '#721c24';
-        statusDiv.innerHTML = `❌ Error checking Kilocode auth: ${error.message}`;
+        statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.auth_error'), {provider: 'Kilocode', error: error.message});
     }
 }
 
@@ -1406,7 +1620,7 @@ async function authenticateClaude(key) {
     statusEl.style.display = 'block';
     statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting OAuth2 authentication flow...</p>';
+    statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Starting OAuth2 authentication flow...</p>';
     
     try {
         const response = await fetch(BASE_PATH + '/dashboard/claude/auth/start', {
@@ -1425,16 +1639,16 @@ async function authenticateClaude(key) {
         if (!data.success || !data.auth_url) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_start_failed'), {error: data.error || ''})}</p>`;
             return;
         }
         
-        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Opening authentication window...</p>';
+        statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Opening authentication window...</p>';
         
         // Open OAuth2 URL in popup window
         const authWindow = window.open(data.auth_url, 'claude-auth', 'width=600,height=700');
         
-        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Please complete authentication in the popup window...</p>';
+        statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Please complete authentication in the popup window...</p>';
         
         // Poll for completion
         let pollCount = 0;
@@ -1470,7 +1684,7 @@ async function authenticateClaude(key) {
                     await new Promise(resolve => setTimeout(resolve, 1000));
                     
                     try {
-                        statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Completing authentication...</p>';
+                        statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Completing authentication...</p>';
                         
                         const completeResponse = await fetch(BASE_PATH + '/dashboard/claude/auth/complete', {
                             method: 'POST',
@@ -1493,7 +1707,7 @@ async function authenticateClaude(key) {
                     } catch (error) {
                         statusEl.style.background = '#402010';
                         statusEl.style.border = '1px solid #ff4a4a';
-                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error completing authentication: ${error.message}</p>`;
+                        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_error_completing'), {error: error.message})}</p>`;
                     }
                 }
             } catch (error) {
@@ -1507,14 +1721,14 @@ async function authenticateClaude(key) {
                 }
                 statusEl.style.background = '#402010';
                 statusEl.style.border = '1px solid #ff4a4a';
-                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+                statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_timeout')}</p>`;
             }
         }, 2000);
         
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_generic_error'), {error: error.message})}</p>`;
     }
 }
 
@@ -1523,7 +1737,7 @@ async function authenticateQwen(key) {
     statusEl.style.display = 'block';
     statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
+    statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Starting Qwen OAuth2 Device Authorization flow...</p>';
     
     try {
         const response = await fetch(BASE_PATH + '/dashboard/qwen/auth/start', {
@@ -1542,7 +1756,7 @@ async function authenticateQwen(key) {
         if (!data.success) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_start_failed'), {error: data.error || ''})}</p>`;
             return;
         }
         
@@ -1550,7 +1764,7 @@ async function authenticateQwen(key) {
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
-                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Qwen Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: var(--color-link); font-weight: bold;">🔐 Qwen Device Authorization</p>
                 <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
@@ -1588,17 +1802,17 @@ async function authenticateQwen(key) {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#0f4020';
                     statusEl.style.border = '1px solid #4eff9e';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Qwen authentication successful! Credentials saved.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">${window.i18n.interpolate(window.i18n.t('providers.auth_success'), {provider: 'Qwen'})}</p>`;
                 } else if (pollData.status === 'denied') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_denied')}</p>`;
                 } else if (pollData.status === 'expired') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_expired')}</p>`;
                 }
                 
             } catch (error) {
@@ -1609,14 +1823,14 @@ async function authenticateQwen(key) {
                 clearInterval(pollInterval);
                 statusEl.style.background = '#402010';
                 statusEl.style.border = '1px solid #ff4a4a';
-                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+                statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_timeout')}</p>`;
             }
         }, data.interval * 1000);
         
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_generic_error'), {error: error.message})}</p>`;
     }
 }
 
@@ -1629,7 +1843,7 @@ async function authenticateCodex(key) {
     statusEl.style.display = 'block';
     statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
+    statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Starting Codex OAuth2 Device Authorization flow...</p>';
     
     try {
         const response = await fetch(BASE_PATH + '/dashboard/codex/auth/start', {
@@ -1649,7 +1863,7 @@ async function authenticateCodex(key) {
         if (!data.success) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_start_failed'), {error: data.error || ''})}</p>`;
             return;
         }
         
@@ -1657,7 +1871,7 @@ async function authenticateCodex(key) {
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
-                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Codex Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: var(--color-link); font-weight: bold;">🔐 Codex Device Authorization</p>
                 <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
@@ -1695,17 +1909,17 @@ async function authenticateCodex(key) {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#0f4020';
                     statusEl.style.border = '1px solid #4eff9e';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Codex authentication successful! Credentials saved.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">${window.i18n.interpolate(window.i18n.t('providers.auth_success'), {provider: 'Codex'})}</p>`;
                 } else if (pollData.status === 'denied') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_denied')}</p>`;
                 } else if (pollData.status === 'expired') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_expired')}</p>`;
                 }
                 
             } catch (error) {
@@ -1716,14 +1930,14 @@ async function authenticateCodex(key) {
                 clearInterval(pollInterval);
                 statusEl.style.background = '#402010';
                 statusEl.style.border = '1px solid #ff4a4a';
-                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+                statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_timeout')}</p>`;
             }
         }, data.interval * 1000);
         
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_generic_error'), {error: error.message})}</p>`;
     }
 }
 
@@ -1736,7 +1950,7 @@ async function authenticateKilo(key) {
     statusEl.style.display = 'block';
     statusEl.style.background = 'var(--bg-panel)';
     statusEl.style.border = '1px solid #4a9eff';
-    statusEl.innerHTML = '<p style="margin: 0; color: #4a9eff;">🔄 Starting Kilocode OAuth2 Device Authorization flow...</p>';
+    statusEl.innerHTML = '<p style="margin: 0; color: var(--color-link);">🔄 Starting Kilocode OAuth2 Device Authorization flow...</p>';
     
     try {
         const response = await fetch(BASE_PATH + '/dashboard/kilo/auth/start', {
@@ -1755,7 +1969,7 @@ async function authenticateKilo(key) {
         if (!data.success) {
             statusEl.style.background = '#402010';
             statusEl.style.border = '1px solid #ff4a4a';
-            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Failed to start authentication: ${data.error || 'Unknown error'}</p>`;
+            statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_start_failed'), {error: data.error || ''})}</p>`;
             return;
         }
         
@@ -1763,7 +1977,7 @@ async function authenticateKilo(key) {
         statusEl.style.border = '1px solid #4a9eff';
         statusEl.innerHTML = `
             <div style="margin: 0;">
-                <p style="margin: 0 0 10px 0; color: #4a9eff; font-weight: bold;">🔐 Kilocode Device Authorization</p>
+                <p style="margin: 0 0 10px 0; color: var(--color-link); font-weight: bold;">🔐 Kilocode Device Authorization</p>
                 <p style="margin: 0 0 10px 0; color: var(--color-text);">
                     Please visit: <a href="${data.verification_uri}" target="_blank" style="color: #4eff9e; text-decoration: underline;">${data.verification_uri}</a>
                 </p>
@@ -1801,17 +2015,17 @@ async function authenticateKilo(key) {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#0f4020';
                     statusEl.style.border = '1px solid #4eff9e';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #4eff9e;">✓ Kilocode authentication successful! Credentials saved.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #4eff9e;">${window.i18n.interpolate(window.i18n.t('providers.auth_success'), {provider: 'Kilocode'})}</p>`;
                 } else if (pollData.status === 'denied') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization denied by user.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_denied')}</p>`;
                 } else if (pollData.status === 'expired') {
                     clearInterval(pollInterval);
                     statusEl.style.background = '#402010';
                     statusEl.style.border = '1px solid #ff4a4a';
-                    statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authorization code expired. Please try again.</p>';
+                    statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_expired')}</p>`;
                 }
                 
             } catch (error) {
@@ -1822,14 +2036,14 @@ async function authenticateKilo(key) {
                 clearInterval(pollInterval);
                 statusEl.style.background = '#402010';
                 statusEl.style.border = '1px solid #ff4a4a';
-                statusEl.innerHTML = '<p style="margin: 0; color: #ff4a4a;">✗ Authentication timeout. Please try again.</p>';
+                statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.t('providers.auth_timeout')}</p>`;
             }
         }, data.interval * 1000);
         
     } catch (error) {
         statusEl.style.background = '#402010';
         statusEl.style.border = '1px solid #ff4a4a';
-        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">✗ Error: ${error.message}</p>`;
+        statusEl.innerHTML = `<p style="margin: 0; color: #ff4a4a;">${window.i18n.interpolate(window.i18n.t('providers.auth_generic_error'), {error: error.message})}</p>`;
     }
 }
 
@@ -1856,7 +2070,7 @@ async function saveProvider(key) {
 }
 
 async function removeProvider(key) {
-    if (await showDangerConfirm(`Remove provider "${key}"?`, 'Remove Provider')) {
+    if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('providers.remove_provider_confirm'), {key}), window.i18n.t('providers.remove_provider_title'))) {
         try {
             const result = await apiCall('DELETE', '/dashboard/api/provider/' + encodeURIComponent(key));
             if (!result.success) {
@@ -1951,7 +2165,7 @@ function addModel(key) {
 }
 
 async function removeModel(providerKey, index) {
-    if (await showDangerConfirm('Remove this model?', 'Remove Model')) {
+    if (await showDangerConfirm(window.i18n.t('providers.remove_model_confirm'), window.i18n.t('providers.remove_model_title'))) {
         providersData[providerKey].models.splice(index, 1);
         renderModels(providerKey);
     }
@@ -1962,12 +2176,12 @@ async function confirmAddProvider() {
     const type = document.getElementById('new-provider-type').value;
 
     if (!key) {
-        showAlert('Please enter a provider key', 'Missing Key', '⚠️', 'warn');
+        showAlert(window.i18n.t('providers.missing_key'), window.i18n.t('providers.missing_key_title'), '⚠️', 'warn');
         return;
     }
 
     if (providersData[key]) {
-        showAlert('Provider key already exists', 'Duplicate Key', '⚠️', 'warn');
+        showAlert(window.i18n.t('providers.duplicate_key'), window.i18n.t('providers.duplicate_key_title'), '⚠️', 'warn');
         return;
     }
 
@@ -2057,7 +2271,7 @@ async function getModelsFromProvider(key) {
     const statusDiv = document.getElementById(`get-models-status-${key}`);
     if (!statusDiv) return;
 
-    statusDiv.innerHTML = 'Fetching models...';
+    statusDiv.innerHTML = window.i18n.t('providers.fetching_models');
 
     try {
         const response = await fetch(BASE_PATH + '/dashboard/providers/get-models', {
@@ -2076,9 +2290,9 @@ async function getModelsFromProvider(key) {
         if (response.ok && result.models) {
             providersData[key].models = result.models;
             renderModels(key);
-            statusDiv.innerHTML = `✅ Found ${result.models.length} models`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.models_found'), {n: result.models.length});
         } else {
-            statusDiv.innerHTML = `❌ Error: ${result.error || 'Failed to fetch models'}`;
+            statusDiv.innerHTML = window.i18n.interpolate(window.i18n.t('providers.models_fetch_error'), {error: result.error || ''});
         }
     } catch (error) {
         statusDiv.innerHTML = `❌ Error: ${error.message}`;
@@ -2117,7 +2331,7 @@ async function saveProviders() {
         if (response.ok) {
             window.location.href = BASE_PATH + '/dashboard/providers?success=1';
         } else {
-            showAlert('Error saving configuration', 'Error', '❌', 'danger');
+            showAlert(window.i18n.t('providers.error_saving'), 'Error', '❌', 'danger');
         }
     } catch (error) {
         showAlert('Error: ' + error.message, 'Error', '❌', 'danger');
@@ -2125,7 +2339,11 @@ async function saveProviders() {
 }
 
 // Defer until i18n is ready so translated strings are available
-function _doInitialRender() { renderProvidersList(); }
+function _doInitialRender() {
+    renderProvidersList();
+    // Kick off initial usage fetch for all usage-supporting providers
+    refreshAllUsage().then(() => renderProvidersList());
+}
 if (window.i18n) { _doInitialRender(); } else { document.addEventListener('i18n:ready', _doInitialRender, {once: true}); }
 
 </script>

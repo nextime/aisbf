@@ -11,6 +11,7 @@ NEW_NS = [
     'signup_page','forgot_page','reset_page','profile_page','password_page',
     'email_page','delete_page','tokens_page','billing_page','user_overview',
     'usage_page','prompts_page','config_page','error_page','tiers_page',
-    'cache_page','response_cache_page','settings_page'
+    'cache_page','response_cache_page','settings_page','payments_page',
+    'subscription_page','user_providers_page','user_rotations_page',
+    'user_autoselects_page',
 ]
-

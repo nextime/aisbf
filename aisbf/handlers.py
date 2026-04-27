@@ -32,7 +32,7 @@ from pathlib import Path
 from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse
 from .models import ChatCompletionRequest, ChatCompletionResponse
-from .providers import get_provider_handler
+from .providers import get_provider_handler, RateLimitError
 from .config import config
 from .utils import (
     count_messages_tokens,
@@ -2487,8 +2487,13 @@ class RotationHandler:
             for model in rotation_models:
                 # Apply defaults: model-specific > rotation defaults > provider defaults
                 model = self._apply_defaults_to_model(model, provider_config, rotation_config)
-                
-                model_name = model['name']
+
+                model_name = (model.get('name') or '').strip()
+                if not model_name:
+                    logger.warning(f"  [SKIPPED] Provider {provider_id}: model entry has empty name, skipping")
+                    total_models_considered -= 1
+                    continue
+
                 model_weight = model['weight']
                 model_rate_limit = model.get('rate_limit', 'N/A')
                 
@@ -2883,7 +2888,11 @@ class RotationHandler:
                                 model_name=model_name,
                                 handler=handler,
                                 request_data=request_data,
-                                effective_context=effective_context
+                                effective_context=effective_context,
+                                rotation_id=rotation_id,
+                                user_id=user_id,
+                                token_id=token_id,
+                                request_start_time=request_start_time
                             )
                         else:
                             # Cache the response for non-streaming chunked requests
@@ -2955,7 +2964,11 @@ class RotationHandler:
                         model_name=model_name,
                         handler=handler,
                         request_data=request_data,
-                        effective_context=effective_context
+                        effective_context=effective_context,
+                        rotation_id=rotation_id,
+                        user_id=user_id,
+                        token_id=token_id,
+                        request_start_time=request_start_time
                     )
                 else:
                     # Cache the response for non-streaming requests
@@ -3024,17 +3037,28 @@ class RotationHandler:
                         logger.warning(f"Analytics recording failed: {analytics_error}")
                     
                     return response
+            except RateLimitError as e:
+                last_error = str(e)
+                # Provider already disabled by handle_rate_limit_response — do NOT call record_failure()
+                logger.warning(f"")
+                logger.warning(f"=== ROTATION FAILOVER: rate limit on attempt {attempt + 1} ===")
+                logger.warning(f"Provider {provider_id} / model {model_name} is rate limited: {str(e)}")
+                logger.warning(f"Skipping to next model in rotation (transparent to client)")
+                logger.warning(f"=== END ROTATION FAILOVER ===")
+                tried_models.append(current_model)
+                continue
+
             except Exception as e:
                 last_error = str(e)
                 handler.record_failure()
-                
+
                 # Increment retry count for this model
                 model_retry_counts[model_key] = retry_count + 1
-                
+
                 logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
                 logger.error(f"Error type: {type(e).__name__}")
                 logger.error(f"Model retry count: {model_retry_counts[model_key]}")
-                
+
                 # If this is the first failure for this model, allow retry with rate limiting
                 if model_retry_counts[model_key] < 2:
                     logger.info(f"Will retry model {model_name} with rate limiting...")
@@ -3292,9 +3316,11 @@ class RotationHandler:
             # Final flush to ensure all buffered data reaches the client
             await asyncio.sleep(0)
         
-        return StreamingResponse(error_stream_generator(), media_type="text/event-stream", status_code=status_code)
+        sr = StreamingResponse(error_stream_generator(), media_type="text/event-stream", status_code=status_code)
+        sr.aisbf_error = True
+        return sr
 
-    def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int):
+    def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int, rotation_id: Optional[str] = None, user_id: Optional[int] = None, token_id: Optional[int] = None, request_start_time: Optional[float] = None):
         """
         Create a StreamingResponse with proper handling based on provider type.
         
@@ -3327,6 +3353,7 @@ class RotationHandler:
         
         async def stream_generator(effective_context):
             import json
+            accumulated_response_text = ""
             try:
                 if is_google_provider:
                     # Handle Google's streaming response
@@ -3731,6 +3758,30 @@ class RotationHandler:
                                 continue
                 
                 handler.record_success()
+
+                # Record analytics after stream completes
+                try:
+                    analytics = get_analytics()
+                    prompt_tokens = effective_context
+                    completion_tokens_count = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name) if accumulated_response_text else 0
+                    total_tokens = prompt_tokens + completion_tokens_count
+                    latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
+                    analytics.record_request(
+                        provider_id=provider_id,
+                        model_name=model_name,
+                        tokens_used=total_tokens,
+                        latency_ms=latency_ms,
+                        success=True,
+                        rotation_id=rotation_id,
+                        user_id=user_id,
+                        token_id=token_id,
+                        prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
+                        completion_tokens=completion_tokens_count if completion_tokens_count > 0 else None,
+                        actual_cost=None
+                    )
+                except Exception as analytics_error:
+                    logger.warning(f"Analytics recording for streaming rotation failed: {analytics_error}")
+
             except Exception as e:
                 handler.record_failure()
                 error_dict = {"error": str(e)}
@@ -4058,78 +4109,161 @@ class AutoselectHandler:
             logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
             raise
     
-    async def _run_internal_model_selection(self, prompt: str) -> str:
-        """Run the internal model for selection in a separate thread"""
+    async def _run_internal_model_selection(self, messages: list) -> str:
+        """Run the internal instruct model for selection in a separate thread"""
         import logging
         import asyncio
         from concurrent.futures import ThreadPoolExecutor
         logger = logging.getLogger(__name__)
-        
-        # Initialize model if needed
+
         if self._internal_model is None:
             self._initialize_internal_model()
-        
+
         def run_inference():
-            """Run inference in a separate thread"""
             with self._internal_model_lock:
                 try:
                     import torch
-                    
-                    # Tokenize input
+
+                    # Use chat template if the tokenizer supports it (instruct models),
+                    # otherwise fall back to a plain concatenated prompt (base models)
+                    has_chat_template = (
+                        getattr(self._internal_tokenizer, 'chat_template', None) is not None
+                    )
+                    if has_chat_template:
+                        logger.info("[internal] Instruct model detected — applying chat template")
+                        prompt = self._internal_tokenizer.apply_chat_template(
+                            messages,
+                            tokenize=False,
+                            add_generation_prompt=True
+                        )
+                    else:
+                        logger.info("[internal] Base model detected — using raw prompt")
+                        prompt = "\n\n".join(m["content"] for m in messages) + "\n"
+                    logger.info(f"[internal] Chat template applied. Prompt length: {len(prompt)} chars")
+                    logger.debug(f"[internal] Full prompt:\n{prompt}")
+
                     inputs = self._internal_tokenizer(prompt, return_tensors="pt")
-                    
-                    # Move to same device as model
+                    input_length = inputs['input_ids'].shape[1]
+                    logger.info(f"[internal] Tokenized input: {input_length} tokens")
+
                     device = next(self._internal_model.parameters()).device
+                    logger.info(f"[internal] Running inference on device: {device}")
                     inputs = {k: v.to(device) for k, v in inputs.items()}
-                    
-                    # Generate response
+
                     with torch.no_grad():
                         outputs = self._internal_model.generate(
                             **inputs,
                             max_new_tokens=100,
-                            temperature=0.1,
-                            do_sample=True,
+                            do_sample=False,
                             pad_token_id=self._internal_tokenizer.eos_token_id
                         )
-                    
-                    # Decode response
-                    response = self._internal_tokenizer.decode(outputs[0], skip_special_tokens=True)
-                    
-                    # Extract only the generated part (remove the prompt)
-                    if response.startswith(prompt):
-                        response = response[len(prompt):].strip()
-                    
+
+                    generated_length = outputs[0].shape[0] - input_length
+                    logger.info(f"[internal] Generated {generated_length} new tokens")
+
+                    response = self._internal_tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
+                    logger.info(f"[internal] Decoded response: {repr(response)}")
                     return response
                 except Exception as e:
-                    logger.error(f"Error during internal model inference: {e}", exc_info=True)
+                    logger.error(f"[internal] Inference error: {e}", exc_info=True)
                     return None
-        
-        # Run in thread pool to avoid blocking
+
         loop = asyncio.get_event_loop()
         with ThreadPoolExecutor(max_workers=1) as executor:
-            result = await loop.run_in_executor(executor, run_inference)
-        
-        return result
+            return await loop.run_in_executor(executor, run_inference)
 
-    def _build_autoselect_messages(self, user_prompt: str, autoselect_config) -> List[Dict]:
+
+    def _compact_messages_for_selection(self, messages: List[Dict], max_tokens: int) -> str:
+        """
+        Compact a message list into a prompt string that fits within max_tokens.
+        Keeps the first HEAD and last TAIL messages verbatim; the dropped middle
+        section is replaced by a compact one-liner summary so no context is lost silently.
+        """
+        def _tokens(text: str) -> int:
+            return len(text) // 4
+
+        def _msg_text(msg: dict) -> str:
+            role = msg.get('role', 'user')
+            content = msg.get('content', '')
+            if isinstance(content, list):
+                content = str(content)
+            return f"{role}: {content}\n"
+
+        if not messages:
+            return ""
+
+        full = "".join(_msg_text(m) for m in messages)
+        if _tokens(full) <= max_tokens:
+            return full
+
+        HEAD = 2  # first N messages to keep verbatim
+        TAIL = 3  # last N messages to keep verbatim
+
+        head = messages[:HEAD]
+        tail = messages[-TAIL:] if len(messages) > HEAD + TAIL else []
+        middle = messages[HEAD: len(messages) - TAIL] if len(messages) > HEAD + TAIL else messages[HEAD:]
+
+        head_text = "".join(_msg_text(m) for m in head)
+        tail_text = "".join(_msg_text(m) for m in tail)
+        fixed_tokens = _tokens(head_text) + _tokens(tail_text)
+
+        summary_block = ""
+        if middle:
+            snippets = [
+                f"{m.get('role','?')}: {str(m.get('content','')).replace(chr(10), ' ').strip()[:80]}"
+                for m in middle
+            ]
+            summary_line = "; ".join(snippets)
+            summary_block = f"[... {len(middle)} omitted messages — summary: {summary_line} ...]\n"
+            available_for_summary = max_tokens - fixed_tokens
+            if _tokens(summary_block) > available_for_summary > 0:
+                max_chars = available_for_summary * 4
+                summary_block = summary_block[:max_chars - 5] + "...]\n"
+
+        return head_text + summary_block + tail_text
+
+    @staticmethod
+    def _detect_loop(text: str, ngram: int = 8, threshold: int = 3) -> bool:
+        """
+        Return True if `text` contains a repeated phrase indicating a generation loop.
+        Splits into word-level n-grams and flags if any n-gram appears >= threshold times.
+        """
+        if not text:
+            return False
+        words = text.split()
+        if len(words) < ngram * threshold:
+            return False
+        counts: dict = {}
+        for i in range(len(words) - ngram + 1):
+            key = tuple(words[i:i + ngram])
+            counts[key] = counts.get(key, 0) + 1
+            if counts[key] >= threshold:
+                return True
+        return False
+
+    def _build_autoselect_messages(self, user_prompt: str, autoselect_config, failed_models: Optional[List[str]] = None) -> List[Dict]:
         """Build the messages for model selection (system + user)"""
         skill_content = self._get_skill_file_content()
-        
-        # Build the available models list
+
+        # Build the available models list, excluding already-failed ones
         models_list = ""
         for model_info in autoselect_config.available_models:
+            if failed_models and model_info.model_id in failed_models:
+                continue
             models_list += f"<model><model_id>{model_info.model_id}</model_id><model_description>{model_info.description}</model_description></model>\n"
-        
-        # System message with the skill content
+
         system_message = skill_content
-        
-        # User message with the prompt and model list
+
+        failed_note = ""
+        if failed_models:
+            failed_note = f"\n<aisbf_failed_models>{', '.join(failed_models)}</aisbf_failed_models>\n<aisbf_note>The above models have already failed or produced looping responses. Do NOT select them.</aisbf_note>"
+
         user_message = f"""<aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
 <aisbf_autoselect_list>
 {models_list}
 </aisbf_autoselect_list>
-<aisbf_autoselect_fallback>{autoselect_config.fallback}</aisbf_autoselect_fallback>"""
-        
+<aisbf_autoselect_fallback>{autoselect_config.fallback}</aisbf_autoselect_fallback>{failed_note}"""
+
         return [
             {"role": "system", "content": system_message},
             {"role": "user", "content": user_message}
@@ -4142,7 +4276,7 @@ class AutoselectHandler:
             return match.group(1).strip()
         return None
 
-    async def _get_model_selection(self, user_prompt: str, autoselect_config) -> str:
+    async def _get_model_selection(self, user_prompt: str, autoselect_config, failed_models: Optional[List[str]] = None) -> str:
         """Send the autoselect prompt to a model and get the selection"""
         import logging
         logger = logging.getLogger(__name__)
@@ -4161,6 +4295,8 @@ class AutoselectHandler:
                 # Build model library for semantic search (model_id -> description)
                 model_library = {}
                 for model_info in autoselect_config.available_models:
+                    if failed_models and model_info.model_id in failed_models:
+                        continue
                     model_library[model_info.model_id] = model_info.description
 
                 # Extract recent chat history (last 3 messages)
@@ -4193,7 +4329,7 @@ class AutoselectHandler:
         logger.info(f"Using '{autoselect_config.selection_model}' for model selection")
 
         # Build messages (system + user)
-        messages = self._build_autoselect_messages(user_prompt, autoselect_config)
+        messages = self._build_autoselect_messages(user_prompt, autoselect_config, failed_models)
         
         # Create a minimal request for model selection
         selection_request = {
@@ -4210,33 +4346,62 @@ class AutoselectHandler:
         logger.info(f"  Stream: False")
         logger.info(f"  Stop: </aisbf_model_autoselection>")
         
-        # Determine if selection_model is a rotation, provider, or special keyword
-        selection_model = autoselect_config.selection_model
-        
+        # Determine if selection_model is a rotation, provider, or special keyword.
+        # Default to "internal" when the configured value is blank.
+        selection_model = (getattr(autoselect_config, 'selection_model', None) or '').strip() or 'internal'
+
         try:
             # Check if it's the special "internal" keyword
             if selection_model == "internal":
+                # Resolve: if the configured model maps to a known provider, use it remotely
+                aisbf_conf = self.config.get_aisbf_config()
+                internal_model_id = (
+                    (aisbf_conf.internal_model or {}).get('autoselect_model_id', '')
+                    if aisbf_conf else ''
+                )
+                if internal_model_id and '/' in internal_model_id:
+                    internal_provider_id = internal_model_id.split('/', 1)[0]
+                    if internal_provider_id in self.config.providers:
+                        logger.info(
+                            f"Internal autoselect model '{internal_model_id}'"
+                            f" → provider '{internal_provider_id}'"
+                        )
+                        model_name = internal_model_id.split('/', 1)[1]
+                        request_handler = RequestHandler()
+                        selection_request['model'] = model_name
+                        response = await request_handler.handle_chat_completion(
+                            request=None,
+                            provider_id=internal_provider_id,
+                            request_data=selection_request
+                        )
+                        content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        model_id = self._extract_model_selection(content)
+                        if model_id:
+                            logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
+                            logger.info(f"Selected model ID: {model_id}")
+                        else:
+                            logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
+                            logger.warning(f"Could not extract model ID from provider response")
+                        return model_id
+
                 logger.info(f"Selection model is 'internal' - using local HuggingFace model")
-                # For internal model, build the full prompt (system + user combined)
-                full_prompt = messages[0]["content"] + "\n\n" + messages[1]["content"]
-                response_content = await self._run_internal_model_selection(full_prompt)
-                
+                response_content = await self._run_internal_model_selection(messages)
+
                 if not response_content:
                     logger.error("Internal model returned no response")
                     return None
-                
+
                 logger.info(f"Internal model response: {response_content[:200]}..." if len(response_content) > 200 else f"Internal model response: {response_content}")
-                
-                # Extract model selection from response
+
                 model_id = self._extract_model_selection(response_content)
-                
+
                 if model_id:
                     logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
                     logger.info(f"Selected model ID: {model_id}")
                 else:
                     logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
                     logger.warning(f"Could not extract model ID from internal model response")
-                
+
                 return model_id
             # Check if it's a rotation
             elif (self.user_id and selection_model in self.rotations) or selection_model in self.config.rotations:
@@ -4248,11 +4413,11 @@ class AutoselectHandler:
                 provider_id, model_name = selection_model.split('/', 1)
                 logger.info(f"Selection model '{selection_model}' is a direct provider model")
                 logger.info(f"  Provider: {provider_id}, Model: {model_name}")
-                
+
                 if provider_id not in self.config.providers:
-                    logger.error(f"Provider '{provider_id}' not found in configuration")
+                    logger.error(f"Selection model provider '{provider_id}' not found in configuration")
                     return None
-                
+
                 # Use the direct provider handler
                 request_handler = RequestHandler()
                 selection_request['model'] = model_name
@@ -4265,12 +4430,12 @@ class AutoselectHandler:
             elif selection_model in self.config.providers:
                 logger.info(f"Selection model '{selection_model}' is a provider (will use first available model)")
                 provider_config = self.config.get_provider(selection_model)
-                
+
                 # Get first available model from provider
                 if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
                     model_name = getattr(provider_config, "models", [])[0].name
                     logger.info(f"  Using model: {model_name}")
-                    
+
                     request_handler = RequestHandler()
                     selection_request['model'] = model_name
                     response = await request_handler.handle_chat_completion(
@@ -4279,7 +4444,7 @@ class AutoselectHandler:
                         request_data=selection_request
                     )
                 else:
-                    logger.error(f"Provider '{selection_model}' has no models configured")
+                    logger.error(f"Selection model provider '{selection_model}' has no models configured")
                     return None
             else:
                 logger.error(f"Selection model '{selection_model}' not found in rotations or providers")
@@ -4311,10 +4476,7 @@ class AutoselectHandler:
     async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict, user_id: Optional[int] = None, token_id: Optional[int] = None) -> Dict:
         """Handle an autoselect request"""
         import logging
-        import time
         logger = logging.getLogger(__name__)
-        # Track request start time for latency calculation
-        request_start_time = time.time()
         logger.info(f"=== AUTOSELECT REQUEST START ===")
         logger.info(f"Autoselect ID: {autoselect_id}")
         logger.info(f"User ID: {self.user_id}")
@@ -4365,117 +4527,94 @@ class AutoselectHandler:
         if not user_messages:
             logger.error("No messages provided")
             raise HTTPException(status_code=400, detail="No messages provided")
-        
+
         logger.info(f"User messages count: {len(user_messages)}")
-        
-        # Build a string representation of the user prompt
-        # Limit to last 10 messages or 8000 tokens, whichever comes first
-        MAX_SELECTION_MESSAGES = 10
+
         MAX_SELECTION_TOKENS = 8000
-        
-        # Take the last N messages
-        limited_messages = user_messages[-MAX_SELECTION_MESSAGES:] if len(user_messages) > MAX_SELECTION_MESSAGES else user_messages
-        logger.info(f"Limited to last {len(limited_messages)} messages for selection")
-        
-        # Build prompt and check token count
-        user_prompt = ""
-        final_messages = []
-        for msg in limited_messages:
-            role = msg.get('role', 'user')
-            content = msg.get('content', '')
-            if isinstance(content, list):
-                # Handle complex content (e.g., with images)
-                content = str(content)
-            
-            # Check if adding this message would exceed token limit
-            test_prompt = user_prompt + f"{role}: {content}\n"
-            # Use a simple token estimation (rough approximation: 1 token ≈ 4 chars)
-            estimated_tokens = len(test_prompt) // 4
-            
-            if estimated_tokens > MAX_SELECTION_TOKENS:
-                logger.info(f"Reached token limit ({estimated_tokens} > {MAX_SELECTION_TOKENS}), stopping at {len(final_messages)} messages")
-                break
-            
-            user_prompt = test_prompt
-            final_messages.append(msg)
-        
-        logger.info(f"Final message count for selection: {len(final_messages)}")
-        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
+        user_prompt = self._compact_messages_for_selection(user_messages, MAX_SELECTION_TOKENS)
+        estimated_tokens = len(user_prompt) // 4
+        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {estimated_tokens} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
-        # Get the model selection
-        logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(user_prompt, autoselect_config)
+        # Filter out entries with empty model_id (misconfiguration guard)
+        valid_models = [m for m in autoselect_config.available_models if (m.model_id or '').strip()]
+        invalid_count = len(autoselect_config.available_models) - len(valid_models)
+        if invalid_count:
+            logger.warning(f"Autoselect '{autoselect_id}': ignoring {invalid_count} available_model(s) with empty model_id")
 
-        # Validate the selected model
-        logger.info(f"=== MODEL VALIDATION ===")
-        if not selected_model_id:
-            # Fallback to the configured fallback model
-            logger.warning(f"No model ID returned from selection")
-            logger.warning(f"Using fallback model: {autoselect_config.fallback}")
-            selected_model_id = autoselect_config.fallback
-        else:
-            # Check if the selected model is in the available models list
-            available_ids = [m.model_id for m in autoselect_config.available_models]
-            if selected_model_id not in available_ids:
-                logger.warning(f"Selected model '{selected_model_id}' not in available models list")
-                logger.warning(f"Available models: {available_ids}")
-                logger.warning(f"Using fallback model: {autoselect_config.fallback}")
-                selected_model_id = autoselect_config.fallback
-            else:
-                logger.info(f"Selected model '{selected_model_id}' is valid and available")
-
-        logger.info(f"=== FINAL MODEL CHOICE ===")
-        logger.info(f"Selected model ID: {selected_model_id}")
-        logger.info(f"Selection method: {'AI-selected' if selected_model_id != autoselect_config.fallback else 'Fallback'}")
-
-        # Now proxy the actual request to the selected rotation
-        logger.info(f"Proxying request to rotation: {selected_model_id}")
+        # Build escalation order: sort available models by priority ascending (lower priority first)
+        available_models_ordered = sorted(valid_models, key=lambda m: m.priority)
         rotation_handler = RotationHandler()
-        
-        try:
-            response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, user_id, token_id)
-        except Exception as e:
-            # Record analytics for failed autoselect request
-            logger.error(f"Autoselect request failed: {str(e)}")
+        failed_models: List[str] = []
+        last_exception = None
+
+        while True:
+            # Re-run selection excluding already-failed models
+            logger.info(f"Requesting model selection from AI (failed so far: {failed_models})...")
+            selected_model_id = await self._get_model_selection(user_prompt, autoselect_config, failed_models)
+
+            # Validate
+            available_ids = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+            if not selected_model_id or selected_model_id not in available_ids:
+                # Pick the lowest-priority untried model as fallback
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.error("All models have failed, no escalation target available")
+                    if last_exception:
+                        raise last_exception
+                    raise HTTPException(status_code=502, detail="All autoselect models failed")
+                selected_model_id = untried[0]
+                logger.warning(f"Selection invalid, using next untried model: {selected_model_id}")
+            else:
+                logger.info(f"Selected model: {selected_model_id}")
+
+            logger.info(f"Proxying request to: {selected_model_id}")
             try:
-                analytics = get_analytics()
-                # Calculate latency
-                latency_ms = (time.time() - request_start_time) * 1000
-                logger.info(f"Failed Autoselect Analytics: latency_ms={latency_ms:.2f}")
-                
-                # Estimate tokens for failed request
-                try:
-                    messages = request_data.get('messages', [])
-                    estimated_tokens = count_messages_tokens(messages, autoselect_id)
-                    total_tokens = estimated_tokens
-                    prompt_tokens = estimated_tokens
-                    completion_tokens = 0
-                except Exception:
-                    total_tokens = 50  # Minimal estimate for failed requests
-                    prompt_tokens = 50
-                    completion_tokens = 0
-                
-                analytics.record_request(
-                    provider_id='autoselect',
-                    model_name=autoselect_id,
-                    tokens_used=total_tokens,
-                    latency_ms=latency_ms,
-                    success=False,
-                    error_type=type(e).__name__,
-                    autoselect_id=autoselect_id,
-                    user_id=user_id,
-                    token_id=token_id,
-                    prompt_tokens=prompt_tokens,
-                    completion_tokens=completion_tokens,
-                    actual_cost=None
-                )
-            except Exception as analytics_error:
-                logger.warning(f"Analytics recording for failed autoselect failed: {analytics_error}")
-            
-            # Re-raise the exception
-            raise
-        
+                response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, user_id, token_id)
+            except Exception as e:
+                logger.warning(f"Model '{selected_model_id}' raised exception: {e} — escalating")
+                failed_models.append(selected_model_id)
+                last_exception = e
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.error("All models exhausted after exception")
+                    raise
+                continue
+
+            # Check if the rotation itself reported a full failure (all its internal models failed)
+            response_dict = response if isinstance(response, dict) else (response.body and __import__('json').loads(response.body) if hasattr(response, 'body') else {})
+            if isinstance(response_dict, dict) and response_dict.get('aisbf_error'):
+                logger.warning(f"Rotation '{selected_model_id}' fully failed (aisbf_error) — escalating")
+                failed_models.append(selected_model_id)
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.warning("All autoselect models exhausted after rotation failure, returning last response")
+                    break
+                continue
+
+            # Loop detection on non-streaming response
+            content = response.get('choices', [{}])[0].get('message', {}).get('content', '') or ''
+            if not content:
+                logger.warning(f"Model '{selected_model_id}' returned empty content — escalating")
+                failed_models.append(selected_model_id)
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.warning("All models exhausted after empty response, returning last response")
+                    break
+                continue
+
+            if self._detect_loop(content):
+                logger.warning(f"Model '{selected_model_id}' detected looping response — escalating")
+                failed_models.append(selected_model_id)
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.warning("All models exhausted after loop detection, returning last response")
+                    break
+                continue
+
+            # Good response
+            break
+
         # Cache the response for non-streaming requests
         if not stream:
             try:
@@ -4486,75 +4625,14 @@ class AutoselectHandler:
                     logger.debug(f"Cached response for autoselect request {autoselect_id}")
             except Exception as cache_error:
                 logger.warning(f"Response cache set failed: {cache_error}")
-        
-        logger.info(f"=== AUTOSELECT REQUEST END ===")
-        
-        # Record analytics for token usage
-        try:
-            analytics = get_analytics()
-            if response and isinstance(response, dict):
-                usage = response.get('usage', {})
-                total_tokens = usage.get('total_tokens', 0)
-                prompt_tokens = usage.get('prompt_tokens', 0)
-                completion_tokens = usage.get('completion_tokens', 0)
-                
-                # If no token usage provided, estimate it
-                if total_tokens == 0:
-                    try:
-                        messages = request_data.get('messages', [])
-                        model_name = response.get('model', 'unknown')
-                        estimated_prompt_tokens = count_messages_tokens(messages, model_name)
-                        
-                        # More realistic completion estimate
-                        max_tokens = request_data.get('max_tokens') or 0
-                        if max_tokens > 0:
-                            estimated_completion = min(max_tokens, estimated_prompt_tokens * 2)
-                        else:
-                            estimated_completion = max(estimated_prompt_tokens, 50)
 
-                        total_tokens = estimated_prompt_tokens + estimated_completion
-                        prompt_tokens = estimated_prompt_tokens
-                        completion_tokens = estimated_completion
-                        logger.debug(f"Estimated token usage for autoselect: {total_tokens}")
-                    except Exception as est_error:
-                        logger.debug(f"Token estimation failed: {est_error}")
-                        total_tokens = 150
-                        prompt_tokens = 0
-                        completion_tokens = 0
-                
-                # Try to extract actual cost from provider response
-                from .cost_extractor import extract_cost_from_response
-                actual_cost = extract_cost_from_response(response, 'autoselect')
-                
-                # Always record analytics
-                # The actual provider/model info is in the response model field
-                model_name = response.get('model', 'unknown')
-                # Calculate latency
-                latency_ms = (time.time() - request_start_time) * 1000
-                logger.info(f"Autoselect Analytics: latency_ms={latency_ms:.2f}")
-                
-                analytics.record_request(
-                    provider_id='autoselect',
-                    model_name=model_name,
-                    tokens_used=total_tokens,
-                    latency_ms=latency_ms,
-                    success=True,
-                    autoselect_id=autoselect_id,
-                    user_id=user_id,
-                    token_id=token_id,
-                    prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
-                    completion_tokens=completion_tokens if completion_tokens > 0 else None,
-                    actual_cost=actual_cost
-                )
-        except Exception as analytics_error:
-            logger.warning(f"Analytics recording failed: {analytics_error}")
-        
+        logger.info(f"=== AUTOSELECT REQUEST END ===")
         return response
 
     async def handle_autoselect_streaming_request(self, autoselect_id: str, request_data: Dict):
         """
         Handle an autoselect streaming request.
-        
+
         The rotation handler handles the streaming conversion internally based on
         the selected provider's type, so we just pass through the response.
         """
@@ -4581,123 +4659,94 @@ class AutoselectHandler:
             raise HTTPException(status_code=400, detail="No messages provided")
         
         logger.info(f"User messages count: {len(user_messages)}")
-        
-        # Build a string representation of the user prompt
-        # Limit to last 10 messages or 8000 tokens, whichever comes first
-        MAX_SELECTION_MESSAGES = 10
+
         MAX_SELECTION_TOKENS = 8000
-        
-        # Take the last N messages
-        limited_messages = user_messages[-MAX_SELECTION_MESSAGES:] if len(user_messages) > MAX_SELECTION_MESSAGES else user_messages
-        logger.info(f"Limited to last {len(limited_messages)} messages for selection")
-        
-        # Build prompt and check token count
-        user_prompt = ""
-        final_messages = []
-        for msg in limited_messages:
-            role = msg.get('role', 'user')
-            content = msg.get('content', '')
-            if isinstance(content, list):
-                content = str(content)
-            
-            # Check if adding this message would exceed token limit
-            test_prompt = user_prompt + f"{role}: {content}\n"
-            # Use a simple token estimation (rough approximation: 1 token ≈ 4 chars)
-            estimated_tokens = len(test_prompt) // 4
-            
-            if estimated_tokens > MAX_SELECTION_TOKENS:
-                logger.info(f"Reached token limit ({estimated_tokens} > {MAX_SELECTION_TOKENS}), stopping at {len(final_messages)} messages")
-                break
-            
-            user_prompt = test_prompt
-            final_messages.append(msg)
-        
-        logger.info(f"Final message count for selection: {len(final_messages)}")
-        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {len(user_prompt) // 4} tokens)")
+        user_prompt = self._compact_messages_for_selection(user_messages, MAX_SELECTION_TOKENS)
+        estimated_tokens = len(user_prompt) // 4
+        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {estimated_tokens} tokens)")
         logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
 
-        # Get the model selection
-        logger.info(f"Requesting model selection from AI...")
-        selected_model_id = await self._get_model_selection(user_prompt, autoselect_config)
+        # Filter out entries with empty model_id (misconfiguration guard)
+        valid_models = [m for m in autoselect_config.available_models if (m.model_id or '').strip()]
+        invalid_count = len(autoselect_config.available_models) - len(valid_models)
+        if invalid_count:
+            logger.warning(f"Autoselect '{autoselect_id}': ignoring {invalid_count} available_model(s) with empty model_id")
 
-        # Validate the selected model
-        logger.info(f"=== MODEL VALIDATION ===")
-        if not selected_model_id:
-            logger.warning(f"No model ID returned from selection")
-            logger.warning(f"Using fallback model: {autoselect_config.fallback}")
-            selected_model_id = autoselect_config.fallback
-        else:
-            available_ids = [m.model_id for m in autoselect_config.available_models]
-            if selected_model_id not in available_ids:
-                logger.warning(f"Selected model '{selected_model_id}' not in available models list")
-                logger.warning(f"Available models: {available_ids}")
-                logger.warning(f"Using fallback model: {autoselect_config.fallback}")
-                selected_model_id = autoselect_config.fallback
+        # Build escalation order: sort available models by priority ascending (lower priority first)
+        available_models_ordered = sorted(valid_models, key=lambda m: m.priority)
+        request_data['stream'] = True
+        failed_models: List[str] = []
+        last_exception = None
+
+        while True:
+            logger.info(f"Requesting model selection from AI (failed so far: {failed_models})...")
+            selected_model_id = await self._get_model_selection(user_prompt, autoselect_config, failed_models)
+
+            available_ids = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+            if not selected_model_id or selected_model_id not in available_ids:
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.error("All models have failed, no escalation target available")
+                    if last_exception:
+                        raise last_exception
+                    raise HTTPException(status_code=502, detail="All autoselect models failed")
+                selected_model_id = untried[0]
+                logger.warning(f"Selection invalid, using next untried model: {selected_model_id}")
             else:
-                logger.info(f"Selected model '{selected_model_id}' is valid and available")
+                logger.info(f"Selected model: {selected_model_id}")
 
-        logger.info(f"=== FINAL MODEL CHOICE ===")
-        logger.info(f"Selected model ID: {selected_model_id}")
-        logger.info(f"Selection method: {'AI-selected' if selected_model_id != autoselect_config.fallback else 'Fallback'}")
-        logger.info(f"Request mode: Streaming")
-
-        # Proxy the streaming request to the selected model (rotation or direct provider)
-        try:
-            # Ensure stream is set to True
-            request_data['stream'] = True
-            
-            # Check if it's a rotation first
-            if (self.user_id and selected_model_id in self.rotations) or selected_model_id in self.config.rotations:
-                logger.info(f"Proxying streaming request to rotation: {selected_model_id}")
-                rotation_handler = RotationHandler(user_id=self.user_id)
-                response = await rotation_handler.handle_rotation_request(selected_model_id, request_data)
-            # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
-            elif '/' in selected_model_id:
-                provider_id, model_name = selected_model_id.split('/', 1)
-                logger.info(f"Proxying streaming request to direct provider model: {selected_model_id}")
-                logger.info(f"  Provider: {provider_id}, Model: {model_name}")
-                
-                if provider_id not in self.config.providers:
-                    logger.error(f"Provider '{provider_id}' not found in configuration")
-                    raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
-                
-                # Use the direct provider handler
-                request_handler = RequestHandler()
-                request_data['model'] = model_name
-                response = await request_handler.handle_streaming_chat_completion(
-                    request=None,
-                    provider_id=provider_id,
-                    request_data=request_data
-                )
-            # Check if it's just a provider ID (use first available model)
-            elif selected_model_id in self.config.providers:
-                logger.info(f"Proxying streaming request to provider: {selected_model_id} (will use first available model)")
-                provider_config = self.config.get_provider(selected_model_id)
-                
-                # Get first available model from provider
-                if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
-                    model_name = getattr(provider_config, "models", [])[0].name
-                    logger.info(f"  Using model: {model_name}")
-                    
+            logger.info(f"Proxying streaming request to: {selected_model_id}")
+            try:
+                # Check if it's a rotation first
+                if (self.user_id and selected_model_id in self.rotations) or selected_model_id in self.config.rotations:
+                    rotation_handler = RotationHandler(user_id=self.user_id)
+                    response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, self.user_id)
+                elif '/' in selected_model_id:
+                    provider_id, model_name = selected_model_id.split('/', 1)
+                    if provider_id not in self.config.providers:
+                        raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
                     request_handler = RequestHandler()
                     request_data['model'] = model_name
                     response = await request_handler.handle_streaming_chat_completion(
-                        request=None,
-                        provider_id=selected_model_id,
-                        request_data=request_data
-                    )
+                        request=None, provider_id=provider_id, request_data=request_data)
+                elif selected_model_id in self.config.providers:
+                    provider_config = self.config.get_provider(selected_model_id)
+                    models = getattr(provider_config, "models", [])
+                    if not models:
+                        raise HTTPException(status_code=400, detail=f"Provider {selected_model_id} has no models configured")
+                    request_handler = RequestHandler()
+                    request_data['model'] = models[0].name
+                    response = await request_handler.handle_streaming_chat_completion(
+                        request=None, provider_id=selected_model_id, request_data=request_data)
                 else:
-                    logger.error(f"Provider '{selected_model_id}' has no models configured")
-                    raise HTTPException(status_code=400, detail=f"Provider {selected_model_id} has no models configured")
-            else:
-                logger.error(f"Selected model '{selected_model_id}' not found in rotations or providers")
-                raise HTTPException(status_code=400, detail=f"Model {selected_model_id} not found")
-            
-            logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
-            return response
-        except Exception as e:
-            logger.error(f"Error proxying to selected model: {str(e)}", exc_info=True)
-            raise
+                    raise HTTPException(status_code=400, detail=f"Model {selected_model_id} not found")
+            except Exception as e:
+                logger.warning(f"Streaming model '{selected_model_id}' raised exception: {e} — escalating")
+                failed_models.append(selected_model_id)
+                last_exception = e
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.error("All streaming models exhausted after exception")
+                    raise
+                continue
+
+            # Check if the rotation itself reported a full failure (all its internal models failed).
+            # Works for both dict responses (non-streaming) and StreamingResponse objects tagged
+            # with aisbf_error=True by _create_error_streaming_response.
+            if (isinstance(response, dict) and response.get('aisbf_error')) or getattr(response, 'aisbf_error', False):
+                logger.warning(f"Rotation '{selected_model_id}' fully failed (aisbf_error) — escalating")
+                failed_models.append(selected_model_id)
+                untried = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
+                if not untried:
+                    logger.warning("All autoselect models exhausted after rotation failure, returning last response")
+                    break
+                continue
+
+            # Good response
+            break
+
+        logger.info(f"=== AUTOSELECT STREAMING REQUEST END ===")
+        return response
 
     async def handle_autoselect_model_list(self, autoselect_id: str) -> List[Dict]:
         """List the available models for an autoselect endpoint"""

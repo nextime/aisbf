@@ -21,7 +21,7 @@
     align-items: center;
     gap: .6rem;
 }
-.page-header h2 i { color: #667eea; }
+.page-header h2 i { color: var(--color-link); }
 .page-header p { color: var(--color-subtle); font-size: .9rem; margin-top: .2rem; }
 
 /* ── Section card ─────────────────────────────────────────── */
@@ -38,7 +38,7 @@
     justify-content: space-between;
     padding: .85rem 1.25rem;
     border-bottom:1px solid var(--color-border);
-    background: rgba(15,52,96,.3);
+    background: var(--bg-accent);
 }
 .section-header h3 {
     font-size: .95rem;
@@ -48,7 +48,7 @@
     align-items: center;
     gap: .5rem;
 }
-.section-header h3 i { color: #667eea; font-size: .85rem; }
+.section-header h3 i { color: var(--color-link); font-size: .85rem; }
 .section-body { padding: 1.25rem; }
 
 /* ── Token card ───────────────────────────────────────────── */
@@ -60,7 +60,7 @@
     padding: 1rem 1.25rem;
     transition: border-color .2s;
 }
-.token-card:hover { border-color: #334477; }
+.token-card:hover { border-color: var(--color-link); }
 .token-card-top {
     display: flex;
     align-items: flex-start;
@@ -83,7 +83,7 @@
     flex-wrap: wrap;
 }
 .token-meta span { display: flex; align-items: center; gap: .3rem; }
-.token-meta i { color: #445; font-size: .75rem; }
+.token-meta i { color: var(--color-subtle); font-size: .75rem; }
 
 .token-actions { display: flex; align-items: center; gap: .6rem; flex-shrink: 0; }
 
@@ -116,7 +116,7 @@
     display: flex;
     align-items: center;
     gap: .6rem;
-    background: #0f1c33;
+    background: var(--bg-page);
     border:1px solid var(--color-border);
     border-radius: 6px;
     padding: .55rem .85rem;
@@ -126,9 +126,9 @@
 }
 .token-value-text { flex: 1; word-break: break-all; }
 .copy-btn {
-    background: rgba(103,126,234,.15);
-    border: 1px solid rgba(103,126,234,.3);
-    color: #667eea;
+    background: var(--bg-accent);
+    border: 1px solid var(--color-border);
+    color: var(--color-link);
     border-radius: 5px;
     padding: .3rem .65rem;
     font-size: .75rem;
@@ -137,20 +137,20 @@
     transition: background .2s;
     flex-shrink: 0;
 }
-.copy-btn:hover { background: rgba(103,126,234,.3); }
+.copy-btn:hover { background: var(--color-secondary-hover); }
 .copy-btn.copied { background: rgba(74,222,128,.2); color: #4ade80; border-color: rgba(74,222,128,.4); }
 
 /* ── Empty state ──────────────────────────────────────────── */
 .empty-state {
     text-align: center;
     padding: 3rem 1rem;
-    color: #555;
+    color: var(--color-subtle);
 }
 .empty-state i {
     font-size: 3rem;
     margin-bottom: 1rem;
     display: block;
-    color: #2a3a5e;
+    color: var(--color-border);
 }
 .empty-state p { font-size: .9rem; margin-bottom: 1.25rem; }
 
@@ -158,7 +158,7 @@
 .create-form-area {
     display: none;
     background: var(--bg-page);
-    border: 1px solid #667eea;
+    border: 1px solid var(--color-link);
     border-radius: 8px;
     padding: 1.25rem;
     margin-top: 1rem;
@@ -177,7 +177,7 @@
 }
 .create-form-area input:focus {
     outline: none;
-    border-color: #667eea;
+    border-color: var(--color-link);
 }
 .form-actions { display: flex; gap: .6rem; margin-top: .5rem; }
 
@@ -230,7 +230,7 @@
     border-radius: 4px;
 }
 .method-GET  { background: rgba(74,222,128,.18); color: #4ade80; }
-.method-POST { background: rgba(96,165,250,.18); color: #60a5fa; }
+.method-POST { background: rgba(96,165,250,.18); color: var(--color-link); }
 .code-block {
     background: #0f1c33;
     border:1px solid var(--color-border);
@@ -255,17 +255,17 @@
 <!-- Page header -->
 <div class="page-header">
     <div>
-        <h2><i class="fas fa-key"></i> API Tokens</h2>
-        <p>Generate tokens to authenticate requests to your personal API endpoints.</p>
+        <h2><i class="fas fa-key"></i> <span data-i18n="tokens_page.title">API Tokens</span></h2>
+        <p data-i18n="tokens_page.desc">Generate tokens to authenticate requests to your personal API endpoints.</p>
     </div>
 </div>
 
 <!-- Token list -->
 <div class="section-card">
     <div class="section-header">
-        <h3><i class="fas fa-list"></i> Your Tokens</h3>
+        <h3><i class="fas fa-list"></i> <span data-i18n="tokens_page.your_tokens">Your Tokens</span></h3>
         <button class="btn btn-primary btn-sm" onclick="toggleCreateForm()">
-            <i class="fas fa-plus"></i> New Token
+            <i class="fas fa-plus"></i> <span data-i18n="tokens_page.new_token">New Token</span>
         </button>
     </div>
     <div class="section-body">
@@ -273,40 +273,40 @@
         <!-- Create form (inline, hidden by default) -->
         <div class="create-form-area" id="createFormArea">
             <div class="form-group">
-                <label>Description <span style="color:#555;">(optional)</span></label>
-                <input type="text" id="tokenDescription" placeholder="e.g. My app, Home server …">
+                <label data-i18n="tokens_page.description_optional">Description <span style="color:#555;">(optional)</span></label>
+                <input type="text" id="tokenDescription" data-i18n="tokens_page.description_placeholder" placeholder="e.g. My app, Home server …">
             </div>
             <div class="form-group">
-                <label>Scope</label>
+                <label data-i18n="tokens_page.scope">Scope</label>
                 <div style="display:flex; gap:.75rem; flex-wrap:wrap; margin-top:.3rem;">
                     <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
-                        <input type="radio" name="tokenScope" value="api" checked> API only
-                        <span style="color:#555; font-size:.78rem;">(proxy requests)</span>
+                        <input type="radio" name="tokenScope" value="api" checked> <span data-i18n="tokens_page.scope_api">API only</span>
+                        <span style="color:#555; font-size:.78rem;" data-i18n="tokens_page.scope_api_hint">(proxy requests)</span>
                     </label>
                     <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
-                        <input type="radio" name="tokenScope" value="mcp"> MCP only
-                        <span style="color:#555; font-size:.78rem;">(agent tools)</span>
+                        <input type="radio" name="tokenScope" value="mcp"> <span data-i18n="tokens_page.scope_mcp">MCP only</span>
+                        <span style="color:#555; font-size:.78rem;" data-i18n="tokens_page.scope_mcp_hint">(agent tools)</span>
                     </label>
                     <label style="display:flex; align-items:center; gap:.4rem; cursor:pointer; color:#c0c0c0; font-size:.88rem;">
-                        <input type="radio" name="tokenScope" value="both"> Both
+                        <input type="radio" name="tokenScope" value="both"> <span data-i18n="tokens_page.scope_both">Both</span>
                     </label>
                 </div>
             </div>
             <div class="form-actions">
-                <button class="btn btn-primary btn-sm" onclick="submitCreateToken()">Create</button>
-                <button class="btn btn-secondary btn-sm" onclick="toggleCreateForm()">Cancel</button>
+                <button class="btn btn-primary btn-sm" onclick="submitCreateToken()" data-i18n="tokens_page.create_btn">Create</button>
+                <button class="btn btn-secondary btn-sm" onclick="toggleCreateForm()" data-i18n="tokens_page.cancel">Cancel</button>
             </div>
         </div>
 
         <!-- New token reveal -->
         <div class="new-token-reveal" id="newTokenReveal">
-            <h4><i class="fas fa-circle-check"></i> Token created successfully</h4>
+            <h4><i class="fas fa-circle-check"></i> <span data-i18n="tokens_page.token_created">Token created successfully</span></h4>
             <div class="token-value-row" style="margin:.6rem 0;">
                 <span class="token-value-text" id="newTokenValue"></span>
-                <button class="copy-btn" onclick="copyNewToken()">Copy</button>
+                <button class="copy-btn" onclick="copyNewToken()" data-i18n="tokens_page.copy">Copy</button>
             </div>
-            <p class="warn"><i class="fas fa-triangle-exclamation"></i> Copy this token now — it won't be shown again.</p>
-            <button class="btn btn-secondary btn-sm" style="margin-top:.5rem;" onclick="dismissReveal()">Done</button>
+            <p class="warn"><i class="fas fa-triangle-exclamation"></i> <span data-i18n="tokens_page.copy_now_warn">Copy this token now — it won't be shown again.</span></p>
+            <button class="btn btn-secondary btn-sm" style="margin-top:.5rem;" onclick="dismissReveal()" data-i18n="tokens_page.done">Done</button>
         </div>
 
         <!-- Token list -->
@@ -317,39 +317,39 @@
 <!-- API Docs (collapsible) -->
 <div class="section-card">
     <div class="section-header docs-toggle" id="docsToggle" onclick="toggleDocs()">
-        <h3><i class="fas fa-book-open"></i> How to use your token</h3>
-        <span style="color:#667eea; font-size:.82rem;">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
+        <h3><i class="fas fa-book-open"></i> <span data-i18n="tokens_page.how_to_use">How to use your token</span></h3>
+        <span style="color:var(--color-link); font-size:.82rem;" data-i18n="user_overview.show_hide">Show / Hide &nbsp;<span class="caret">&#9660;</span></span>
     </div>
     <div class="docs-body" id="docsBody">
         <div class="section-body">
             <p style="color:var(--color-muted); font-size:.88rem; margin-bottom:.75rem;">Add the token to every request in the <code style="background:var(--bg-accent); padding:.1rem .35rem; border-radius:3px;">Authorization</code> header:</p>
             <div class="code-block">Authorization: Bearer YOUR_API_TOKEN</div>
 
-            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Token scopes:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;" data-i18n="tokens_page.token_scopes">Token scopes:</p>
             <table class="ep-table">
-                <thead><tr><th>Scope</th><th>Access</th></tr></thead>
+                <thead><tr><th data-i18n="tokens_page.scope">Scope</th><th data-i18n="tokens_page.col_description">Description</th></tr></thead>
                 <tbody>
-                    <tr><td><code style="color:#60a5fa;">api</code></td><td>Proxy API endpoints only (<code>/api/u/…</code>)</td></tr>
+                    <tr><td><code style="color:var(--color-link);">api</code></td><td>Proxy API endpoints only (<code>/api/u/…</code>)</td></tr>
                     <tr><td><code style="color:#a78bfa;">mcp</code></td><td>MCP tool endpoints only (<code>/mcp/u/…</code>)</td></tr>
                     <tr><td><code style="color:#4ade80;">both</code></td><td>Both API and MCP endpoints</td></tr>
                 </tbody>
             </table>
 
-            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Available endpoints:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;" data-i18n="tokens_page.available_endpoints">Available endpoints:</p>
             <table class="ep-table">
-                <thead><tr><th>Method</th><th>Endpoint</th><th>Scope</th><th>Description</th></tr></thead>
+                <thead><tr><th data-i18n="tokens_page.col_method">Method</th><th data-i18n="tokens_page.col_endpoint">Endpoint</th><th data-i18n="tokens_page.scope">Scope</th><th data-i18n="tokens_page.col_description">Description</th></tr></thead>
                 <tbody>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/models</code></td>      <td><code style="color:#60a5fa;">api</code></td><td>List your models</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/providers</code></td>    <td><code style="color:#60a5fa;">api</code></td><td>List your providers</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/rotations</code></td>    <td><code style="color:#60a5fa;">api</code></td><td>List your rotations</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/autoselects</code></td>  <td><code style="color:#60a5fa;">api</code></td><td>List your autoselects</td></tr>
-                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/api/u/{{ session.username }}/chat/completions</code></td><td><code style="color:#60a5fa;">api</code></td><td>Chat using your configs</td></tr>
-                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/mcp/u/{{ session.username }}/tools</code></td>        <td><code style="color:#a78bfa;">mcp</code></td><td>List MCP tools</td></tr>
-                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/mcp/u/{{ session.username }}/tools/call</code></td>  <td><code style="color:#a78bfa;">mcp</code></td><td>Call MCP tools</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/models</code></td>      <td><code style="color:var(--color-link);">api</code></td><td data-i18n="tokens_page.ep_list_models">List your models</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/providers</code></td>    <td><code style="color:var(--color-link);">api</code></td><td data-i18n="tokens_page.ep_list_providers">List your providers</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/rotations</code></td>    <td><code style="color:var(--color-link);">api</code></td><td data-i18n="tokens_page.ep_list_rotations">List your rotations</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/api/u/{{ session.username }}/autoselects</code></td>  <td><code style="color:var(--color-link);">api</code></td><td data-i18n="tokens_page.ep_list_autoselects">List your autoselects</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/api/u/{{ session.username }}/chat/completions</code></td><td><code style="color:var(--color-link);">api</code></td><td data-i18n="tokens_page.ep_chat">Chat using your configs</td></tr>
+                    <tr><td><span class="method-badge method-GET">GET</span></td> <td><code>/mcp/u/{{ session.username }}/tools</code></td>        <td><code style="color:#a78bfa;">mcp</code></td><td data-i18n="tokens_page.ep_mcp_list">List MCP tools</td></tr>
+                    <tr><td><span class="method-badge method-POST">POST</span></td><td><code>/mcp/u/{{ session.username }}/tools/call</code></td>  <td><code style="color:#a78bfa;">mcp</code></td><td data-i18n="tokens_page.ep_mcp_call">Call MCP tools</td></tr>
                 </tbody>
             </table>
 
-            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;">Example curl commands:</p>
+            <p style="color:var(--color-muted); font-size:.88rem; margin-top:1.25rem; margin-bottom:.5rem;" data-i18n="tokens_page.example_commands">Example curl commands:</p>
             <div class="code-block"># List your models
 curl -H "Authorization: Bearer YOUR_TOKEN" \
   {{ request.base_url }}api/u/{{ session.username }}/models
@@ -374,7 +374,7 @@ function renderTokens() {
         list.innerHTML = `
             <div class="empty-state">
                 <i class="fas fa-key"></i>
-                <p>No API tokens yet.<br>Create one to start using the API.</p>
+                <p>${window.i18n.t('tokens_page.no_tokens')}<br>${window.i18n.t('tokens_page.no_tokens_hint')}</p>
             </div>`;
         return;
     }
@@ -386,16 +386,16 @@ function renderTokens() {
         <div class="token-card" id="token-${t.id}">
             <div class="token-card-top">
                 <div>
-                    <div class="token-name">${escHtml(t.description || 'Unnamed token')}</div>
+                    <div class="token-name">${escHtml(t.description || window.i18n.t('tokens_page.unnamed_token'))}</div>
                     <div class="token-meta">
-                        <span><i class="fas fa-calendar-plus"></i> Created ${formatDate(t.created_at)}</span>
-                        ${t.last_used ? `<span><i class="fas fa-clock"></i> Last used ${formatDate(t.last_used)}</span>` : ''}
+                        <span><i class="fas fa-calendar-plus"></i> ${window.i18n.t('tokens_page.created')} ${formatDate(t.created_at)}</span>
+                        ${t.last_used ? `<span><i class="fas fa-clock"></i> ${window.i18n.t('tokens_page.last_used')} ${formatDate(t.last_used)}</span>` : ''}
                         <span style="color:${scopeColor};"><i class="fas fa-shield-halved"></i> ${scopeLabel}</span>
                     </div>
                 </div>
                 <div class="token-actions">
                     <span class="status-pill ${t.is_active ? 'status-active' : 'status-inactive'}">
-                        ${t.is_active ? 'Active' : 'Inactive'}
+                        ${t.is_active ? window.i18n.t('tokens_page.active') : window.i18n.t('tokens_page.inactive')}
                     </span>
                     <button class="btn btn-danger btn-sm" onclick="deleteToken(${t.id})">
                         <i class="fas fa-trash"></i>
@@ -404,7 +404,7 @@ function renderTokens() {
             </div>
             <div class="token-value-row">
                 <span class="token-value-text">${escHtml(t.token.substring(0, 24))}…</span>
-                <button class="copy-btn" onclick="copyPartialToken(this, ${JSON.stringify(t.token)})">Copy full</button>
+                <button class="copy-btn" onclick="copyPartialToken(this, ${JSON.stringify(t.token)})">${window.i18n.t('tokens_page.copy_full')}</button>
             </div>
         </div>
     `}).join('');
@@ -500,7 +500,7 @@ function copyToClipboard(text, btn) {
 
 /* ── Delete ───────────────────────────────────────────────── */
 async function deleteToken(id) {
-    const ok = await showDangerConfirm('Delete this API token? This will immediately revoke access and cannot be undone.', 'Delete Token');
+    const ok = await showDangerConfirm(window.i18n.t('tokens_page.delete_confirm'), window.i18n.t('tokens_page.delete_token'));
     if (!ok) return;
 
     fetch('{{ url_for(request, "/dashboard/user/tokens") }}/' + id, {

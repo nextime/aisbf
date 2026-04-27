@@ -3,41 +3,41 @@
 {% block title %}Wallet{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 20px;"><i class="fas fa-wallet me-2"></i>Wallet</h2>
+<h2 style="margin-bottom: 20px;"><i class="fas fa-wallet me-2"></i><span data-i18n="wallet_page.title">Wallet</span></h2>
 
 {% if upgrade_tiers %}
 <!-- Subscription upgrade hint -->
-<div style="background: linear-gradient(135deg, rgba(74,158,255,.12), rgba(103,126,234,.08)); border: 1px solid rgba(74,158,255,.5); border-radius: 8px; padding: 14px 20px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap;">
+<div style="background: var(--bg-accent); border: 1px solid var(--color-border); border-radius: 8px; padding: 14px 20px; margin-bottom: 20px; display: flex; align-items: center; justify-content: space-between; gap: 15px; flex-wrap: wrap;">
     <div>
         <i class="fas fa-crown" style="color: #ffc107; margin-right: 8px;"></i>
-        <span style="color: var(--color-text); font-weight: 600;">Did you know?</span>
-        <span style="color: var(--color-muted); margin-left: 6px;">You can use your wallet balance to subscribe to a paid plan and unlock higher limits.</span>
+        <span style="color: var(--color-text); font-weight: 600;" data-i18n="wallet_page.did_you_know">Did you know?</span>
+        <span style="color: var(--color-muted); margin-left: 6px;" data-i18n="wallet_page.wallet_upgrade_hint">You can use your wallet balance to subscribe to a paid plan and unlock higher limits.</span>
     </div>
-    <a href="{{ url_for(request, '/dashboard/pricing') }}" style="background: linear-gradient(135deg, #4a9eff, #667eea); color: white; text-decoration: none; padding: 8px 16px; border-radius: 6px; font-size: 14px; font-weight: 600; white-space: nowrap; flex-shrink: 0;">
-        <i class="fas fa-arrow-up me-1"></i> View Plans
+    <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn">
+        <i class="fas fa-arrow-up me-1"></i> <span data-i18n="wallet_page.view_plans">View Plans</span>
     </a>
 </div>
 {% endif %}
 
 <!-- Balance Banner -->
-<div style="background: linear-gradient(135deg, #1a4a2e, var(--bg-accent)); border: 2px solid #28a745; border-radius: 8px; padding: 24px; margin-bottom: 20px;">
+<div style="background: var(--bg-panel); border: 2px solid #28a745; border-radius: 8px; padding: 24px; margin-bottom: 20px;">
     <div style="display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 15px;">
         <div>
-            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 6px;">Available Balance</div>
+            <div style="color: var(--color-muted); font-size: 14px; margin-bottom: 6px;" data-i18n="wallet_page.available_balance">Available Balance</div>
             <div style="font-size: 42px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ "%.2f"|format(wallet.balance|float) }}</div>
             <div style="color: var(--color-muted); font-size: 13px; margin-top: 6px;">
-                Currency: <span style="color: var(--color-text);">{{ wallet.currency_code }}</span>
-                &nbsp;·&nbsp; Wallet ID: <span style="color: var(--color-text); font-family: monospace;">{{ wallet.id }}</span>
+                <span data-i18n="wallet_page.currency">Currency</span>: <span style="color: var(--color-text);">{{ wallet.currency_code }}</span>
+                &nbsp;·&nbsp; <span data-i18n="wallet_page.wallet_id">Wallet ID</span>: <span style="color: var(--color-text); font-family: monospace;">{{ wallet.id }}</span>
             </div>
         </div>
         <div style="text-align: right;">
             {% if wallet.auto_topup_enabled %}
             <span style="background: #28a745; color: white; padding: 4px 12px; border-radius: 10px; font-size: 13px;">
-                <i class="fas fa-sync-alt me-1"></i>Auto Top-Up Active
+                <i class="fas fa-sync-alt me-1"></i><span data-i18n="wallet_page.auto_topup_active">Auto Top-Up Active</span>
             </span>
             {% else %}
             <span style="background: #6c757d; color: white; padding: 4px 12px; border-radius: 10px; font-size: 13px;">
-                <i class="fas fa-sync-alt me-1"></i>Auto Top-Up Off
+                <i class="fas fa-sync-alt me-1"></i><span data-i18n="wallet_page.auto_topup_off">Auto Top-Up Off</span>
             </span>
             {% endif %}
         </div>
@@ -47,9 +47,9 @@
 <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px; margin-bottom: 20px;">
 
     <!-- Top Up -->
-    <div style="background: var(--bg-panel); border: 2px solid #4a9eff; border-radius: 8px; padding: 20px;">
-        <h3 style="margin: 0 0 18px 0; color: #4a9eff;">
-            <i class="fas fa-plus-circle me-2"></i>Top Up Wallet
+    <div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px;">
+        <h3 style="margin: 0 0 18px 0; color: var(--color-link);">
+            <i class="fas fa-plus-circle me-2"></i><span data-i18n="wallet_page.topup_title">Top Up Wallet</span>
         </h3>
 
         {% set fiat_gateways = enabled_gateways.keys() | select('in', ['stripe', 'paypal']) | list %}
@@ -57,26 +57,26 @@
 
         {% if not enabled_gateways %}
         <div style="color: var(--color-muted); text-align: center; padding: 20px 10px;">
-            <i class="fas fa-info-circle fa-2x" style="margin-bottom: 12px; display: block; color: #4a9eff;"></i>
-            No payment methods are currently enabled.<br>
-            <span style="font-size: 13px;">Please contact the administrator to enable a payment gateway.</span>
+            <i class="fas fa-info-circle fa-2x" style="margin-bottom: 12px; display: block; color: var(--color-link);"></i>
+            <span data-i18n="wallet_page.no_payment_methods">No payment methods are currently enabled.</span><br>
+            <span style="font-size: 13px;" data-i18n="wallet_page.contact_admin">Please contact the administrator to enable a payment gateway.</span>
         </div>
         {% else %}
 
         {% if fiat_gateways %}
         <div style="margin-bottom: 16px;">
-            <div style="color: var(--color-muted); font-size: 13px; margin-bottom: 8px;">Quick amounts</div>
+            <div style="color: var(--color-muted); font-size: 13px; margin-bottom: 8px;" data-i18n="wallet_page.quick_amounts">Quick amounts</div>
             <div style="display: flex; gap: 8px; flex-wrap: wrap;">
                 {% for amt in [10, 15, 20, 50, 100] %}
                 <button type="button" class="amount-btn" data-amount="{{ amt }}"
-                    style="background: var(--bg-page); border: 1px solid #4a9eff; color: #4a9eff; padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
+                    style="background: var(--bg-page); border: 1px solid var(--color-link); color: var(--color-link); padding: 8px 16px; border-radius: 6px; cursor: pointer; font-size: 14px; transition: all .15s;">
                     {{ currency_symbol }}{{ amt }}
                 </button>
                 {% endfor %}
             </div>
         </div>
         <div style="margin-bottom: 16px;">
-            <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Custom amount</label>
+            <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;" data-i18n="wallet_page.custom_amount">Custom amount</label>
             <input type="number" id="custom-amount"
                 style="width: 100%; padding: 10px; background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; color: var(--color-text); font-size: 15px;"
                 placeholder="Enter amount ({{ currency_symbol }}5 – {{ currency_symbol }}500)" step="0.01" min="5" max="500">
@@ -103,14 +103,14 @@
         <hr style="border-color: var(--color-border); margin: 4px 0 14px 0;">
         {% endif %}
         <div style="color: var(--color-muted); font-size: 13px; margin-bottom: 10px;">
-            <i class="fas fa-coins me-1"></i>Crypto deposit
+            <i class="fas fa-coins me-1"></i><span data-i18n="wallet_page.crypto_deposit">Crypto deposit</span>
         </div>
         <div style="display: flex; flex-wrap: wrap; gap: 8px;">
         {% for name in crypto_gateways %}
         {% set cfg = enabled_gateways[name] %}
         <button onclick="openCryptoModal('{{ name }}')"
             style="background:var(--bg-page); border:1px solid var(--color-border); color:var(--color-text); padding:8px 16px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600; display:flex; align-items:center; gap:6px; transition:border-color .15s;"
-            onmouseover="this.style.borderColor='#4a9eff'" onmouseout="this.style.borderColor='var(--color-border)'">
+            onmouseover="this.style.borderColor='var(--color-link)'" onmouseout="this.style.borderColor='var(--color-border)'">
             {% if name == 'bitcoin' %}<i class="fab fa-bitcoin" style="color:#f7931a;"></i>
             {% elif name == 'ethereum' %}<i class="fab fa-ethereum" style="color:#627eea;"></i>
             {% else %}<i class="fas fa-coins" style="color:#26a17b;"></i>
@@ -125,9 +125,9 @@
     </div>
 
     <!-- Auto Top-Up -->
-    <div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px;">
-        <h3 style="margin: 0 0 18px 0; color: #17a2b8;">
-            <i class="fas fa-sync-alt me-2"></i>Auto Top-Up Settings
+    <div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px;">
+        <h3 style="margin: 0 0 18px 0; color: var(--color-link);">
+            <i class="fas fa-sync-alt me-2"></i><span data-i18n="wallet_page.auto_topup_title">Auto Top-Up Settings</span>
         </h3>
 
         <div style="display: flex; align-items: center; gap: 12px; margin-bottom: 20px;">
@@ -136,17 +136,17 @@
                     {% if wallet.auto_topup_enabled %}checked{% endif %}
                     style="opacity: 0; width: 0; height: 0; position: absolute;">
                 <label for="auto-topup-enabled" id="toggle-label"
-                    style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: #6c757d; border-radius: 26px; transition: .3s;">
+                    style="position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background: var(--color-subtle); border-radius: 26px; transition: .3s;">
                     <span id="toggle-knob" style="position: absolute; height: 20px; width: 20px; left: 3px; bottom: 3px; background: white; border-radius: 50%; transition: .3s;"></span>
                 </label>
             </div>
-            <span style="color: var(--color-text); font-size: 15px;">Enable Auto Top-Up</span>
+            <span style="color: var(--color-text); font-size: 15px;" data-i18n="wallet_page.enable_auto_topup">Enable Auto Top-Up</span>
         </div>
 
         <div id="auto-topup-settings" {% if not wallet.auto_topup_enabled %}style="display:none;"{% endif %}>
             {% if stripe_cards %}
             <div style="margin-bottom: 14px;">
-                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Top-up amount</label>
+                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;" data-i18n="wallet_page.topup_amount">Top-up amount</label>
                 <div style="position: relative;">
                     <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #4ade80; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-amount"
@@ -155,7 +155,7 @@
                 </div>
             </div>
             <div style="margin-bottom: 14px;">
-                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;">Trigger when balance falls below</label>
+                <label style="display: block; color: var(--color-muted); font-size: 13px; margin-bottom: 6px;" data-i18n="wallet_page.trigger_below">Trigger when balance falls below</label>
                 <div style="position: relative;">
                     <span style="position: absolute; left: 11px; top: 50%; transform: translateY(-50%); color: #ffc107; font-weight: bold;">{{ currency_symbol }}</span>
                     <input type="number" id="auto-topup-threshold"
@@ -165,28 +165,28 @@
             </div>
             <div style="margin-bottom: 14px; color: var(--color-muted); font-size: 13px;">
                 <i class="fab fa-cc-stripe me-1"></i>
-                Charged to your default credit card:
+                <span data-i18n="wallet_page.charged_to_card">Charged to your default credit card:</span>
                 {% set default_card = stripe_cards | selectattr('is_default') | first | default(stripe_cards[0]) %}
                 <strong style="color: var(--color-text);">•••• {{ default_card.last4 or '????'  }} ({{ default_card.brand | default('Card') | capitalize }})</strong>
             </div>
             <button id="save-auto-topup"
-                style="background: #17a2b8; border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .15s;">
-                <i class="fas fa-save me-2"></i>Save Settings
+                style="background: var(--color-primary); border: none; color: white; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-size: 14px; font-weight: 600; transition: background .15s;">
+                <i class="fas fa-save me-2"></i><span data-i18n="wallet_page.save_settings">Save Settings</span>
             </button>
             {% else %}
             <div style="background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; padding: 16px; text-align: center;">
-                <p style="color: var(--color-muted); margin: 0 0 12px 0; font-size: 13px;">
+                <p style="color: var(--color-muted); margin: 0 0 12px 0; font-size: 13px;" data-i18n="wallet_page.no_card">
                     Auto top-up charges your saved credit card automatically.<br>You don't have a credit card on file yet.
                 </p>
                 <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn" style="font-size: 13px; padding: 8px 16px;">
-                    <i class="fab fa-cc-stripe me-2"></i>Add Credit Card
+                    <i class="fab fa-cc-stripe me-2"></i><span data-i18n="wallet_page.add_credit_card">Add Credit Card</span>
                 </a>
             </div>
             {% endif %}
         </div>
 
         {% if not wallet.auto_topup_enabled %}
-        <div style="color: var(--color-muted); font-size: 13px; line-height: 1.6;">
+        <div style="color: var(--color-muted); font-size: 13px; line-height: 1.6;" data-i18n="wallet_page.auto_topup_desc">
             Enable auto top-up to automatically reload your wallet when the balance drops below a threshold. This ensures uninterrupted API access.
         </div>
         {% endif %}
@@ -194,20 +194,20 @@
 </div>
 
 <!-- Transaction History -->
-<div style="background: var(--bg-panel); border: 2px solid #6f42c1; border-radius: 8px; padding: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #a57bff;">
-        <i class="fas fa-history me-2"></i>Transaction History
+<div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
+        <i class="fas fa-history me-2"></i><span data-i18n="wallet_page.tx_history">Transaction History</span>
     </h3>
 
     <div style="overflow-x: auto;">
         <table style="width: 100%; border-collapse: collapse;">
             <thead>
                 <tr style="background: var(--bg-accent); color: var(--color-text);">
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Date</th>
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Type</th>
-                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Description</th>
-                    <th style="padding: 12px 14px; text-align: right; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Amount</th>
-                    <th style="padding: 12px 14px; text-align: center; font-weight: 600; border-bottom: 1px solid var(--bg-page);">Status</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);" data-i18n="wallet_page.col_date">Date</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);" data-i18n="wallet_page.col_type">Type</th>
+                    <th style="padding: 12px 14px; text-align: left; font-weight: 600; border-bottom: 1px solid var(--bg-page);" data-i18n="wallet_page.col_description">Description</th>
+                    <th style="padding: 12px 14px; text-align: right; font-weight: 600; border-bottom: 1px solid var(--bg-page);" data-i18n="wallet_page.col_amount">Amount</th>
+                    <th style="padding: 12px 14px; text-align: center; font-weight: 600; border-bottom: 1px solid var(--bg-page);" data-i18n="wallet_page.col_status">Status</th>
                 </tr>
             </thead>
             <tbody id="transaction-list">
@@ -232,13 +232,13 @@
             <div id="cryptoQR" style="margin: 0 auto 16px; width:200px; height:200px; background:#fff; border-radius:8px; display:flex; align-items:center; justify-content:center;">
                 <i class="fas fa-spinner fa-spin fa-2x" style="color:var(--bg-accent);"></i>
             </div>
-            <div style="color:var(--color-muted); font-size:12px; margin-bottom:6px;">${window.i18n.t('wallet.send_to_address')}</div>
+            <div style="color:var(--color-muted); font-size:12px; margin-bottom:6px;" data-i18n="wallet.send_to_address">${window.i18n.t('wallet.send_to_address')}</div>
             <div id="cryptoAddress" style="font-family:monospace; font-size:12px; color:var(--color-text); word-break:break-all; background:var(--bg-page); padding:10px; border-radius:6px; margin-bottom:12px;"></div>
             <button onclick="copyCryptoAddress()"
-                style="background:#4a9eff; border:none; color:white; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">
-                <i class="fas fa-copy me-1"></i>Copy Address
+                style="background:var(--color-primary); border:none; color:white; padding:8px 20px; border-radius:6px; cursor:pointer; font-size:13px; font-weight:600;">
+                <i class="fas fa-copy me-1"></i><span data-i18n="wallet.copy_address">Copy Address</span>
             </button>
-            <div style="color:#6c757d; font-size:11px; margin-top:12px;">${window.i18n.t('wallet.balance_credited')}</div>
+            <div style="color:var(--color-subtle); font-size:11px; margin-top:12px;" data-i18n="wallet.balance_credited">${window.i18n.t('wallet.balance_credited')}</div>
         </div>
     </div>
 </div>
@@ -247,14 +247,14 @@
 {% block extra_js %}
 <style>
 .amount-btn:hover, .amount-btn.active {
-    background: #4a9eff !important;
+    background: var(--color-link) !important;
     color: #fff !important;
-    border-color: #4a9eff !important;
+    border-color: var(--color-link) !important;
 }
 .topup-fiat-btn[data-method="stripe"]:hover:not(:disabled) { background: #4f49d0 !important; }
 .topup-fiat-btn[data-method="paypal"]:hover:not(:disabled)  { background: #00256b !important; }
-#save-auto-topup:hover { background: #138496 !important; }
-#toggle-label.on     { background: #17a2b8 !important; }
+#save-auto-topup:hover { background: var(--color-primary-hover) !important; }
+#toggle-label.on     { background: var(--color-link) !important; }
 #toggle-label.on #toggle-knob { transform: translateX(22px); }
 </style>
 
@@ -290,7 +290,7 @@ document.addEventListener('DOMContentLoaded', function () {
         btn.addEventListener('click', function () {
             const amount = getAmount();
             if (!amount || amount < 5 || amount > 500) {
-                showAlert('Please select or enter an amount between {{ currency_symbol }}5 and {{ currency_symbol }}500.', 'Invalid Amount', '⚠️', 'warn');
+                showAlert(window.i18n.interpolate(window.i18n.t('wallet_page.invalid_amount'), {min: '{{ currency_symbol }}5', max: '{{ currency_symbol }}500'}), window.i18n.t('wallet_page.invalid_amount_title'), '⚠️', 'warn');
                 return;
             }
             const method = this.dataset.method;
@@ -344,12 +344,12 @@ document.addEventListener('DOMContentLoaded', function () {
     function syncToggle() {
         if (toggle.checked) {
             label.classList.add('on');
-            label.style.background = '#17a2b8';
+            label.style.background = 'var(--color-link)';
             document.getElementById('toggle-knob').style.transform = 'translateX(22px)';
             settings.style.display = 'block';
         } else {
             label.classList.remove('on');
-            label.style.background = '#6c757d';
+            label.style.background = 'var(--color-subtle)';
             document.getElementById('toggle-knob').style.transform = 'translateX(0)';
             settings.style.display = 'none';
         }
@@ -374,7 +374,7 @@ document.addEventListener('DOMContentLoaded', function () {
         .then(data => {
             if (data.success) {
                 this.textContent = window.i18n.t('wallet.saved');
-                setTimeout(() => { this.innerHTML = '<i class="fas fa-save me-2"></i>Save Settings'; }, 2000);
+                setTimeout(() => { this.innerHTML = `<i class="fas fa-save me-2"></i>${window.i18n.t('wallet_page.save_settings')}`; }, 2000);
             } else {
                 showAlert(data.error || window.i18n.t('wallet.save_failed'), 'Error', '❌', 'danger');
             }

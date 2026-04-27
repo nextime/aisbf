@@ -323,7 +323,7 @@ class CodexProviderHandler(BaseProviderHandler):
                     })
                 
                 # Add function calls
-                for tool_call in msg.get("tool_calls", []):
+                for tool_call in msg.get("tool_calls") or []:
                     result.append({
                         "type": "function_call",
                         "call_id": tool_call.get("id", ""),
@@ -483,25 +483,32 @@ class CodexProviderHandler(BaseProviderHandler):
     
     def _convert_sse_to_openai_format(self, events: List[Dict], model: str) -> Dict:
         """Convert Responses API SSE events to OpenAI Chat Completions format."""
-        # Accumulate response
         response_id = None
         content = ""
         tool_calls = []
-        finish_reason = None
+        raw_finish_reason = None
         usage = {}
-        
+
         for event in events:
             event_type = event.get("event")
             data = event.get("data", {})
-            
+
             if event_type == "response.created":
                 response_id = data.get("response_id")
-            
+
+            elif event_type in ("response.output_text.delta",):
+                # Primary text-delta event from the Responses API
+                text = data.get("delta", "")
+                if text:
+                    content += text
+
             elif event_type == "response.content_part.delta":
+                # Alternative text-delta form: delta is a dict with a "text" key
                 delta = data.get("delta", {})
-                if "text" in delta:
-                    content += delta["text"]
-            
+                text = delta.get("text", "") if isinstance(delta, dict) else str(delta)
+                if text:
+                    content += text
+
             elif event_type == "response.output_item.done":
                 item = data.get("item", {})
                 if item.get("type") == "function_call":
@@ -513,20 +520,26 @@ class CodexProviderHandler(BaseProviderHandler):
                             "arguments": item.get("arguments", "{}")
                         }
                     })
-            
+
             elif event_type == "response.done":
-                finish_reason = data.get("status", "stop")
+                raw_finish_reason = data.get("status", "stop")
                 usage = data.get("usage", {})
-        
-        # Build OpenAI-compatible response
+
+        # Map Responses API status → OpenAI finish_reason
+        if tool_calls:
+            finish_reason = "tool_calls"
+        elif raw_finish_reason in (None, "completed"):
+            finish_reason = "stop"
+        else:
+            finish_reason = raw_finish_reason
+
         message = {
             "role": "assistant",
             "content": content if content else None,
         }
-        
         if tool_calls:
             message["tool_calls"] = tool_calls
-        
+
         return {
             "id": response_id or f"chatcmpl-{uuid.uuid4().hex[:8]}",
             "object": "chat.completion",
@@ -535,15 +548,159 @@ class CodexProviderHandler(BaseProviderHandler):
             "choices": [{
                 "index": 0,
                 "message": message,
-                "finish_reason": finish_reason or "stop"
+                "finish_reason": finish_reason,
             }],
             "usage": {
                 "prompt_tokens": usage.get("input_tokens", 0),
                 "completion_tokens": usage.get("output_tokens", 0),
-                "total_tokens": usage.get("total_tokens", 0)
-            }
+                "total_tokens": usage.get("total_tokens", 0),
+            },
         }
-    
+
+    async def _stream_oauth2_response(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        request_payload: Dict,
+        model: str,
+    ) -> AsyncIterator[Dict]:
+        """
+        Async generator: converts ChatGPT Responses API SSE events into
+        OpenAI-compatible streaming chunks (dicts).  Yields a raw bytes
+        ``data: [DONE]\\n\\n`` sentinel at the end so clients know the stream
+        is finished.
+        """
+        response_id = f"chatcmpl-{uuid.uuid4().hex[:8]}"
+        created_time = int(time.time())
+        tool_call_index = 0
+
+        if AISBF_DEBUG:
+            logger.info(f"CodexProviderHandler: Starting OAuth2 SSE stream to {url}")
+
+        async with httpx.AsyncClient(timeout=300.0) as client:
+            async with client.stream(
+                "POST",
+                url,
+                headers=headers,
+                json=request_payload,
+            ) as response:
+                if response.status_code >= 400:
+                    error_body = await response.aread()
+                    logger.error(
+                        f"CodexProviderHandler: Streaming error {response.status_code}: "
+                        f"{error_body.decode('utf-8')}"
+                    )
+                    response.raise_for_status()
+
+                async for event in self._parse_sse_stream(response):
+                    event_type = event.get("event")
+                    data = event.get("data", {})
+
+                    if event_type == "response.created":
+                        if data.get("response_id"):
+                            response_id = data["response_id"]
+
+                    elif event_type in ("response.output_text.delta",):
+                        # Primary text delta
+                        text = data.get("delta", "")
+                        if text:
+                            yield {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                            }
+
+                    elif event_type == "response.content_part.delta":
+                        # Alternative text delta: delta is {"text": "..."}
+                        delta = data.get("delta", {})
+                        text = delta.get("text", "") if isinstance(delta, dict) else str(delta)
+                        if text:
+                            yield {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{"index": 0, "delta": {"content": text}, "finish_reason": None}],
+                            }
+
+                    elif event_type == "response.output_item.added":
+                        # A new output item started (function-call header)
+                        item = data.get("item", {})
+                        if item.get("type") == "function_call":
+                            yield {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "tool_calls": [{
+                                            "index": tool_call_index,
+                                            "id": item.get("call_id", ""),
+                                            "type": "function",
+                                            "function": {"name": item.get("name", ""), "arguments": ""},
+                                        }]
+                                    },
+                                    "finish_reason": None,
+                                }],
+                            }
+
+                    elif event_type == "response.function_call_arguments.delta":
+                        # Streaming function-call argument tokens
+                        arguments_delta = data.get("delta", "")
+                        if arguments_delta:
+                            yield {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "tool_calls": [{
+                                            "index": tool_call_index,
+                                            "function": {"arguments": arguments_delta},
+                                        }]
+                                    },
+                                    "finish_reason": None,
+                                }],
+                            }
+
+                    elif event_type == "response.output_item.done":
+                        item = data.get("item", {})
+                        if item.get("type") == "function_call":
+                            tool_call_index += 1
+
+                    elif event_type == "response.done":
+                        raw_status = data.get("status", "stop")
+                        usage = data.get("usage", {})
+                        # Map Responses API status → OpenAI finish_reason
+                        if tool_call_index > 0:
+                            finish_reason = "tool_calls"
+                        elif raw_status in (None, "completed"):
+                            finish_reason = "stop"
+                        else:
+                            finish_reason = raw_status
+
+                        yield {
+                            "id": response_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_time,
+                            "model": model,
+                            "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}],
+                            "usage": {
+                                "prompt_tokens": usage.get("input_tokens", 0),
+                                "completion_tokens": usage.get("output_tokens", 0),
+                                "total_tokens": usage.get("total_tokens", 0),
+                            },
+                        }
+
+        # SSE end-of-stream sentinel (passed through as raw bytes by the handler)
+        yield b"data: [DONE]\n\n"
+
     async def _handle_request_oauth2_mode(
         self,
         model: str,
@@ -555,33 +712,31 @@ class CodexProviderHandler(BaseProviderHandler):
         tool_choice: Optional[Union[str, Dict]] = None,
     ) -> Union[Dict, object]:
         """Handle request using ChatGPT Responses API."""
-        # Get valid API key (with OAuth2 refresh if needed)
         api_key = await self._get_valid_api_key()
-        
-        # Build Responses API request
+
         request_payload = self._build_responses_request(
             model=model,
             messages=messages,
             max_tokens=max_tokens,
             temperature=temperature,
             tools=tools,
-            tool_choice=tool_choice
+            tool_choice=tool_choice,
         )
-        
-        # Generate conversation ID for tracking
         conversation_id = str(uuid.uuid4())
-        
-        # Build headers
         headers = self._build_headers(api_key, conversation_id)
-        
-        # Make request to Responses API
         url = f"{self.base_url}/codex/responses"
-        
-        logger.info(f"CodexProviderHandler: Sending request to {url}")
+
+        logger.info(f"CodexProviderHandler: Sending {'streaming' if stream else 'non-streaming'} OAuth2 request to {url}")
         if AISBF_DEBUG:
             logger.info(f"CodexProviderHandler: Request payload: {json.dumps(request_payload, indent=2)}")
             logger.info(f"CodexProviderHandler: Request headers: {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
-        
+
+        if stream:
+            # Return an async generator so the streaming handler can iterate it
+            # directly and forward chunks to the client as they arrive.
+            return self._stream_oauth2_response(url, headers, request_payload, model)
+
+        # Non-streaming: collect all Responses API SSE events then convert.
         async with httpx.AsyncClient(timeout=300.0) as client:
             async with client.stream(
                 "POST",
@@ -593,21 +748,14 @@ class CodexProviderHandler(BaseProviderHandler):
                     error_body = await response.aread()
                     logger.error(f"CodexProviderHandler: Error response status: {response.status_code}")
                     logger.error(f"CodexProviderHandler: Error response body: {error_body.decode('utf-8')}")
-                
+
                 response.raise_for_status()
-                
-                # Parse SSE stream
+
                 events = []
                 async for event in self._parse_sse_stream(response):
                     events.append(event)
-                    
-                    # For streaming, we would yield events here
-                    # For now, accumulate all events
-                
-                # Convert to OpenAI format
-                openai_response = self._convert_sse_to_openai_format(events, model)
-                
-                return openai_response
+
+                return self._convert_sse_to_openai_format(events, model)
     
     # =========================================================================
     # Main Request Handler (Routes to appropriate mode)
@@ -771,3 +919,33 @@ class CodexProviderHandler(BaseProviderHandler):
             
             logger.info(f"CodexProviderHandler: Returned {len(default_models)} default models as fallback")
             return default_models
+
+    def supports_usage(self) -> bool:
+        return not self._use_api_key_mode and self.oauth2.is_authenticated()
+
+    async def get_usage(self) -> Optional[Dict]:
+        try:
+            # Always use the OAuth2 token — /wham/usage is a ChatGPT backend endpoint
+            # that requires an OAuth2 bearer token, not an API key.
+            token = await self.oauth2.get_valid_token_with_refresh()
+            if not token:
+                logger.warning(f"CodexProviderHandler: No OAuth2 token available for usage fetch")
+                return None
+            logger.debug(f"CodexProviderHandler: Fetching usage with OAuth2 token (len={len(token)})")
+            headers = self._build_headers(token)
+            headers["Accept"] = "application/json"
+            async with httpx.AsyncClient() as client:
+                response = await client.get(
+                    "https://chatgpt.com/backend-api/wham/usage",
+                    headers=headers,
+                    timeout=10.0
+                )
+                logger.debug(f"CodexProviderHandler: Usage response status={response.status_code} headers={dict(response.headers)}")
+                response.raise_for_status()
+                data = response.json()
+                import json as _json
+                logger.debug(f"CodexProviderHandler: Usage raw body for {self.provider_id}:\n{_json.dumps(data, indent=2)}")
+                return data
+        except Exception as e:
+            logger.warning(f"CodexProviderHandler: Failed to fetch usage: {e}")
+            return None

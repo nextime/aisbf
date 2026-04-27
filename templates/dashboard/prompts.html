@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}Prompts - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">Prompts Configuration</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="prompts_page.title">Prompts Configuration</h2>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -30,7 +30,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endif %}
 
 <div style="margin-bottom: 20px;">
-    <label style="font-weight: 500; margin-bottom: 10px; display: block;">Select Prompt File:</label>
+    <label style="font-weight: 500; margin-bottom: 10px; display: block;" data-i18n="prompts_page.select_file">Select Prompt File:</label>
     <select id="prompt-selector" onchange="switchPrompt()">
         {% for prompt in prompts %}
         <option value="{{ prompt.key }}" {% if loop.first %}selected{% endif %}>{{ prompt.name }}</option>
@@ -44,7 +44,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="form-group">
         <label for="prompt_content" data-i18n="prompts_page.content">Prompt Content:</label>
         <textarea id="prompt_content" name="prompt_content" style="min-height: 400px;"></textarea>
-        <small style="color: #a0a0a0; display: block; margin-top: 5px;">Edit the prompt template. Use markdown formatting as needed.</small>
+        <small style="color: var(--color-muted); display: block; margin-top: 5px;" data-i18n="prompts_page.content_hint">Edit the prompt template. Use markdown formatting as needed.</small>
     </div>
     
     <div style="display: flex; gap: 10px; margin-top: 20px;">
@@ -52,7 +52,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         {% if not is_admin %}
         <button type="button" class="btn btn-secondary" onclick="resetPrompt()" data-i18n="prompts_page.reset">Reset to Default</button>
         {% endif %}
-        <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
+        <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary" data-i18n="prompts_page.cancel">Cancel</a>
     </div>
 </form>
 
@@ -74,7 +74,7 @@ function switchPrompt() {
 
 async function resetPrompt() {
     if (!currentPromptKey) return;
-    const ok = await showDangerConfirm('Are you sure you want to reset this prompt to the default admin configuration?', 'Reset Prompt');
+    const ok = await showDangerConfirm(window.i18n.t('prompts_page.reset_confirm'), window.i18n.t('prompts_page.reset_confirm_title'));
     if (ok) {
         fetch('/dashboard/prompts/reset/' + currentPromptKey, {
             method: 'POST',

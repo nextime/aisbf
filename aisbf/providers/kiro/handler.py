@@ -221,23 +221,22 @@ class KiroProviderHandler(BaseProviderHandler):
                         self.record_failure()
                         raise
 
-            # Check for 429 rate limit error before raising
-            if response.status_code == 429:
+            # Detect and handle rate-limit responses (429, 402-with-limit-body, …)
+            if response.status_code >= 400:
                 try:
                     response_data = response.json()
                 except Exception:
                     response_data = response.text
 
-                self.handle_429_error(response_data, dict(response.headers))
-                response.raise_for_status()
+                if self.is_rate_limit_response(response.status_code, response_data, dict(response.headers)):
+                    logging.warning(f"KiroProviderHandler: Rate limit response (HTTP {response.status_code}): {response_data}")
+                    self.handle_rate_limit_response(response.status_code, response_data, dict(response.headers))
+                    # handle_rate_limit_response always raises RateLimitError — unreachable
 
-            # Log error details for non-2xx responses before raising
-            if response.status_code >= 400:
-                try:
-                    error_body = response.json()
-                    logging.error(f"KiroProviderHandler: API error response: {json.dumps(error_body, indent=2)}")
-                except Exception:
-                    logging.error(f"KiroProviderHandler: API error response (text): {response.text}")
+                if isinstance(response_data, dict):
+                    logging.error(f"KiroProviderHandler: API error response: {json.dumps(response_data, indent=2)}")
+                else:
+                    logging.error(f"KiroProviderHandler: API error response (text): {response_data}")
 
             response.raise_for_status()
 
@@ -323,14 +322,25 @@ class KiroProviderHandler(BaseProviderHandler):
         logger = logging.getLogger(__name__)
         logger.info(f"KiroProviderHandler: Starting streaming request")
 
-        async with httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0)) as streaming_client:
+        # Use longer timeout for streaming (10 minutes total, 30s connect, 120s read between chunks)
+        async with httpx.AsyncClient(timeout=httpx.Timeout(600.0, connect=30.0, read=120.0)) as streaming_client:
             async with streaming_client.stream("POST", kiro_api_url, json=payload, headers=headers) as response:
                 logger.info(f"KiroProviderHandler: Streaming response status: {response.status_code}")
 
                 if response.status_code >= 400:
-                    error_text = await response.aread()
-                    logger.error(f"KiroProviderHandler: Streaming error: {error_text}")
-                    raise Exception(f"Kiro API error: {response.status_code}")
+                    error_body = await response.aread()
+                    logger.error(f"KiroProviderHandler: Streaming error: {error_body}")
+                    try:
+                        response_data = json.loads(error_body)
+                    except Exception:
+                        response_data = error_body.decode('utf-8') if isinstance(error_body, bytes) else str(error_body)
+
+                    if self.is_rate_limit_response(response.status_code, response_data, dict(response.headers)):
+                        logger.warning(f"KiroProviderHandler: Streaming rate limit response (HTTP {response.status_code})")
+                        self.handle_rate_limit_response(response.status_code, response_data, dict(response.headers))
+                        # handle_rate_limit_response always raises RateLimitError — unreachable
+
+                    raise Exception(f"Kiro API error: {response.status_code}: {error_body}")
 
                 from .parsers import AwsEventStreamParser
                 parser = AwsEventStreamParser()
@@ -340,9 +350,24 @@ class KiroProviderHandler(BaseProviderHandler):
 
                 first_chunk = True
                 accumulated_content = ""
+                last_chunk_time = time.time()
+                keepalive_interval = 30.0  # Send keepalive every 30 seconds
+
+                async def send_keepalive_if_needed():
+                    """Send keepalive comment to prevent client timeout"""
+                    nonlocal last_chunk_time
+                    current_time = time.time()
+                    if current_time - last_chunk_time > keepalive_interval:
+                        # Send SSE comment as keepalive (comments start with ':')
+                        yield b": keepalive\n\n"
+                        last_chunk_time = current_time
+                        logger.debug("KiroProviderHandler: Sent keepalive")
 
                 async for chunk in response.aiter_bytes():
                     if not chunk:
+                        # Check if we need to send keepalive during empty chunks
+                        async for keepalive in send_keepalive_if_needed():
+                            yield keepalive
                         continue
 
                     parser.feed(chunk)
@@ -373,6 +398,11 @@ class KiroProviderHandler(BaseProviderHandler):
                         }
 
                         yield f"data: {json.dumps(openai_chunk, ensure_ascii=False)}\n\n".encode('utf-8')
+                        last_chunk_time = time.time()  # Update last chunk time
+                    else:
+                        # No content delta, check if we need keepalive
+                        async for keepalive in send_keepalive_if_needed():
+                            yield keepalive
 
                 logger.info(f"KiroProviderHandler: Streaming completed")
 

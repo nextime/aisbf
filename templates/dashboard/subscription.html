@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 
 {% block content %}
-<h2 style="margin-bottom: 30px;">Subscription Management</h2>
+<h2 style="margin-bottom: 30px;" data-i18n="subscription_page.title">Subscription Management</h2>
 
 {% if success %}
 <div class="alert alert-success">{{ success }}</div>
@@ -12,9 +12,9 @@
 {% endif %}
 
 <!-- Current Plan Status -->
-<div style="background: #16213e; border: 2px solid #4a9eff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #4a9eff;">
-        <i class="fas fa-star me-2"></i>Current Plan
+<div style="background: var(--bg-panel); border: 2px solid var(--color-link); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
+        <i class="fas fa-star me-2"></i><span data-i18n="subscription_page.current_plan">Current Plan</span>
     </h3>
 
     {% if current_tier %}
@@ -23,39 +23,39 @@
             <div style="display: flex; align-items: center; margin-bottom: 10px;">
                 <h3 style="margin: 0 15px 0 0;">{{ current_tier.name }}</h3>
                 {% if current_tier.is_default %}
-                <span style="background: #28a745; color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px;">Free Tier</span>
+                <span style="background: #28a745; color: white; padding: 4px 12px; border-radius: 15px; font-size: 12px;" data-i18n="subscription_page.free_tier">Free Tier</span>
                 {% endif %}
             </div>
-            <p style="color: #a0a0a0; margin: 0;">{{ current_tier.description if current_tier.description else 'No description available' }}</p>
+            <p style="color: var(--color-muted); margin: 0;">{{ current_tier.description if current_tier.description else '' }}<span {% if not current_tier.description %}data-i18n="subscription_page.no_description"{% endif %}>{{ '' if current_tier.description else 'No description available' }}</span></p>
         </div>
         <div style="text-align: right;">
             {% if not current_tier.is_default %}
             <div style="margin-bottom: 10px;">
                 <span style="font-size: 24px; font-weight: bold; color: #4ade80;">{{ currency_symbol }}{{ current_tier.price_monthly }}</span>
-                <span style="color: #a0a0a0; font-size: 14px;">/month</span>
+                <span style="color: var(--color-muted); font-size: 14px;" data-i18n="subscription_page.per_month">/month</span>
                 <br>
-                <small style="color: #a0a0a0;">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</small>
+                <small style="color: var(--color-muted);">or {{ currency_symbol }}{{ current_tier.price_yearly }}/year</small>
             </div>
             {% endif %}
             <a href="{{ url_for(request, '/dashboard/pricing') }}" class="btn">
-                <i class="fas fa-arrow-up me-2"></i>Change Plan
+                <i class="fas fa-arrow-up me-2"></i><span data-i18n="subscription_page.change_plan">Change Plan</span>
             </a>
         </div>
     </div>
 
     <!-- Plan Limits -->
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 15px; margin-bottom: 20px;">
-        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
-            <div style="font-size: 24px; font-weight: bold; color: #4a9eff; margin-bottom: 5px;">
+        <div style="text-align: center; padding: 15px; background: var(--bg-accent); border-radius: 5px;">
+            <div style="font-size: 24px; font-weight: bold; color: var(--color-link); margin-bottom: 5px;">
                 {% if current_tier.max_requests_per_day == -1 %}
                 ∞
                 {% elif current_tier.max_requests_per_day is not none %}
                 {{ "{:,}".format(current_tier.max_requests_per_day) }}
                 {% else %}∞{% endif %}
             </div>
-            <div style="color: #a0a0a0; font-size: 12px;">Requests per day</div>
+            <div style="color: var(--color-muted); font-size: 12px;" data-i18n="subscription_page.requests_per_day">Requests per day</div>
         </div>
-        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+        <div style="text-align: center; padding: 15px; background: var(--bg-accent); border-radius: 5px;">
             <div style="font-size: 24px; font-weight: bold; color: #4ade80; margin-bottom: 5px;">
                 {% if current_tier.max_requests_per_month == -1 %}
                 ∞
@@ -63,9 +63,9 @@
                 {{ "{:,}".format(current_tier.max_requests_per_month) }}
                 {% else %}∞{% endif %}
             </div>
-            <div style="color: #a0a0a0; font-size: 12px;">Requests per month</div>
+            <div style="color: var(--color-muted); font-size: 12px;" data-i18n="subscription_page.requests_per_month">Requests per month</div>
         </div>
-        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+        <div style="text-align: center; padding: 15px; background: var(--bg-accent); border-radius: 5px;">
             <div style="font-size: 24px; font-weight: bold; color: #f39c12; margin-bottom: 5px;">
                 {% if current_tier.max_providers == -1 %}
                 ∞
@@ -73,9 +73,9 @@
                 {{ current_tier.max_providers }}
                 {% endif %}
             </div>
-            <div style="color: #a0a0a0; font-size: 12px;">Providers</div>
+            <div style="color: var(--color-muted); font-size: 12px;" data-i18n="subscription_page.providers">Providers</div>
         </div>
-        <div style="text-align: center; padding: 15px; background: #0f2840; border-radius: 5px;">
+        <div style="text-align: center; padding: 15px; background: var(--bg-accent); border-radius: 5px;">
             <div style="font-size: 24px; font-weight: bold; color: #17a2b8; margin-bottom: 5px;">
                 {% if current_tier.max_rotations == -1 %}
                 ∞
@@ -83,31 +83,31 @@
                 {{ current_tier.max_rotations }}
                 {% endif %}
             </div>
-            <div style="color: #a0a0a0; font-size: 12px;">Rotations</div>
+            <div style="color: var(--color-muted); font-size: 12px;" data-i18n="subscription_page.rotations">Rotations</div>
         </div>
     </div>
 
     {% if subscription %}
-    <hr style="border-color: #0f3460; margin: 20px 0;">
+    <hr style="border-color: var(--color-border); margin: 20px 0;">
     <div style="display: flex; align-items: center;">
         <div style="flex: 1;">
-            <h4 style="margin: 0 0 10px 0; color: #8ec8ff;">Subscription Status</h4>
+            <h4 style="margin: 0 0 10px 0; color: var(--color-link);" data-i18n="subscription_page.subscription_status">Subscription Status</h4>
             <div style="display: flex; align-items: center; gap: 15px;">
                 <span class="subscription-status-{{ subscription.status }}">
                     {{ subscription.status|title }}
                 </span>
                 {% if subscription.expires_at %}
-                <div style="color: #a0a0a0;">
+                <div style="color: var(--color-muted);">
                     <i class="fas fa-calendar-alt me-1"></i>
-                    <strong>Renews:</strong> {{ subscription.expires_at }}
+                    <strong data-i18n="subscription_page.renews">Renews:</strong> {{ subscription.expires_at }}
                 </div>
                 {% endif %}
             </div>
         </div>
         <div style="text-align: right;">
             {% if subscription.status == 'active' %}
-            <button class="btn btn-secondary" style="background: #dc3545;">
-                <i class="fas fa-times-circle me-2"></i>Cancel Subscription
+            <button class="btn btn-danger">
+                <i class="fas fa-times-circle me-2"></i><span data-i18n="subscription_page.cancel_subscription">Cancel Subscription</span>
             </button>
             {% endif %}
         </div>
@@ -117,48 +117,48 @@
 </div>
 
 <!-- Quick Actions -->
-<div style="background: #16213e; border: 2px solid #8ec8ff; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
-    <h3 style="margin: 0 0 20px 0; color: #8ec8ff;">
-        <i class="fas fa-bolt me-2"></i>Quick Actions
+<div style="background: var(--bg-panel); border: 2px solid var(--color-border); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+    <h3 style="margin: 0 0 20px 0; color: var(--color-text);">
+        <i class="fas fa-bolt me-2"></i><span data-i18n="subscription_page.quick_actions">Quick Actions</span>
     </h3>
 
     <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(250px, 1fr)); gap: 15px;">
         <a href="{{ url_for(request, '/dashboard/billing') }}" style="text-decoration: none; color: inherit;">
-            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#4a9eff'; this.style.boxShadow='0 2px 8px rgba(74,158,255,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+            <div style="border: 1px solid var(--color-border); border-radius: 5px; padding: 20px; background: var(--bg-page); transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='var(--color-link)'; this.style.boxShadow='0 2px 8px var(--shadow)';" onmouseout="this.style.borderColor=''; this.style.boxShadow='none';">
                 <div style="text-align: center;">
-                    <i class="fas fa-history fa-3x mb-3" style="color: #4a9eff;"></i>
-                    <h4 style="margin: 0 0 10px 0;">Billing & Payments</h4>
-                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Manage payment methods and view history</p>
+                    <i class="fas fa-history fa-3x mb-3" style="color: var(--color-link);"></i>
+                    <h4 style="margin: 0 0 10px 0;" data-i18n="subscription_page.billing_payments">Billing & Payments</h4>
+                    <p style="margin: 0; color: var(--color-muted); font-size: 14px;" data-i18n="subscription_page.billing_payments_desc">Manage payment methods and view history</p>
                 </div>
             </div>
         </a>
 
         <a href="{{ url_for(request, '/dashboard/pricing') }}" style="text-decoration: none; color: inherit;">
-            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#f39c12'; this.style.boxShadow='0 2px 8px rgba(243,156,18,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+            <div style="border: 1px solid var(--color-border); border-radius: 5px; padding: 20px; background: var(--bg-page); transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#f39c12'; this.style.boxShadow='0 2px 8px var(--shadow)';" onmouseout="this.style.borderColor=''; this.style.boxShadow='none';">
                 <div style="text-align: center;">
                     <i class="fas fa-star fa-3x mb-3" style="color: #f39c12;"></i>
-                    <h4 style="margin: 0 0 10px 0;">Upgrade Plan</h4>
-                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">View all available plans</p>
+                    <h4 style="margin: 0 0 10px 0;" data-i18n="subscription_page.upgrade_plan">Upgrade Plan</h4>
+                    <p style="margin: 0; color: var(--color-muted); font-size: 14px;" data-i18n="subscription_page.upgrade_plan_desc">View all available plans</p>
                 </div>
             </div>
         </a>
 
         <a href="{{ url_for(request, '/dashboard/profile') }}" style="text-decoration: none; color: inherit;">
-            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#17a2b8'; this.style.boxShadow='0 2px 8px rgba(23,162,184,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+            <div style="border: 1px solid var(--color-border); border-radius: 5px; padding: 20px; background: var(--bg-page); transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#17a2b8'; this.style.boxShadow='0 2px 8px var(--shadow)';" onmouseout="this.style.borderColor=''; this.style.boxShadow='none';">
                 <div style="text-align: center;">
                     <i class="fas fa-user fa-3x mb-3" style="color: #17a2b8;"></i>
-                    <h4 style="margin: 0 0 10px 0;">Edit Profile</h4>
-                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Update account settings</p>
+                    <h4 style="margin: 0 0 10px 0;" data-i18n="subscription_page.edit_profile">Edit Profile</h4>
+                    <p style="margin: 0; color: var(--color-muted); font-size: 14px;" data-i18n="subscription_page.edit_profile_desc">Update account settings</p>
                 </div>
             </div>
         </a>
 
         <a href="{{ url_for(request, '/dashboard/change-password') }}" style="text-decoration: none; color: inherit;">
-            <div style="border: 1px solid #0f3460; border-radius: 5px; padding: 20px; background: #1a1a2e; transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='#6c757d'; this.style.boxShadow='0 2px 8px rgba(108,117,125,0.2)';" onmouseout="this.style.borderColor='#0f3460'; this.style.boxShadow='none';">
+            <div style="border: 1px solid var(--color-border); border-radius: 5px; padding: 20px; background: var(--bg-page); transition: all 0.2s ease; cursor: pointer;" onmouseover="this.style.borderColor='var(--color-muted)'; this.style.boxShadow='0 2px 8px var(--shadow)';" onmouseout="this.style.borderColor=''; this.style.boxShadow='none';">
                 <div style="text-align: center;">
-                    <i class="fas fa-lock fa-3x mb-3" style="color: #6c757d;"></i>
-                    <h4 style="margin: 0 0 10px 0;">Change Password</h4>
-                    <p style="margin: 0; color: #a0a0a0; font-size: 14px;">Update security settings</p>
+                    <i class="fas fa-lock fa-3x mb-3" style="color: var(--color-muted);"></i>
+                    <h4 style="margin: 0 0 10px 0;" data-i18n="subscription_page.change_password">Change Password</h4>
+                    <p style="margin: 0; color: var(--color-muted); font-size: 14px;" data-i18n="subscription_page.change_password_desc">Update security settings</p>
                 </div>
             </div>
         </a>
@@ -167,13 +167,13 @@
 
 <!-- Add Payment Method Button (only shown when no payment methods exist) -->
 {% if not payment_methods or payment_methods|length == 0 %}
-<div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+<div style="background: var(--bg-panel); border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
     <div style="text-align: center;">
         <i class="fas fa-credit-card fa-3x mb-3" style="color: #f39c12;"></i>
-        <h3 style="margin: 0 0 15px 0; color: #f39c12;">No Payment Methods</h3>
-        <p style="color: #a0a0a0; margin-bottom: 20px;">Add a payment method to upgrade your plan and manage subscriptions</p>
-        <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn" style="background: #f39c12; color: #1a1a2e;">
-            <i class="fas fa-wallet me-2"></i>Go to Billing & Payment Methods
+        <h3 style="margin: 0 0 15px 0; color: #f39c12;" data-i18n="subscription_page.no_payment_methods">No Payment Methods</h3>
+        <p style="color: var(--color-muted); margin-bottom: 20px;" data-i18n="subscription_page.no_payment_methods_desc">Add a payment method to upgrade your plan and manage subscriptions</p>
+        <a href="{{ url_for(request, '/dashboard/billing') }}" class="btn btn-warning">
+            <i class="fas fa-wallet me-2"></i><span data-i18n="subscription_page.go_to_billing">Go to Billing & Payment Methods</span>
         </a>
     </div>
 </div>

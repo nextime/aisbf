@@ -30,6 +30,7 @@ from .base import (
     AdaptiveRateLimiter,
     get_adaptive_rate_limiter,
     get_all_adaptive_rate_limiters,
+    RateLimitError,
     AISBF_DEBUG,
 )
 from .google import GoogleProviderHandler

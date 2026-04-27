@@ -1,32 +1,54 @@
 /**
  * AISBF OAuth2 Relay - Content Script
- * 
- * This content script bridges communication between the AISBF dashboard
- * and the extension's background service worker.
- * 
+ *
+ * Bridges communication between the AISBF dashboard and the extension's
+ * background service worker. Runs on all pages; auto-configures relay rules
+ * only when an AISBF providers page is detected via window.AISBF_PROVIDERS_PAGE.
+ *
  * Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>
  * Licensed under GPL-3.0
  */
 
-// Inject marker to indicate extension is installed
-window.aisbfOAuth2Extension = true;
+// After the page scripts have run, check for the AISBF providers page marker
+// and auto-configure redirect rules — no manual setup required.
+document.addEventListener('DOMContentLoaded', () => {
+  const pageInfo = window.AISBF_PROVIDERS_PAGE;
+  if (!pageInfo) return;
+
+  const serverUrl = (pageInfo && typeof pageInfo === 'object' && pageInfo.serverUrl)
+    ? pageInfo.serverUrl
+    : window.location.origin;
+
+  console.log('[AISBF] Providers page detected, auto-configuring relay for:', serverUrl);
+
+  chrome.runtime.sendMessage({
+    type: 'SET_CONFIG',
+    config: {
+      enabled: true,
+      remoteServer: serverUrl,
+      ports: [54545],
+      paths: ['/callback', '/oauth/callback', '/auth/callback']
+    }
+  }).then(response => {
+    if (response && response.success) {
+      console.log('[AISBF] Auto-configuration complete for:', serverUrl);
+    }
+  }).catch(err => {
+    console.warn('[AISBF] Auto-configuration failed:', err);
+  });
+});
 
 // Listen for messages from the web page
 window.addEventListener('message', async (event) => {
-  // Only accept messages from the same window
-  if (event.source !== window) {
-    return;
-  }
-  
+  if (event.source !== window) return;
+
   const message = event.data;
-  
-  // Handle ping request
+
   if (message.type === 'aisbf-extension-ping') {
     window.postMessage({ type: 'aisbf-extension-pong' }, '*');
     return;
   }
-  
-  // Handle configuration request
+
   if (message.type === 'aisbf-extension-configure') {
     try {
       const response = await chrome.runtime.sendMessage({
@@ -38,7 +60,6 @@ window.addEventListener('message', async (event) => {
           paths: message.paths || ['/callback', '/oauth/callback', '/auth/callback']
         }
       });
-      
       window.postMessage({
         type: 'aisbf-extension-configured',
         success: response.success
@@ -53,14 +74,10 @@ window.addEventListener('message', async (event) => {
     }
     return;
   }
-  
-  // Handle status request
+
   if (message.type === 'aisbf-extension-status') {
     try {
-      const response = await chrome.runtime.sendMessage({
-        type: 'GET_STATUS'
-      });
-      
+      const response = await chrome.runtime.sendMessage({ type: 'GET_STATUS' });
       window.postMessage({
         type: 'aisbf-extension-status-response',
         ...response
@@ -77,5 +94,4 @@ window.addEventListener('message', async (event) => {
   }
 });
 
-// Notify that content script is ready
-console.log('[AISBF Content] Extension content script loaded');
+console.log('[AISBF] Extension content script loaded');

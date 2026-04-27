@@ -1,0 +1,509 @@
+# Translation TODO
+
+## Status
+
+The i18n system uses English as automatic fallback for any missing key, so the dashboard is fully functional in all languages — untranslated strings simply display in English.
+
+During the recent translation work, **379 new keys** were added to `en.json` (new user dashboard pages, providers/rotations/autoselects UI, billing, tokens, usage, subscription, etc.).
+
+These keys were applied to all 38 language files. The following languages received **full translations** for all 236 high-priority keys (visible UI labels, buttons, headings):
+
+| Language | Code | Status |
+|----------|------|--------|
+| French | `fr` | ✅ Translated |
+| German | `de` | ✅ Translated |
+| Spanish | `es` | ✅ Translated |
+| Portuguese | `pt` | ✅ Translated |
+| Italian | `it` | ✅ Translated |
+| Russian | `ru` | ✅ Translated |
+| Japanese | `ja` | ✅ Translated |
+| Chinese | `zh` | ✅ Translated |
+| Korean | `ko` | ✅ Translated |
+| Dutch | `nl` | ✅ Translated |
+| Swedish | `sv` | ✅ Translated |
+
+The remaining **27 languages** still have ~350 keys falling back to English. All 143 low-priority keys (long hint texts, technical descriptions, error message templates) are intentionally left in English across all languages — they are acceptable as-is.
+
+## Languages Needing Translation (~210 high-priority keys each)
+
+| Language | Code | Keys remaining |
+|----------|------|---------------|
+| Afrikaans | `af` | ~210 |
+| Arabic | `ar` | ~210 |
+| Bengali | `bn` | ~210 |
+| Czech | `cs` | ~210 |
+| Danish | `da` | ~210 |
+| Greek | `el` | ~210 |
+| Esperanto | `eo` | ~210 |
+| Persian | `fa` | ~210 |
+| Finnish | `fi` | ~210 |
+| Hebrew | `he` | ~210 |
+| Hindi | `hi` | ~210 |
+| Hungarian | `hu` | ~210 |
+| Indonesian | `id` | ~210 |
+| Malay | `ms` | ~210 |
+| Norwegian | `nb` | ~210 |
+| Polish | `pl` | ~210 |
+| Romanian | `ro` | ~210 |
+| Slovak | `sk` | ~210 |
+| Thai | `th` | ~210 |
+| Turkish | `tr` | ~210 |
+| Ukrainian | `uk` | ~210 |
+| Vietnamese | `vi` | ~210 |
+| Xhosa | `xh` | ~210 |
+| Zulu | `zu` | ~210 |
+| Quenya (Elvish) | `qya` | ~210 |
+| Klingon | `tlh` | ~210 |
+| Vulcan | `vul` | ~210 |
+
+## Keys to Translate Per Language
+
+Each language file is at `static/i18n/<code>.json`. The keys currently falling back to English are listed below by namespace. Any key whose value equals the English value needs translation.
+
+### Namespaces and key counts
+
+| Namespace | Keys |
+|-----------|------|
+| `providers` | 100 |
+| `tokens_page` | 36 |
+| `usage_page` | 30 |
+| `user_overview` | 28 |
+| `billing_page` | 26 |
+| `subscription_page` | 21 |
+| `delete_page` | 16 |
+| `profile_page` | 16 |
+| `rotations` | 17 |
+| `autoselect` | 15 |
+| `rate_limits_page` | 18 |
+| `reset_page` | 6 |
+| `prompts_page` | 4 |
+| `user_autoselects_page` | 3 |
+| `user_rotations_page` | 3 |
+| `signup_page` | 3 |
+| `wallet_page` | 5 |
+| `forgot_page` | 2 |
+| `user_providers_page` | 2 |
+| `login_page` | 1 |
+| `email_page` | 1 |
+
+### Key list (same for all 27 languages)
+
+```
+providers.provider_key_label
+providers.provider_count_singular
+providers.provider_count_plural
+providers.search_models_title
+providers.result_count
+providers.kiro_auth_title
+providers.kiro_opt1
+providers.kiro_opt2
+providers.kiro_opt3
+providers.kiro_opt4
+providers.kiro_aws_region
+providers.kiro_sqlite_path
+providers.kiro_refresh_token
+providers.kiro_profile_arn
+providers.kiro_client_id
+providers.kiro_client_secret
+providers.kiro_upload_creds
+providers.kiro_upload_sqlite
+providers.kilo_opt1
+providers.kilo_opt2
+providers.qwen_opt2_discontinued
+providers.kiro_auth_section
+providers.kilo_auth_section
+providers.workspace_id
+providers.oauth2_issuer_url
+providers.pricing_section
+providers.subscription_based
+providers.price_prompt
+providers.price_completion
+providers.default_rate_limit_tpm
+providers.default_rate_limit_tph
+providers.default_rate_limit_tpd
+providers.default_condense_context
+providers.default_condense_method
+providers.nsfw
+providers.privacy
+providers.native_caching_section
+providers.enable_native_caching
+providers.cache_ttl
+providers.min_cacheable_tokens
+providers.prompt_cache_key
+providers.model_filter
+providers.model_rate_limit_tpm
+providers.model_rate_limit_tph
+providers.model_rate_limit_tpd
+providers.model_condense_context
+providers.model_condense_method
+providers.remove_provider_title
+providers.remove_model_title
+providers.missing_key
+providers.missing_key_title
+providers.duplicate_key
+providers.duplicate_key_title
+providers.models_found
+providers.not_authenticated
+providers.uploading_file
+providers.uploading_cli
+providers.cli_creds_saved
+providers.upload_failed
+providers.fetching_models
+providers.checking_auth
+providers.auth_valid
+providers.auth_failed
+providers.auth_error
+providers.auth_success
+providers.auth_timeout
+providers.auth_denied
+providers.auth_expired
+providers.auth_start_failed
+providers.auth_error_completing
+providers.auth_generic_error
+providers.remove_provider_confirm
+providers.remove_model_confirm
+providers.error_saving
+providers.models_fetch_error
+providers.standard_config
+providers.rate_limit_hint
+providers.models_section_hint
+providers.model_filter_hint
+providers.kiro_auth_hint
+providers.kilo_auth_hint
+providers.workspace_id_hint
+providers.kiro_aws_region_hint
+providers.kiro_sqlite_hint
+providers.kiro_refresh_hint
+providers.kiro_profile_arn_hint
+providers.kiro_client_id_hint
+providers.kiro_client_secret_hint
+providers.kiro_upload_creds_hint
+providers.kiro_upload_sqlite_hint
+providers.provider_key_hint
+providers.subscription_based_hint
+providers.price_prompt_hint
+providers.price_completion_hint
+providers.default_rate_limit_tpm_hint
+providers.default_rate_limit_tph_hint
+providers.default_rate_limit_tpd_hint
+providers.native_caching_hint
+providers.enable_native_caching_hint
+providers.cache_ttl_hint
+providers.min_cacheable_tokens_hint
+providers.prompt_cache_key_hint
+rotations.search_models_title
+rotations.result_count
+rotations.copy_title
+rotations.add_title
+rotations.key_exists
+rotations.key_exists_title
+rotations.invalid_key_title
+rotations.remove_title
+rotations.remove_provider_title
+rotations.remove_model_title
+rotations.copy_prompt
+rotations.add_prompt
+rotations.key_different
+rotations.remove_confirm
+rotations.remove_provider_confirm
+rotations.remove_model_confirm
+rotations.error_saving
+autoselect.copy_title
+autoselect.add_title
+autoselect.key_exists
+autoselect.key_exists_title
+autoselect.invalid_key_title
+autoselect.remove_title
+autoselect.remove_model_title
+autoselect.result_count
+autoselect.models_found
+autoselect.copy_prompt
+autoselect.add_prompt
+autoselect.key_different
+autoselect.remove_confirm
+autoselect.remove_model_confirm
+autoselect.error_saving
+wallet_page.currency
+wallet_page.wallet_id
+wallet_page.charged_to_card
+wallet_page.invalid_amount
+wallet_page.invalid_amount_title
+rate_limits_page.refresh
+rate_limits_page.provider_label
+rate_limits_page.enabled
+rate_limits_page.current_rate_limit
+rate_limits_page.base_rate_limit
+rate_limits_page.total_429
+rate_limits_page.total_requests
+rate_limits_page.consecutive_429
+rate_limits_page.recent_429
+rate_limits_page.last_429
+rate_limits_page.never
+rate_limits_page.seconds
+rate_limits_page.yes
+rate_limits_page.no
+rate_limits_page.reset_all_title
+rate_limits_page.analytics
+rate_limits_page.response_cache
+rate_limits_page.rate_limits
+rate_limits_page.reset_confirm
+rate_limits_page.reset_confirm_title
+rate_limits_page.reset_all_confirm
+rate_limits_page.reset_all_success
+login_page.remember_me
+signup_page.username_hint
+signup_page.email_hint
+signup_page.password_hint
+forgot_page.intro
+forgot_page.sent
+reset_page.intro
+reset_page.password_hint
+reset_page.success
+reset_page.go_to_login
+reset_page.invalid_token
+reset_page.request_new
+profile_page.display_name_hint
+profile_page.no_email
+profile_page.add_email
+profile_page.change_email
+profile_page.email_requires_verify
+profile_page.upload_image
+profile_page.upload_hint
+profile_page.danger_zone
+profile_page.danger_zone_desc
+profile_page.delete_account
+profile_page.uploading
+profile_page.upload_pct
+profile_page.upload_success
+profile_page.upload_too_large
+profile_page.upload_invalid_type
+profile_page.upload_failed
+email_page.password_hint
+delete_page.danger_zone
+delete_page.danger_zone_desc
+delete_page.will_delete
+delete_page.item_account
+delete_page.item_providers
+delete_page.item_rotations
+delete_page.item_history
+delete_page.item_tokens
+delete_page.sub_warning_title
+delete_page.sub_warning_desc
+delete_page.sub_item_cancel
+delete_page.sub_item_access
+delete_page.sub_item_refund
+delete_page.sub_consider
+delete_page.type_delete_confirm
+delete_page.final_confirm
+tokens_page.new_token
+tokens_page.your_tokens
+tokens_page.description
+tokens_page.description_optional
+tokens_page.description_placeholder
+tokens_page.scope_api
+tokens_page.scope_api_hint
+tokens_page.scope_mcp
+tokens_page.scope_mcp_hint
+tokens_page.scope_both
+tokens_page.create_btn
+tokens_page.token_created
+tokens_page.copy_now_warn
+tokens_page.done
+tokens_page.how_to_use
+tokens_page.auth_header_desc
+tokens_page.token_scopes
+tokens_page.scope_api_access
+tokens_page.scope_mcp_access
+tokens_page.scope_both_access
+tokens_page.available_endpoints
+tokens_page.col_method
+tokens_page.col_endpoint
+tokens_page.col_scope
+tokens_page.col_description
+tokens_page.ep_list_models
+tokens_page.ep_list_providers
+tokens_page.ep_list_rotations
+tokens_page.ep_list_autoselects
+tokens_page.ep_chat
+tokens_page.ep_mcp_list
+tokens_page.ep_mcp_call
+tokens_page.example_commands
+tokens_page.active
+tokens_page.inactive
+tokens_page.created
+tokens_page.last_used
+tokens_page.unnamed_token
+tokens_page.delete_confirm
+tokens_page.delete_token
+billing_page.wallet_balance
+billing_page.wallet_desc
+billing_page.manage_wallet
+billing_page.no_payment_methods
+billing_page.no_payment_methods_desc
+billing_page.add_credit_card
+billing_page.top_up_wallet
+billing_page.set_default
+billing_page.default_label
+billing_page.billing_history
+billing_page.no_history
+billing_page.no_history_desc
+billing_page.no_history_upgrade
+billing_page.view_plans
+billing_page.plan_payment
+billing_page.col_date
+billing_page.col_description
+billing_page.col_amount
+billing_page.col_method
+billing_page.col_status
+billing_page.col_actions
+billing_page.status_completed
+billing_page.status_pending
+billing_page.status_failed
+billing_page.status_refunded
+billing_page.invoice
+billing_page.prev
+billing_page.next
+user_overview.stat_total_tokens
+user_overview.stat_requests_today
+user_overview.stat_active_providers
+user_overview.stat_active_rotations
+user_overview.quick_actions
+user_overview.subscription
+user_overview.manage
+user_overview.add_payment_method
+user_overview.unlock_more_power
+user_overview.upgrade_plan
+user_overview.higher_plans
+user_overview.upgrade_to
+user_overview.api_endpoints
+user_overview.show_hide
+user_overview.auth_header_desc
+user_overview.ep_models
+user_overview.ep_list_models
+user_overview.ep_providers
+user_overview.ep_list_providers
+user_overview.ep_rotations_autoselect
+user_overview.ep_list_rotations
+user_overview.ep_list_autoselects
+user_overview.ep_chat
+user_overview.ep_chat_desc
+user_overview.ep_mcp
+user_overview.ep_mcp_list
+user_overview.ep_mcp_call
+user_overview.ep_model_formats
+user_overview.admin_access
+user_overview.admin_access_desc
+user_overview.token_required
+user_overview.manage_tokens
+usage_page.manage_subscription
+usage_page.current_plan
+usage_page.activity_quotas
+usage_page.activity_quotas_desc
+usage_page.config_limits
+usage_page.config_limits_desc
+usage_page.requests_today
+usage_page.resets_midnight
+usage_page.resets_in
+usage_page.requests_month
+usage_page.resets_on_1st
+usage_page.resets_in_days
+usage_page.resets_in_days_plural
+usage_page.tokens_24h
+usage_page.tokens_combined
+usage_page.tokens_used
+usage_page.unlimited
+usage_page.quota_reached
+usage_page.remaining
+usage_page.ai_providers
+usage_page.ai_providers_desc
+usage_page.rotations
+usage_page.rotations_desc
+usage_page.autoselections
+usage_page.autoselections_desc
+usage_page.unlimited_slots
+usage_page.pct_used_slots_free
+usage_page.pct_used_slots_free_plural
+usage_page.need_higher_limits
+usage_page.upgrade_desc
+usage_page.view_plans
+prompts_page.select_file
+prompts_page.content_hint
+prompts_page.reset_confirm
+prompts_page.reset_confirm_title
+subscription_page.title
+subscription_page.current_plan
+subscription_page.free_tier
+subscription_page.no_description
+subscription_page.per_month
+subscription_page.per_year
+subscription_page.or_yearly
+subscription_page.change_plan
+subscription_page.requests_per_day
+subscription_page.requests_per_month
+subscription_page.providers
+subscription_page.rotations
+subscription_page.subscription_status
+subscription_page.renews
+subscription_page.cancel_subscription
+subscription_page.quick_actions
+subscription_page.billing_payments
+subscription_page.billing_payments_desc
+subscription_page.upgrade_plan
+subscription_page.upgrade_plan_desc
+subscription_page.edit_profile
+subscription_page.edit_profile_desc
+subscription_page.change_password
+subscription_page.change_password_desc
+subscription_page.no_payment_methods
+subscription_page.no_payment_methods_desc
+subscription_page.go_to_billing
+user_providers_page.title
+user_providers_page.add_new
+user_rotations_page.title
+user_rotations_page.add_rotation
+user_rotations_page.save_config
+user_rotations_page.cancel
+user_autoselects_page.title
+user_autoselects_page.add_autoselect
+user_autoselects_page.save_config
+user_autoselects_page.cancel
+```
+
+## How to Apply Translations
+
+Use the helper function pattern already established in the codebase:
+
+```python
+import json
+
+D = '/working/aisbf/static/i18n/'
+
+def apply(lang, translations):
+    path = D + lang + '.json'
+    with open(path) as f:
+        data = json.load(f)
+    def set_nested(d, key, value):
+        parts = key.split('.')
+        c = d
+        for p in parts[:-1]:
+            c = c.setdefault(p, {})
+        c[parts[-1]] = value
+    for key, value in translations.items():
+        set_nested(data, key, value)
+    with open(path, 'w') as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+
+# Example:
+apply('da', {
+    'providers.provider_count_singular': '{n} udbyder',
+    'providers.provider_count_plural': '{n} udbydere',
+    # ... etc
+})
+```
+
+## Notes
+
+- The i18n system (`static/i18n.js`) automatically falls back to English for any missing key, so untranslated strings display in English — no broken UI.
+- Keys containing only `{placeholders}` or symbols (✅ ❌ ✓ ✗) do not need translation.
+- Technical terms like `NSFW`, `OAuth2`, `API`, `MCP`, `SQLite`, `ARN`, `TTL` should remain untranslated.
+- The `qya` (Quenya/Elvish), `tlh` (Klingon), and `vul` (Vulcan) languages are fictional — translate only if you have expertise, otherwise English fallback is fine.

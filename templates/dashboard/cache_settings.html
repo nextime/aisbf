@@ -3,32 +3,32 @@
 {% block title %}Prompt Cache Settings{% endblock %}
 
 {% block content %}
-<div class="container-fluid" style="padding: 20px; background: #0f3460; min-height: 100vh;">
+<div class="container-fluid" style="padding: 20px;">
     <div style="max-width: 1400px; margin: 0 auto;">
-        <h2 style="color: #4a9eff; margin-bottom: 30px;">
+        <h2 style="color: var(--color-text); margin-bottom: 30px;">
             <i class="fas fa-memory me-2"></i>Prompt Cache Settings
         </h2>
 
         <!-- User Default Cache Setting -->
-        <div style="background: #16213e; border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+        <div style="background: var(--bg-panel); border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #f39c12;">
                 <i class="fas fa-user-circle me-2"></i>User Default Cache Setting
             </h3>
             
-            <div style="background: #1a1a2e; padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+            <div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <h5 style="margin: 0 0 5px 0; color: #e0e0e0;">Enable Prompt Caching</h5>
-                        <p style="color: #888; margin: 0; font-size: 14px;">Enable/disable prompt caching for all your providers and models</p>
+                        <h5 style="margin: 0 0 5px 0; color: var(--color-text);">Enable Prompt Caching</h5>
+                        <p style="color: var(--color-muted); margin: 0; font-size: 14px;">Enable/disable prompt caching for all your providers and models</p>
                     </div>
                 </div>
             </div>
             
-            <div style="background: #0f2840; padding: 15px; border-radius: 8px; border-left: 3px solid #4a9eff;">
-                <h5 style="margin: 0 0 10px 0; color: #4a9eff;">
+            <div style="background: var(--bg-accent); padding: 15px; border-radius: 8px; border-left: 3px solid var(--color-link);">
+                <h5 style="margin: 0 0 10px 0; color: var(--color-link);">
                     <i class="fas fa-info-circle me-2"></i>Cache Override Hierarchy
                 </h5>
-                <p style="color: #a0a0a0; margin: 0; font-size: 13px; line-height: 1.6;">
+                <p style="color: var(--color-muted); margin: 0; font-size: 13px; line-height: 1.6;">
                     Settings are applied in this priority order (most specific takes precedence):
                     <br><strong>1. Model-level setting</strong> → Overrides everything
                     <br><strong>2. Provider-level setting</strong> → Overrides user default
@@ -48,7 +48,7 @@
 
         <!-- Back Button -->
         <div style="margin-top: 30px;">
-            <a href="{{ url_for(request, '/dashboard') }}" class="btn" style="background: #0f3460; color: #4a9eff; border: 1px solid #4a9eff;">
+            <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">
                 <i class="fas fa-arrow-left me-2"></i>Back to Dashboard
             </a>
         </div>
