@@ -672,6 +672,26 @@ class DatabaseManager:
 
             if deleted > 0:
                 logger.info(f"Cleaned up {deleted} old token usage records")
+
+    def delete_analytics_global(self):
+        """Delete token_usage rows that belong to global (non-user) requests only."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM token_usage WHERE user_id IS NULL')
+            deleted = cursor.rowcount
+            conn.commit()
+            logger.info(f"Deleted {deleted} global analytics records")
+            return deleted
+
+    def delete_analytics_all(self):
+        """Delete all token_usage rows (global + all users)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('DELETE FROM token_usage')
+            deleted = cursor.rowcount
+            conn.commit()
+            logger.info(f"Deleted {deleted} total analytics records")
+            return deleted
     
     def get_all_context_dimensions(self, user_filter: Optional[int] = None) -> List[Dict]:
         """
@@ -2566,6 +2586,130 @@ class DatabaseManager:
                 ''', (user_id, provider_id, data_json))
             conn.commit()
 
+    # Provider Disabled State methods
+    def get_provider_disabled_until(self, user_id, provider_id: str) -> Optional[float]:
+        """Return the disabled_until Unix timestamp for a provider, or None if not disabled."""
+        import time as _time
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'''
+                    SELECT disabled_until FROM provider_disabled_state
+                    WHERE user_id IS NULL AND provider_id = {placeholder}
+                ''', (provider_id,))
+            else:
+                cursor.execute(f'''
+                    SELECT disabled_until FROM provider_disabled_state
+                    WHERE user_id = {placeholder} AND provider_id = {placeholder}
+                ''', (user_id, provider_id))
+            row = cursor.fetchone()
+            if row and row[0] is not None:
+                ts = float(row[0])
+                if ts > _time.time():
+                    return ts
+                # Expired — clean it up
+                try:
+                    self.clear_provider_disabled_until(user_id, provider_id)
+                except Exception:
+                    pass
+        return None
+
+    def set_provider_disabled_until(self, user_id, provider_id: str, disabled_until: float, reason: str = None):
+        """Persist a usage-based disabled_until timestamp for a provider."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'DELETE FROM provider_disabled_state WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+                cursor.execute(f'''
+                    INSERT INTO provider_disabled_state (user_id, provider_id, disabled_until, disable_reason)
+                    VALUES (NULL, {placeholder}, {placeholder}, {placeholder})
+                ''', (provider_id, disabled_until, reason))
+            elif self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT OR REPLACE INTO provider_disabled_state (user_id, provider_id, disabled_until, disable_reason)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
+                ''', (user_id, provider_id, disabled_until, reason))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO provider_disabled_state (user_id, provider_id, disabled_until, disable_reason)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder})
+                    ON DUPLICATE KEY UPDATE disabled_until=VALUES(disabled_until), disable_reason=VALUES(disable_reason), updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, provider_id, disabled_until, reason))
+            conn.commit()
+
+    def clear_provider_disabled_until(self, user_id, provider_id: str):
+        """Clear a provider's usage-based disabled state."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'DELETE FROM provider_disabled_state WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+            else:
+                cursor.execute(f'DELETE FROM provider_disabled_state WHERE user_id = {placeholder} AND provider_id = {placeholder}', (user_id, provider_id))
+            conn.commit()
+
+    # Sort order methods
+
+    def get_sort_order(self, user_id, entity_type: str) -> Optional[List[str]]:
+        """Return the saved sort order for provider/rotation/autoselect lists, or None."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(
+                    f'SELECT ordered_ids FROM user_sort_order WHERE user_id IS NULL AND entity_type = {placeholder}',
+                    (entity_type,)
+                )
+            else:
+                cursor.execute(
+                    f'SELECT ordered_ids FROM user_sort_order WHERE user_id = {placeholder} AND entity_type = {placeholder}',
+                    (user_id, entity_type)
+                )
+            row = cursor.fetchone()
+            if row:
+                try:
+                    return json.loads(row[0])
+                except Exception:
+                    return None
+            return None
+
+    def set_sort_order(self, user_id, entity_type: str, ordered_ids: List[str]):
+        """Persist the sort order for provider/rotation/autoselect lists."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            data_json = json.dumps(ordered_ids)
+            if self.db_type == 'sqlite':
+                # SQLite: use DELETE+INSERT (no UNIQUE constraint due to NULL handling)
+                if user_id is None:
+                    cursor.execute(
+                        f'DELETE FROM user_sort_order WHERE user_id IS NULL AND entity_type = {placeholder}',
+                        (entity_type,)
+                    )
+                    cursor.execute(
+                        f'INSERT INTO user_sort_order (user_id, entity_type, ordered_ids) VALUES (NULL, {placeholder}, {placeholder})',
+                        (entity_type, data_json)
+                    )
+                else:
+                    cursor.execute(
+                        f'DELETE FROM user_sort_order WHERE user_id = {placeholder} AND entity_type = {placeholder}',
+                        (user_id, entity_type)
+                    )
+                    cursor.execute(
+                        f'INSERT INTO user_sort_order (user_id, entity_type, ordered_ids) VALUES ({placeholder}, {placeholder}, {placeholder})',
+                        (user_id, entity_type, data_json)
+                    )
+            else:
+                # MySQL: UNIQUE(user_id, entity_type) + ON DUPLICATE KEY UPDATE
+                cursor.execute(
+                    f'INSERT INTO user_sort_order (user_id, entity_type, ordered_ids) VALUES ({placeholder}, {placeholder}, {placeholder}) '
+                    f'ON DUPLICATE KEY UPDATE ordered_ids = {placeholder}',
+                    (user_id, entity_type, data_json, data_json)
+                )
+            conn.commit()
+
     # Account Tier methods
     def get_all_tiers(self) -> List[Dict]:
         """
@@ -4330,6 +4474,79 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created user_provider_usage table")
     except Exception as e:
         logger.warning(f"Migration check for user_provider_usage table: {e}")
+
+    # Migration: Create provider_disabled_state table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(provider_disabled_state)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE provider_disabled_state (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        disabled_until REAL,
+                        disable_reason VARCHAR(255),
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created provider_disabled_state table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_disabled_state'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE provider_disabled_state (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        disabled_until DOUBLE,
+                        disable_reason VARCHAR(255),
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created provider_disabled_state table")
+    except Exception as e:
+        logger.warning(f"Migration check for provider_disabled_state table: {e}")
+
+    # Migration: Create user_sort_order table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(user_sort_order)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE user_sort_order (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        entity_type VARCHAR(50) NOT NULL,
+                        ordered_ids TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_sort_order table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'user_sort_order'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE user_sort_order (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        entity_type VARCHAR(50) NOT NULL,
+                        ordered_ids TEXT NOT NULL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, entity_type)
+                    )
+                ''')
+                logger.info("✅ Migration: Created user_sort_order table")
+    except Exception as e:
+        logger.warning(f"Migration check for user_sort_order table: {e}")
 
     logger.info("✅ All database migrations completed")
 

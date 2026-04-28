@@ -163,12 +163,24 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="form-group">
+        <label for="condensation_max_tokens">Condensation Max Tokens</label>
+        <input type="number" id="condensation_max_tokens" name="condensation_max_tokens" value="{{ config.internal_model.condensation_max_tokens or 1000 }}" min="64" max="32000" style="width:160px;">
+        <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Max tokens the condensation model can generate per summary (default 1000).</small>
+    </div>
+
+    <div class="form-group">
         <label for="autoselect_model_id" data-i18n="settings_page.lbl_autoselect_model">Autoselect Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
             <input type="text" id="autoselect_model_id" name="autoselect_model_id" value="{{ config.internal_model.autoselect_model_id }}" required style="flex:1;">
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('autoselect_model_id').value, 'autoselect', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
         </div>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Used when autoselect selection_model is set to "internal"</small>
+    </div>
+
+    <div class="form-group">
+        <label for="autoselect_max_tokens" data-i18n="settings_page.lbl_autoselect_max_tokens">Autoselect Context Limit (tokens)</label>
+        <input type="number" id="autoselect_max_tokens" name="autoselect_max_tokens" value="{{ config.internal_model.autoselect_max_tokens or 8000 }}" min="256" max="200000" style="width:160px;">
+        <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Max tokens of conversation context sent to the internal autoselect model (default 8000). Ignored when selection_model is a rotation or provider/model.</small>
     </div>
 
     <div class="form-group">

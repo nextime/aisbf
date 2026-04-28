@@ -55,6 +55,7 @@ class Analytics:
         'kiro': {'prompt': 0.5, 'completion': 1.5},  # $0.5/M prompt, $1.5/M completion
         'openrouter': {'prompt': 5.0, 'completion': 15.0},  # Average pricing
         'kilo': {'prompt': 0.0, 'completion': 0.0},  # Kilo providers are free/subscription
+        'codex': {'prompt': 2.5, 'completion': 10.0},  # ChatGPT pricing (input cheaper, output more expensive)
     }
     
     def __init__(self, db_manager, pricing: Optional[Dict] = None):
@@ -294,13 +295,13 @@ class Analytics:
             total_requests = result[0] if result else 0
             success_count = result[1] if result else 0
             error_count = result[2] if result else 0
-            avg_latency = result[3] if result and result[3] else 0
-            min_latency = result[4] if result and result[4] else 0
-            max_latency = result[5] if result and result[5] else 0
-            total_tokens = result[6] if result else 0
-            total_prompt_tokens = result[7] if result else 0
-            total_completion_tokens = result[8] if result else 0
-            total_actual_cost = result[9] if result else 0
+            avg_latency = float(result[3] if result and result[3] else 0)
+            min_latency = float(result[4] if result and result[4] else 0)
+            max_latency = float(result[5] if result and result[5] else 0)
+            total_tokens = int(result[6] if result and result[6] else 0)
+            total_prompt_tokens = int(result[7] if result and result[7] else 0)
+            total_completion_tokens = int(result[8] if result and result[8] else 0)
+            total_actual_cost = float(result[9] if result and result[9] else 0)
             first_request = result[10] if result and result[10] else None
             last_request = result[11] if result and result[11] else None
             
@@ -516,11 +517,11 @@ class Analytics:
             total_requests = row[4] or 0
             success_count = row[5] or 0
             error_count = row[6] or 0
-            avg_latency = row[7] or 0
-            total_tokens = row[8] or 0
-            total_prompt_tokens = row[9] or 0
-            total_completion_tokens = row[10] or 0
-            total_actual_cost = row[11] or 0
+            avg_latency = float(row[7] or 0)
+            total_tokens = int(row[8] or 0)
+            total_prompt_tokens = int(row[9] or 0)
+            total_completion_tokens = int(row[10] or 0)
+            total_actual_cost = float(row[11] or 0)
             first_request = row[12]
             last_request = row[13]
 
@@ -742,88 +743,82 @@ class Analytics:
         Returns:
             List of model performance data
         """
-        # Try to get from context_dimensions first
-        context_dims = self.db.get_all_context_dimensions(user_filter=user_filter)
-        
-        # If context_dimensions is empty, get unique provider/model combinations from token_usage
-        if not context_dims:
-            logger.info("No context_dimensions found, querying token_usage for provider/model combinations")
-            with self.db._get_connection() as conn:
-                cursor = conn.cursor()
-                placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
-                
-                # Build query with optional date range and user filter
-                query = '''
-                    SELECT DISTINCT provider_id, model_name
-                    FROM token_usage
-                    WHERE 1=1
-                '''
-                params = []
-                
-                if from_datetime:
-                    query += f' AND timestamp >= {placeholder}'
-                    params.append(self._format_timestamp(from_datetime))
-                if to_datetime:
-                    query += f' AND timestamp <= {placeholder}'
-                    params.append(self._format_timestamp(to_datetime))
-                if user_filter == -1:
-                    query += ' AND user_id IS NULL'
-                elif user_filter is not None:
-                    query += f' AND user_id = {placeholder}'
-                    params.append(user_filter)
-                
-                query += ' ORDER BY provider_id, model_name'
-                
-                cursor.execute(query, params)
-                
-                # Build context_dims from query results
-                context_dims = []
-                for row in cursor.fetchall():
-                    context_dims.append({
-                        'provider_id': row[0],
-                        'model_name': row[1],
-                        'context_size': None,
-                        'condense_context': None,
-                        'condense_method': None,
-                        'effective_context': None,
-                        'is_rotation': False,
-                        'is_autoselect': False,
-                        'rotation_id': None,
-                        'autoselect_id': None
-                    })
-        
+        # Always query token_usage for provider/model combinations within the time range
+        # context_dimensions is used only for metadata (context_size, condense settings)
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+
+            query = '''
+                SELECT DISTINCT provider_id, model_name, rotation_id, autoselect_id
+                FROM token_usage
+                WHERE 1=1
+            '''
+            params = []
+
+            if from_datetime:
+                query += f' AND timestamp >= {placeholder}'
+                params.append(self._format_timestamp(from_datetime))
+            if to_datetime:
+                query += f' AND timestamp <= {placeholder}'
+                params.append(self._format_timestamp(to_datetime))
+            if user_filter == -1:
+                query += ' AND user_id IS NULL'
+            elif user_filter is not None:
+                query += f' AND user_id = {placeholder}'
+                params.append(user_filter)
+
+            query += ' ORDER BY provider_id, model_name'
+            cursor.execute(query, params)
+            active_combos = {(row[0], row[1]): {'rotation_id': row[2], 'autoselect_id': row[3]} for row in cursor.fetchall()}
+
+        # Build context_dims lookup from context_dimensions table (for metadata only)
+        raw_dims = self.db.get_all_context_dimensions(user_filter=user_filter)
+        dim_lookup = {(d['provider_id'], d['model_name']): d for d in raw_dims}
+
+        # Build context_dims from active token_usage combinations, enriched with context metadata
+        context_dims = []
+        for (pid, mname), extra in active_combos.items():
+            meta = dim_lookup.get((pid, mname), {})
+            context_dims.append({
+                'provider_id': pid,
+                'model_name': mname,
+                'context_size': meta.get('context_size'),
+                'condense_context': meta.get('condense_context'),
+                'condense_method': meta.get('condense_method'),
+                'effective_context': meta.get('effective_context'),
+                'is_rotation': bool(extra.get('rotation_id')),
+                'is_autoselect': bool(extra.get('autoselect_id')),
+                'rotation_id': extra.get('rotation_id'),
+                'autoselect_id': extra.get('autoselect_id'),
+            })
+
         results = []
         for dim in context_dims:
             provider_id = dim['provider_id']
             model_name = dim['model_name']
-            
+
             # Apply filters
             if provider_filter and provider_id != provider_filter:
                 continue
             if model_filter and model_name != model_filter:
                 continue
-            
-            # Check if this is a rotation or autoselect by checking the model name
-            # Rotations and autoselects have special prefixes in the context dimensions
+
             is_rotation = dim.get('is_rotation', False)
             is_autoselect = dim.get('is_autoselect', False)
-            
-            # Get rotation/autoselect ID from context dimensions if available
             rotation_id = dim.get('rotation_id')
             autoselect_id = dim.get('autoselect_id')
-            
+
             # Apply rotation filter
             if rotation_filter:
-                # Skip if not a rotation or different rotation
                 if not is_rotation or (rotation_id and rotation_id != rotation_filter):
                     continue
-            
+
             # Apply autoselect filter
             if autoselect_filter:
-                # Skip if not an autoselect or different autoselect
                 if not is_autoselect or (autoselect_id and autoselect_id != autoselect_filter):
                     continue
-            
+
             # Get provider request stats with date range
             provider_stats = self.get_provider_stats(provider_id, from_datetime, to_datetime, user_filter)
             
@@ -975,8 +970,8 @@ class Analytics:
             total_cost = prompt_cost + completion_cost
             logger.info(f"  Calculated: ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
             return total_cost
-        elif prompt_tokens > 0:
-            # Only prompt tokens provided, calculate completion from total
+        elif prompt_tokens > 0 and tokens_used > prompt_tokens:
+            # Prompt tokens provided and total > prompt, so completion = total - prompt
             completion_tokens_calc = tokens_used - prompt_tokens
             prompt_cost = (prompt_tokens / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens_calc / 1_000_000) * provider_pricing.get('completion', 0)
@@ -984,7 +979,7 @@ class Analytics:
             logger.info(f"  Calculated (estimated completion): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
             return total_cost
         else:
-            # No breakdown available - use estimation (25% prompt, 75% completion is common for chat)
+            # No reliable breakdown — use estimation (25% input, 75% output is typical for chat)
             prompt_tokens_est = tokens_used * 0.25
             completion_tokens_est = tokens_used * 0.75
             prompt_cost = (prompt_tokens_est / 1_000_000) * provider_pricing.get('prompt', 0)
@@ -1206,7 +1201,145 @@ class Analytics:
         self._latencies = {}
         self._error_types = {}
         logger.info("Analytics stats reset")
-    
+
+    def get_rotation_breakdown(
+        self,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None,
+        rotation_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Per-rotation breakdown: which provider/model received what share of hits and tokens.
+        Returns list of {rotation_id, entries: [{provider_id, model_name, requests, tokens, hit_pct, token_pct, avg_latency_ms}]}
+        """
+        now = datetime.now()
+        start = from_datetime or (now - timedelta(days=1))
+        end = to_datetime or now
+
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = '?' if self.db.db_type == 'sqlite' else '%s'
+
+            if user_filter == -1:
+                user_cond = " AND user_id IS NULL"
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
+            elif user_filter is not None:
+                user_cond = f" AND user_id = {ph}"
+                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
+            else:
+                user_cond = ""
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
+
+            rot_cond = ""
+            if rotation_filter:
+                rot_cond = f" AND rotation_id = {ph}"
+                params.append(rotation_filter)
+
+            cursor.execute(f'''
+                SELECT rotation_id, provider_id, model_name,
+                       COUNT(*) as requests,
+                       SUM(tokens_used) as tokens,
+                       AVG(COALESCE(latency_ms, 0)) as avg_latency
+                FROM token_usage
+                WHERE rotation_id IS NOT NULL
+                  AND timestamp >= {ph} AND timestamp <= {ph}
+                  {user_cond} {rot_cond}
+                GROUP BY rotation_id, provider_id, model_name
+                ORDER BY rotation_id, requests DESC
+            ''', params)
+            rows = cursor.fetchall()
+
+        # Group by rotation_id
+        from collections import defaultdict
+        grouped: Dict[str, list] = defaultdict(list)
+        totals: Dict[str, dict] = defaultdict(lambda: {'requests': 0, 'tokens': 0})
+        for row in rows:
+            rid, pid, mname, reqs, toks, lat = row[0], row[1], row[2], int(row[3] or 0), int(row[4] or 0), float(row[5] or 0)
+            grouped[rid].append({'provider_id': pid, 'model_name': mname, 'requests': reqs, 'tokens': toks, 'avg_latency_ms': lat})
+            totals[rid]['requests'] += reqs
+            totals[rid]['tokens'] += toks
+
+        result = []
+        for rid, entries in grouped.items():
+            tot_req = totals[rid]['requests'] or 1
+            tot_tok = totals[rid]['tokens'] or 1
+            for e in entries:
+                e['hit_pct'] = round(e['requests'] / tot_req * 100, 1)
+                e['token_pct'] = round(e['tokens'] / tot_tok * 100, 1)
+            result.append({'rotation_id': rid, 'total_requests': totals[rid]['requests'], 'total_tokens': totals[rid]['tokens'], 'entries': entries})
+
+        return result
+
+    def get_autoselect_breakdown(
+        self,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None,
+        autoselect_filter: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Per-autoselect breakdown: which rotation/model was selected, hit %, tokens, and selection latency.
+        Returns list of {autoselect_id, entries: [{model_name, requests, tokens, hit_pct, token_pct, avg_latency_ms}]}
+        Selection latency is stored as latency_ms on the 'autoselect' provider_id rows.
+        """
+        now = datetime.now()
+        start = from_datetime or (now - timedelta(days=1))
+        end = to_datetime or now
+
+        with self.db._get_connection() as conn:
+            cursor = conn.cursor()
+            ph = '?' if self.db.db_type == 'sqlite' else '%s'
+
+            if user_filter == -1:
+                user_cond = " AND user_id IS NULL"
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
+            elif user_filter is not None:
+                user_cond = f" AND user_id = {ph}"
+                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
+            else:
+                user_cond = ""
+                params = [self._format_timestamp(start), self._format_timestamp(end)]
+
+            as_cond = ""
+            if autoselect_filter:
+                as_cond = f" AND autoselect_id = {ph}"
+                params.append(autoselect_filter)
+
+            cursor.execute(f'''
+                SELECT autoselect_id, model_name,
+                       COUNT(*) as requests,
+                       SUM(tokens_used) as tokens,
+                       AVG(COALESCE(latency_ms, 0)) as avg_latency
+                FROM token_usage
+                WHERE autoselect_id IS NOT NULL
+                  AND timestamp >= {ph} AND timestamp <= {ph}
+                  {user_cond} {as_cond}
+                GROUP BY autoselect_id, model_name
+                ORDER BY autoselect_id, requests DESC
+            ''', params)
+            rows = cursor.fetchall()
+
+        from collections import defaultdict
+        grouped: Dict[str, list] = defaultdict(list)
+        totals: Dict[str, dict] = defaultdict(lambda: {'requests': 0, 'tokens': 0})
+        for row in rows:
+            aid, mname, reqs, toks, lat = row[0], row[1], int(row[2] or 0), int(row[3] or 0), float(row[4] or 0)
+            grouped[aid].append({'model_name': mname, 'requests': reqs, 'tokens': toks, 'avg_latency_ms': lat})
+            totals[aid]['requests'] += reqs
+            totals[aid]['tokens'] += toks
+
+        result = []
+        for aid, entries in grouped.items():
+            tot_req = totals[aid]['requests'] or 1
+            tot_tok = totals[aid]['tokens'] or 1
+            for e in entries:
+                e['hit_pct'] = round(e['requests'] / tot_req * 100, 1)
+                e['token_pct'] = round(e['tokens'] / tot_tok * 100, 1)
+            result.append({'autoselect_id': aid, 'total_requests': totals[aid]['requests'], 'total_tokens': totals[aid]['tokens'], 'entries': entries})
+
+        return result
+
     # User-specific analytics methods
     def get_user_stats(self, user_id: int) -> Dict[str, Any]:
         """

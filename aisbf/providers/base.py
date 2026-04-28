@@ -790,6 +790,14 @@ class BaseProviderHandler:
         if config.aisbf and config.aisbf.adaptive_rate_limiting:
             adaptive_config = config.aisbf.adaptive_rate_limiting.dict()
         self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config, user_id)
+        # Load usage-based disabled state from DB (persists across restarts)
+        self._usage_disabled_until: Optional[float] = None
+        try:
+            db = DatabaseRegistry.get_config_database()
+            if db:
+                self._usage_disabled_until = db.get_provider_disabled_until(user_id, provider_id)
+        except Exception:
+            pass
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """
@@ -857,10 +865,26 @@ class BaseProviderHandler:
                     except Exception as e:
                         logger.warning(f"Failed to parse X-RateLimit-Reset header: {e}")
         
-        # Check response body
-        if not wait_seconds and isinstance(response_data, dict):
-            logger.info(f"Checking response body for rate limit info: {response_data}")
-            
+        # Normalize response_data into a dict and/or raw string for parsing
+        body_dict = None
+        body_str = None
+        if isinstance(response_data, dict):
+            body_dict = response_data
+        elif isinstance(response_data, (str, bytes)):
+            body_str = response_data.decode('utf-8') if isinstance(response_data, bytes) else response_data
+            try:
+                import json as _json
+                parsed = _json.loads(body_str)
+                if isinstance(parsed, dict):
+                    body_dict = parsed
+                    logger.info("Parsed response body string as JSON dict")
+            except (ValueError, TypeError):
+                logger.info("Response body is not valid JSON, will apply regex to raw string")
+
+        # Check response body (structured fields)
+        if not wait_seconds and body_dict:
+            logger.info(f"Checking response body for rate limit info: {body_dict}")
+
             # Common field names for retry/reset time
             retry_fields = [
                 'retry_after', 'retryAfter', 'retry_after_seconds',
@@ -870,66 +894,77 @@ class BaseProviderHandler:
                 'reset_time', 'resetTime', 'reset_at', 'resetAt',
                 'reset_timestamp', 'resetTimestamp'
             ]
-            
+
             # Check retry fields (direct seconds)
             for field in retry_fields:
-                if field in response_data:
+                if field in body_dict:
                     try:
-                        wait_seconds = int(response_data[field])
+                        wait_seconds = int(body_dict[field])
                         logger.info(f"Found {field} in response body: {wait_seconds} seconds")
                         break
                     except (ValueError, TypeError) as e:
                         logger.warning(f"Failed to parse {field}: {e}")
-            
+
             # Check reset fields (timestamp)
             if not wait_seconds:
                 for field in reset_fields:
-                    if field in response_data:
+                    if field in body_dict:
                         try:
-                            reset_timestamp = int(response_data[field])
+                            reset_timestamp = int(body_dict[field])
                             now_timestamp = int(time.time())
                             wait_seconds = reset_timestamp - now_timestamp
                             logger.info(f"Found {field} in response body, calculated wait: {wait_seconds} seconds")
                             break
                         except (ValueError, TypeError) as e:
                             logger.warning(f"Failed to parse {field}: {e}")
-            
-            # Check for error message with time information
+
+            # Check reason field for known rate limit reason codes
             if not wait_seconds:
-                error_msg = response_data.get('error', {})
-                if isinstance(error_msg, dict):
-                    message = error_msg.get('message', '')
-                elif isinstance(error_msg, str):
-                    message = error_msg
-                else:
-                    message = response_data.get('message', '')
-                
-                if message:
-                    logger.info(f"Checking error message for time info: {message}")
-                    # Look for patterns like "try again in X seconds/minutes/hours"
-                    patterns = [
-                        r'try again in (\d+)\s*(second|minute|hour|day)s?',
-                        r'retry after (\d+)\s*(second|minute|hour|day)s?',
-                        r'wait (\d+)\s*(second|minute|hour|day)s?',
-                        r'available in (\d+)\s*(second|minute|hour|day)s?',
-                    ]
-                    
-                    for pattern in patterns:
-                        match = re.search(pattern, message, re.IGNORECASE)
-                        if match:
-                            value = int(match.group(1))
-                            unit = match.group(2).lower()
-                            
-                            # Convert to seconds
-                            multipliers = {
-                                'second': 1,
-                                'minute': 60,
-                                'hour': 3600,
-                                'day': 86400
-                            }
-                            wait_seconds = value * multipliers.get(unit, 1)
-                            logger.info(f"Extracted wait time from message: {value} {unit}(s) = {wait_seconds} seconds")
+                reason = body_dict.get('reason') or body_dict.get('error_code') or body_dict.get('code', '')
+                if isinstance(reason, str):
+                    reason_upper = reason.upper()
+                    reason_wait_map = {
+                        'MONTHLY_REQUEST_COUNT': 86400,   # daily fallback; actual reset is monthly
+                        'DAILY_REQUEST_COUNT': 3600,      # hourly fallback; actual reset is daily
+                        'HOURLY_REQUEST_COUNT': 600,
+                        'RATE_LIMIT_EXCEEDED': 60,
+                        'TOO_MANY_REQUESTS': 60,
+                        'QUOTA_EXCEEDED': 3600,
+                    }
+                    for key, secs in reason_wait_map.items():
+                        if key in reason_upper:
+                            wait_seconds = secs
+                            logger.info(f"Inferred wait time from reason '{reason}': {wait_seconds} seconds")
                             break
+
+            # Extract message string from dict for regex matching below
+            if not body_str:
+                error_field = body_dict.get('error')
+                if isinstance(error_field, dict):
+                    body_str = error_field.get('message', '') or body_dict.get('message', '')
+                elif isinstance(error_field, str):
+                    body_str = error_field
+                else:
+                    body_str = body_dict.get('message', '')
+
+        # Apply regex patterns to any available string (raw body or extracted message)
+        if not wait_seconds and body_str:
+            logger.info(f"Checking string body for time patterns: {body_str[:500]}")
+            time_patterns = [
+                r'try again in (\d+)\s*(second|minute|hour|day)s?',
+                r'retry after (\d+)\s*(second|minute|hour|day)s?',
+                r'wait (\d+)\s*(second|minute|hour|day)s?',
+                r'available in (\d+)\s*(second|minute|hour|day)s?',
+            ]
+            multipliers = {'second': 1, 'minute': 60, 'hour': 3600, 'day': 86400}
+            for pattern in time_patterns:
+                match = re.search(pattern, body_str, re.IGNORECASE)
+                if match:
+                    value = int(match.group(1))
+                    unit = match.group(2).lower()
+                    wait_seconds = value * multipliers.get(unit, 1)
+                    logger.info(f"Extracted wait time from string body: {value} {unit}(s) = {wait_seconds} seconds")
+                    break
         
         # Ensure wait_seconds is positive and reasonable
         if wait_seconds:
@@ -1085,6 +1120,9 @@ class BaseProviderHandler:
     def is_rate_limited(self) -> bool:
         disabled_until = self.error_tracking.get('disabled_until')
         if disabled_until and disabled_until > time.time():
+            return True
+        # Check usage-based disable (loaded from DB on init, persists across restarts)
+        if self._usage_disabled_until and self._usage_disabled_until > time.time():
             return True
         return False
     

@@ -375,11 +375,10 @@ start_server() {
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
-    fi
 
-    # Test importing main module before starting uvicorn
-    echo "=== DEBUG: Testing main module import ==="
-    python3 -c "
+        # Test importing main module before starting uvicorn (debug only)
+        echo "=== DEBUG: Testing main module import ==="
+        python3 -c "
 try:
     import main
     print('main module imported successfully')
@@ -389,6 +388,10 @@ except Exception as e:
     traceback.print_exc()
     exit(1)
 " 2>&1
+    fi
+
+    # Signal to the aisbf package that it is running as a server
+    export AISBF_SERVER_MODE=1
 
     # Start the proxy server - runs in foreground
     # Use exec to replace the shell process so signals are properly handled
@@ -428,13 +431,13 @@ start_daemon() {
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
     fi
-    
+
     # Start in background with nohup and logging
     # Filter out BrokenPipeError logging errors
     if [ "$DEBUG" = "true" ]; then
-        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host $HOST --port $PORT --log-level debug 2>&1" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && AISBF_SERVER_MODE=1 uvicorn main:app --host $HOST --port $PORT --log-level debug 2>&1" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     else
-        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && uvicorn main:app --host $HOST --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
+        nohup bash -c "source $VENV_DIR/bin/activate && cd $SHARE_DIR && AISBF_SERVER_MODE=1 uvicorn main:app --host $HOST --port $PORT 2>&1 | grep -v '--- Logging error ---' | grep -v 'BrokenPipeError' | grep -v 'Call stack:' | grep -v 'File .*python' | grep -v 'Message:' | grep -v 'Arguments:'" >> "$LOG_DIR/aisbf_stdout.log" 2>&1 &
     fi
     PID=$!
     echo $PID > "$PIDFILE"

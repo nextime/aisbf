@@ -161,6 +161,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endblock %}
 
 {% block extra_js %}
+<script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>
 <script>
 const CLAUDE_CLI_MODE = {{ 'true' if claude_cli_mode else 'false' }};
 const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
@@ -281,11 +282,14 @@ let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
 let providerSearchFilter = '';
 let rawProviders = {{ user_providers_json | replace("</script>", "<\\/script>") | safe }};
+let providerMasterOrder = [];
+let _providerDS = null;
 
 // Convert user providers format to the format expected by the UI
 rawProviders.forEach(provider => {
     providersData[provider.provider_id] = provider.config;
 });
+providerMasterOrder = rawProviders.map(p => p.provider_id);
 
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
 const CHUNK_SIZE = 512 * 1024;
@@ -353,10 +357,14 @@ function _renderUsageCompact(usage) {
     if (rl) {
         _allWindows(rl).forEach(w => {
             const pct = w.used_percent || 0;
+            let countStr = '';
+            if (w.num_requests_used != null && w.num_requests_limit != null) {
+                countStr = ` (${w.num_requests_used.toLocaleString()}/${w.num_requests_limit.toLocaleString()})`;
+            }
             parts.push(`<div style="display:flex;align-items:center;gap:4px;font-size:11px;">
                 <span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>
                 ${_usageBarHtml(pct)}
-                <span style="color:var(--color-text);white-space:nowrap;">${pct}%</span>
+                <span style="color:var(--color-text);white-space:nowrap;">${pct}%${countStr}</span>
             </div>`);
         });
         if (rl.limit_reached) parts.push('<span style="color:#ef4444;font-size:11px;font-weight:600;">LIMIT REACHED</span>');
@@ -378,6 +386,13 @@ function _renderUsageFull(usage) {
             const pct = w.used_percent || 0;
             const color = pct >= 90 ? '#ef4444' : pct >= 70 ? '#f59e0b' : '#22c55e';
             const label = _windowLabel(w.limit_window_seconds);
+            let countsHtml = '';
+            if (w.num_requests_used != null && w.num_requests_limit != null) {
+                countsHtml += `<span>Requests: ${w.num_requests_used.toLocaleString()} / ${w.num_requests_limit.toLocaleString()}</span>`;
+            }
+            if (w.num_tokens_used != null && w.num_tokens_limit != null) {
+                countsHtml += `<span>Tokens: ${w.num_tokens_used.toLocaleString()} / ${w.num_tokens_limit.toLocaleString()}</span>`;
+            }
             return `<div style="margin-bottom:12px;">
                 <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
                     <span style="font-size:13px;font-weight:600;">${label}</span>
@@ -386,9 +401,10 @@ function _renderUsageFull(usage) {
                 <div style="height:8px;background:var(--color-border);border-radius:4px;overflow:hidden;margin-bottom:4px;">
                     <div style="height:100%;width:${Math.min(pct,100)}%;background:${color};transition:width 0.4s;border-radius:4px;"></div>
                 </div>
-                <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-muted);">
+                <div style="display:flex;flex-wrap:wrap;gap:6px;font-size:11px;color:var(--color-muted);">
                     <span>Window: ${_fmtSeconds(w.limit_window_seconds)}</span>
                     <span>Resets ${_fmtResetAt(w.reset_at)}</span>
+                    ${countsHtml}
                 </div>
             </div>`;
         };
@@ -569,16 +585,18 @@ async function uploadCodexFile(providerKey, file) {
     await uploadFileChunked(providerKey, 'credentials_file', file, 'codex_config');
 }
 
+function _providerFilteredKeys() {
+    return providerSearchFilter
+        ? providerMasterOrder.filter(k => k.toLowerCase().includes(providerSearchFilter.toLowerCase()) ||
+              (providersData[k] && (providersData[k].name || '').toLowerCase().includes(providerSearchFilter.toLowerCase())))
+        : providerMasterOrder.filter(k => k in providersData);
+}
+
 function renderProvidersList() {
     const container = document.getElementById('providers-list');
     if (!container) return;
 
-    const allKeys = Object.keys(providersData);
-    const filteredKeys = providerSearchFilter
-        ? allKeys.filter(k => k.toLowerCase().includes(providerSearchFilter.toLowerCase()) ||
-                              (providersData[k].name || '').toLowerCase().includes(providerSearchFilter.toLowerCase()))
-        : allKeys;
-
+    const filteredKeys = _providerFilteredKeys();
     const total = filteredKeys.length;
     const totalPages = Math.max(1, Math.ceil(total / PROVIDERS_PAGE_SIZE));
     if (currentProviderPage >= totalPages) currentProviderPage = totalPages - 1;
@@ -588,14 +606,19 @@ function renderProvidersList() {
     const countEl = document.getElementById('providers-count');
     if (countEl) countEl.textContent = window.i18n.interpolate(window.i18n.t(total !== 1 ? 'providers.provider_count_plural' : 'providers.provider_count_singular'), {n: total});
 
-    container.innerHTML = '';
+    const hasPrev = totalPages > 1 && currentProviderPage > 0;
+    const hasNext = totalPages > 1 && currentProviderPage < totalPages - 1;
+
+    container.innerHTML = `<div id="providers-list-page-prev" class="ds-sentinel${hasPrev ? ' ds-visible' : ''}">⬆ Drop here to move to previous page</div>`;
+
     if (pageKeys.length === 0) {
-        container.innerHTML = `<p style="color:var(--color-muted);">${window.i18n.t('providers.no_providers')}</p>`;
+        container.innerHTML += `<p style="color:var(--color-muted);">${window.i18n.t('providers.no_providers')}</p>`;
     } else {
         pageKeys.forEach(key => {
             const provider = providersData[key];
             const providerItem = document.createElement('div');
             providerItem.className = 'provider-item';
+            providerItem.dataset.sortKey = key;
             providerItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
 
             const isExpanded = expandedProviders.has(key);
@@ -608,6 +631,7 @@ function renderProvidersList() {
             providerItem.innerHTML = `
                 <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; flex-wrap: wrap; gap: 8px;">
                     <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+                        <span class="drag-handle" onclick="event.stopPropagation();" title="Drag to reorder">⠿</span>
                         <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                         <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
@@ -626,6 +650,12 @@ function renderProvidersList() {
             }
         });
     }
+
+    const sentinelBot = document.createElement('div');
+    sentinelBot.id = 'providers-list-page-next';
+    sentinelBot.className = 'ds-sentinel' + (hasNext ? ' ds-visible' : '');
+    sentinelBot.textContent = '⬇ Drop here to move to next page';
+    container.appendChild(sentinelBot);
 
     const paginationEl = document.getElementById('providers-pagination');
     if (paginationEl) {
@@ -646,6 +676,31 @@ function renderProvidersList() {
             </div>`;
         }
     }
+
+    if (!_providerDS) {
+        _providerDS = new DragSort({
+            containerId: 'providers-list',
+            masterOrder: { value: providerMasterOrder },
+            onReorder: function(newOrder) {
+                providerMasterOrder = newOrder;
+                renderProvidersList();
+                fetch(BASE_PATH + '/dashboard/api/provider/reorder', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({order: newOrder})
+                }).catch(function(){});
+            },
+            pagination: {
+                getCurrentPage: function() { return currentProviderPage; },
+                getTotalPages: function() { return Math.max(1, Math.ceil(_providerFilteredKeys().length / PROVIDERS_PAGE_SIZE)); },
+                goToPage: function(p) { goToProviderPage(p); },
+                pageSize: PROVIDERS_PAGE_SIZE,
+                getFilteredKeys: _providerFilteredKeys
+            }
+        });
+    } else {
+        _providerDS._opts.masterOrder.value = providerMasterOrder;
+        _providerDS.attach();
+    }
 }
 
 function goToProviderPage(page) {
@@ -660,11 +715,7 @@ function toggleProvider(key) {
         expandedProviders.delete(key);
     } else {
         expandedProviders.add(key);
-        const allKeys = Object.keys(providersData);
-        const filteredKeys = providerSearchFilter
-            ? allKeys.filter(k => k.toLowerCase().includes(providerSearchFilter.toLowerCase()) ||
-                                  (providersData[k].name || '').toLowerCase().includes(providerSearchFilter.toLowerCase()))
-            : allKeys;
+        const filteredKeys = _providerFilteredKeys();
         const idx = filteredKeys.indexOf(key);
         if (idx >= 0) currentProviderPage = Math.floor(idx / PROVIDERS_PAGE_SIZE);
     }
@@ -2099,6 +2150,7 @@ async function removeProvider(key) {
             return;
         }
         delete providersData[key];
+        providerMasterOrder = providerMasterOrder.filter(k => k !== key);
         expandedProviders.delete(key);
         renderProvidersList();
     }
@@ -2256,6 +2308,7 @@ async function confirmAddProvider() {
         return;
     }
 
+    if (!providerMasterOrder.includes(key)) providerMasterOrder.push(key);
     expandedProviders.add(key);
     cancelAddProvider();
     renderProvidersList();
@@ -2334,7 +2387,11 @@ async function saveProviders() {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: 'config=' + encodeURIComponent(JSON.stringify(providersData, null, 2))
+            body: (function() {
+                const orderedData = {};
+                providerMasterOrder.forEach(k => { if (providersData[k]) orderedData[k] = providersData[k]; });
+                return 'config=' + encodeURIComponent(JSON.stringify(orderedData, null, 2));
+            })()
         });
 
         if (response.ok) {

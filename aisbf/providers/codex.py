@@ -58,15 +58,22 @@ class CodexProviderHandler(BaseProviderHandler):
     For non-admin users, credentials are loaded from the database.
     """
     
-    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None, provider_config=None):
         super().__init__(provider_id, api_key, user_id=user_id)
-        
-        # Get provider config
-        provider_config = config.providers.get(provider_id)
-        
-        # Initialize OAuth2 client
-        codex_config = getattr(provider_config, 'codex_config', {}) if provider_config else {}
-        credentials_file = codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json')
+
+        # Resolve provider config: prefer explicitly passed config, then global lookup
+        if provider_config is None:
+            provider_config = config.providers.get(provider_id)
+
+        # Extract codex_config safely from both dict and object configs
+        if isinstance(provider_config, dict):
+            codex_config = provider_config.get('codex_config') or {}
+        else:
+            codex_config = getattr(provider_config, 'codex_config', None) or {}
+
+        # Use per-provider credentials file so multiple codex providers don't share state
+        default_creds = f'~/.aisbf/codex_{provider_id}_credentials.json'
+        credentials_file = codex_config.get('credentials_file', default_creds)
         issuer = codex_config.get('issuer', 'https://auth.openai.com')
         
         # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
@@ -81,16 +88,20 @@ class CodexProviderHandler(BaseProviderHandler):
             )
         
         # Determine mode: API key mode or OAuth2 mode
-        self._use_api_key_mode = bool(api_key or (provider_config and provider_config.api_key))
+        _cfg_api_key = (provider_config.get('api_key') if isinstance(provider_config, dict)
+                        else getattr(provider_config, 'api_key', None)) if provider_config else None
+        self._use_api_key_mode = bool(api_key or _cfg_api_key)
         self._account_id = None  # Will be extracted from ID token in OAuth2 mode
-        
+
         # Set base URL from config (default endpoint)
         # This will be overridden for OAuth2 mode when credentials are validated
-        self.base_url = provider_config.endpoint if provider_config else "https://api.openai.com/v1"
-        
+        _endpoint = (provider_config.get('endpoint') if isinstance(provider_config, dict)
+                     else getattr(provider_config, 'endpoint', None)) if provider_config else None
+        self.base_url = _endpoint or "https://api.openai.com/v1"
+
         # API Key Mode: Initialize OpenAI client with configured endpoint
         if self._use_api_key_mode:
-            resolved_api_key = api_key or (provider_config.api_key if provider_config else None)
+            resolved_api_key = api_key or _cfg_api_key
             self.client = OpenAI(
                 base_url=self.base_url,
                 api_key=resolved_api_key or "dummy",
@@ -164,10 +175,9 @@ class CodexProviderHandler(BaseProviderHandler):
     
     async def _get_valid_api_key(self) -> str:
         """Get a valid API key, refreshing OAuth2 if needed."""
-        # If we have an API key from config, use it
-        provider_config = config.providers.get(self.provider_id)
-        if provider_config and provider_config.api_key:
-            return provider_config.api_key
+        # If we have an API key, use it (prefer passed api_key, then stored config)
+        if self.api_key:
+            return self.api_key
         
         # Try OAuth2 token
         token = await self.oauth2.get_valid_token_with_refresh()

@@ -308,6 +308,7 @@ setup(
         ('share/aisbf/static/i18n', [
             'static/i18n/af.json',
             'static/i18n/ar.json',
+            'static/i18n/bel.json',
             'static/i18n/bn.json',
             'static/i18n/cs.json',
             'static/i18n/da.json',
@@ -328,6 +329,7 @@ setup(
             'static/i18n/ko.json',
             'static/i18n/ms.json',
             'static/i18n/nb.json',
+            'static/i18n/new.json',
             'static/i18n/nl.json',
             'static/i18n/pl.json',
             'static/i18n/pt.json',

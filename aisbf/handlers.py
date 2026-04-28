@@ -26,7 +26,9 @@ import asyncio
 import re
 import uuid
 import hashlib
+import threading
 import time as time_module
+from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Union
 from pathlib import Path
 from fastapi import HTTPException, Request
@@ -53,6 +55,28 @@ from .streaming_optimization import (
     OptimizedTextAccumulator,
     optimize_sse_chunk
 )
+
+_autoselect_result_cache: dict = {}
+_autoselect_result_cache_ttl: int = 3600  # seconds
+# In-flight Future registry for single-flight deduplication of identical concurrent selections
+_autoselect_inflight: dict = {}  # cache_key → asyncio.Future
+
+# Incremental conversation summaries — keyed by a stable session identifier derived from
+# the first messages of the conversation.  Each entry records the fingerprints of the
+# messages that were summarized so that the next turn can detect a prefix match and send
+# only the delta (new messages) instead of re-compacting the full history.
+_conversation_summaries: dict = {}
+_conversation_summary_ttl: int = 14400  # 4 hours
+
+# Internal HuggingFace model singleton — shared across all AutoselectHandler instances
+# so the model is loaded once and kept in RAM regardless of how many user handlers exist.
+_internal_model_singleton = None
+_internal_tokenizer_singleton = None
+# Serializes concurrent initialization (double-checked locking pattern)
+_internal_model_init_lock = threading.Lock()
+# Single-worker executor: queues inference calls so the model is never called concurrently.
+# max_workers=1 makes the queue implicit — no separate inference lock needed.
+_internal_model_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="aisbf-internal-model")
 
 
 def generate_system_fingerprint(provider_id: str, seed: Optional[int] = None) -> str:
@@ -3938,9 +3962,6 @@ class AutoselectHandler:
         self.user_id = user_id
         self.config = config
         self._skill_file_content = None
-        self._internal_model = None
-        self._internal_tokenizer = None
-        self._internal_model_lock = None
         # Load user-specific configs if user_id is provided
         if user_id:
             self._load_user_configs()
@@ -4009,168 +4030,182 @@ class AutoselectHandler:
         return self._skill_file_content
 
     def reset_internal_model(self):
-        """Unload the internal model from memory so it is re-loaded on next use."""
-        self._internal_model = None
-        self._internal_tokenizer = None
-        self._internal_model_lock = None
+        """Unload the shared internal model from memory so it is re-loaded on next use."""
+        global _internal_model_singleton, _internal_tokenizer_singleton
+        # Acquire init lock so we don't race with a concurrent initialization
+        with _internal_model_init_lock:
+            _internal_model_singleton = None
+            _internal_tokenizer_singleton = None
 
     def _initialize_internal_model(self):
-        """Initialize the internal HuggingFace model for selection (lazy loading)"""
+        """Load the shared HuggingFace model once; safe to call from multiple concurrent threads."""
+        global _internal_model_singleton, _internal_tokenizer_singleton
         import logging
         import json
         from pathlib import Path
         logger = logging.getLogger(__name__)
-        
-        if self._internal_model is not None:
-            return  # Already initialized
-        
-        try:
-            import torch
-            from transformers import AutoTokenizer, AutoModelForCausalLM
-            import threading
-            
-            logger.info("=== INITIALIZING INTERNAL SELECTION MODEL ===")
-            
-            # Load model name from config
-            config_path = Path.home() / '.aisbf' / 'aisbf.json'
-            if not config_path.exists():
-                # Try installed locations
-                installed_dirs = [
-                    Path('/usr/share/aisbf'),
-                    Path.home() / '.local' / 'share' / 'aisbf',
-                ]
-                for installed_dir in installed_dirs:
-                    test_path = installed_dir / 'aisbf.json'
-                    if test_path.exists():
-                        config_path = test_path
-                        break
-                else:
-                    # Fallback to source tree
-                    config_path = Path(__file__).parent.parent / 'config' / 'aisbf.json'
-            
-            model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"  # Default
-            if config_path.exists():
-                try:
-                    with open(config_path) as f:
-                        aisbf_config = json.load(f)
-                        model_name = aisbf_config.get('internal_model', {}).get('autoselect_model_id', model_name)
-                except Exception as e:
-                    logger.warning(f"Error loading autoselect model config: {e}, using default")
-            
-            logger.info(f"Model: {model_name}")
-            
-            # Check for GPU availability
-            device = "cuda" if torch.cuda.is_available() else "cpu"
-            logger.info(f"Device: {device}")
-            
-            # Load tokenizer - try local cache first, download only on first use
-            logger.info("Loading tokenizer...")
-            try:
-                self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
-                logger.info("Tokenizer loaded from local cache")
-            except (OSError, EnvironmentError):
-                logger.info("Tokenizer not cached, downloading from HuggingFace...")
-                self._internal_tokenizer = AutoTokenizer.from_pretrained(model_name)
-                logger.info("Tokenizer downloaded and cached")
 
-            # Load model - try local cache first, download only on first use
-            logger.info("Loading model...")
+        # Fast path: model already loaded (no lock needed for read)
+        if _internal_model_singleton is not None:
+            return
+
+        # Slow path: acquire init lock, then check again (double-checked locking)
+        with _internal_model_init_lock:
+            if _internal_model_singleton is not None:
+                return  # Another thread loaded it while we waited
+
             try:
-                self._internal_model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                    device_map="auto" if device == "cuda" else None,
-                    local_files_only=True
-                )
-                logger.info("Model loaded from local cache")
-            except (OSError, EnvironmentError):
-                logger.info("Model not cached, downloading from HuggingFace...")
-                self._internal_model = AutoModelForCausalLM.from_pretrained(
-                    model_name,
-                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
-                    device_map="auto" if device == "cuda" else None
-                )
-                logger.info("Model downloaded and cached")
-            
-            if device == "cpu":
-                self._internal_model = self._internal_model.to(device)
-            
-            logger.info("Model loaded successfully")
-            
-            # Initialize thread lock for model access
-            self._internal_model_lock = threading.Lock()
-            
-            logger.info("=== INTERNAL SELECTION MODEL READY ===")
-        except ImportError as e:
-            logger.error(f"Failed to import required libraries for internal model: {e}")
-            logger.error("Please install: pip install torch transformers")
-            raise
-        except Exception as e:
-            logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
-            raise
+                import torch
+                from transformers import AutoTokenizer, AutoModelForCausalLM
+
+                logger.info("=== INITIALIZING INTERNAL SELECTION MODEL ===")
+
+                config_path = Path.home() / '.aisbf' / 'aisbf.json'
+                if not config_path.exists():
+                    installed_dirs = [
+                        Path('/usr/share/aisbf'),
+                        Path.home() / '.local' / 'share' / 'aisbf',
+                    ]
+                    for installed_dir in installed_dirs:
+                        test_path = installed_dir / 'aisbf.json'
+                        if test_path.exists():
+                            config_path = test_path
+                            break
+                    else:
+                        config_path = Path(__file__).parent.parent / 'config' / 'aisbf.json'
+
+                model_name = "huihui-ai/Qwen2.5-0.5B-Instruct-abliterated-v3"
+                if config_path.exists():
+                    try:
+                        with open(config_path) as f:
+                            aisbf_cfg = json.load(f)
+                            model_name = aisbf_cfg.get('internal_model', {}).get('autoselect_model_id', model_name)
+                    except Exception as e:
+                        logger.warning(f"Error loading autoselect model config: {e}, using default")
+
+                logger.info(f"Model: {model_name}")
+                device = "cuda" if torch.cuda.is_available() else "cpu"
+                logger.info(f"Device: {device}")
+
+                logger.info("Loading tokenizer...")
+                try:
+                    _internal_tokenizer_singleton = AutoTokenizer.from_pretrained(model_name, local_files_only=True)
+                    logger.info("Tokenizer loaded from local cache")
+                except (OSError, EnvironmentError):
+                    logger.info("Tokenizer not cached, downloading from HuggingFace...")
+                    _internal_tokenizer_singleton = AutoTokenizer.from_pretrained(model_name)
+                    logger.info("Tokenizer downloaded and cached")
+
+                logger.info("Loading model...")
+                try:
+                    _internal_model_singleton = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                        device_map="auto" if device == "cuda" else None,
+                        local_files_only=True
+                    )
+                    logger.info("Model loaded from local cache")
+                except (OSError, EnvironmentError):
+                    logger.info("Model not cached, downloading from HuggingFace...")
+                    _internal_model_singleton = AutoModelForCausalLM.from_pretrained(
+                        model_name,
+                        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                        device_map="auto" if device == "cuda" else None
+                    )
+                    logger.info("Model downloaded and cached")
+
+                if device == "cpu":
+                    _internal_model_singleton = _internal_model_singleton.to(device)
+
+                logger.info("=== INTERNAL SELECTION MODEL READY ===")
+            except ImportError as e:
+                logger.error(f"Failed to import required libraries for internal model: {e}")
+                logger.error("Please install: pip install torch transformers")
+                raise
+            except Exception as e:
+                logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
+                raise
     
     async def _run_internal_model_selection(self, messages: list) -> str:
-        """Run the internal instruct model for selection in a separate thread"""
+        """Run the shared internal instruct model for selection.
+
+        Inference is submitted to a module-level single-worker executor so concurrent
+        requests are automatically queued — only one inference runs at a time without
+        any additional locking.  Initialization is protected separately by
+        _internal_model_init_lock (double-checked locking).
+        """
+        global _internal_model_singleton, _internal_tokenizer_singleton
         import logging
-        import asyncio
-        from concurrent.futures import ThreadPoolExecutor
         logger = logging.getLogger(__name__)
 
-        if self._internal_model is None:
+        if _internal_model_singleton is None:
             self._initialize_internal_model()
 
         def run_inference():
-            with self._internal_model_lock:
-                try:
-                    import torch
+            try:
+                import torch
 
-                    # Use chat template if the tokenizer supports it (instruct models),
-                    # otherwise fall back to a plain concatenated prompt (base models)
-                    has_chat_template = (
-                        getattr(self._internal_tokenizer, 'chat_template', None) is not None
+                has_chat_template = (
+                    getattr(_internal_tokenizer_singleton, 'chat_template', None) is not None
+                )
+                if has_chat_template:
+                    logger.info("[internal] Instruct model — applying chat template")
+                    prompt = _internal_tokenizer_singleton.apply_chat_template(
+                        messages,
+                        tokenize=False,
+                        add_generation_prompt=True
                     )
-                    if has_chat_template:
-                        logger.info("[internal] Instruct model detected — applying chat template")
-                        prompt = self._internal_tokenizer.apply_chat_template(
-                            messages,
-                            tokenize=False,
-                            add_generation_prompt=True
-                        )
-                    else:
-                        logger.info("[internal] Base model detected — using raw prompt")
-                        prompt = "\n\n".join(m["content"] for m in messages) + "\n"
-                    logger.info(f"[internal] Chat template applied. Prompt length: {len(prompt)} chars")
-                    logger.debug(f"[internal] Full prompt:\n{prompt}")
+                else:
+                    logger.info("[internal] Base model — using raw prompt")
+                    prompt = "\n\n".join(m["content"] for m in messages) + "\n"
+                logger.info(f"[internal] Prompt length: {len(prompt)} chars")
+                logger.debug(f"[internal] Full prompt:\n{prompt}")
 
-                    inputs = self._internal_tokenizer(prompt, return_tensors="pt")
-                    input_length = inputs['input_ids'].shape[1]
-                    logger.info(f"[internal] Tokenized input: {input_length} tokens")
+                inputs = _internal_tokenizer_singleton(prompt, return_tensors="pt")
+                input_length = inputs['input_ids'].shape[1]
+                logger.info(f"[internal] Tokenized input: {input_length} tokens")
 
-                    device = next(self._internal_model.parameters()).device
-                    logger.info(f"[internal] Running inference on device: {device}")
-                    inputs = {k: v.to(device) for k, v in inputs.items()}
+                aisbf_conf = self.config.get_aisbf_config()
+                _max_input_tokens = int(
+                    (aisbf_conf.internal_model or {}).get('autoselect_max_tokens', 8000)
+                    if aisbf_conf else 8000
+                )
+                if input_length > _max_input_tokens:
+                    logger.info(f"[internal] Truncating input from {input_length} to {_max_input_tokens} tokens")
+                    inputs = {k: v[:, -_max_input_tokens:] for k, v in inputs.items()}
+                    input_length = _max_input_tokens
 
-                    with torch.no_grad():
-                        outputs = self._internal_model.generate(
-                            **inputs,
-                            max_new_tokens=100,
-                            do_sample=False,
-                            pad_token_id=self._internal_tokenizer.eos_token_id
-                        )
+                device = next(_internal_model_singleton.parameters()).device
+                logger.info(f"[internal] Running inference on device: {device}")
+                inputs = {k: v.to(device) for k, v in inputs.items()}
 
-                    generated_length = outputs[0].shape[0] - input_length
-                    logger.info(f"[internal] Generated {generated_length} new tokens")
+                aisbf_conf = self.config.get_aisbf_config()
+                _max_new_tokens = int(
+                    (aisbf_conf.internal_model or {}).get('autoselect_max_new_tokens', 100)
+                    if aisbf_conf else 100
+                )
+                with torch.no_grad():
+                    outputs = _internal_model_singleton.generate(
+                        **inputs,
+                        max_new_tokens=_max_new_tokens,
+                        do_sample=False,
+                        pad_token_id=_internal_tokenizer_singleton.eos_token_id
+                    )
 
-                    response = self._internal_tokenizer.decode(outputs[0][input_length:], skip_special_tokens=True).strip()
-                    logger.info(f"[internal] Decoded response: {repr(response)}")
-                    return response
-                except Exception as e:
-                    logger.error(f"[internal] Inference error: {e}", exc_info=True)
-                    return None
+                generated_length = outputs[0].shape[0] - input_length
+                logger.info(f"[internal] Generated {generated_length} new tokens")
 
-        loop = asyncio.get_event_loop()
-        with ThreadPoolExecutor(max_workers=1) as executor:
-            return await loop.run_in_executor(executor, run_inference)
+                response = _internal_tokenizer_singleton.decode(
+                    outputs[0][input_length:], skip_special_tokens=True
+                ).strip()
+                logger.info(f"[internal] Decoded response: {repr(response)}")
+                return response
+            except Exception as e:
+                logger.error(f"[internal] Inference error: {e}", exc_info=True)
+                return None
+
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(_internal_model_executor, run_inference)
 
 
     def _compact_messages_for_selection(self, messages: List[Dict], max_tokens: int) -> str:
@@ -4178,15 +4213,21 @@ class AutoselectHandler:
         Compact a message list into a prompt string that fits within max_tokens.
         Keeps the first HEAD and last TAIL messages verbatim; the dropped middle
         section is replaced by a compact one-liner summary so no context is lost silently.
+
+        Individual messages that are too large are truncated so the HEAD/TAIL
+        content always fits within the budget even when there are fewer messages
+        than HEAD+TAIL.
         """
         def _tokens(text: str) -> int:
             return len(text) // 4
 
-        def _msg_text(msg: dict) -> str:
+        def _msg_text(msg: dict, max_content_chars: int = None) -> str:
             role = msg.get('role', 'user')
-            content = msg.get('content', '')
+            content = msg.get('content') or ''
             if isinstance(content, list):
                 content = str(content)
+            if max_content_chars is not None and len(content) > max_content_chars:
+                content = content[:max_content_chars] + "...[truncated]"
             return f"{role}: {content}\n"
 
         if not messages:
@@ -4198,13 +4239,22 @@ class AutoselectHandler:
 
         HEAD = 2  # first N messages to keep verbatim
         TAIL = 3  # last N messages to keep verbatim
+        max_chars = max_tokens * 4
 
         head = messages[:HEAD]
         tail = messages[-TAIL:] if len(messages) > HEAD + TAIL else []
         middle = messages[HEAD: len(messages) - TAIL] if len(messages) > HEAD + TAIL else messages[HEAD:]
 
-        head_text = "".join(_msg_text(m) for m in head)
-        tail_text = "".join(_msg_text(m) for m in tail)
+        # Budget each kept message so head+tail together never exceed the limit.
+        kept_count = len(head) + len(tail)
+        if kept_count > 0:
+            # Reserve ~10 % for the summary block; split the rest equally.
+            per_msg_budget_chars = max(256, (max_chars * 9 // 10) // kept_count)
+        else:
+            per_msg_budget_chars = max_chars
+
+        head_text = "".join(_msg_text(m, per_msg_budget_chars) for m in head)
+        tail_text = "".join(_msg_text(m, per_msg_budget_chars) for m in tail)
         fixed_tokens = _tokens(head_text) + _tokens(tail_text)
 
         summary_block = ""
@@ -4217,10 +4267,15 @@ class AutoselectHandler:
             summary_block = f"[... {len(middle)} omitted messages — summary: {summary_line} ...]\n"
             available_for_summary = max_tokens - fixed_tokens
             if _tokens(summary_block) > available_for_summary > 0:
-                max_chars = available_for_summary * 4
-                summary_block = summary_block[:max_chars - 5] + "...]\n"
+                summary_block = summary_block[:available_for_summary * 4 - 5] + "...]\n"
 
-        return head_text + summary_block + tail_text
+        result = head_text + summary_block + tail_text
+
+        # Final safety cap: never exceed the hard limit regardless of edge cases.
+        if len(result) > max_chars:
+            result = result[:max_chars - 14] + "...[truncated]"
+
+        return result
 
     @staticmethod
     def _detect_loop(text: str, ngram: int = 8, threshold: int = 3) -> bool:
@@ -4241,8 +4296,198 @@ class AutoselectHandler:
                 return True
         return False
 
-    def _build_autoselect_messages(self, user_prompt: str, autoselect_config, failed_models: Optional[List[str]] = None) -> List[Dict]:
-        """Build the messages for model selection (system + user)"""
+    # ------------------------------------------------------------------
+    # Incremental conversation summary helpers
+    # ------------------------------------------------------------------
+
+    def _msg_fingerprint(self, msg: dict) -> str:
+        """Stable MD5 of a message's content — used to detect identical message prefixes."""
+        c = msg.get('content', '')
+        if isinstance(c, list):
+            c = ' '.join(p.get('text', '') if isinstance(p, dict) else str(p) for p in c)
+        return hashlib.md5(str(c).encode()).hexdigest()
+
+    def _get_session_key(self, context_msgs: list) -> Optional[str]:
+        """Derive a stable conversation-level key from the first 1-2 messages.
+
+        These messages (usually the system prompt + first user turn) are constant
+        for the lifetime of a conversation, giving a reliable session identifier.
+        """
+        if not context_msgs:
+            return None
+        parts = []
+        for m in context_msgs[:2]:
+            c = m.get('content', '')
+            if isinstance(c, list):
+                c = ' '.join(p.get('text', '') if isinstance(p, dict) else str(p) for p in c)
+            parts.append(str(c)[:500])
+        return hashlib.md5('||'.join(parts).encode()).hexdigest()
+
+    def _find_conversation_summary(self, context_msgs: list):
+        """Look for a cached summary whose fingerprints are a prefix of context_msgs.
+
+        Returns (summary_dict, msgs_since_summary) if found, or (None, context_msgs).
+        A prefix match means the conversation grew by appending new messages — the
+        summarized part is identical to what was seen before.
+        """
+        global _conversation_summaries
+        session_key = self._get_session_key(context_msgs)
+        if not session_key:
+            return None, context_msgs
+
+        entry = _conversation_summaries.get(session_key)
+        if not entry:
+            return None, context_msgs
+
+        if time_module.time() - entry['created_at'] > _conversation_summary_ttl:
+            _conversation_summaries.pop(session_key, None)
+            return None, context_msgs
+
+        stored_fps = entry['fingerprints']
+        K = len(stored_fps)
+        if K > len(context_msgs):
+            return None, context_msgs
+
+        # Verify that stored fingerprints match the first K messages exactly
+        current_fps = [self._msg_fingerprint(m) for m in context_msgs[:K]]
+        if current_fps != stored_fps:
+            return None, context_msgs  # conversation was edited — treat as new
+
+        return entry, context_msgs[K:]
+
+    def _build_summary_context_prompt(self, summary: dict, new_msgs: list, max_tokens: int) -> str:
+        """Build context_prompt from a cached summary + messages added since that summary."""
+        lines = [
+            "[PRIOR CONTEXT SUMMARY]",
+            summary['summary_text'],
+        ]
+        nsfw = summary.get('nsfw')
+        pd   = summary.get('personal_data')
+        prev = summary.get('previous_selection')
+        lines.append(f"NSFW content: {'detected' if nsfw else 'not detected' if nsfw is False else 'not analyzed'}")
+        lines.append(f"Personal data: {'detected' if pd else 'not detected' if pd is False else 'not analyzed'}")
+        if prev:
+            lines.append(f"Previous model selection: {prev}")
+
+        if new_msgs:
+            lines.append("\n[NEW MESSAGES SINCE SUMMARY]")
+            # Budget the new messages portion: summary is already compact, give remaining tokens to new msgs
+            header_chars = sum(len(l) for l in lines)
+            remaining_tokens = max(500, max_tokens - header_chars // 4)
+            lines.append(self._compact_messages_for_selection(new_msgs, remaining_tokens))
+
+        return '\n'.join(lines)
+
+    async def _store_conversation_summary(self, context_msgs: list, model_id: Optional[str],
+                                          autoselect_config=None, context_text: str = ''):
+        """Build and cache a compact conversation summary for the next autoselect turn.
+
+        Classification (NSFW / personal-data) only runs when the classifier is already
+        loaded in memory — no model download penalty.  Classification runs in the shared
+        executor so it never blocks the event loop.
+        """
+        global _conversation_summaries
+        if not context_msgs:
+            return
+        session_key = self._get_session_key(context_msgs)
+        if not session_key:
+            return
+
+        fingerprints = [self._msg_fingerprint(m) for m in context_msgs]
+
+        # Compact summary text: HEAD messages + message count
+        summary_lines = []
+        for m in context_msgs[:2]:
+            role = m.get('role', 'user')
+            c = m.get('content', '')
+            if isinstance(c, list):
+                c = ' '.join(p.get('text', '') if isinstance(p, dict) else str(p) for p in c)
+            summary_lines.append(f"{role}: {str(c).strip()[:400]}")
+        if len(context_msgs) > 2:
+            summary_lines.append(f"[{len(context_msgs) - 2} additional messages in session]")
+        summary_text = '\n'.join(summary_lines)
+
+        classify_text = (context_text or summary_text)[:512]
+
+        # NSFW / privacy — only if classifier is already initialised (fast path)
+        nsfw: Optional[bool] = None
+        personal_data: Optional[bool] = None
+
+        loop = asyncio.get_running_loop()
+
+        if autoselect_config and getattr(autoselect_config, 'classify_nsfw', False) \
+                and content_classifier._nsfw_classifier is not None:
+            try:
+                is_safe, _ = await loop.run_in_executor(
+                    None, content_classifier.check_nsfw, classify_text
+                )
+                nsfw = not is_safe
+            except Exception:
+                pass
+
+        if autoselect_config and getattr(autoselect_config, 'classify_privacy', False) \
+                and content_classifier._privacy_classifier is not None:
+            try:
+                is_safe, _ = await loop.run_in_executor(
+                    None, content_classifier.check_privacy, classify_text
+                )
+                personal_data = not is_safe
+            except Exception:
+                pass
+
+        _conversation_summaries[session_key] = {
+            'fingerprints': fingerprints,
+            'summary_text': summary_text,
+            'nsfw': nsfw,
+            'personal_data': personal_data,
+            'previous_selection': model_id,
+            'created_at': time_module.time(),
+        }
+
+    def _get_selection_max_tokens(self, autoselect_config) -> int:
+        """Return the max-tokens budget for compacting messages before autoselection.
+
+        - internal model   → aisbf_config.internal_model.autoselect_max_tokens (default 8000)
+        - rotation         → rotation.default_context_size  (fallback 8000)
+        - provider/model   → model.context_length  (fallback 8000)
+        """
+        selection_model = (getattr(autoselect_config, 'selection_model', None) or '').strip() or 'internal'
+
+        if selection_model == 'internal':
+            aisbf_conf = self.config.get_aisbf_config()
+            if aisbf_conf and aisbf_conf.internal_model:
+                return int(aisbf_conf.internal_model.get('autoselect_max_tokens', 8000))
+            return 8000
+
+        # Rotation: look in user rotations first, then global
+        rotation_cfg = None
+        if self.user_id and hasattr(self, 'user_rotations'):
+            rotation_cfg = next(
+                (r['config'] for r in self.user_rotations if r['rotation_id'] == selection_model),
+                None
+            )
+        if rotation_cfg is None and hasattr(self.config, 'rotations'):
+            rotation_cfg = self.config.rotations.get(selection_model)
+        if rotation_cfg and getattr(rotation_cfg, 'default_context_size', None):
+            return rotation_cfg.default_context_size
+
+        # Direct provider/model
+        if '/' in selection_model:
+            provider_id, model_name = selection_model.split('/', 1)
+            if hasattr(self.config, 'providers') and provider_id in self.config.providers:
+                prov_cfg = self.config.get_provider(provider_id)
+                for m in (getattr(prov_cfg, 'models', None) or []):
+                    if m.name == model_name and getattr(m, 'context_length', None):
+                        return m.context_length
+
+        return 8000
+
+    def _build_autoselect_messages(self, context_prompt: str, current_task: str, autoselect_config, failed_models: Optional[List[str]] = None) -> List[Dict]:
+        """Build the messages for model selection (system + user).
+
+        context_prompt  — compacted prior conversation (establishes domain/topic)
+        current_task    — the last user message, i.e. the specific thing to do NOW
+        """
         skill_content = self._get_skill_file_content()
 
         # Build the available models list, excluding already-failed ones
@@ -4258,7 +4503,9 @@ class AutoselectHandler:
         if failed_models:
             failed_note = f"\n<aisbf_failed_models>{', '.join(failed_models)}</aisbf_failed_models>\n<aisbf_note>The above models have already failed or produced looping responses. Do NOT select them.</aisbf_note>"
 
-        user_message = f"""<aisbf_user_prompt>{user_prompt}</aisbf_user_prompt>
+        context_block = f"<aisbf_session_context>\n{context_prompt}\n</aisbf_session_context>\n" if context_prompt.strip() else ""
+
+        user_message = f"""{context_block}<aisbf_current_task>{current_task}</aisbf_current_task>
 <aisbf_autoselect_list>
 {models_list}
 </aisbf_autoselect_list>
@@ -4276,84 +4523,128 @@ class AutoselectHandler:
             return match.group(1).strip()
         return None
 
-    async def _get_model_selection(self, user_prompt: str, autoselect_config, failed_models: Optional[List[str]] = None) -> str:
-        """Send the autoselect prompt to a model and get the selection"""
+    async def _get_model_selection(self, context_prompt: str, current_task: str, autoselect_config, failed_models: Optional[List[str]] = None) -> str:
+        """Cache + coalescing wrapper around _run_selection.
+
+        1. Returns immediately on a cache hit.
+        2. If an identical selection is already in-flight, awaits its Future instead of
+           making a redundant API/inference call (single-flight deduplication).
+        3. Otherwise runs the selection, stores the result, and resolves all waiters.
+        """
         import logging
         logger = logging.getLogger(__name__)
-        logger.info(f"=== AUTOSELECT MODEL SELECTION START ===")
+        logger.info("=== AUTOSELECT MODEL SELECTION START ===")
+
+        global _autoselect_result_cache, _autoselect_inflight
+
+        _available_ids = sorted(
+            m.model_id for m in autoselect_config.available_models
+            if not failed_models or m.model_id not in failed_models
+        )
+        _sel_model_key = (getattr(autoselect_config, 'selection_model', None) or 'internal') or 'internal'
+        _cache_key = (
+            hashlib.md5(context_prompt.encode()).hexdigest()
+            + "|" + hashlib.md5(current_task.encode()).hexdigest()
+            + "|" + hashlib.md5(",".join(_available_ids).encode()).hexdigest()
+            + "|" + _sel_model_key
+        )
+        _now = time_module.time()
+
+        # 1. Cache hit
+        _cached = _autoselect_result_cache.get(_cache_key)
+        if _cached:
+            _cached_id, _cached_at = _cached
+            if _now - _cached_at < _autoselect_result_cache_ttl:
+                logger.info(f"=== AUTOSELECT CACHE HIT (age {_now - _cached_at:.0f}s) → {_cached_id} ===")
+                return _cached_id
+
+        # 2. Coalesce: await an identical in-flight selection rather than duplicating the call.
+        #    Safe without a lock because asyncio is single-threaded — the check and the
+        #    dict assignment below are both in the same synchronous segment (no await between).
+        if _cache_key in _autoselect_inflight:
+            logger.info("=== AUTOSELECT COALESCING: awaiting identical in-flight selection ===")
+            try:
+                result = await _autoselect_inflight[_cache_key]
+                logger.info(f"=== AUTOSELECT COALESCED RESULT → {result} ===")
+                return result
+            except Exception as e:
+                logger.warning(f"In-flight selection failed ({e}), running independent selection")
+
+        # 3. Register as in-flight, run, then resolve all waiters atomically.
+        _future = asyncio.get_running_loop().create_future()
+        _autoselect_inflight[_cache_key] = _future
+        try:
+            model_id = await self._run_selection(context_prompt, current_task, autoselect_config, failed_models)
+            if model_id:
+                _autoselect_result_cache[_cache_key] = (model_id, _now)
+            _future.set_result(model_id)
+            return model_id
+        except Exception as e:
+            if not _future.done():
+                _future.set_exception(e)
+            raise
+        finally:
+            _autoselect_inflight.pop(_cache_key, None)
+
+    async def _run_selection(self, context_prompt: str, current_task: str, autoselect_config, failed_models: Optional[List[str]] = None) -> Optional[str]:
+        """Run the actual model selection — no caching, no coalescing.  Called only by _get_model_selection."""
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # For text/semantic search we combine both parts
+        full_prompt = (context_prompt + "\n" + current_task).strip()
 
         # Check if semantic classification is enabled
         if autoselect_config.classify_semantic:
             logger.info("=== SEMANTIC CLASSIFICATION ENABLED ===")
-            logger.info(f"Using semantic classification for model selection")
 
             try:
-                # Initialize semantic classifier
                 semantic_classifier = SemanticClassifier()
                 semantic_classifier.initialize()
 
-                # Build model library for semantic search (model_id -> description)
                 model_library = {}
                 for model_info in autoselect_config.available_models:
                     if failed_models and model_info.model_id in failed_models:
                         continue
                     model_library[model_info.model_id] = model_info.description
 
-                # Extract recent chat history (last 3 messages)
-                # Split user_prompt into messages (it's formatted as "role: content\nrole: content\n...")
-                chat_history = []
-                if user_prompt:
-                    lines = user_prompt.strip().split('\n')
-                    for line in lines[-3:]:  # Last 3 messages
+                chat_history = [current_task] if current_task else []
+                if context_prompt:
+                    lines = context_prompt.strip().split('\n')
+                    for line in lines[-3:]:
                         if ': ' in line:
-                            role, content = line.split(': ', 1)
+                            _, content = line.split(': ', 1)
                             chat_history.append(content)
 
-                # Perform hybrid BM25 + semantic re-ranking
-                results = semantic_classifier.hybrid_model_search(user_prompt, chat_history, model_library, top_k=1)
+                results = semantic_classifier.hybrid_model_search(full_prompt, chat_history, model_library, top_k=1)
 
                 if results:
                     selected_model_id, score = results[0]
-                    logger.info(f"=== SEMANTIC CLASSIFICATION SUCCESS ===")
-                    logger.info(f"Selected model ID: {selected_model_id} (score: {score:.4f})")
+                    logger.info(f"=== SEMANTIC CLASSIFICATION SUCCESS === Selected: {selected_model_id} (score: {score:.4f})")
                     return selected_model_id
                 else:
-                    logger.warning(f"=== SEMANTIC CLASSIFICATION FAILED ===")
-                    logger.warning("No models returned from semantic search, falling back to AI model selection")
+                    logger.warning("Semantic search returned no results, falling back to AI model selection")
 
             except Exception as e:
-                logger.error(f"=== SEMANTIC CLASSIFICATION ERROR ===")
-                logger.error(f"Error during semantic classification: {str(e)}")
+                logger.error(f"Semantic classification error: {e}")
                 logger.warning("Falling back to AI model selection")
 
         logger.info(f"Using '{autoselect_config.selection_model}' for model selection")
 
-        # Build messages (system + user)
-        messages = self._build_autoselect_messages(user_prompt, autoselect_config, failed_models)
-        
-        # Create a minimal request for model selection
+        messages = self._build_autoselect_messages(context_prompt, current_task, autoselect_config, failed_models)
+
         selection_request = {
             "messages": messages,
-            "temperature": 0,  # Deterministic selection
-            "max_tokens": 100,   # We only need a short response
+            "temperature": 0,
+            "max_tokens": 100,
             "stream": False,
-            "stop": ["</aisbf_model_autoselection>"]  # Stop at the closing tag
+            "stop": ["</aisbf_model_autoselection>"]
         }
-        
-        logger.info(f"Selection request parameters:")
-        logger.info(f"  Temperature: 0 (deterministic)")
-        logger.info(f"  Max tokens: 100 (short response expected)")
-        logger.info(f"  Stream: False")
-        logger.info(f"  Stop: </aisbf_model_autoselection>")
-        
-        # Determine if selection_model is a rotation, provider, or special keyword.
-        # Default to "internal" when the configured value is blank.
+
         selection_model = (getattr(autoselect_config, 'selection_model', None) or '').strip() or 'internal'
 
         try:
-            # Check if it's the special "internal" keyword
             if selection_model == "internal":
-                # Resolve: if the configured model maps to a known provider, use it remotely
                 aisbf_conf = self.config.get_aisbf_config()
                 internal_model_id = (
                     (aisbf_conf.internal_model or {}).get('autoselect_model_id', '')
@@ -4362,115 +4653,74 @@ class AutoselectHandler:
                 if internal_model_id and '/' in internal_model_id:
                     internal_provider_id = internal_model_id.split('/', 1)[0]
                     if internal_provider_id in self.config.providers:
-                        logger.info(
-                            f"Internal autoselect model '{internal_model_id}'"
-                            f" → provider '{internal_provider_id}'"
-                        )
-                        model_name = internal_model_id.split('/', 1)[1]
-                        request_handler = RequestHandler()
-                        selection_request['model'] = model_name
-                        response = await request_handler.handle_chat_completion(
-                            request=None,
-                            provider_id=internal_provider_id,
-                            request_data=selection_request
+                        logger.info(f"Internal autoselect model '{internal_model_id}' → provider '{internal_provider_id}'")
+                        selection_request['model'] = internal_model_id.split('/', 1)[1]
+                        response = await RequestHandler().handle_chat_completion(
+                            request=None, provider_id=internal_provider_id, request_data=selection_request
                         )
                         content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
                         model_id = self._extract_model_selection(content)
                         if model_id:
-                            logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
-                            logger.info(f"Selected model ID: {model_id}")
+                            logger.info(f"=== AUTOSELECT SUCCESS === {model_id}")
                         else:
-                            logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
-                            logger.warning(f"Could not extract model ID from provider response")
+                            logger.warning("Could not extract model ID from provider response")
                         return model_id
 
-                logger.info(f"Selection model is 'internal' - using local HuggingFace model")
+                logger.info("Selection model is 'internal' — using local HuggingFace model")
                 response_content = await self._run_internal_model_selection(messages)
-
                 if not response_content:
                     logger.error("Internal model returned no response")
                     return None
-
                 logger.info(f"Internal model response: {response_content[:200]}..." if len(response_content) > 200 else f"Internal model response: {response_content}")
-
                 model_id = self._extract_model_selection(response_content)
-
                 if model_id:
-                    logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
-                    logger.info(f"Selected model ID: {model_id}")
+                    logger.info(f"=== AUTOSELECT SUCCESS === {model_id}")
                 else:
-                    logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
-                    logger.warning(f"Could not extract model ID from internal model response")
-
+                    logger.warning("Could not extract model ID from internal model response")
                 return model_id
-            # Check if it's a rotation
-            elif (self.user_id and selection_model in self.rotations) or selection_model in self.config.rotations:
+
+            elif (self.user_id and hasattr(self, 'rotations') and selection_model in self.rotations) or selection_model in self.config.rotations:
                 logger.info(f"Selection model '{selection_model}' is a rotation")
-                rotation_handler = RotationHandler(user_id=self.user_id)
-                response = await rotation_handler.handle_rotation_request(selection_model, selection_request)
-            # Check if it's a provider/model format (e.g., "gemini/gemini-pro")
+                response = await RotationHandler(user_id=self.user_id).handle_rotation_request(selection_model, selection_request)
+
             elif '/' in selection_model:
                 provider_id, model_name = selection_model.split('/', 1)
                 logger.info(f"Selection model '{selection_model}' is a direct provider model")
-                logger.info(f"  Provider: {provider_id}, Model: {model_name}")
-
                 if provider_id not in self.config.providers:
-                    logger.error(f"Selection model provider '{provider_id}' not found in configuration")
+                    logger.error(f"Selection model provider '{provider_id}' not found")
                     return None
-
-                # Use the direct provider handler
-                request_handler = RequestHandler()
                 selection_request['model'] = model_name
-                response = await request_handler.handle_chat_completion(
-                    request=None,  # No HTTP request object needed
-                    provider_id=provider_id,
-                    request_data=selection_request
+                response = await RequestHandler().handle_chat_completion(
+                    request=None, provider_id=provider_id, request_data=selection_request
                 )
-            # Check if it's just a provider ID (use any model from that provider)
+
             elif selection_model in self.config.providers:
-                logger.info(f"Selection model '{selection_model}' is a provider (will use first available model)")
+                logger.info(f"Selection model '{selection_model}' is a provider")
                 provider_config = self.config.get_provider(selection_model)
-
-                # Get first available model from provider
-                if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
-                    model_name = getattr(provider_config, "models", [])[0].name
-                    logger.info(f"  Using model: {model_name}")
-
-                    request_handler = RequestHandler()
-                    selection_request['model'] = model_name
-                    response = await request_handler.handle_chat_completion(
-                        request=None,
-                        provider_id=selection_model,
-                        request_data=selection_request
-                    )
-                else:
-                    logger.error(f"Selection model provider '{selection_model}' has no models configured")
+                models = getattr(provider_config, "models", []) or []
+                if not models:
+                    logger.error(f"Provider '{selection_model}' has no models configured")
                     return None
+                selection_request['model'] = models[0].name
+                response = await RequestHandler().handle_chat_completion(
+                    request=None, provider_id=selection_model, request_data=selection_request
+                )
+
             else:
                 logger.error(f"Selection model '{selection_model}' not found in rotations or providers")
                 return None
-            
-            logger.info(f"Selection response received")
-            
+
             content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
-            logger.info(f"Raw response content: {content[:200]}..." if len(content) > 200 else f"Raw response content: {content}")
-            
+            logger.info(f"Raw response: {content[:200]}..." if len(content) > 200 else f"Raw response: {content}")
             model_id = self._extract_model_selection(content)
-            
             if model_id:
-                logger.info(f"=== AUTOSELECT MODEL SELECTION SUCCESS ===")
-                logger.info(f"Selected model ID: {model_id}")
+                logger.info(f"=== AUTOSELECT SUCCESS === {model_id}")
             else:
-                logger.warning(f"=== AUTOSELECT MODEL SELECTION FAILED ===")
-                logger.warning(f"Could not extract model ID from response")
-                logger.warning(f"Response content: {content}")
-            
+                logger.warning(f"Could not extract model ID from response: {content}")
             return model_id
+
         except Exception as e:
-            logger.error(f"=== AUTOSELECT MODEL SELECTION ERROR ===")
-            logger.error(f"Error during model selection: {str(e)}")
-            logger.error(f"Will use fallback model")
-            # If selection fails, we'll handle it in the main handler
+            logger.error(f"=== AUTOSELECT SELECTION ERROR === {e}")
             return None
 
     async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict, user_id: Optional[int] = None, token_id: Optional[int] = None) -> Dict:
@@ -4530,11 +4780,36 @@ class AutoselectHandler:
 
         logger.info(f"User messages count: {len(user_messages)}")
 
-        MAX_SELECTION_TOKENS = 8000
-        user_prompt = self._compact_messages_for_selection(user_messages, MAX_SELECTION_TOKENS)
-        estimated_tokens = len(user_prompt) // 4
-        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {estimated_tokens} tokens)")
-        logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
+        # Split: last TAIL messages → current_task (what's happening now)
+        #        earlier messages  → context_prompt (session domain/background)
+        _TAIL = 5
+        tail_msgs = user_messages[-_TAIL:]
+        context_msgs = user_messages[:-_TAIL] if len(user_messages) > _TAIL else []
+        _task_parts = []
+        for _m in tail_msgs:
+            _role = _m.get('role', 'user')
+            _c = _m.get('content', '')
+            if isinstance(_c, list):
+                _c = ' '.join((p.get('text', '') if isinstance(p, dict) else str(p)) for p in _c).strip()
+            _c = str(_c).strip()
+            if len(_c) > 800:
+                _c = _c[:800] + "...[truncated]"
+            _task_parts.append(f"{_role}: {_c}")
+        current_task = "\n".join(_task_parts)
+
+        max_selection_tokens = self._get_selection_max_tokens(autoselect_config)
+
+        # Try to reuse a cached conversation summary (incremental context)
+        _summary, _new_msgs = self._find_conversation_summary(context_msgs)
+        if _summary:
+            context_prompt = self._build_summary_context_prompt(_summary, _new_msgs, max_selection_tokens)
+            logger.info(f"Using cached conversation summary ({len(_summary['fingerprints'])} msgs summarized, {len(_new_msgs)} new)")
+        else:
+            context_prompt = self._compact_messages_for_selection(context_msgs, max_selection_tokens) if context_msgs else ""
+            logger.info(f"No cached summary — full context compaction")
+
+        logger.info(f"Context: {len(context_prompt)} chars; current task: {len(current_task)} chars ({len(tail_msgs)} tail msgs, limit {max_selection_tokens} tokens)")
+        logger.info(f"Current task preview: {current_task[:300]}..." if len(current_task) > 300 else f"Current task: {current_task}")
 
         # Filter out entries with empty model_id (misconfiguration guard)
         valid_models = [m for m in autoselect_config.available_models if (m.model_id or '').strip()]
@@ -4547,11 +4822,22 @@ class AutoselectHandler:
         rotation_handler = RotationHandler()
         failed_models: List[str] = []
         last_exception = None
+        _summary_stored = False
+        _selection_latency_ms = 0.0
 
         while True:
             # Re-run selection excluding already-failed models
             logger.info(f"Requesting model selection from AI (failed so far: {failed_models})...")
-            selected_model_id = await self._get_model_selection(user_prompt, autoselect_config, failed_models)
+            _sel_start = time.time()
+            selected_model_id = await self._get_model_selection(context_prompt, current_task, autoselect_config, failed_models)
+            _selection_latency_ms = (time.time() - _sel_start) * 1000
+
+            # Store/update conversation summary after the first selection (fire-and-forget)
+            if not _summary_stored:
+                _summary_stored = True
+                asyncio.create_task(self._store_conversation_summary(
+                    context_msgs, selected_model_id, autoselect_config, context_prompt
+                ))
 
             # Validate
             available_ids = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
@@ -4626,6 +4912,41 @@ class AutoselectHandler:
             except Exception as cache_error:
                 logger.warning(f"Response cache set failed: {cache_error}")
 
+        # Record analytics with autoselect_id so it appears in the autoselect column
+        try:
+            analytics = get_analytics()
+            if response and isinstance(response, dict):
+                usage = response.get('usage', {})
+                total_tokens = usage.get('total_tokens', 0)
+                prompt_tokens = usage.get('prompt_tokens', 0)
+                completion_tokens = usage.get('completion_tokens', 0)
+                if total_tokens == 0:
+                    try:
+                        messages = request_data.get('messages', [])
+                        prompt_tokens = count_messages_tokens(messages, selected_model_id)
+                        response_content = response.get('choices', [{}])[0].get('message', {}).get('content', '')
+                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": response_content}], selected_model_id) if response_content else 0
+                        total_tokens = prompt_tokens + completion_tokens
+                    except Exception:
+                        total_tokens = 150
+                        prompt_tokens = 0
+                        completion_tokens = 0
+                analytics.record_request(
+                    provider_id='autoselect',
+                    model_name=selected_model_id,
+                    tokens_used=total_tokens,
+                    latency_ms=_selection_latency_ms,
+                    success=True,
+                    autoselect_id=autoselect_id,
+                    user_id=user_id,
+                    token_id=token_id,
+                    prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
+                    completion_tokens=completion_tokens if completion_tokens > 0 else None,
+                    actual_cost=None
+                )
+        except Exception as analytics_error:
+            logger.warning(f"Analytics recording for autoselect failed: {analytics_error}")
+
         logger.info(f"=== AUTOSELECT REQUEST END ===")
         return response
 
@@ -4657,14 +4978,39 @@ class AutoselectHandler:
         if not user_messages:
             logger.error("No messages provided")
             raise HTTPException(status_code=400, detail="No messages provided")
-        
+
         logger.info(f"User messages count: {len(user_messages)}")
 
-        MAX_SELECTION_TOKENS = 8000
-        user_prompt = self._compact_messages_for_selection(user_messages, MAX_SELECTION_TOKENS)
-        estimated_tokens = len(user_prompt) // 4
-        logger.info(f"User prompt length: {len(user_prompt)} characters (est. {estimated_tokens} tokens)")
-        logger.info(f"User prompt preview: {user_prompt[:200]}..." if len(user_prompt) > 200 else f"User prompt: {user_prompt}")
+        # Split: last TAIL messages → current_task (what's happening now)
+        #        earlier messages  → context_prompt (session domain/background)
+        _TAIL = 5
+        tail_msgs = user_messages[-_TAIL:]
+        context_msgs = user_messages[:-_TAIL] if len(user_messages) > _TAIL else []
+        _task_parts = []
+        for _m in tail_msgs:
+            _role = _m.get('role', 'user')
+            _c = _m.get('content', '')
+            if isinstance(_c, list):
+                _c = ' '.join((p.get('text', '') if isinstance(p, dict) else str(p)) for p in _c).strip()
+            _c = str(_c).strip()
+            if len(_c) > 800:
+                _c = _c[:800] + "...[truncated]"
+            _task_parts.append(f"{_role}: {_c}")
+        current_task = "\n".join(_task_parts)
+
+        max_selection_tokens = self._get_selection_max_tokens(autoselect_config)
+
+        # Try to reuse a cached conversation summary (incremental context)
+        _summary, _new_msgs = self._find_conversation_summary(context_msgs)
+        if _summary:
+            context_prompt = self._build_summary_context_prompt(_summary, _new_msgs, max_selection_tokens)
+            logger.info(f"Using cached conversation summary ({len(_summary['fingerprints'])} msgs summarized, {len(_new_msgs)} new)")
+        else:
+            context_prompt = self._compact_messages_for_selection(context_msgs, max_selection_tokens) if context_msgs else ""
+            logger.info(f"No cached summary — full context compaction")
+
+        logger.info(f"Context: {len(context_prompt)} chars; current task: {len(current_task)} chars ({len(tail_msgs)} tail msgs, limit {max_selection_tokens} tokens)")
+        logger.info(f"Current task preview: {current_task[:300]}..." if len(current_task) > 300 else f"Current task: {current_task}")
 
         # Filter out entries with empty model_id (misconfiguration guard)
         valid_models = [m for m in autoselect_config.available_models if (m.model_id or '').strip()]
@@ -4677,10 +5023,18 @@ class AutoselectHandler:
         request_data['stream'] = True
         failed_models: List[str] = []
         last_exception = None
+        _summary_stored = False
 
         while True:
             logger.info(f"Requesting model selection from AI (failed so far: {failed_models})...")
-            selected_model_id = await self._get_model_selection(user_prompt, autoselect_config, failed_models)
+            selected_model_id = await self._get_model_selection(context_prompt, current_task, autoselect_config, failed_models)
+
+            # Store/update conversation summary after the first selection (fire-and-forget)
+            if not _summary_stored:
+                _summary_stored = True
+                asyncio.create_task(self._store_conversation_summary(
+                    context_msgs, selected_model_id, autoselect_config, context_prompt
+                ))
 
             available_ids = [m.model_id for m in available_models_ordered if m.model_id not in failed_models]
             if not selected_model_id or selected_model_id not in available_ids:

@@ -85,16 +85,16 @@ class KiloProviderHandler(BaseProviderHandler):
             logger.info(f"KiloProviderHandler.__init__: provider_id={provider_id}, user_id={user_id}")
             logger.info(f"KiloProviderHandler.__init__: kilo_config type={type(kilo_config)}, value={kilo_config}")
             
+            # Per-provider default so multiple admin kilo providers don't share a file
+            default_creds = os.path.expanduser(f"~/.aisbf/kilo_{provider_id}_credentials.json")
             if kilo_config and isinstance(kilo_config, dict):
                 # Check both 'credentials_file' and 'creds_file' for backward compatibility
                 credentials_path = kilo_config.get('credentials_file') or kilo_config.get('creds_file')
                 logger.info(f"KiloProviderHandler.__init__: credentials_path={credentials_path}")
-                if credentials_path:
-                    self._credentials_file = os.path.expanduser(credentials_path)
+                self._credentials_file = os.path.expanduser(credentials_path) if credentials_path else default_creds
                 self._api_base = kilo_config.get('api_base')
             else:
-                # Set default credentials file path when not explicitly configured
-                self._credentials_file = os.path.expanduser("~/.kilo_credentials.json")
+                self._credentials_file = default_creds
                 self._api_base = None
             
             logger.info(f"KiloProviderHandler.__init__: self._credentials_file={self._credentials_file}")

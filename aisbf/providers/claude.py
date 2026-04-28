@@ -155,10 +155,12 @@ class ClaudeProviderHandler(BaseProviderHandler):
             claude_config = self.provider_config.get('claude_config')
         else:
             claude_config = getattr(self.provider_config, 'claude_config', None)
-        credentials_file = None
+        # Per-provider default so multiple admin claude providers don't share a file
+        default_creds = f'~/.aisbf/claude_{provider_id}_credentials.json'
+        credentials_file = default_creds
         if claude_config and isinstance(claude_config, dict):
-            credentials_file = claude_config.get('credentials_file')
-        
+            credentials_file = claude_config.get('credentials_file') or default_creds
+
         # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
         # All other users (including database admins with user_id) use database credentials
         if user_id is not None:

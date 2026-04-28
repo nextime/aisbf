@@ -49,6 +49,7 @@
         'zu': 'isiZulu',
         'af': 'Afrikaans',
         'eo': 'Esperanto',
+        'bel': 'Belter',
         'qya': 'Quenya (Elvish)',
         'tlh': 'tlhIngan Hol (Klingon)',
         'vul': 'Vulcan'

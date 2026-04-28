@@ -46,6 +46,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
+<script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>
 <script>
 function escHtmlAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -61,6 +62,8 @@ let rotationsConfig = rotationsData.config;
 let availableProviders = rotationsData.providers;
 const providersMeta = {{ providers_meta | default('{}') | safe }};
 let expandedRotations = new Set();
+let rotationMasterOrder = Object.keys(rotationsConfig.rotations || {});
+let _rotationDS = null;
 
 // ===== Provider Usage =====
 const _usageCache = {};
@@ -105,7 +108,11 @@ function _renderUsageCompact(usage) {
         if (Array.isArray(rl.additional_rate_limits)) windows.push(...rl.additional_rate_limits);
         windows.forEach(w => {
             const pct = w.used_percent || 0;
-            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%</span></div>`);
+            let countStr = '';
+            if (w.num_requests_used != null && w.num_requests_limit != null) {
+                countStr = ` (${w.num_requests_used}/${w.num_requests_limit})`;
+            }
+            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%${countStr}</span></div>`);
         });
         if (rl.limit_reached) parts.push('<span style="color:#ef4444;font-size:10px;font-weight:700;">LIMIT</span>');
     }
@@ -273,12 +280,14 @@ document.getElementById('global-notify').checked = rotationsConfig.notifyerrors 
 function renderRotationsList() {
     const container = document.getElementById('rotations-list');
     container.innerHTML = '';
-    
-    Object.entries(rotationsConfig.rotations || {}).forEach(([key, rotation]) => {
+
+    rotationMasterOrder.filter(k => k in (rotationsConfig.rotations || {})).forEach(key => {
+        const rotation = rotationsConfig.rotations[key];
         const rotationItem = document.createElement('div');
         rotationItem.className = 'rotation-item';
+        rotationItem.dataset.sortKey = key;
         rotationItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
-        
+
         const isExpanded = expandedRotations.has(key);
         const providerCount = rotation.providers ? rotation.providers.length : 0;
         const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -286,6 +295,7 @@ function renderRotationsList() {
         rotationItem.innerHTML = `
             <div class="rotation-header" onclick="toggleRotation('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="drag-handle" onclick="event.stopPropagation();" title="Drag to reorder">⠿</span>
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                     <span style="color: var(--color-muted); font-size: 14px;">(${providerCount} ${window.i18n.t(providerCount !== 1 ? 'rotations.providers_plural' : 'rotations.providers_singular')})</span>
@@ -305,6 +315,24 @@ function renderRotationsList() {
             renderRotationDetails(key);
         }
     });
+
+    if (!_rotationDS) {
+        _rotationDS = new DragSort({
+            containerId: 'rotations-list',
+            masterOrder: { value: rotationMasterOrder },
+            onReorder: function(newOrder) {
+                rotationMasterOrder = newOrder;
+                renderRotationsList();
+                fetch(BASE_PATH + '/dashboard/api/rotation/reorder', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({order: newOrder})
+                }).catch(function(){});
+            }
+        });
+    } else {
+        _rotationDS._opts.masterOrder.value = rotationMasterOrder;
+        _rotationDS.attach();
+    }
 }
 
 function toggleRotation(key) {
@@ -551,6 +579,7 @@ async function copyRotation(sourceKey) {
         delete rotationsConfig.rotations[newKey];
         return;
     }
+    if (!rotationMasterOrder.includes(newKey)) rotationMasterOrder.push(newKey);
     expandedRotations.add(newKey);
     renderRotationsList();
 }
@@ -577,6 +606,7 @@ async function addRotation() {
         delete rotationsConfig.rotations[key];
         return;
     }
+    if (!rotationMasterOrder.includes(key)) rotationMasterOrder.push(key);
     expandedRotations.add(key);
     renderRotationsList();
 }
@@ -588,6 +618,7 @@ async function removeRotation(key) {
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
         } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete rotationsConfig.rotations[key];
+        rotationMasterOrder = rotationMasterOrder.filter(k => k !== key);
         expandedRotations.delete(key);
         renderRotationsList();
     }
@@ -682,7 +713,11 @@ async function saveRotations() {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: 'config=' + encodeURIComponent(JSON.stringify(rotationsConfig, null, 2))
+            body: (function() {
+                const orderedRotations = {};
+                rotationMasterOrder.forEach(k => { if (rotationsConfig.rotations[k]) orderedRotations[k] = rotationsConfig.rotations[k]; });
+                return 'config=' + encodeURIComponent(JSON.stringify({ ...rotationsConfig, rotations: orderedRotations }, null, 2));
+            })()
         });
         
         if (response.ok) {

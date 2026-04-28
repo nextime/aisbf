@@ -457,12 +457,9 @@ function escHtml(s) {
         <th data-i18n="analytics_page.col_input_tokens">Input Tokens</th>
         <th data-i18n="analytics_page.col_output_tokens">Output Tokens</th>
         <th data-i18n="analytics_page.col_total_tokens">Total Tokens</th>
-        <th data-i18n="analytics_page.col_tpm">Tokens/Min</th>
-        <th data-i18n="analytics_page.col_tph">Tokens/Hour</th>
-        <th data-i18n="analytics_page.col_tpd">Tokens/Day</th>
     </tr>
     {% for provider in provider_stats %}
-    <tr>
+    <tr style="cursor: pointer;" onclick="showProviderDetails('{{ provider.provider_id }}', '{{ provider.model_name or '' }}', '{{ provider.rotation_id or '' }}', '{{ provider.autoselect_id or '' }}', {{ provider.tokens.TPM }}, {{ provider.tokens.TPH }}, {{ provider.tokens.TPD }})">
         <td><strong>{{ provider.provider_id }}</strong></td>
         <td>{{ provider.model_name or '' }}</td>
         <td>{{ provider.rotation_id or '' }}</td>
@@ -479,9 +476,6 @@ function escHtml(s) {
         <td><strong>{{ format_tokens(provider.tokens.prompt or 0) }}</strong></td>
         <td><strong>{{ format_tokens(provider.tokens.completion or 0) }}</strong></td>
         <td><strong>{{ format_tokens(provider.tokens.total or 0) }}</strong></td>
-        <td>{{ format_tokens(provider.tokens.TPM) }}</td>
-        <td>{{ format_tokens(provider.tokens.TPH) }}</td>
-        <td>{{ format_tokens(provider.tokens.TPD) }}</td>
     </tr>
     {% endfor %}
     {% if provider_stats %}
@@ -516,12 +510,79 @@ function escHtml(s) {
         <td><strong>{{ format_tokens(provider_stats | sum(attribute='tokens.prompt') or 0) }}</strong></td>
         <td><strong>{{ format_tokens(provider_stats | sum(attribute='tokens.completion') or 0) }}</strong></td>
         <td><strong>{{ format_tokens(provider_stats | sum(attribute='tokens.total') or 0) }}</strong></td>
-        <td>{{ format_tokens(provider_stats | sum(attribute='tokens.TPM')) }}</td>
-        <td>{{ format_tokens(provider_stats | sum(attribute='tokens.TPH')) }}</td>
-        <td>{{ format_tokens(provider_stats | sum(attribute='tokens.TPD')) }}</td>
     </tr>
     {% endif %}
 </table>
+
+<!-- Modal for provider details -->
+<div id="providerModal" style="display: none; position: fixed; z-index: 1000; left: 0; top: 0; width: 100%; height: 100%; overflow: auto; background-color: rgba(0,0,0,0.6);">
+    <div style="background-color: var(--bg-page); margin: 10% auto; padding: 30px; border: 1px solid #888; border-radius: 8px; width: 60%; max-width: 600px;">
+        <span onclick="closeProviderModal()" style="color: #aaa; float: right; font-size: 28px; font-weight: bold; cursor: pointer;">&times;</span>
+        <h3 style="margin-top: 0;">Provider Rate Details</h3>
+        <div id="modalContent"></div>
+    </div>
+</div>
+
+<script>
+function showProviderDetails(providerId, modelName, rotationId, autoselectId, tpm, tph, tpd) {
+    const modal = document.getElementById('providerModal');
+    const content = document.getElementById('modalContent');
+    
+    let title = '<strong>' + providerId + '</strong>';
+    if (modelName) title += ' / ' + modelName;
+    if (rotationId) title += ' (Rotation: ' + rotationId + ')';
+    if (autoselectId) title += ' (Autoselect: ' + autoselectId + ')';
+    
+    content.innerHTML = `
+        <p style="margin-bottom: 20px;">${title}</p>
+        <table style="width: 100%;">
+            <tr>
+                <th style="text-align: left; padding: 10px; background: var(--bg-accent);">Metric</th>
+                <th style="text-align: right; padding: 10px; background: var(--bg-accent);">Value</th>
+            </tr>
+            <tr>
+                <td style="padding: 10px;">Tokens per Minute</td>
+                <td style="padding: 10px; text-align: right;"><strong>${formatTokens(tpm)}</strong></td>
+            </tr>
+            <tr>
+                <td style="padding: 10px;">Tokens per Hour</td>
+                <td style="padding: 10px; text-align: right;"><strong>${formatTokens(tph)}</strong></td>
+            </tr>
+            <tr>
+                <td style="padding: 10px;">Tokens per Day</td>
+                <td style="padding: 10px; text-align: right;"><strong>${formatTokens(tpd)}</strong></td>
+            </tr>
+        </table>
+        <p style="margin-top: 20px; color: var(--color-muted); font-size: 14px;">
+            These rates are calculated based on the selected time range and filters.
+        </p>
+    `;
+    
+    modal.style.display = 'block';
+}
+
+function closeProviderModal() {
+    document.getElementById('providerModal').style.display = 'none';
+}
+
+function formatTokens(value) {
+    if (!value || value === 0) return '0';
+    const val = parseFloat(value);
+    if (val >= 1000000000) return (val / 1000000000).toFixed(2) + 'B';
+    if (val >= 1000000) return (val / 1000000).toFixed(2) + 'M';
+    if (val >= 1000) return (val / 1000).toFixed(2) + 'K';
+    return value.toString();
+}
+
+// Close modal when clicking outside
+window.onclick = function(event) {
+    const modal = document.getElementById('providerModal');
+    if (event.target == modal) {
+        closeProviderModal();
+    }
+}
+</script>
+
 {% else %}
 <p style="color: var(--color-muted);">No provider statistics available yet. Make API requests to see analytics.</p>
 {% endif %}
@@ -770,6 +831,186 @@ fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
 </script>
 {% else %}
 <p style="color: var(--color-muted);">No token usage data available for the selected period.</p>
+{% endif %}
+
+<!-- Rotation Breakdown -->
+{% if rotation_breakdown %}
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Rotation Breakdown</h3>
+{% for rot in rotation_breakdown %}
+<div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 10px 0; color: #f39c12;">⟳ {{ rot.rotation_id }}
+        <span style="font-weight: normal; font-size: 13px; color: var(--color-muted); margin-left: 10px;">
+            {{ rot.total_requests }} requests · {{ format_tokens(rot.total_tokens) }} tokens
+        </span>
+    </h4>
+    <table>
+        <tr>
+            <th>Provider</th>
+            <th>Model</th>
+            <th>Requests</th>
+            <th>Hit %</th>
+            <th>Tokens</th>
+            <th>Token %</th>
+            <th>Avg Latency</th>
+        </tr>
+        {% for e in rot.entries %}
+        <tr>
+            <td>{{ e.provider_id }}</td>
+            <td>{{ e.model_name or '' }}</td>
+            <td>{{ e.requests }}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #2a4a7a; border-radius: 4px; width: 80px; height: 8px; overflow: hidden;">
+                        <div style="background: #f39c12; width: {{ e.hit_pct }}%; height: 100%;"></div>
+                    </div>
+                    {{ e.hit_pct }}%
+                </div>
+            </td>
+            <td>{{ format_tokens(e.tokens) }}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #2a4a7a; border-radius: 4px; width: 80px; height: 8px; overflow: hidden;">
+                        <div style="background: #3498db; width: {{ e.token_pct }}%; height: 100%;"></div>
+                    </div>
+                    {{ e.token_pct }}%
+                </div>
+            </td>
+            <td {% if e.avg_latency_ms > 5000 %}style="color: #fcd34d;"{% endif %}>
+                {% if e.avg_latency_ms > 1000 %}{{ "%.1f"|format(e.avg_latency_ms / 1000) }}s{% else %}{{ "%.0f"|format(e.avg_latency_ms) }}ms{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Autoselect Breakdown -->
+{% if autoselect_breakdown %}
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Autoselect Breakdown</h3>
+{% for asel in autoselect_breakdown %}
+<div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 10px 0; color: #9b59b6;">⚡ {{ asel.autoselect_id }}
+        <span style="font-weight: normal; font-size: 13px; color: var(--color-muted); margin-left: 10px;">
+            {{ asel.total_requests }} requests · {{ format_tokens(asel.total_tokens) }} tokens
+        </span>
+    </h4>
+    <table>
+        <tr>
+            <th>Selected Model / Rotation</th>
+            <th>Requests</th>
+            <th>Hit %</th>
+            <th>Tokens</th>
+            <th>Token %</th>
+            <th>Selection Latency</th>
+        </tr>
+        {% for e in asel.entries %}
+        <tr>
+            <td><strong>{{ e.model_name or '(unknown)' }}</strong></td>
+            <td>{{ e.requests }}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #2a4a7a; border-radius: 4px; width: 80px; height: 8px; overflow: hidden;">
+                        <div style="background: #9b59b6; width: {{ e.hit_pct }}%; height: 100%;"></div>
+                    </div>
+                    {{ e.hit_pct }}%
+                </div>
+            </td>
+            <td>{{ format_tokens(e.tokens) }}</td>
+            <td>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                    <div style="background: #2a4a7a; border-radius: 4px; width: 80px; height: 8px; overflow: hidden;">
+                        <div style="background: #3498db; width: {{ e.token_pct }}%; height: 100%;"></div>
+                    </div>
+                    {{ e.token_pct }}%
+                </div>
+            </td>
+            <td {% if e.avg_latency_ms > 5000 %}style="color: #fcd34d;"{% endif %}>
+                {% if e.avg_latency_ms > 1000 %}{{ "%.1f"|format(e.avg_latency_ms / 1000) }}s{% else %}{{ "%.0f"|format(e.avg_latency_ms) }}ms{% endif %}
+            </td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endfor %}
+{% endif %}
+
+<!-- Internal Models Stats (kiro, kilo, claude CLI, etc.) -->
+{% set internal_providers = ['kiro', 'kilo', 'claude', 'codex'] %}
+{% set internal_stats = provider_stats | selectattr('provider_id', 'in', internal_providers) | list %}
+{% if not internal_stats %}
+    {# also catch any provider_id that contains these keywords #}
+    {% set internal_stats = [] %}
+    {% for p in provider_stats %}
+        {% if 'kiro' in p.provider_id or 'kilo' in p.provider_id or 'claude' in p.provider_id %}
+            {% set _ = internal_stats.append(p) %}
+        {% endif %}
+    {% endfor %}
+{% endif %}
+{% if internal_stats %}
+<h3 style="margin-top: 30px; margin-bottom: 15px;">Internal / CLI Provider Stats</h3>
+<table>
+    <tr>
+        <th>Provider</th>
+        <th>Model</th>
+        <th>Total Requests</th>
+        <th>Success</th>
+        <th>Errors</th>
+        <th>Error Rate</th>
+        <th>Avg Latency</th>
+        <th>Input Tokens</th>
+        <th>Output Tokens</th>
+        <th>Total Tokens</th>
+    </tr>
+    {% for p in internal_stats %}
+    <tr>
+        <td><strong>{{ p.provider_id }}</strong></td>
+        <td>{{ p.model_name or '' }}</td>
+        <td>{{ p.requests.total }}</td>
+        <td>{{ p.requests.success }}</td>
+        <td>{{ p.requests.error }}</td>
+        <td {% if p.error_rate > 0.1 %}style="color: #f87171;"{% endif %}>{{ "%.1f"|format(p.error_rate * 100) }}%</td>
+        <td {% if p.avg_latency_ms > 5000 %}style="color: #fcd34d;"{% endif %}>
+            {% if p.avg_latency_ms > 1000 %}{{ "%.1f"|format(p.avg_latency_ms / 1000) }}s{% else %}{{ "%.0f"|format(p.avg_latency_ms) }}ms{% endif %}
+        </td>
+        <td>{{ format_tokens(p.tokens.prompt or 0) }}</td>
+        <td>{{ format_tokens(p.tokens.completion or 0) }}</td>
+        <td><strong>{{ format_tokens(p.tokens.total or 0) }}</strong></td>
+    </tr>
+    {% endfor %}
+</table>
+{% endif %}
+
+<!-- Admin: Delete Analytics -->
+{% if is_config_admin %}
+<h3 style="margin-top: 40px; margin-bottom: 15px; color: #f87171;">⚠ Analytics Management</h3>
+<div style="background: var(--bg-page); padding: 20px; border-radius: 8px; border: 1px solid #f87171;">
+    <p style="margin: 0 0 15px 0; color: var(--color-muted);">These actions permanently delete analytics data from the database and cannot be undone.</p>
+    <div style="display: flex; gap: 15px; flex-wrap: wrap;">
+        <button onclick="confirmDeleteAnalytics('global')" class="btn" style="background: #e67e22; border: none; cursor: pointer;">
+            🗑 Reset Global Analytics
+        </button>
+        <button onclick="confirmDeleteAnalytics('all')" class="btn" style="background: #e74c3c; border: none; cursor: pointer;">
+            🗑 Reset All Analytics (Global + Users)
+        </button>
+    </div>
+</div>
+<script>
+function confirmDeleteAnalytics(scope) {
+    const msg = scope === 'global'
+        ? 'Delete all analytics for global (non-user) providers/models? This cannot be undone.'
+        : 'Delete ALL analytics including all user data? This cannot be undone.';
+    if (!confirm(msg)) return;
+    if (!confirm('Are you sure? This is irreversible.')) return;
+    fetch('/api/admin/analytics/delete-' + scope, {method: 'POST'})
+        .then(r => r.json())
+        .then(d => {
+            alert('Deleted ' + d.deleted + ' records.');
+            location.reload();
+        })
+        .catch(e => alert('Error: ' + e));
+}
+</script>
 {% endif %}
 
 <div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">

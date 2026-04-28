@@ -1115,6 +1115,7 @@
     "lbl_fullconfig_tokens": "Full Config Tokens (one per line)",
     "lbl_condensation_model": "Condensation Model ID",
     "lbl_autoselect_model": "Autoselect Model ID",
+    "lbl_autoselect_max_tokens": "Autoselect Context Limit (tokens)",
     "lbl_nsfw_classifier": "NSFW Classifier Model ID",
     "lbl_privacy_classifier": "Privacy Classifier Model ID",
     "lbl_semantic_vectorization": "Semantic Vectorization Model ID",

@@ -39,6 +39,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary" data-i18n="user_autoselects_page.cancel">Cancel</a>
 </div>
 
+<script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>
 <script>
 function escHtml(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
@@ -182,6 +183,8 @@ let availableRotations = autoselectData.rotations;
 let availableModels = autoselectData.models;
 const providersMeta = {{ providers_meta | default('{}') | safe }};
 let expandedAutoselects = new Set();
+let autoselectMasterOrder = Object.keys(autoselectConfig || {});
+let _autoselectDS = null;
 
 // ===== Provider Usage =====
 const _usageCache = {};
@@ -231,7 +234,11 @@ function _renderUsageCompact(usage) {
         if (Array.isArray(rl.additional_rate_limits)) windows.push(...rl.additional_rate_limits);
         windows.forEach(w => {
             const pct = w.used_percent || 0;
-            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%</span></div>`);
+            let countStr = '';
+            if (w.num_requests_used != null && w.num_requests_limit != null) {
+                countStr = ` (${w.num_requests_used}/${w.num_requests_limit})`;
+            }
+            parts.push(`<div style="display:flex;align-items:center;gap:3px;font-size:10px;"><span style="color:var(--color-muted);white-space:nowrap;">${_windowLabel(w.limit_window_seconds)}:</span>${_usageBarHtml(pct)}<span>${pct}%${countStr}</span></div>`);
         });
         if (rl.limit_reached) parts.push('<span style="color:#ef4444;font-size:10px;font-weight:700;">LIMIT</span>');
     }
@@ -276,17 +283,20 @@ document.addEventListener('DOMContentLoaded', () => setTimeout(_refreshAutoselec
 function renderAutoselectList() {
     const container = document.getElementById('autoselect-list');
     container.innerHTML = '';
-    
-    if (!autoselectConfig || Object.keys(autoselectConfig).length === 0) {
+
+    const visibleKeys = autoselectMasterOrder.filter(k => k in (autoselectConfig || {}));
+    if (!autoselectConfig || visibleKeys.length === 0) {
         container.innerHTML = `<p style="color: var(--color-muted);">${window.i18n.t('autoselect.no_autoselects')}</p>`;
         return;
     }
-    
-    Object.entries(autoselectConfig).forEach(([key, autoselect]) => {
+
+    visibleKeys.forEach(key => {
+        const autoselect = autoselectConfig[key];
         const autoselectItem = document.createElement('div');
         autoselectItem.className = 'autoselect-item';
+        autoselectItem.dataset.sortKey = key;
         autoselectItem.style.cssText = 'border: 1px solid var(--color-border); margin-bottom: 10px; border-radius: 5px; background: var(--bg-page);';
-        
+
         const isExpanded = expandedAutoselects.has(key);
         const modelCount = autoselect.available_models ? autoselect.available_models.length : 0;
         const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
@@ -294,6 +304,7 @@ function renderAutoselectList() {
         autoselectItem.innerHTML = `
             <div class="autoselect-header" onclick="toggleAutoselect('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none;">
                 <div style="display: flex; align-items: center; gap: 10px;">
+                    <span class="drag-handle" onclick="event.stopPropagation();" title="Drag to reorder">⠿</span>
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtml(autoselect.model_name || key)}</strong>
                     <span style="color: var(--color-muted); font-size: 14px;">(${modelCount} ${modelCount !== 1 ? window.i18n.t('autoselect.models_plural') : window.i18n.t('autoselect.models_singular')})</span>
@@ -314,6 +325,24 @@ function renderAutoselectList() {
             renderAutoselectDetails(key);
         }
     });
+
+    if (!_autoselectDS) {
+        _autoselectDS = new DragSort({
+            containerId: 'autoselect-list',
+            masterOrder: { value: autoselectMasterOrder },
+            onReorder: function(newOrder) {
+                autoselectMasterOrder = newOrder;
+                renderAutoselectList();
+                fetch(BASE_PATH + '/dashboard/api/autoselect/reorder', {
+                    method: 'POST', headers: {'Content-Type':'application/json'},
+                    body: JSON.stringify({order: newOrder})
+                }).catch(function(){});
+            }
+        });
+    } else {
+        _autoselectDS._opts.masterOrder.value = autoselectMasterOrder;
+        _autoselectDS.attach();
+    }
 }
 
 function toggleAutoselect(key) {
@@ -588,6 +617,7 @@ async function copyAutoselect(sourceKey) {
         delete autoselectConfig[newKey];
         return;
     }
+    if (!autoselectMasterOrder.includes(newKey)) autoselectMasterOrder.push(newKey);
     expandedAutoselects.add(newKey);
     renderAutoselectList();
 }
@@ -613,6 +643,7 @@ async function addAutoselect() {
         delete autoselectConfig[key];
         return;
     }
+    if (!autoselectMasterOrder.includes(key)) autoselectMasterOrder.push(key);
     expandedAutoselects.add(key);
     renderAutoselectList();
 }
@@ -624,6 +655,7 @@ async function removeAutoselect(key) {
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
         } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete autoselectConfig[key];
+        autoselectMasterOrder = autoselectMasterOrder.filter(k => k !== key);
         expandedAutoselects.delete(key);
         renderAutoselectList();
     }
@@ -676,7 +708,11 @@ async function saveAutoselect() {
             headers: {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
-            body: 'config=' + encodeURIComponent(JSON.stringify(autoselectConfig, null, 2))
+            body: (function() {
+                const orderedConfig = {};
+                autoselectMasterOrder.forEach(k => { if (autoselectConfig[k]) orderedConfig[k] = autoselectConfig[k]; });
+                return 'config=' + encodeURIComponent(JSON.stringify(orderedConfig, null, 2));
+            })()
         });
         
         if (response.ok) {

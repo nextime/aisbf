@@ -530,17 +530,21 @@ class Config:
                 available_providers = list(self.providers.keys())
                 logger.info(f"Available providers: {available_providers}")
                 
+                server_mode = os.environ.get('AISBF_SERVER_MODE')
+                warned = set()
                 for rotation_id, rotation_config in self.rotations.items():
                     logger.info(f"Validating rotation: {rotation_id}")
                     for provider in rotation_config.providers:
                         provider_id = provider['provider_id']
                         if provider_id not in self.providers:
-                            logger.warning(f"!!! CONFIGURATION WARNING !!!")
-                            logger.warning(f"Rotation '{rotation_id}' references provider '{provider_id}' which is NOT defined in providers.json")
-                            logger.warning(f"Available providers: {available_providers}")
-                            logger.warning(f"This provider will be SKIPPED during rotation requests")
-                            logger.warning(f"Please add the provider to providers.json or remove it from the rotation configuration")
-                            logger.warning(f"!!! END WARNING !!!")
+                            if server_mode and (rotation_id, provider_id) not in warned:
+                                warned.add((rotation_id, provider_id))
+                                logger.warning(f"!!! CONFIGURATION WARNING !!!")
+                                logger.warning(f"Rotation '{rotation_id}' references provider '{provider_id}' which is NOT defined in providers.json")
+                                logger.warning(f"Available providers: {available_providers}")
+                                logger.warning(f"This provider will be SKIPPED during rotation requests")
+                                logger.warning(f"Please add the provider to providers.json or remove it from the rotation configuration")
+                                logger.warning(f"!!! END WARNING !!!")
                         else:
                             logger.info(f"  ✓ Provider '{provider_id}' is available")
         except json.JSONDecodeError as e:

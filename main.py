@@ -354,10 +354,12 @@ def setup_logging():
     console_handler = logging.StreamHandler(sys.stdout)
     if AISBF_DEBUG:
         console_handler.setLevel(logging.DEBUG)
-        print("=== AISBF DEBUG MODE ENABLED ===")
-        print("All debug messages will be shown in console")
-        print("Raw responses from providers will be logged")
-        print("=== END AISBF DEBUG MODE ===")
+        if not getattr(setup_logging, '_debug_banner_shown', False):
+            print("=== AISBF DEBUG MODE ENABLED ===")
+            print("All debug messages will be shown in console")
+            print("Raw responses from providers will be logged")
+            print("=== END AISBF DEBUG MODE ===")
+            setup_logging._debug_banner_shown = True
     else:
         console_handler.setLevel(logging.INFO)
     console_formatter = logging.Formatter(
@@ -833,7 +835,10 @@ tor_service = None
 # Model cache for dynamically fetched provider models
 _model_cache = {}
 _model_cache_timestamps = {}
-_cache_refresh_interval = 4 * 3600  # 4 hours in seconds
+_cache_refresh_interval = 24 * 3600  # 24 hours in seconds
+# Per-endpoint deduplication cache: endpoint_key -> (models, timestamp)
+# Prevents multiple providers sharing the same endpoint from fetching the same model list repeatedly.
+_endpoint_model_cache: dict = {}
 _cache_refresh_task = None
 # Strong references to fire-and-forget tasks so the GC does not cancel them
 _background_tasks: set = set()
@@ -891,12 +896,39 @@ def initialize_app(custom_config_dir=None):
     logger.info("App initialization complete")
 
 async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None) -> list:
-    """Fetch models from provider API and cache them"""
-    global _model_cache, _model_cache_timestamps
+    """Fetch models from provider API and cache them.
+
+    Providers that share the same (type, endpoint) pair return identical model
+    lists, so we maintain a per-endpoint deduplication cache.  The first
+    provider to fetch populates it; subsequent ones copy from it without making
+    a redundant HTTP request.
+    """
+    global _model_cache, _model_cache_timestamps, _endpoint_model_cache
 
     logger.debug(f"=== FETCH_PROVIDER_MODELS START: {provider_id} ===")
+    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
     try:
         logger.debug(f"Fetching models from provider: {provider_id} (user_id: {user_id})")
+
+        # --- endpoint-level deduplication (global/admin fetches only) ---
+        if not user_id and config is not None:
+            try:
+                prov_cfg = config.get_provider(provider_id)
+                prov_type = getattr(prov_cfg, 'type', '')
+                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
+                endpoint_key = f"{prov_type}:{endpoint}"
+                if endpoint_key and endpoint_key in _endpoint_model_cache:
+                    cached_models, cached_at = _endpoint_model_cache[endpoint_key]
+                    if time.time() - cached_at < _cache_refresh_interval:
+                        logger.debug(
+                            f"Provider '{provider_id}' shares endpoint with cached result "
+                            f"({endpoint_key}), reusing {len(cached_models)} models"
+                        )
+                        _model_cache[cache_key] = cached_models
+                        _model_cache_timestamps[cache_key] = cached_at
+                        return cached_models
+            except Exception:
+                pass  # endpoint lookup failure is non-fatal; proceed with normal fetch
 
         # Create request handler with correct user context
         logger.debug(f"Creating RequestHandler for provider '{provider_id}' with user_id: {user_id}")
@@ -906,7 +938,6 @@ async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None)
         # Create a dummy request object for the handler
         logger.debug(f"Creating dummy request object for provider '{provider_id}'")
         from starlette.requests import Request
-        from starlette.datastructures import Headers
 
         scope = {
             "type": "http",
@@ -923,10 +954,21 @@ async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None)
         models = await request_handler.handle_model_list(dummy_request, provider_id)
         logger.debug(f"handle_model_list returned {len(models) if models else 0} models for provider '{provider_id}'")
 
-        # Cache the results - separate cache for users vs global
-        cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+        now = time.time()
         _model_cache[cache_key] = models
-        _model_cache_timestamps[cache_key] = time.time()
+        _model_cache_timestamps[cache_key] = now
+
+        # Populate endpoint-level cache so other providers skip the HTTP call
+        if not user_id and config is not None:
+            try:
+                prov_cfg = config.get_provider(provider_id)
+                prov_type = getattr(prov_cfg, 'type', '')
+                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
+                endpoint_key = f"{prov_type}:{endpoint}"
+                if endpoint_key and endpoint_key not in _endpoint_model_cache:
+                    _endpoint_model_cache[endpoint_key] = (models, now)
+            except Exception:
+                pass
 
         logger.info(f"Cached {len(models)} models from provider: {provider_id}")
         logger.debug(f"=== FETCH_PROVIDER_MODELS SUCCESS: {provider_id} ===")
@@ -941,18 +983,21 @@ async def fetch_provider_models(provider_id: str, user_id: Optional[int] = None)
 
 async def refresh_model_cache():
     """Background task to refresh model cache periodically"""
-    global _model_cache, _model_cache_timestamps
-    
+    global _model_cache, _model_cache_timestamps, _endpoint_model_cache
+
     while True:
         try:
             await asyncio.sleep(_cache_refresh_interval)
             logger.info("Starting periodic model cache refresh...")
-            
+
+            # Clear endpoint dedup cache so providers re-fetch fresh data
+            _endpoint_model_cache.clear()
+
             # Refresh cache for all providers without local model config
             for provider_id, provider_config in config.providers.items():
                 if not (hasattr(provider_config, 'models') and provider_config.models):
                     await fetch_provider_models(provider_id)
-            
+
             logger.info("Model cache refresh complete")
         except Exception as e:
             logger.error(f"Error in model cache refresh task: {e}")
@@ -1152,10 +1197,10 @@ async def get_provider_models(provider_id: str, provider_config, user_id: Option
     # Check if we have cached models
     cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
     if cache_key in _model_cache:
-        cache_age = time.time() - _model_cache_timestamps.get(provider_id, 0)
+        cache_age = time.time() - _model_cache_timestamps.get(cache_key, 0)
         if cache_age < _cache_refresh_interval:
             # Cache is still fresh, use it
-            cached_models = _model_cache[provider_id]
+            cached_models = _model_cache[cache_key]
             if cached_models:  # Only return if we have actual models
                 # Add provider prefix to model IDs and ensure all required fields
                 models = []
@@ -2065,6 +2110,36 @@ async def record_token_usage_async(user_id: int, token_id: int):
         logger.warning(f"Failed to record token usage: {e}")
 
 
+def _apply_usage_disable(db, user_id, provider_id: str, usage_data: dict):
+    """Disable provider until reset_at if any usage window is at 100%; clear if all are below."""
+    import time as _time
+    try:
+        rl = usage_data.get('rate_limit') if usage_data else None
+        if not rl:
+            return
+        windows = []
+        if rl.get('primary_window'):
+            windows.append(rl['primary_window'])
+        if rl.get('secondary_window'):
+            windows.append(rl['secondary_window'])
+        windows.extend(rl.get('additional_rate_limits') or [])
+        # Find the furthest reset_at among windows at 100% (or limit_reached flag)
+        max_reset_at = None
+        for w in windows:
+            if w.get('used_percent', 0) >= 100 or rl.get('limit_reached'):
+                reset_at = w.get('reset_at')
+                if reset_at and (max_reset_at is None or reset_at > max_reset_at):
+                    max_reset_at = float(reset_at)
+        if max_reset_at and max_reset_at > _time.time():
+            db.set_provider_disabled_until(user_id, provider_id, max_reset_at, 'usage_limit')
+            logger.info(f"Provider {provider_id} usage-disabled until {max_reset_at} (rate limit reached)")
+        else:
+            # No window at 100% — clear any stale usage-based disable
+            db.clear_provider_disabled_until(user_id, provider_id)
+    except Exception as e:
+        logger.debug(f"_apply_usage_disable error for {provider_id}: {e}")
+
+
 async def _refresh_provider_usage_if_stale(provider_id: str, user_id):
     """Refresh provider usage in the background if last update was >2 minutes ago."""
     try:
@@ -2091,6 +2166,7 @@ async def _refresh_provider_usage_if_stale(provider_id: str, user_id):
         usage_data = await handler.get_usage()
         if usage_data:
             db.save_provider_usage(user_id, provider_id, usage_data)
+            _apply_usage_disable(db, user_id, provider_id, usage_data)
     except Exception as e:
         logger.debug(f"Background usage refresh failed for {provider_id}: {e}")
 
@@ -2797,6 +2873,14 @@ async def dashboard_analytics(
         end = to_datetime or datetime.now()
         date_range_usage = analytics.get_token_usage_by_date_range(effective_provider_filter, start, end, user_filter=user_filter_int)
 
+    # Get rotation and autoselect breakdowns
+    rotation_breakdown = analytics.get_rotation_breakdown(from_datetime, to_datetime, user_filter=user_filter_int, rotation_filter=rotation_filter)
+    autoselect_breakdown = analytics.get_autoselect_breakdown(from_datetime, to_datetime, user_filter=user_filter_int, autoselect_filter=autoselect_filter)
+
+    # Config admin = logged in as the aisbf.json admin (no user_id in session)
+    current_user_id = request.session.get('user_id')
+    is_config_admin = is_admin and current_user_id is None
+
     # Handle Decimal values from MySQL for JSON serialization
     def decimal_default(obj):
         if isinstance(obj, Decimal):
@@ -2810,6 +2894,7 @@ async def dashboard_analytics(
         "request": request,
         "session": request.session,
         "is_admin": is_admin,
+        "is_config_admin": is_config_admin,
         "provider_stats": provider_stats,
         "token_over_time": json.dumps(token_over_time, default=decimal_default),
         "model_performance": model_performance,
@@ -2831,7 +2916,9 @@ async def dashboard_analytics(
         "selected_autoselect": autoselect_filter,
         "selected_user": user_filter,
         "global_only": global_only,
-        "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$')
+        "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$'),
+        "rotation_breakdown": rotation_breakdown,
+        "autoselect_breakdown": autoselect_breakdown,
     }
     )
 
@@ -2841,6 +2928,38 @@ async def dashboard_auth_check(request: Request):
     from fastapi.responses import JSONResponse
     authenticated = bool(request.session.get('logged_in') and request.session.get('user_id'))
     return JSONResponse({"authenticated": authenticated})
+
+
+@app.post("/api/admin/analytics/delete-global")
+async def analytics_delete_global(request: Request):
+    """Delete analytics for global (non-user) requests only. Config admin only."""
+    from fastapi.responses import JSONResponse
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    current_user_id = request.session.get('user_id')
+    is_admin = request.session.get('role') == 'admin'
+    if not is_admin or current_user_id is not None:
+        return JSONResponse({"error": "Config admin only"}, status_code=403)
+    db = DatabaseRegistry.get_config_database()
+    deleted = db.delete_analytics_global()
+    return JSONResponse({"deleted": deleted})
+
+
+@app.post("/api/admin/analytics/delete-all")
+async def analytics_delete_all(request: Request):
+    """Delete all analytics (global + all users). Config admin only."""
+    from fastapi.responses import JSONResponse
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"error": "Unauthorized"}, status_code=401)
+    current_user_id = request.session.get('user_id')
+    is_admin = request.session.get('role') == 'admin'
+    if not is_admin or current_user_id is not None:
+        return JSONResponse({"error": "Config admin only"}, status_code=403)
+    db = DatabaseRegistry.get_config_database()
+    deleted = db.delete_analytics_all()
+    return JSONResponse({"deleted": deleted})
 
 
 @app.get("/dashboard/profile-pic")
@@ -4681,14 +4800,20 @@ async def dashboard_providers(request: Request):
         # Database user: load from database
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
-        
+
+        # Apply stored sort order if any
+        saved_order = db.get_sort_order(current_user_id, 'provider')
+        if saved_order:
+            order_map = {k: i for i, k in enumerate(saved_order)}
+            user_providers = sorted(user_providers, key=lambda p: order_map.get(p['provider_id'], len(saved_order)))
+
         # Convert datetime objects to strings for JSON serialization
         for provider in user_providers:
             if 'created_at' in provider and provider['created_at']:
                 provider['created_at'] = provider['created_at'].isoformat() if hasattr(provider['created_at'], 'isoformat') else str(provider['created_at'])
             if 'updated_at' in provider and provider['updated_at']:
                 provider['updated_at'] = provider['updated_at'].isoformat() if hasattr(provider['updated_at'], 'isoformat') else str(provider['updated_at'])
-        
+
         # Always pass raw user providers format to the template (array)
         providers_data = user_providers
     
@@ -5287,7 +5412,13 @@ async def dashboard_rotations(request: Request):
         # Database user: load from database
         db = DatabaseRegistry.get_config_database()
         user_rotations = db.get_user_rotations(current_user_id)
-        
+
+        # Apply stored sort order if any
+        saved_order = db.get_sort_order(current_user_id, 'rotation')
+        if saved_order:
+            order_map = {k: i for i, k in enumerate(saved_order)}
+            user_rotations = sorted(user_rotations, key=lambda r: order_map.get(r['rotation_id'], len(saved_order)))
+
         # Convert to the format expected by the frontend
         rotations_data = {"rotations": {}, "notifyerrors": False}
         for rotation in user_rotations:
@@ -5502,7 +5633,13 @@ async def dashboard_autoselect(request: Request):
         # Database user: load from database
         db = DatabaseRegistry.get_config_database()
         user_autoselects = db.get_user_autoselects(current_user_id)
-        
+
+        # Apply stored sort order if any
+        saved_order = db.get_sort_order(current_user_id, 'autoselect')
+        if saved_order:
+            order_map = {k: i for i, k in enumerate(saved_order)}
+            user_autoselects = sorted(user_autoselects, key=lambda a: order_map.get(a['autoselect_id'], len(saved_order)))
+
         # Convert to the format expected by the frontend
         autoselect_data = {}
         for autoselect in user_autoselects:
@@ -5991,6 +6128,7 @@ async def api_provider_usage(request: Request, provider_id: str):
                 return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data'], "stale": True})
             return JSONResponse({"success": True, "supported": True, "usage": None})
         db.save_provider_usage(current_user_id, provider_id, usage_data)
+        _apply_usage_disable(db, current_user_id, provider_id, usage_data)
         return JSONResponse({"success": True, "supported": True, "usage": usage_data})
     except Exception as e:
         logger.warning(f"api_provider_usage error for {provider_id}: {e}")
@@ -6157,6 +6295,125 @@ async def api_autoselect_delete(request: Request, autoselect_id: str):
         return JSONResponse({"success": True})
     except Exception as e:
         logger.error(f"api_autoselect_delete error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+def _reorder_dict(d: dict, order: list) -> dict:
+    """Return a new dict with keys in the given order (unknown keys appended at end)."""
+    result = {k: d[k] for k in order if k in d}
+    for k, v in d.items():
+        if k not in result:
+            result[k] = v
+    return result
+
+
+@app.post("/dashboard/api/provider/reorder")
+async def api_provider_reorder(request: Request):
+    """Persist a new display order for providers."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        order = body.get('order', [])
+        if not isinstance(order, list):
+            return JSONResponse({"success": False, "error": "order must be a list"}, status_code=400)
+
+        if is_config_admin:
+            config_path = _providers_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            providers = full_config.get('providers', full_config)
+            full_config['providers'] = _reorder_dict(providers, order)
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.set_sort_order(current_user_id, 'provider', order)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_provider_reorder error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/dashboard/api/rotation/reorder")
+async def api_rotation_reorder(request: Request):
+    """Persist a new display order for rotations."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        order = body.get('order', [])
+        if not isinstance(order, list):
+            return JSONResponse({"success": False, "error": "order must be a list"}, status_code=400)
+
+        if is_config_admin:
+            config_path = _rotations_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            rotations = full_config.get('rotations', full_config)
+            full_config['rotations'] = _reorder_dict(rotations, order)
+            save_path = Path.home() / '.aisbf' / 'rotations.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.set_sort_order(current_user_id, 'rotation', order)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_rotation_reorder error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@app.post("/dashboard/api/autoselect/reorder")
+async def api_autoselect_reorder(request: Request):
+    """Persist a new display order for autoselects."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        body = await request.json()
+        order = body.get('order', [])
+        if not isinstance(order, list):
+            return JSONResponse({"success": False, "error": "order must be a list"}, status_code=400)
+
+        if is_config_admin:
+            config_path = _autoselect_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            full_config = _reorder_dict(full_config, order)
+            save_path = Path.home() / '.aisbf' / 'autoselect.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            db.set_sort_order(current_user_id, 'autoselect', order)
+
+        return JSONResponse({"success": True})
+    except Exception as e:
+        logger.error(f"api_autoselect_reorder error: {e}", exc_info=True)
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
@@ -6378,6 +6635,9 @@ async def dashboard_settings_save(
    dashboard_username: str = Form(...),
    condensation_model_id: str = Form(...),
    autoselect_model_id: str = Form(...),
+   autoselect_max_tokens: int = Form(8000),
+   condensation_max_tokens: int = Form(1000),
+   autoselect_max_new_tokens: int = Form(100),
    nsfw_classifier: str = Form("michelleli99/NSFW_text_classifier"),
    privacy_classifier: str = Form("iiiorg/piiranha-v1-detect-personal-information"),
    semantic_vectorization: str = Form("sentence-transformers/all-MiniLM-L6-v2"),
@@ -6499,6 +6759,9 @@ async def dashboard_settings_save(
     aisbf_config['dashboard']['username'] = dashboard_username
     aisbf_config['internal_model']['condensation_model_id'] = condensation_model_id
     aisbf_config['internal_model']['autoselect_model_id'] = autoselect_model_id
+    aisbf_config['internal_model']['autoselect_max_tokens'] = max(256, autoselect_max_tokens)
+    aisbf_config['internal_model']['condensation_max_tokens'] = max(64, condensation_max_tokens)
+    aisbf_config['internal_model']['autoselect_max_new_tokens'] = max(16, autoselect_max_new_tokens)
 
     # Update database config
     if 'database' not in aisbf_config:
@@ -7758,8 +8021,7 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
         
         if current_user_id is None:
             # Admin: check global config
-            global_config = Config()
-            provider_config = global_config.providers.get(provider_name)
+            provider_config = config.providers.get(provider_name)
         else:
             # Regular user: get from user providers
             from aisbf.database import DatabaseRegistry

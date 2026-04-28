@@ -277,6 +277,13 @@ class ContextManager:
             logger.error(f"Failed to initialize internal model: {e}", exc_info=True)
             raise
     
+    def _get_condensation_max_tokens(self) -> int:
+        """Return max_tokens for condensation model calls, from config or default 1000."""
+        aisbf_conf = config.get_aisbf_config()
+        if aisbf_conf and aisbf_conf.internal_model:
+            return int(aisbf_conf.internal_model.get('condensation_max_tokens', 1000))
+        return 1000
+
     def _compact_for_model(self, messages: List[Dict], max_tokens: int = 7500) -> str:
         """
         Return a compact text representation of messages that fits within max_tokens.
@@ -629,7 +636,7 @@ class ContextManager:
                 condensation_request = {
                     "messages": condensation_messages,
                     "temperature": 0.3,
-                    "max_tokens": 1000,
+                    "max_tokens": self._get_condensation_max_tokens(),
                     "stream": False
                 }
                 response = await self._rotation_handler.handle_rotation_request(self._rotation_id, condensation_request, None, None)
@@ -643,7 +650,7 @@ class ContextManager:
                     summary_response = await handler.handle_request(
                         model=condense_model,
                         messages=condensation_messages,
-                        max_tokens=1000,
+                        max_tokens=self._get_condensation_max_tokens(),
                         temperature=0.3,
                         stream=False
                     )

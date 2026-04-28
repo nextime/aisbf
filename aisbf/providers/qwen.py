@@ -85,10 +85,12 @@ class QwenProviderHandler(BaseProviderHandler):
             qwen_config = self.provider_config.get('qwen_config')
         else:
             qwen_config = getattr(self.provider_config, 'qwen_config', None)
-        credentials_file = None
+        # Per-provider default so multiple admin qwen providers don't share a file
+        default_creds = f'~/.aisbf/qwen_{provider_id}_credentials.json'
+        credentials_file = default_creds
         if qwen_config and isinstance(qwen_config, dict):
-            credentials_file = qwen_config.get('credentials_file')
-        
+            credentials_file = qwen_config.get('credentials_file') or default_creds
+
         # Only the ONE config admin (user_id=None from aisbf.json) uses file-based credentials
         # All other users (including database admins with user_id) use database credentials
         if user_id is not None:

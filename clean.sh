@@ -136,6 +136,24 @@ else
     echo "  - htmlcov/ not found (skipping)"
 fi
 
+# Remove _share directory (PyPI packaging artifacts)
+if [ -d "_share" ]; then
+    echo "Removing _share/ directory..."
+    rm -rf _share
+    echo "  ✓ _share/ removed"
+else
+    echo "  - _share/ not found (skipping)"
+fi
+
+# Remove __pycache__ in aisbf module
+if [ -d "aisbf/__pycache__" ]; then
+    echo "Removing aisbf/__pycache__/ directory..."
+    rm -rf aisbf/__pycache__
+    echo "  ✓ aisbf/__pycache__/ removed"
+else
+    echo "  - aisbf/__pycache__/ not found (skipping)"
+fi
+
 # Remove additional files:
 rm -f debug.log || true
 rm -f *.db || true

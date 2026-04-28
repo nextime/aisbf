@@ -362,10 +362,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
             window.selectLanguage = function(lang) {
                 window.i18n.setLanguage(lang).then(function() {
-                    var codeEl = document.getElementById('current-lang-code');
-                    if (codeEl) codeEl.textContent = lang.toUpperCase();
-                    document.getElementById('lang-dropdown').classList.remove('active');
-                    buildLangDropdown();
+                    // Reload page to apply server-side translations
+                    window.location.reload();
                 });
             };
 
