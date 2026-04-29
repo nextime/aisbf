@@ -37,6 +37,20 @@ class GoogleProviderHandler(BaseProviderHandler):
         self.client = genai.Client(api_key=api_key)
         # Cache storage for Google Context Caching
         self._cached_content_refs = {}  # {cache_key: (cached_content_name, expiry_time)}
+    
+    def validate_credentials(self) -> bool:
+        """Validate Google (Gemini) API key presence."""
+        import logging
+        logger = logging.getLogger(__name__)
+        if not self.api_key:
+            logger.error(f"[{self.provider_id}] API key required but not provided")
+            return False
+        stripped = self.api_key.strip()
+        if not stripped or stripped.startswith('YOUR_'):
+            logger.error(f"[{self.provider_id}] Invalid API key format")
+            return False
+        logger.info(f"[{self.provider_id}] API key validated")
+        return True
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                             temperature: Optional[float] = 1.0, stream: Optional[bool] = False,

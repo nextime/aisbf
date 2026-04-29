@@ -136,5 +136,16 @@ def get_provider_handler(provider_id: str, api_key: Optional[str] = None, user_i
             handler.provider_config = provider_config
     
     logger.info(f"Handler created: {handler.__class__.__name__}")
+    
+    # Validate credentials for this provider
+    try:
+        if not handler.validate_credentials():
+            logger.error(f"Provider '{provider_id}' credentials validation failed")
+            raise ValueError(f"Provider '{provider_id}' credentials not valid or not configured")
+        logger.info(f"Credentials validated for provider '{provider_id}'")
+    except Exception as e:
+        logger.error(f"Error validating credentials for provider '{provider_id}': {e}")
+        raise
+    
     logger.info(f"=== get_provider_handler END ===")
     return handler

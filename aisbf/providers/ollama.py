@@ -38,7 +38,24 @@ class OllamaProviderHandler(BaseProviderHandler):
             pool=60.0
         )
         self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint, timeout=timeout)
-
+    
+    def validate_credentials(self) -> bool:
+        """
+        Validate Ollama credentials.
+        
+        Ollama typically runs locally without authentication.
+        If an API key is configured, it's noted but not required for validation.
+        
+        Returns:
+            Always True (Ollama doesn't require credential validation).
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.debug(f"[{self.provider_id}] Ollama provider - no credentials required (local or trusted endpoint)")
+        if self.api_key:
+            logger.debug(f"[{self.provider_id}] Ollama API key is configured (optional)")
+        return True
+    
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                            tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Dict:

@@ -857,6 +857,80 @@ class BaseProviderHandler:
         except Exception:
             pass
     
+    def validate_credentials(self) -> bool:
+        """
+        Validate provider credentials.
+        
+        Returns:
+            True if credentials are valid or validation is not needed.
+            False if credentials are invalid/missing.
+        
+        Base implementation checks only if api_key_required=True and api_key is missing/empty.
+        Override in subclasses for provider-specific validation (e.g., Kiro credential files).
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Determine which config to use: user-specific or global
+        is_user_context = self.user_id is not None and hasattr(self, 'user_provider_config') and self.user_provider_config is not None
+        provider_config = self.user_provider_config if is_user_context else None
+        
+        if provider_config is None:
+            from ..config import config
+            provider_config = config.providers.get(self.provider_id)
+        
+        if provider_config is None:
+            logger.error(f"[{self.provider_id}] Provider configuration not found")
+            return False
+        
+        # Check if this provider requires authentication
+        if isinstance(provider_config, dict):
+            api_key_required = provider_config.get('api_key_required', False)
+        else:
+            api_key_required = getattr(provider_config, 'api_key_required', False)
+        
+        if not api_key_required:
+            logger.debug(f"[{self.provider_id}] No API key required, skipping credential validation")
+            return True
+        
+        # Check if API key is provided (either from config or passed to constructor)
+        if not self.api_key:
+            # Also check if it might be in config
+            if isinstance(provider_config, dict):
+                api_key_from_config = provider_config.get('api_key')
+            else:
+                api_key_from_config = getattr(provider_config, 'api_key', None)
+            if api_key_from_config:
+                self.api_key = api_key_from_config
+            else:
+                logger.error(f"[{self.provider_id}] API key required but not provided")
+                return False
+        
+        # Check for placeholder/empty API key
+        if isinstance(self.api_key, str):
+            stripped = self.api_key.strip()
+            if not stripped or stripped.startswith('YOUR_'):
+                logger.error(f"[{self.provider_id}] Invalid API key format")
+                return False
+        
+        logger.info(f"[{self.provider_id}] API key present, validation passed")
+        return True
+        
+        # Check if API key is provided
+        if not self.api_key:
+            logger.error(f"[{self.provider_id}] API key required but not provided")
+            return False
+        
+        # Check for placeholder/empty API key
+        if isinstance(self.api_key, str):
+            stripped = self.api_key.strip()
+            if not stripped or stripped.startswith('YOUR_') or 'placeholder' in stripped.lower():
+                logger.error(f"[{self.provider_id}] Invalid API key format")
+                return False
+        
+        logger.info(f"[{self.provider_id}] API key present, validation passed")
+        return True
+    
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """
         Parse 429 rate limit response to extract wait time in seconds.

@@ -125,7 +125,38 @@ class KiloProviderHandler(BaseProviderHandler):
         
         self._kilo_endpoint = endpoint
         
-        self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
+            self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
+    
+    def validate_credentials(self) -> bool:
+        """
+        Validate Kilo credentials.
+        
+        In API key mode: checks if api_key is present and valid (not placeholder).
+        In OAuth2 mode: checks if OAuth2 is authenticated via is_authenticated().
+        
+        Returns:
+            True if credentials are valid, False otherwise.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        if self._use_api_key_auth:
+            logger.info(f"[{self.provider_id}] Kilo using API key mode")
+            if self.api_key and self.api_key != "placeholder":
+                logger.debug(f"[{self.provider_id}] Kilo API key present")
+                return True
+            logger.error(f"[{self.provider_id}] Kilo API key missing or placeholder")
+            return False
+        else:
+            if hasattr(self, 'oauth2') and self.oauth2:
+                is_auth = self.oauth2.is_authenticated()
+                if is_auth:
+                    logger.info(f"[{self.provider_id}] Kilo OAuth2 credentials are valid")
+                else:
+                    logger.error(f"[{self.provider_id}] Kilo OAuth2 credentials are invalid or missing")
+                return is_auth
+            logger.error(f"[{self.provider_id}] No OAuth2 instance configured for Kilo")
+            return False
     
     def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, api_base: str):
         """

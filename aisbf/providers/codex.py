@@ -92,34 +92,37 @@ class CodexProviderHandler(BaseProviderHandler):
                         else getattr(provider_config, 'api_key', None)) if provider_config else None
         self._use_api_key_mode = bool(api_key or _cfg_api_key)
         self._account_id = None  # Will be extracted from ID token in OAuth2 mode
-
-        # Set base URL from config (default endpoint)
-        # This will be overridden for OAuth2 mode when credentials are validated
-        _endpoint = (provider_config.get('endpoint') if isinstance(provider_config, dict)
-                     else getattr(provider_config, 'endpoint', None)) if provider_config else None
-        self.base_url = _endpoint or "https://api.openai.com/v1"
-
-        # API Key Mode: Initialize OpenAI client with configured endpoint
+    
+    def validate_credentials(self) -> bool:
+        """
+        Validate Codex credentials.
+        
+        In API key mode: checks if api_key is present and valid.
+        In OAuth2 mode: checks if OAuth2 is authenticated via is_authenticated().
+        
+        Returns:
+            True if credentials are valid, False otherwise.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
         if self._use_api_key_mode:
-            resolved_api_key = api_key or _cfg_api_key
-            self.client = OpenAI(
-                base_url=self.base_url,
-                api_key=resolved_api_key or "dummy",
-                default_headers={
-                    "User-Agent": "codex-cli/1.0.0",
-                }
-            )
-            logger.info(f"CodexProviderHandler: Initialized in API Key mode with endpoint: {self.base_url}")
+            logger.info(f"[{self.provider_id}] Codex using API key mode")
+            if self.api_key and self.api_key != "placeholder":
+                logger.debug(f"[{self.provider_id}] Codex API key present")
+                return True
+            logger.error(f"[{self.provider_id}] Codex API key missing or placeholder")
+            return False
         else:
-            # OAuth2 Mode: Check if OAuth2 is authenticated
-            # If authenticated, use ChatGPT backend; otherwise use configured endpoint
-            if self.oauth2.is_authenticated():
-                self.base_url = "https://chatgpt.com/backend-api"
-                logger.info(f"CodexProviderHandler: Initialized in OAuth2 mode with ChatGPT backend: {self.base_url}")
-            else:
-                # Not yet authenticated, keep configured endpoint
-                logger.info(f"CodexProviderHandler: Initialized in OAuth2 mode (not authenticated yet) with endpoint: {self.base_url}")
-            self.client = None  # Not used in OAuth2 mode
+            if hasattr(self, 'oauth2') and self.oauth2:
+                is_auth = self.oauth2.is_authenticated()
+                if is_auth:
+                    logger.info(f"[{self.provider_id}] Codex OAuth2 credentials are valid")
+                else:
+                    logger.error(f"[{self.provider_id}] Codex OAuth2 credentials are invalid or missing")
+                return is_auth
+            logger.error(f"[{self.provider_id}] No OAuth2 instance configured for Codex")
+            return False
     
     def _load_oauth2_from_db(self, provider_id: str, credentials_file: str, issuer: str) -> CodexOAuth2:
         """

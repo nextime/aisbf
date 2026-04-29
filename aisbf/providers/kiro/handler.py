@@ -52,60 +52,105 @@ class KiroProviderHandler(BaseProviderHandler):
     """
     def __init__(self, provider_id: str, api_key: str):
         super().__init__(provider_id, api_key)
-        self.provider_config = config.get_provider(provider_id)
+        # Don't load provider_config here — get_provider_handler will set it after creation
         self.region = "us-east-1"  # Default region
 
         # Import AuthType for checking auth type
         from ...auth.kiro import AuthType
         self.AuthType = AuthType
 
-        # Initialize KiroAuthManager with credentials from config
+        # Initialize KiroAuthManager lazily on first use
         self.auth_manager = None
-        self._init_auth_manager()
+        self._kiro_config = None  # Will be populated from provider_config
 
         # HTTP client for making requests
         self.client = httpx.AsyncClient(timeout=httpx.Timeout(300.0, connect=30.0))
+    
+    def _ensure_auth_manager(self):
+        """Initialize auth manager if not already done, using current provider_config."""
+        if self.auth_manager is not None:
+            return
+        
+        from ...auth.kiro import KiroAuthManager
+        
+        # Get kiro_config from provider_config (set by get_provider_handler)
+        provider_config = getattr(self, 'provider_config', None) or getattr(self, 'user_provider_config', None)
+        if not provider_config:
+            # Fallback to global config (shouldn't normally happen)
+            from ...config import config
+            provider_config = config.get_provider(self.provider_id)
+        
+        # Extract kiro_config (handle dict or object)
+        kiro_config = getattr(provider_config, 'kiro_config', {}) if hasattr(provider_config, 'kiro_config') else provider_config.get('kiro_config', {})
+        
+        # Extract credential parameters
+        refresh_token = kiro_config.get('refresh_token') if isinstance(kiro_config, dict) else None
+        profile_arn = kiro_config.get('profile_arn') if isinstance(kiro_config, dict) else None
+        region = kiro_config.get('region', 'us-east-1') if isinstance(kiro_config, dict) else getattr(provider_config, 'region', 'us-east-1')
+        creds_file = kiro_config.get('creds_file') if isinstance(kiro_config, dict) else getattr(provider_config, 'creds_file', None)
+        sqlite_db = kiro_config.get('sqlite_db') if isinstance(kiro_config, dict) else getattr(provider_config, 'sqlite_db', None)
+        client_id = kiro_config.get('client_id') if isinstance(kiro_config, dict) else getattr(provider_config, 'client_id', None)
+        client_secret = kiro_config.get('client_secret') if isinstance(kiro_config, dict) else getattr(provider_config, 'client_secret', None)
 
-    def _init_auth_manager(self):
-        """Initialize KiroAuthManager with credentials from config"""
+        self.region = region
+
+        # Initialize auth manager
+        self.auth_manager = KiroAuthManager(
+            refresh_token=refresh_token,
+            profile_arn=profile_arn,
+            region=region,
+            creds_file=creds_file,
+            sqlite_db=sqlite_db,
+            client_id=client_id,
+            client_secret=client_secret
+        )
+    
+    def validate_credentials(self) -> bool:
+        """
+        Validate Kiro-specific credentials.
+        
+        Checks that credential files (creds_file or sqlite_db) exist and
+        that auth manager can successfully load credentials. Also validates
+        token/profile presence based on storage type.
+        """
         try:
-            from ...auth.kiro import KiroAuthManager
-
-            # Get Kiro-specific configuration from provider config
-            kiro_config = getattr(self.provider_config, 'kiro_config', None)
-
-            if not kiro_config:
-                logging.warning(f"No kiro_config found in provider {self.provider_id}, using defaults")
-                kiro_config = {}
-
-            # Extract credentials from provider config
-            refresh_token = kiro_config.get('refresh_token') if isinstance(kiro_config, dict) else None
-            profile_arn = kiro_config.get('profile_arn') if isinstance(kiro_config, dict) else None
-            region = kiro_config.get('region', 'us-east-1') if isinstance(kiro_config, dict) else 'us-east-1'
-            creds_file = kiro_config.get('creds_file') if isinstance(kiro_config, dict) else None
-            sqlite_db = kiro_config.get('sqlite_db') if isinstance(kiro_config, dict) else None
-            client_id = kiro_config.get('client_id') if isinstance(kiro_config, dict) else None
-            client_secret = kiro_config.get('client_secret') if isinstance(kiro_config, dict) else None
-
-            self.region = region
-
-            # Initialize auth manager
-            self.auth_manager = KiroAuthManager(
-                refresh_token=refresh_token,
-                profile_arn=profile_arn,
-                region=region,
-                creds_file=creds_file,
-                sqlite_db=sqlite_db,
-                client_id=client_id,
-                client_secret=client_secret
-            )
-
-            logging.info(f"KiroProviderHandler: Auth manager initialized for region {region}")
-
+            self._ensure_auth_manager()
         except Exception as e:
-            logging.error(f"Failed to initialize KiroAuthManager: {e}")
-            self.auth_manager = None
-
+            logging.error(f"[{self.provider_id}] Failed to initialize auth manager: {e}")
+            return False
+        
+        if not self.auth_manager:
+            logging.error(f"[{self.provider_id}] Auth manager not initialized")
+            return False
+        
+        # Check for credential sources
+        creds_file = getattr(self.auth_manager, 'creds_file', None)
+        sqlite_db = getattr(self.auth_manager, 'sqlite_db', None)
+        refresh_token = getattr(self.auth_manager, 'refresh_token', None)
+        profile_arn = getattr(self.auth_manager, 'profile_arn', None)
+        
+        has_creds_file = creds_file and Path(creds_file).expanduser().exists()
+        has_sqlite_db = sqlite_db and Path(sqlite_db).expanduser().exists()
+        has_token = bool(refresh_token or profile_arn)
+        
+        if not (has_creds_file or has_sqlite_db or has_token):
+            logging.error(
+                f"[{self.provider_id}] No Kiro credentials found. "
+                f"Need creds_file, sqlite_db, or refresh_token/profile_arn in kiro_config."
+            )
+            return False
+        
+        if creds_file and not has_creds_file:
+            logging.error(f"[{self.provider_id}] Kiro creds_file not found: {creds_file}")
+            return False
+        
+        if sqlite_db and not has_sqlite_db:
+            logging.error(f"[{self.provider_id}] Kiro sqlite_db not found: {sqlite_db}")
+            return False
+        
+        logging.info(f"[{self.provider_id}] Kiro credentials validated successfully")
+        return True
+    
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                            temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                            tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:
@@ -121,6 +166,9 @@ class KiroProviderHandler(BaseProviderHandler):
                 logging.info(f"KiroProviderHandler: Messages count: {len(messages)}")
                 logging.info(f"KiroProviderHandler: Tools count: {len(tools) if tools else 0}")
 
+            # Ensure auth manager is initialized and credentials are valid
+            self._ensure_auth_manager()
+            
             if not self.auth_manager:
                 raise Exception("Kiro authentication not configured. Please set kiro_config in provider configuration.")
 

@@ -1002,45 +1002,6 @@ async def refresh_model_cache():
         except Exception as e:
             logger.error(f"Error in model cache refresh task: {e}")
 
-def validate_kiro_credentials(provider_id: str, provider_config) -> bool:
-    """
-    Validate that kiro/kiro-cli credentials are available and accessible.
-    
-    Args:
-        provider_id: Provider identifier (e.g., 'kiro', 'kiro-cli')
-        provider_config: Provider configuration object
-    
-    Returns:
-        True if credentials are valid and accessible, False otherwise
-    """
-    # Only validate kiro-type providers
-    if not hasattr(provider_config, 'type') or provider_config.type != 'kiro':
-        return True  # Not a kiro provider, no validation needed
-    
-    # Check if kiro_config exists
-    if not hasattr(provider_config, 'kiro_config'):
-        logger.debug(f"Provider {provider_id}: No kiro_config found")
-        return False
-    
-    kiro_config = provider_config.kiro_config
-    
-    # Handle both dict and object access patterns
-    def get_config_value(config, key):
-        """Get value from config whether it's a dict or object"""
-        if isinstance(config, dict):
-            return config.get(key)
-        return getattr(config, key, None)
-    
-    # Check for credentials file (kiro IDE)
-    creds_file_path = get_config_value(kiro_config, 'creds_file')
-    if creds_file_path:
-        creds_file = Path(creds_file_path).expanduser()
-        if not creds_file.exists():
-            logger.debug(f"Provider {provider_id}: Credentials file not found: {creds_file}")
-            return False
-        
-        # Try to load and validate the credentials file
-        try:
             with open(creds_file, 'r') as f:
                 data = json.load(f)
             
@@ -1109,63 +1070,19 @@ async def get_provider_models(provider_id: str, provider_config, user_id: Option
     """Get models for a provider from local config or cache"""
     global _model_cache, _model_cache_timestamps
     
-    # Check if provider requires API key and if it's configured
-    api_key_required = getattr(provider_config, 'api_key_required', False)
-    api_key = getattr(provider_config, 'api_key', None)
-    
-    # If API key is required but not configured or is placeholder, skip this provider
-    if api_key_required:
-        if not api_key or api_key.startswith('YOUR_'):
-            logger.debug(f"Skipping provider {provider_id}: API key required but not configured")
-            return []
-    
-    # Validate provider authentication status
-    provider_type = getattr(provider_config, 'type', '')
-    
-    # Validate kiro/kiro-cli credentials
-    if provider_type in ('kiro', 'kiro-cli'):
-        if not validate_kiro_credentials(provider_id, provider_config):
-            logger.debug(f"Skipping provider {provider_id}: Kiro credentials not available or invalid")
-            return []
-    
-    # Validate Codex OAuth2 credentials
-    if provider_type == 'codex':
-        try:
-            from aisbf.auth.codex import CodexOAuth2
-            codex_config = getattr(provider_config, 'codex_config', {})
-            credentials_file = codex_config.get('credentials_file', '~/.aisbf/codex_credentials.json')
-            auth = CodexOAuth2(credentials_file=credentials_file)
-            if not auth.is_authenticated():
-                logger.debug(f"Skipping provider {provider_id}: Codex OAuth2 not authenticated")
-                return []
-        except Exception as e:
-            logger.debug(f"Codex auth check failed for {provider_id}: {e}")
-    
-    # Validate Qwen OAuth2 credentials
-    if provider_type == 'qwen':
-        try:
-            from aisbf.auth.qwen import QwenOAuth2
-            qwen_config = getattr(provider_config, 'qwen_config', {})
-            credentials_file = qwen_config.get('credentials_file', '~/.aisbf/qwen_credentials.json')
-            auth = QwenOAuth2(credentials_file=credentials_file)
-            if not auth.is_authenticated():
-                logger.debug(f"Skipping provider {provider_id}: Qwen OAuth2 not authenticated")
-                return []
-        except Exception as e:
-            logger.debug(f"Qwen auth check failed for {provider_id}: {e}")
-    
-    # Validate Claude OAuth2 credentials
-    if provider_type == 'claude':
-        try:
-            from aisbf.auth.claude import ClaudeAuth
-            claude_config = getattr(provider_config, 'claude_config', {})
-            credentials_file = claude_config.get('credentials_file', '~/.claude_credentials.json')
-            auth = ClaudeAuth(credentials_file=credentials_file)
-            if not auth.is_authenticated():
-                logger.debug(f"Skipping provider {provider_id}: Claude OAuth2 not authenticated")
-                return []
-        except Exception as e:
-            logger.debug(f"Claude auth check failed for {provider_id}: {e}")
+    # Validate provider credentials using the provider handler's validation
+    # This ensures consistency with request-time validation
+    try:
+        from aisbf.providers import get_provider_handler
+        api_key = getattr(provider_config, 'api_key', None)
+        # Create a temporary handler to validate credentials
+        # This will call the provider-specific validate_credentials() method
+        handler = get_provider_handler(provider_id, api_key, user_id=user_id)
+        # If we got here, credentials are valid (get_provider_handler validates)
+    except Exception as e:
+        # If validation fails, silently skip this provider for model listing
+        logger.debug(f"Skipping provider {provider_id}: Credential validation failed - {e}")
+        return []
     
     current_time = int(time.time())
     
@@ -11349,15 +11266,6 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request (only for kiro-type providers)
-    provider_config = config.get_provider(provider_id)
-    provider_type = getattr(provider_config, 'type', '')
-    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
-        )
-    
     # Handle as direct provider request
     body_dict['model'] = actual_model
     # Get user-specific handler
@@ -11574,15 +11482,6 @@ async def v1_audio_transcriptions(request: Request):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request (only for kiro-type providers)
-    provider_config = config.get_provider(provider_id)
-    provider_type = getattr(provider_config, 'type', '')
-    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
-        )
-    
     # Get user-specific handler
     user_id = getattr(request.state, 'user_id', None)
     handler = get_user_handler('request', user_id)
@@ -11651,15 +11550,6 @@ async def v1_audio_speech(request: Request, body: dict):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request (only for kiro-type providers)
-    provider_config = config.get_provider(provider_id)
-    provider_type = getattr(provider_config, 'type', '')
-    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
-        )
-    
     body['model'] = actual_model
     # Get user-specific handler
     user_id = getattr(request.state, 'user_id', None)
@@ -11719,15 +11609,6 @@ async def v1_image_generations(request: Request, body: dict):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request (only for kiro-type providers)
-    provider_config = config.get_provider(provider_id)
-    provider_type = getattr(provider_config, 'type', '')
-    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
-        )
-    
     body['model'] = actual_model
     # Get user-specific handler
     user_id = getattr(request.state, 'user_id', None)
@@ -11785,14 +11666,6 @@ async def v1_embeddings(request: Request, body: dict):
         raise HTTPException(
             status_code=400,
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
-        )
-    
-    # Validate kiro credentials before processing request
-    provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
         )
     
     body['model'] = actual_model
@@ -11988,51 +11861,22 @@ async def list_autoselection_models():
     return await list_autoselect_models()
 
 @app.post("/api/{provider_id}/chat/completions")
-async def chat_completions(provider_id: str, request: Request, body: ChatCompletionRequest):
-    logger.info(f"=== CHAT COMPLETION REQUEST START ===")
-    logger.info(f"Request path: {request.url.path}")
+async def provider_chat_completions(request: Request, provider_id: str, body: dict):
+    """Chat completions endpoint for a specific provider (non-streaming)"""
+    logger.info("=== PROVIDER CHAT COMPLETIONS REQUEST ===")
     logger.info(f"Provider ID: {provider_id}")
-    logger.info(f"Request headers: {dict(request.headers)}")
-    logger.info(f"Request body: {body}")
-    logger.info(f"Available providers: {list(config.providers.keys())}")
-    logger.info(f"Available rotations: {list(config.rotations.keys())}")
-    logger.info(f"Available autoselect: {list(config.autoselect.keys())}")
-    logger.debug(f"Request headers: {dict(request.headers)}")
-    logger.debug(f"Request body: {body}")
-
-    body_dict = body.model_dump()
-
-    # Get user-specific handler based on the type
-    user_id = getattr(request.state, 'user_id', None)
-
-    # Check if it's an autoselect
-    if provider_id in config.autoselect or (user_id and provider_id in get_user_handler('autoselect', user_id).user_autoselects):
-        logger.debug("Handling autoselect request")
-        token_id = getattr(request.state, 'token_id', None)
-        handler = get_user_handler('autoselect', user_id)
-        try:
-            if body.stream:
-                logger.debug("Handling streaming autoselect request")
-                return await handler.handle_autoselect_streaming_request(provider_id, body_dict)
-            else:
-                logger.debug("Handling non-streaming autoselect request")
-                result = await handler.handle_autoselect_request(provider_id, body_dict, user_id, token_id)
-                logger.debug(f"Autoselect response result: {result}")
-                return result
-        except Exception as e:
-            logger.error(f"Error handling autoselect: {str(e)}", exc_info=True)
-            raise
-
-    # Check if it's a rotation
-    if provider_id in config.rotations or (user_id and provider_id in get_user_handler('rotation', user_id).rotations):
-        logger.info(f"Provider ID '{provider_id}' found in rotations")
-        logger.debug("Handling rotation request")
-        token_id = getattr(request.state, 'token_id', None)
-        handler = get_user_handler('rotation', user_id)
-        return await handler.handle_rotation_request(provider_id, body_dict, user_id, token_id)
-
-    # Check if it's a provider
-    handler = get_user_handler('request', user_id)
+    logger.info(f"Body: {body}")
+    
+    # Parse model in format 'provider/model'
+    model = body.get('model', '')
+    if '/' not in model:
+        raise HTTPException(
+            status_code=400,
+            detail="Model must be in format 'provider/model', 'rotation/name', or 'autoselect/name'"
+        )
+    
+    parts = model.split('/', 1)
+    actual_model = parts[1]
     if provider_id not in config.providers and (not user_id or provider_id not in handler.user_providers):
         logger.error(f"Provider ID '{provider_id}' not found in providers")
         logger.error(f"Available providers: {list(config.providers.keys())}")
@@ -12042,15 +11886,8 @@ async def chat_completions(provider_id: str, request: Request, body: ChatComplet
 
     logger.info(f"Provider ID '{provider_id}' found in providers")
 
-    provider_config = handler.user_providers.get(provider_id) if user_id and provider_id in handler.user_providers else config.get_provider(provider_id)
-    logger.debug(f"Provider config: {provider_config}")
-
-    # Validate kiro credentials before processing request
-    if not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
-        )
+    provider_config_source = handler.user_providers.get(provider_id) if user_id and provider_id in handler.user_providers else config.get_provider(provider_id)
+    logger.debug(f"Provider config source: {provider_config_source}")
 
     try:
         if body.stream:
@@ -12382,14 +12219,6 @@ async def embeddings(request: Request, body: dict):
         raise HTTPException(
             status_code=400,
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
-        )
-    
-    # Validate kiro credentials before processing request
-    provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
-        raise HTTPException(
-            status_code=403,
-            detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
         )
     
     body['model'] = actual_model
@@ -14127,12 +13956,6 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         
         provider_config = handler.user_providers[provider_name]
         
-        if not validate_kiro_credentials(provider_name, provider_config):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Provider '{provider_name}' credentials not available."
-            )
-        
         # Extract actual model name: if format is "provider/model", keep only "model" part
         if actual_model.startswith(f"{provider_name}/"):
             actual_model_name = actual_model[len(provider_name)+1:]
@@ -14182,12 +14005,6 @@ async def user_chat_completions_by_username(request: Request, username: str, bod
         
         if provider_id in config.providers:
             provider_config = config.get_provider(provider_id)
-            
-            if not validate_kiro_credentials(provider_id, provider_config):
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Provider '{provider_id}' credentials not available."
-                )
             
             body_dict['model'] = actual_model
             handler = get_user_handler('request', None)
@@ -14490,13 +14307,6 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
         
         provider_config = handler.user_providers[actual_model]
         
-        # Validate kiro credentials
-        if not validate_kiro_credentials(actual_model, provider_config):
-            raise HTTPException(
-                status_code=403,
-                detail=f"Provider '{actual_model}' credentials not available."
-            )
-        
         body_dict['model'] = actual_model
         
         if body.stream:
@@ -14537,13 +14347,6 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
         # Handle global provider
         if provider_id in config.providers:
             provider_config = config.get_provider(provider_id)
-            
-            # Validate kiro credentials
-            if not validate_kiro_credentials(provider_id, provider_config):
-                raise HTTPException(
-                    status_code=403,
-                    detail=f"Provider '{provider_id}' credentials not available."
-                )
             
             body_dict['model'] = actual_model
             handler = get_user_handler('request', None)

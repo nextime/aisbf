@@ -33,6 +33,20 @@ class AnthropicProviderHandler(BaseProviderHandler):
     def __init__(self, provider_id: str, api_key: str):
         super().__init__(provider_id, api_key)
         self.client = Anthropic(api_key=api_key)
+    
+    def validate_credentials(self) -> bool:
+        """Validate Anthropic API key presence."""
+        if not self.api_key:
+            logging.error(f"[{self.provider_id}] API key required but not provided")
+            return False
+        
+        stripped = self.api_key.strip()
+        if not stripped or stripped.startswith('YOUR_'):
+            logging.error(f"[{self.provider_id}] API key appears to be a placeholder")
+            return False
+        
+        logging.info(f"[{self.provider_id}] API key validated")
+        return True
 
     async def handle_request(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                             temperature: Optional[float] = 1.0, stream: Optional[bool] = False,

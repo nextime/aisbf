@@ -106,6 +106,53 @@ class QwenProviderHandler(BaseProviderHandler):
         # OpenAI SDK client (will be configured dynamically with OAuth token)
         self._sdk_client = None
     
+    def validate_credentials(self) -> bool:
+        """
+        Validate Qwen credentials.
+        
+        In API key mode: checks if qwen_config.api_key is present and valid.
+        In OAuth2 mode: checks if OAuth2 is authenticated via is_authenticated().
+        
+        Note: As of April 2026, Qwen OAuth2 service has been discontinued.
+        API key authentication is the recommended method.
+        
+        Returns:
+            True if credentials are valid, False otherwise.
+        """
+        import logging
+        logger = logging.getLogger(__name__)
+        
+        # Check if API key mode is configured
+        if isinstance(self.provider_config, dict):
+            qwen_config = self.provider_config.get('qwen_config')
+        else:
+            qwen_config = getattr(self.provider_config, 'qwen_config', None)
+        api_key = qwen_config.get('api_key') if qwen_config and isinstance(qwen_config, dict) else None
+        
+        if api_key:
+            logger.info(f"[{self.provider_id}] Qwen using API key authentication")
+            if api_key and api_key != "placeholder":
+                logger.debug(f"[{self.provider_id}] Qwen API key present")
+                return True
+            logger.error(f"[{self.provider_id}] Qwen API key is placeholder or missing")
+            return False
+        else:
+            # OAuth2 mode (discontinued but code maintained for future)
+            if hasattr(self, 'auth') and self.auth:
+                is_auth = self.auth.is_authenticated()
+                if is_auth:
+                    logger.info(f"[{self.provider_id}] Qwen OAuth2 credentials are valid")
+                else:
+                    logger.error(f"[{self.provider_id}] Qwen OAuth2 credentials are invalid or missing")
+                    logger.warning(
+                        "Qwen OAuth2 service has been discontinued by Qwen. "
+                        "Tokens obtained from chat.qwen.ai are no longer accepted by DashScope API. "
+                        "Please use API key authentication instead."
+                    )
+                return is_auth
+            logger.error(f"[{self.provider_id}] No authentication method configured for Qwen")
+            return False
+    
     def _load_auth_from_db(self, provider_id: str, credentials_file: str):
         """
         Load OAuth2 credentials:
