@@ -86,7 +86,7 @@ class KiloProviderHandler(BaseProviderHandler):
             logger.info(f"KiloProviderHandler.__init__: kilo_config type={type(kilo_config)}, value={kilo_config}")
             
             # Per-provider default so multiple admin kilo providers don't share a file
-            default_creds = os.path.expanduser(f"~/.aisbf/kilo_{provider_id}_credentials.json")
+            default_creds = BaseProviderHandler.build_credentials_file('kilo', provider_id)
             if kilo_config and isinstance(kilo_config, dict):
                 # Check both 'credentials_file' and 'creds_file' for backward compatibility
                 credentials_path = kilo_config.get('credentials_file') or kilo_config.get('creds_file')

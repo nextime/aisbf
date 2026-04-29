@@ -1,8 +1,0 @@
-providers.nsfw: "NSFW"
-providers.auth_generic_error: "✗ Error: {error}"
-providers.models_fetch_error: "❌ Error: {error}"
-rate_limits_page.no: "No"
-tokens_page.col_endpoint: "Endpoint"
-usage_page.remaining: "{n} remaining"
-usage_page.pct_used_slots_free: "{pct}% used · {n} slot free"
-usage_page.pct_used_slots_free_plural: "{pct}% used · {n} slots free"

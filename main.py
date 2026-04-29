@@ -11349,9 +11349,10 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request
+    # Validate kiro credentials before processing request (only for kiro-type providers)
     provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
         raise HTTPException(
             status_code=403,
             detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
@@ -11573,9 +11574,10 @@ async def v1_audio_transcriptions(request: Request):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request
+    # Validate kiro credentials before processing request (only for kiro-type providers)
     provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
         raise HTTPException(
             status_code=403,
             detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
@@ -11649,9 +11651,10 @@ async def v1_audio_speech(request: Request, body: dict):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request
+    # Validate kiro credentials before processing request (only for kiro-type providers)
     provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
         raise HTTPException(
             status_code=403,
             detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."
@@ -11716,9 +11719,10 @@ async def v1_image_generations(request: Request, body: dict):
             detail=f"Provider '{provider_id}' not found. Available: {list(config.providers.keys())}"
         )
     
-    # Validate kiro credentials before processing request
+    # Validate kiro credentials before processing request (only for kiro-type providers)
     provider_config = config.get_provider(provider_id)
-    if not validate_kiro_credentials(provider_id, provider_config):
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type in ('kiro', 'kiro-cli') and not validate_kiro_credentials(provider_id, provider_config):
         raise HTTPException(
             status_code=403,
             detail=f"Provider '{provider_id}' credentials not available. Please configure credentials for this provider."

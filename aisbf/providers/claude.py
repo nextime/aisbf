@@ -156,7 +156,7 @@ class ClaudeProviderHandler(BaseProviderHandler):
         else:
             claude_config = getattr(self.provider_config, 'claude_config', None)
         # Per-provider default so multiple admin claude providers don't share a file
-        default_creds = f'~/.aisbf/claude_{provider_id}_credentials.json'
+        default_creds = BaseProviderHandler.build_credentials_file('claude', provider_id)
         credentials_file = default_creds
         if claude_config and isinstance(claude_config, dict):
             credentials_file = claude_config.get('credentials_file') or default_creds

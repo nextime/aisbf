@@ -592,7 +592,8 @@ class AdaptiveRateLimiter:
         
         logger.info(f"[AdaptiveRateLimiter {self.provider_id}] 429 recorded: wait_seconds={wait_seconds}, "
                    f"new_rate_limit={self.current_rate_limit:.2f}s, consecutive_429s={self._consecutive_429s}")
-    
+        self.save_to_cache()
+
     def record_success(self):
         """Record a successful request and gradually recover rate limit."""
         import logging
@@ -617,7 +618,8 @@ class AdaptiveRateLimiter:
                 
                 # Reset consecutive successes counter after recovery
                 self._consecutive_successes = 0
-    
+                self.save_to_cache()
+
     def get_rate_limit(self) -> float:
         """Get the current adaptive rate limit."""
         return self.current_rate_limit
@@ -692,7 +694,7 @@ class AdaptiveRateLimiter:
         """Reset the adaptive rate limiter to initial state."""
         import logging
         logger = logging.getLogger(__name__)
-        
+
         self.current_rate_limit = self.initial_rate_limit
         self._429_history = []
         self._consecutive_429s = 0
@@ -700,8 +702,51 @@ class AdaptiveRateLimiter:
         self.total_429_count = 0
         self.total_requests = 0
         self.last_429_time = None
-        
+
         logger.info(f"[AdaptiveRateLimiter {self.provider_id}] Reset to initial state")
+        self._clear_cache()
+
+    def _cache_key(self) -> str:
+        return f"aisbf:adaptive_rate_limiter:{self.provider_id}"
+
+    def save_to_cache(self):
+        """Persist rate limiter state to the cache so it survives restarts."""
+        try:
+            from ..cache import get_cache_manager
+            cache = get_cache_manager()
+            state = {
+                'current_rate_limit': self.current_rate_limit,
+                'consecutive_429s': self._consecutive_429s,
+                'total_429_count': self.total_429_count,
+                'last_429_time': self.last_429_time,
+                'history': self._429_history[-50:],  # keep last 50 entries
+            }
+            cache.set(self._cache_key(), state, ttl=86400 * 7)
+        except Exception:
+            pass
+
+    def load_from_cache(self):
+        """Restore rate limiter state from cache after a restart."""
+        try:
+            from ..cache import get_cache_manager
+            cache = get_cache_manager()
+            state = cache.get(self._cache_key())
+            if not state:
+                return
+            self.current_rate_limit = state.get('current_rate_limit', self.initial_rate_limit)
+            self._consecutive_429s = state.get('consecutive_429s', 0)
+            self.total_429_count = state.get('total_429_count', 0)
+            self.last_429_time = state.get('last_429_time')
+            self._429_history = state.get('history', [])
+        except Exception:
+            pass
+
+    def _clear_cache(self):
+        try:
+            from ..cache import get_cache_manager
+            get_cache_manager().delete(self._cache_key())
+        except Exception:
+            pass
 
 
 # Global adaptive rate limiters registry - now supports user-specific limiters
@@ -720,8 +765,10 @@ def get_adaptive_rate_limiter(provider_id: str, config: Dict = None, user_id: Op
         key = provider_id
     
     if key not in _adaptive_rate_limiters:
-        _adaptive_rate_limiters[key] = AdaptiveRateLimiter(key, config)
-    
+        limiter = AdaptiveRateLimiter(key, config)
+        limiter.load_from_cache()
+        _adaptive_rate_limiters[key] = limiter
+
     return _adaptive_rate_limiters[key]
 
 
@@ -748,6 +795,15 @@ def get_all_adaptive_rate_limiters(user_id: Optional[int] = None) -> Dict[str, A
 
 
 class BaseProviderHandler:
+    @staticmethod
+    def build_credentials_file(provider_type: str, provider_id: str) -> str:
+        """Return the standard per-provider credential file path.
+
+        Using both provider_type and provider_id guarantees a unique path
+        even when multiple providers share the same type.
+        """
+        return os.path.expanduser(f"~/.aisbf/{provider_type}_{provider_id}_credentials.json")
+
     def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None):
         self.provider_id = provider_id
         self.api_key = api_key
@@ -790,6 +846,8 @@ class BaseProviderHandler:
         if config.aisbf and config.aisbf.adaptive_rate_limiting:
             adaptive_config = config.aisbf.adaptive_rate_limiting.dict()
         self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config, user_id)
+        # Load rate-limit disabled state from cache (persists across restarts)
+        self._load_disabled_until_from_cache()
         # Load usage-based disabled state from DB (persists across restarts)
         self._usage_disabled_until: Optional[float] = None
         try:
@@ -1005,8 +1063,8 @@ class BaseProviderHandler:
             self._auto_configure_rate_limits(headers)
         
         # Disable provider for the calculated duration
-        self.error_tracking['disabled_until'] = time.time() + wait_seconds
-        
+        self._save_disabled_until(time.time() + wait_seconds)
+
         logger.error(f"!!! PROVIDER DISABLED DUE TO RATE LIMIT !!!")
         logger.error(f"Provider: {self.provider_id}")
         logger.error(f"Reason: 429 Too Many Requests")
@@ -1116,6 +1174,38 @@ class BaseProviderHandler:
                 
         except (ValueError, TypeError) as e:
             logger.debug(f"Could not parse rate limit header: {e}")
+
+    def _disabled_cache_key(self) -> str:
+        return f"aisbf:provider_disabled:{self.adaptive_limiter.provider_id}"
+
+    def _save_disabled_until(self, disabled_until: float):
+        """Set disabled_until in error_tracking and persist it to the cache."""
+        self.error_tracking['disabled_until'] = disabled_until
+        try:
+            from ..cache import get_cache_manager
+            ttl = max(1, int(disabled_until - time.time()) + 60)
+            get_cache_manager().set(self._disabled_cache_key(), disabled_until, ttl=ttl)
+        except Exception:
+            pass
+
+    def _clear_disabled_until(self):
+        """Clear disabled_until from error_tracking and the cache."""
+        self.error_tracking['disabled_until'] = None
+        try:
+            from ..cache import get_cache_manager
+            get_cache_manager().delete(self._disabled_cache_key())
+        except Exception:
+            pass
+
+    def _load_disabled_until_from_cache(self):
+        """Restore disabled_until from cache on startup."""
+        try:
+            from ..cache import get_cache_manager
+            disabled_until = get_cache_manager().get(self._disabled_cache_key())
+            if disabled_until and disabled_until > time.time():
+                self.error_tracking['disabled_until'] = disabled_until
+        except Exception:
+            pass
 
     def is_rate_limited(self) -> bool:
         disabled_until = self.error_tracking.get('disabled_until')
@@ -1253,8 +1343,8 @@ class BaseProviderHandler:
             return
         
         disable_seconds = duration_map[duration]
-        self.error_tracking['disabled_until'] = time.time() + disable_seconds
-        
+        self._save_disabled_until(time.time() + disable_seconds)
+
         logger.error(f"!!! PROVIDER DISABLED !!!")
         logger.error(f"Provider: {self.provider_id}")
         logger.error(f"Reason: Token rate limit exceeded")
@@ -1342,7 +1432,7 @@ class BaseProviderHandler:
             else:
                 logger.info(f"Using system default cooldown: {cooldown_seconds} seconds")
             
-            self.error_tracking['disabled_until'] = time.time() + cooldown_seconds
+            self._save_disabled_until(time.time() + cooldown_seconds)
             disabled_until_time = self.error_tracking['disabled_until']
             cooldown_remaining = int(disabled_until_time - time.time())
             logger.error(f"!!! PROVIDER DISABLED !!!")
@@ -1364,8 +1454,8 @@ class BaseProviderHandler:
         previous_failures = self.error_tracking.get('failures', 0)
         
         self.error_tracking['failures'] = 0
-        self.error_tracking['disabled_until'] = None
-        
+        self._clear_disabled_until()
+
         # Record success in adaptive rate limiter
         self.adaptive_limiter.record_success()
         

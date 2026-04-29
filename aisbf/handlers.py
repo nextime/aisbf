@@ -2017,6 +2017,11 @@ class RequestHandler:
             logger.error(f"Error proxying content: {str(e)}")
             raise HTTPException(status_code=500, detail=f"Error fetching content: {str(e)}")
 
+# Round-robin state for even load distribution across equal-priority models
+_rotation_round_robin: Dict[str, int] = {}
+_rotation_round_robin_lock = threading.Lock()
+
+
 class RotationHandler:
     def __init__(self, user_id=None):
         self.user_id = user_id
@@ -2744,20 +2749,24 @@ class RotationHandler:
 
         # Filter models with the highest weight
         highest_weight_models = [m for m in available_models if m['weight'] == highest_weight]
+        other_models = [m for m in available_models if m['weight'] != highest_weight]
         logger.info(f"Models with highest priority ({highest_weight}): {len(highest_weight_models)}")
         for model in highest_weight_models:
             logger.info(f"  - {model['name']} (provider: {model['provider_id']})")
 
-        # If multiple models have the same highest weight, randomly select among them
-        import random
+        # Round-robin selection among equal-priority models for even load distribution
         if len(highest_weight_models) > 1:
-            logger.info(f"Multiple models with same highest priority - performing random selection")
-            selected_model = random.choice(highest_weight_models)
-            logger.info(f"Randomly selected from {len(highest_weight_models)} candidates")
-        else:
-            selected_model = highest_weight_models[0]
-            logger.info(f"Single model with highest priority - deterministic selection")
-        
+            rr_key = f"{rotation_id}:{self.user_id or ''}"
+            with _rotation_round_robin_lock:
+                idx = _rotation_round_robin.get(rr_key, 0) % len(highest_weight_models)
+                _rotation_round_robin[rr_key] = idx + 1
+            highest_weight_models = highest_weight_models[idx:] + highest_weight_models[:idx]
+            logger.info(f"Round-robin selection: slot {idx} of {len(highest_weight_models)} candidates")
+
+        # Reassemble available_models with round-robin order for the top-priority tier
+        available_models = highest_weight_models + other_models
+        selected_model = available_models[0]
+
         logger.info(f"")
         logger.info(f"=== FINAL SELECTION ===")
         logger.info(f"Selected model: {selected_model['name']}")
@@ -3727,7 +3736,6 @@ class RotationHandler:
                             logger.error(f"Response type: {type(response)}")
                             logger.error(f"Response has __aiter__: {hasattr(response, '__aiter__')}")
                             logger.error(f"Response is coroutine function: {inspect.iscoroutinefunction(response)}")
-                            # Re-raise to trigger failure recording
                             raise async_error
                         finally:
                             logger.info(f"Async generator processed {chunk_count} chunks total")
@@ -3806,11 +3814,15 @@ class RotationHandler:
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for streaming rotation failed: {analytics_error}")
 
+            except RateLimitError as e:
+                # Provider already disabled by handle_429 — do NOT call record_failure()
+                error_dict = {"error": str(e)}
+                yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
             except Exception as e:
                 handler.record_failure()
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
-        
+
         return StreamingResponse(stream_generator(effective_context), media_type="text/event-stream")
 
     async def handle_rotation_model_list(self, rotation_id: str) -> List[Dict]:
@@ -4100,7 +4112,7 @@ class AutoselectHandler:
                 try:
                     _internal_model_singleton = AutoModelForCausalLM.from_pretrained(
                         model_name,
-                        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                        dtype=torch.float16 if device == "cuda" else torch.float32,
                         device_map="auto" if device == "cuda" else None,
                         local_files_only=True
                     )
@@ -4109,7 +4121,7 @@ class AutoselectHandler:
                     logger.info("Model not cached, downloading from HuggingFace...")
                     _internal_model_singleton = AutoModelForCausalLM.from_pretrained(
                         model_name,
-                        torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                        dtype=torch.float16 if device == "cuda" else torch.float32,
                         device_map="auto" if device == "cuda" else None
                     )
                     logger.info("Model downloaded and cached")

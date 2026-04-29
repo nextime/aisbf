@@ -86,7 +86,7 @@ class QwenProviderHandler(BaseProviderHandler):
         else:
             qwen_config = getattr(self.provider_config, 'qwen_config', None)
         # Per-provider default so multiple admin qwen providers don't share a file
-        default_creds = f'~/.aisbf/qwen_{provider_id}_credentials.json'
+        default_creds = BaseProviderHandler.build_credentials_file('qwen', provider_id)
         credentials_file = default_creds
         if qwen_config and isinstance(qwen_config, dict):
             credentials_file = qwen_config.get('credentials_file') or default_creds

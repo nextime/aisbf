@@ -233,7 +233,7 @@ class ContextManager:
             try:
                 self._internal_model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    dtype=torch.float16 if device == "cuda" else torch.float32,
                     device_map="auto" if device == "cuda" else None,
                     local_files_only=True
                 )
@@ -242,7 +242,7 @@ class ContextManager:
                 logger.info("Model not cached, downloading from HuggingFace...")
                 self._internal_model = AutoModelForCausalLM.from_pretrained(
                     model_name,
-                    torch_dtype=torch.float16 if device == "cuda" else torch.float32,
+                    dtype=torch.float16 if device == "cuda" else torch.float32,
                     device_map="auto" if device == "cuda" else None
                 )
                 logger.info("Model downloaded and cached")

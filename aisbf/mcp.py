@@ -1361,29 +1361,55 @@ class MCPServer:
     async def _delete_provider_config(self, args: Dict) -> Dict:
         """Delete provider configuration"""
         provider_id = args.get('provider_id')
-        
+
         if not provider_id:
             raise HTTPException(status_code=400, detail="provider_id is required")
-        
+
         # Load existing config
         config_path = Path.home() / '.aisbf' / 'providers.json'
         if not config_path.exists():
             raise HTTPException(status_code=404, detail="Providers config not found")
-        
+
         with open(config_path) as f:
             full_config = json.load(f)
-        
+
         if provider_id not in full_config.get('providers', {}):
             raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
-        
+
         del full_config['providers'][provider_id]
-        
+
         # Save config
         save_path = Path.home() / '.aisbf' / 'providers.json'
         with open(save_path, 'w') as f:
             json.dump(full_config, f, indent=2)
-        
-        return {"status": "success", "message": f"Provider '{provider_id}' deleted. Restart server for changes to take effect."}
+
+        # Remove provider from rotations
+        rotations_path = Path.home() / '.aisbf' / 'rotations.json'
+        affected_rotations = []
+        deleted_rotations = []
+        if rotations_path.exists():
+            with open(rotations_path) as f:
+                rotations_config = json.load(f)
+            for rotation_id, rotation in list(rotations_config.get('rotations', {}).items()):
+                original_providers = rotation.get('providers', [])
+                filtered_providers = [p for p in original_providers if p.get('provider_id') != provider_id]
+                if len(filtered_providers) < len(original_providers):
+                    if not filtered_providers:
+                        del rotations_config['rotations'][rotation_id]
+                        deleted_rotations.append(rotation_id)
+                    else:
+                        rotations_config['rotations'][rotation_id]['providers'] = filtered_providers
+                        affected_rotations.append(rotation_id)
+            if affected_rotations or deleted_rotations:
+                with open(rotations_path, 'w') as f:
+                    json.dump(rotations_config, f, indent=2)
+
+        msg = f"Provider '{provider_id}' deleted. Restart server for changes to take effect."
+        if affected_rotations:
+            msg += f" Removed from rotations: {', '.join(affected_rotations)}."
+        if deleted_rotations:
+            msg += f" Deleted empty rotations: {', '.join(deleted_rotations)}."
+        return {"status": "success", "message": msg}
 
 
     # ===== User-specific MCP tools =====
@@ -1523,17 +1549,40 @@ class MCPServer:
         """Delete a user provider configuration"""
         if not user_id:
             raise HTTPException(status_code=401, detail="User authentication required")
-        
+
         provider_id = args.get('provider_id')
         if not provider_id:
             raise HTTPException(status_code=400, detail="provider_id is required")
-        
+
         from .database import DatabaseRegistry
         db = DatabaseRegistry.get_config_database()
-        
+
         db.delete_user_provider(user_id, provider_id)
-        
-        return {"status": "success", "message": f"Provider '{provider_id}' deleted successfully."}
+
+        # Remove provider from user rotations
+        affected_rotations = []
+        deleted_rotations = []
+        user_rotations = db.get_user_rotations(user_id)
+        for rotation in user_rotations:
+            rotation_id = rotation['rotation_id']
+            config = rotation['config']
+            original_providers = config.get('providers', [])
+            filtered_providers = [p for p in original_providers if p.get('provider_id') != provider_id]
+            if len(filtered_providers) < len(original_providers):
+                if not filtered_providers:
+                    db.delete_user_rotation(user_id, rotation_id)
+                    deleted_rotations.append(rotation_id)
+                else:
+                    config['providers'] = filtered_providers
+                    db.save_user_rotation(user_id, rotation_id, config)
+                    affected_rotations.append(rotation_id)
+
+        msg = f"Provider '{provider_id}' deleted successfully."
+        if affected_rotations:
+            msg += f" Removed from rotations: {', '.join(affected_rotations)}."
+        if deleted_rotations:
+            msg += f" Deleted empty rotations: {', '.join(deleted_rotations)}."
+        return {"status": "success", "message": msg}
 
     async def _list_user_rotations(self, args: Dict, user_id: Optional[int] = None) -> Dict:
         """List all user-configured rotations"""

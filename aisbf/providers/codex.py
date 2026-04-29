@@ -72,7 +72,7 @@ class CodexProviderHandler(BaseProviderHandler):
             codex_config = getattr(provider_config, 'codex_config', None) or {}
 
         # Use per-provider credentials file so multiple codex providers don't share state
-        default_creds = f'~/.aisbf/codex_{provider_id}_credentials.json'
+        default_creds = BaseProviderHandler.build_credentials_file('codex', provider_id)
         credentials_file = codex_config.get('credentials_file', default_creds)
         issuer = codex_config.get('issuer', 'https://auth.openai.com')
         

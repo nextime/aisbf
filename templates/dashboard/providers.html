@@ -1681,7 +1681,7 @@ async function authenticateClaude(key) {
             },
             body: JSON.stringify({
                 provider_key: key,
-                credentials_file: providersData[key].claude_config?.credentials_file || '~/.claude_credentials.json'
+                credentials_file: providersData[key].claude_config?.credentials_file || `~/.aisbf/claude_${key}_credentials.json`
             })
         });
         
@@ -1798,7 +1798,7 @@ async function authenticateQwen(key) {
             },
             body: JSON.stringify({
                 provider_key: key,
-                credentials_file: providersData[key].qwen_config?.credentials_file || '~/.aisbf/qwen_credentials.json'
+                credentials_file: providersData[key].qwen_config?.credentials_file || `~/.aisbf/qwen_${key}_credentials.json`
             })
         });
         
@@ -2011,7 +2011,7 @@ async function authenticateKilo(key) {
             },
             body: JSON.stringify({
                 provider_key: key,
-                credentials_file: providersData[key].kilo_config?.credentials_file || '~/.kilo_credentials.json'
+                credentials_file: providersData[key].kilo_config?.credentials_file || `~/.aisbf/kilo_${key}_credentials.json`
             })
         });
         
@@ -2261,23 +2261,23 @@ async function confirmAddProvider() {
         };
     } else if (type === 'claude') {
         providersData[key].claude_config = {
-            credentials_file: '~/.claude_credentials.json'
+            credentials_file: `~/.aisbf/claude_${key}_credentials.json`
         };
     } else if (type === 'kilocode') {
         providersData[key].kilo_config = {
-            credentials_file: '~/.kilo_credentials.json',
+            credentials_file: `~/.aisbf/kilo_${key}_credentials.json`,
             api_base: 'https://api.kilo.ai/api/gateway'
         };
     } else if (type === 'qwen') {
         providersData[key].qwen_config = {
-            credentials_file: '~/.aisbf/qwen_credentials.json',
+            credentials_file: `~/.aisbf/qwen_${key}_credentials.json`,
             api_key: '',
             region: 'china-beijing',
             workspace_id: 'Default Workspace'
         };
     } else if (type === 'codex') {
         providersData[key].codex_config = {
-            credentials_file: '~/.aisbf/codex_credentials.json',
+            credentials_file: `~/.aisbf/codex_${key}_credentials.json`,
             issuer: 'https://auth.openai.com'
         };
     }
@@ -2386,6 +2386,7 @@ async function saveProviders() {
         });
 
         if (response.ok) {
+            sessionStorage.setItem('providers_page', currentProviderPage);
             window.location.href = BASE_PATH + '/dashboard/providers?success=1';
         } else {
             showAlert(window.i18n.t('providers.error_saving'), 'Error', '❌', 'danger');
@@ -2397,6 +2398,11 @@ async function saveProviders() {
 
 // Defer until i18n is ready so translated strings are available
 function _doInitialRender() {
+    const savedPage = sessionStorage.getItem('providers_page');
+    if (savedPage !== null) {
+        currentProviderPage = parseInt(savedPage) || 0;
+        sessionStorage.removeItem('providers_page');
+    }
     renderProvidersList();
     // Kick off initial usage fetch for all usage-supporting providers
     refreshAllUsage().then(() => renderProvidersList());
