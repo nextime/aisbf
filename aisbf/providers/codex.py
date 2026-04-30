@@ -92,6 +92,18 @@ class CodexProviderHandler(BaseProviderHandler):
                         else getattr(provider_config, 'api_key', None)) if provider_config else None
         self._use_api_key_mode = bool(api_key or _cfg_api_key)
         self._account_id = None  # Will be extracted from ID token in OAuth2 mode
+
+        # Base URL for API requests
+        _endpoint = (provider_config.get('endpoint') if isinstance(provider_config, dict)
+                     else getattr(provider_config, 'endpoint', None)) if provider_config else None
+        self.base_url = (_endpoint or 'https://chatgpt.com/backend-api').rstrip('/')
+
+        # Initialize OpenAI client for API key mode
+        if self._use_api_key_mode:
+            effective_key = api_key or _cfg_api_key
+            self.client = OpenAI(api_key=effective_key, base_url=self.base_url)
+        else:
+            self.client = None
     
     def validate_credentials(self) -> bool:
         """

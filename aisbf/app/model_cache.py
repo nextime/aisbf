@@ -1,0 +1,278 @@
+"""
+Provider model fetching, caching, and background refresh.
+Extracted from main.py.
+"""
+import time
+import logging
+import asyncio
+from typing import Optional
+
+logger = logging.getLogger(__name__)
+
+_model_cache: dict = {}
+_model_cache_timestamps: dict = {}
+_cache_refresh_interval = 24 * 3600
+_endpoint_model_cache: dict = {}
+_background_tasks: set = set()
+
+
+async def fetch_provider_models(provider_id: str, config, user_id: Optional[int] = None) -> list:
+    global _model_cache, _model_cache_timestamps, _endpoint_model_cache
+
+    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+    try:
+        if not user_id and config is not None:
+            try:
+                prov_cfg = config.get_provider(provider_id)
+                prov_type = getattr(prov_cfg, 'type', '')
+                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
+                endpoint_key = f"{prov_type}:{endpoint}"
+                if endpoint_key and endpoint_key in _endpoint_model_cache:
+                    cached_models, cached_at = _endpoint_model_cache[endpoint_key]
+                    if time.time() - cached_at < _cache_refresh_interval:
+                        _model_cache[cache_key] = cached_models
+                        _model_cache_timestamps[cache_key] = cached_at
+                        return cached_models
+            except Exception:
+                pass
+
+        from aisbf.handlers import RequestHandler
+        from starlette.requests import Request as StarletteRequest
+
+        request_handler = RequestHandler(user_id=user_id)
+        scope = {"type": "http", "method": "GET", "headers": [],
+                 "query_string": b"", "path": f"/api/{provider_id}/models"}
+        dummy_request = StarletteRequest(scope)
+
+        models = await request_handler.handle_model_list(dummy_request, provider_id)
+
+        now = time.time()
+        _model_cache[cache_key] = models
+        _model_cache_timestamps[cache_key] = now
+
+        if not user_id and config is not None:
+            try:
+                prov_cfg = config.get_provider(provider_id)
+                prov_type = getattr(prov_cfg, 'type', '')
+                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
+                endpoint_key = f"{prov_type}:{endpoint}"
+                if endpoint_key and endpoint_key not in _endpoint_model_cache:
+                    _endpoint_model_cache[endpoint_key] = (models, now)
+            except Exception:
+                pass
+
+        logger.info(f"Cached {len(models)} models from provider: {provider_id}")
+        return models
+    except Exception as e:
+        logger.error(f"Failed to fetch models from provider {provider_id}: {e}")
+        return []
+
+
+async def refresh_model_cache(config):
+    global _endpoint_model_cache
+    while True:
+        try:
+            await asyncio.sleep(_cache_refresh_interval)
+            logger.info("Starting periodic model cache refresh...")
+            _endpoint_model_cache.clear()
+            for provider_id, provider_config in config.providers.items():
+                if not (hasattr(provider_config, 'models') and provider_config.models):
+                    await fetch_provider_models(provider_id, config)
+            logger.info("Model cache refresh complete")
+        except Exception as e:
+            logger.error(f"Error in model cache refresh task: {e}")
+
+
+async def get_provider_models(provider_id: str, provider_config, config, user_id: Optional[int] = None) -> list:
+    current_time = int(time.time())
+
+    try:
+        from aisbf.providers import get_provider_handler
+        api_key = getattr(provider_config, 'api_key', None)
+        get_provider_handler(provider_id, api_key, user_id=user_id)
+    except Exception as e:
+        logger.debug(f"Skipping provider {provider_id}: {e}")
+        return []
+
+    if hasattr(provider_config, 'models') and provider_config.models:
+        return [
+            {
+                'id': f"{provider_id}/{model.name}",
+                'object': 'model',
+                'created': current_time,
+                'owned_by': provider_config.name,
+                'provider': provider_id,
+                'type': 'provider',
+                'model_name': model.name,
+                'context_size': getattr(model, 'context_size', None),
+                'capabilities': getattr(model, 'capabilities', []),
+                'description': getattr(model, 'description', None),
+                'architecture': getattr(model, 'architecture', None),
+                'pricing': getattr(model, 'pricing', None),
+                'top_provider': getattr(model, 'top_provider', None),
+                'supported_parameters': getattr(model, 'supported_parameters', None),
+                'default_parameters': getattr(model, 'default_parameters', None),
+                'source': 'local_config'
+            }
+            for model in provider_config.models
+        ]
+
+    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+    if cache_key in _model_cache:
+        cache_age = time.time() - _model_cache_timestamps.get(cache_key, 0)
+        if cache_age < _cache_refresh_interval:
+            cached_models = _model_cache[cache_key]
+            if cached_models:
+                models = []
+                for model in cached_models:
+                    mc = model.copy()
+                    mc['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    mc.setdefault('object', 'model')
+                    mc.setdefault('created', current_time)
+                    mc.setdefault('owned_by', provider_config.name)
+                    mc['provider'] = provider_id
+                    mc['type'] = 'provider'
+                    mc['source'] = 'api_cache'
+                    models.append(mc)
+                return models
+
+    api_key = getattr(provider_config, 'api_key', None)
+    api_key_required = getattr(provider_config, 'api_key_required', True)
+    if not api_key_required or (api_key and not api_key.startswith('YOUR_')):
+        try:
+            fetched = await fetch_provider_models(provider_id, config, user_id=user_id)
+            if fetched:
+                models = []
+                for model in fetched:
+                    mc = model.copy()
+                    mc['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+                    mc.setdefault('object', 'model')
+                    mc.setdefault('created', current_time)
+                    mc.setdefault('owned_by', provider_config.name)
+                    mc['provider'] = provider_id
+                    mc['type'] = 'provider'
+                    mc['source'] = 'api_cache'
+                    models.append(mc)
+                return models
+        except Exception as e:
+            logger.debug(f"Failed to fetch models for provider {provider_id}: {e}")
+
+    return []
+
+
+async def prefetch_global_provider_models(config):
+    import os
+    from aisbf.database import DatabaseRegistry
+
+    logger.info("=== STARTUP MODEL PRE-FETCHING (background) ===")
+    prefetch_count = 0
+    total = 0
+
+    for provider_id, provider_config in config.providers.items():
+        total += 1
+        if hasattr(provider_config, 'models') and provider_config.models:
+            continue
+
+        provider_type = getattr(provider_config, 'type', '')
+        if provider_type in ('kilo', 'kilocode'):
+            has_valid_auth = False
+            api_key = getattr(provider_config, 'api_key', None)
+            if api_key and not api_key.startswith('YOUR_'):
+                has_valid_auth = True
+            if not has_valid_auth:
+                try:
+                    from aisbf.auth.kilo import KiloOAuth2
+                    kilo_config = getattr(provider_config, 'kilo_config', None)
+                    credentials_file = None
+                    api_base = getattr(provider_config, 'endpoint', 'https://api.kilo.ai')
+                    if kilo_config and isinstance(kilo_config, dict):
+                        credentials_file = kilo_config.get('credentials_file')
+                        if kilo_config.get('api_base'):
+                            api_base = kilo_config['api_base']
+                    oauth2 = KiloOAuth2(credentials_file=credentials_file, api_base=api_base)
+                    if oauth2.is_authenticated():
+                        has_valid_auth = True
+                except Exception:
+                    pass
+            if not has_valid_auth:
+                try:
+                    db = DatabaseRegistry.get_config_database()
+                    if db:
+                        for af in db.get_user_auth_files(0, provider_id):
+                            if af.get('file_type') in ('credentials', 'kilo_credentials', 'config') and os.path.exists(af.get('file_path', '')):
+                                has_valid_auth = True
+                                break
+                except Exception:
+                    pass
+            if not has_valid_auth:
+                logger.info(f"Skipping model prefetch for Kilo provider '{provider_id}' (no valid auth)")
+                continue
+
+        try:
+            models = await fetch_provider_models(provider_id, config)
+            if models:
+                prefetch_count += 1
+                logger.info(f"✓ Pre-fetched {len(models)} models from provider: {provider_id}")
+            else:
+                logger.warning(f"✗ Pre-fetch returned empty model list from provider '{provider_id}'")
+        except Exception as e:
+            logger.error(f"✗ Failed to pre-fetch models from provider '{provider_id}': {e}")
+
+    logger.info(f"=== MODEL PRE-FETCHING COMPLETE: {prefetch_count}/{total} providers ===")
+
+
+def _apply_usage_disable(db, user_id, provider_id: str, usage_data: dict):
+    import time as _time
+    try:
+        rl = usage_data.get('rate_limit') if usage_data else None
+        if not rl:
+            return
+        windows = []
+        if rl.get('primary_window'):
+            windows.append(rl['primary_window'])
+        if rl.get('secondary_window'):
+            windows.append(rl['secondary_window'])
+        windows.extend(rl.get('additional_rate_limits') or [])
+        max_reset_at = None
+        for w in windows:
+            if w.get('used_percent', 0) >= 100 or rl.get('limit_reached'):
+                reset_at = w.get('reset_at')
+                if reset_at and (max_reset_at is None or reset_at > max_reset_at):
+                    max_reset_at = float(reset_at)
+        if max_reset_at and max_reset_at > _time.time():
+            db.set_provider_disabled_until(user_id, provider_id, max_reset_at, 'usage_limit')
+        else:
+            db.clear_provider_disabled_until(user_id, provider_id)
+    except Exception as e:
+        logger.debug(f"_apply_usage_disable error for {provider_id}: {e}")
+
+
+async def _refresh_provider_usage_if_stale(provider_id: str, user_id):
+    try:
+        import datetime as _dt
+        from aisbf.database import DatabaseRegistry
+        db = DatabaseRegistry.get_config_database()
+        cached = db.get_provider_usage(user_id, provider_id)
+        now = _dt.datetime.utcnow()
+        if cached:
+            lu = cached.get('last_updated')
+            if lu:
+                if hasattr(lu, 'utcoffset'):
+                    lu = lu.replace(tzinfo=None)
+                if isinstance(lu, str):
+                    try:
+                        lu = _dt.datetime.fromisoformat(lu)
+                    except Exception:
+                        lu = None
+                if lu and (now - lu).total_seconds() < 120:
+                    return
+        from aisbf.providers import get_provider_handler
+        handler = get_provider_handler(provider_id, user_id=user_id)
+        if not handler.supports_usage():
+            return
+        usage_data = await handler.get_usage()
+        if usage_data:
+            db.save_provider_usage(user_id, provider_id, usage_data)
+            _apply_usage_disable(db, user_id, provider_id, usage_data)
+    except Exception as e:
+        logger.debug(f"Background usage refresh failed for {provider_id}: {e}")

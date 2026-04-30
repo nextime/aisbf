@@ -106,7 +106,7 @@ class InstallCommand(_install):
 
 setup(
     name="aisbf",
-    version="0.99.64",
+    version="0.99.65",
     author="AISBF Contributors",
     author_email="stefy@nexlab.net",
     description="AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations",
@@ -172,7 +172,7 @@ setup(
             'aisbf/batching.py',
             'aisbf/cache.py',
             'aisbf/classifier.py',
-            'aisbf/cli_mode.py',
+            'aisbf/providers/claude_cli.py',
             'aisbf/cost_extractor.py',
             'aisbf/streaming_optimization.py',
             'aisbf/analytics.py',
@@ -202,6 +202,31 @@ setup(
             'aisbf/providers/kiro/models.py',
             'aisbf/providers/kiro/parsers.py',
             'aisbf/providers/kiro/utils.py',
+        ]),
+        # aisbf.app subpackage
+        ('share/aisbf/aisbf/app', [
+            'aisbf/app/__init__.py',
+            'aisbf/app/startup.py',
+            'aisbf/app/templates.py',
+            'aisbf/app/model_cache.py',
+            'aisbf/app/middleware.py',
+        ]),
+        # aisbf.routes subpackage
+        ('share/aisbf/aisbf/routes', [
+            'aisbf/routes/__init__.py',
+            'aisbf/routes/auth.py',
+            'aisbf/routes/api.py',
+            'aisbf/routes/mcp.py',
+            'aisbf/routes/user_api.py',
+        ]),
+        # aisbf.routes.dashboard subpackage
+        ('share/aisbf/aisbf/routes/dashboard', [
+            'aisbf/routes/dashboard/__init__.py',
+            'aisbf/routes/dashboard/providers.py',
+            'aisbf/routes/dashboard/settings.py',
+            'aisbf/routes/dashboard/admin.py',
+            'aisbf/routes/dashboard/payments.py',
+            'aisbf/routes/dashboard/provider_auth.py',
         ]),
         # aisbf.auth subpackage
         ('share/aisbf/aisbf/auth', [

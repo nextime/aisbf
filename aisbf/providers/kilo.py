@@ -124,8 +124,7 @@ class KiloProviderHandler(BaseProviderHandler):
             endpoint = 'https://kilo.ai/api/openrouter/v1'
         
         self._kilo_endpoint = endpoint
-        
-            self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
+        self.client = OpenAI(base_url=endpoint, api_key=api_key or "placeholder")
     
     def validate_credentials(self) -> bool:
         """

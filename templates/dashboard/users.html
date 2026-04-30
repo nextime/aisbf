@@ -194,6 +194,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         <button onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})" class="btn btn-warning" style="padding: 5px 10px; font-size: 12px; margin: 0;">
                             {% if user.is_active %}Disable{% else %}Enable{% endif %}
                         </button>
+                        <button onclick="impersonateUser({{ user.id }}, '{{ user.username }}')" class="btn" style="padding: 5px 10px; font-size: 12px; margin: 0; background: #7c3aed;">Impersonate</button>
                         <button onclick="deleteUser({{ user.id }}, '{{ user.username }}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px; margin: 0;" data-i18n="users_page.delete_btn">Delete</button>
                     </div>
                 </td>
@@ -797,6 +798,24 @@ async function deleteUser(userId, username) {
             showAlert('Error: ' + error, 'Error', '❌', 'danger');
         });
     }
+}
+
+async function impersonateUser(userId, username) {
+    const ok = await showConfirm('Impersonate "' + username + '"? You will act as this user until you log out, which will return you to the admin session.', 'Impersonate User', 'Impersonate', 'btn-warning');
+    if (!ok) return;
+    fetch(baseUrl + userId + '/impersonate', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'}
+    })
+    .then(r => r.json())
+    .then(data => {
+        if (data.success) {
+            window.location.href = data.redirect;
+        } else {
+            showAlert(data.error || 'Failed to impersonate user', 'Error', '❌', 'danger');
+        }
+    })
+    .catch(error => showAlert('Error: ' + error, 'Error', '❌', 'danger'));
 }
 
 function updateUserTier(userId, tierId) {

@@ -915,21 +915,6 @@ class BaseProviderHandler:
         
         logger.info(f"[{self.provider_id}] API key present, validation passed")
         return True
-        
-        # Check if API key is provided
-        if not self.api_key:
-            logger.error(f"[{self.provider_id}] API key required but not provided")
-            return False
-        
-        # Check for placeholder/empty API key
-        if isinstance(self.api_key, str):
-            stripped = self.api_key.strip()
-            if not stripped or stripped.startswith('YOUR_') or 'placeholder' in stripped.lower():
-                logger.error(f"[{self.provider_id}] Invalid API key format")
-                return False
-        
-        logger.info(f"[{self.provider_id}] API key present, validation passed")
-        return True
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """

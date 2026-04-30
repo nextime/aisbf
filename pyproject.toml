@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "aisbf"
-version = "0.99.64"
+version = "0.99.65"
 description = "AISBF - AI Service Broker Framework || AI Should Be Free - A modular proxy server for managing multiple AI provider integrations"
 readme = "README.md"
 license = "GPL-3.0-or-later"
@@ -50,6 +50,9 @@ Documentation = "https://git.nexlab.net/nexlab/aisbf.git"
 [tool.setuptools]
 packages = [
     "aisbf",
+    "aisbf.app",
+    "aisbf.routes",
+    "aisbf.routes.dashboard",
     "aisbf.auth",
     "aisbf.providers",
     "aisbf.providers.kiro",

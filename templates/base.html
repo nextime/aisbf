@@ -799,7 +799,15 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             {% endif %}
         </div>
     </div>
-    
+
+    {% if request.session.impersonating_as %}
+    <div style="background: #7c3aed; color: #fff; text-align: center; padding: 8px 16px; font-size: 14px;">
+        <strong>⚠ Impersonating:</strong> {{ request.session.username }}
+        &nbsp;—&nbsp;
+        <a href="{{ url_for(request, '/dashboard/logout') }}" style="color: #fff; text-decoration: underline;">Stop impersonating (return to admin)</a>
+    </div>
+    {% endif %}
+
     {% if request.session.logged_in and show_upgrade_banner %}
     <div class="upgrade-banner">
         <div class="container">
@@ -1350,6 +1358,16 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                     buttons: [
                         {label:'Cancel', value:false, cls:'btn-secondary'},
                         {label:'Delete', value:true, cls:'btn btn-danger'}
+                    ] });
+            });
+        };
+        window.showConfirm = function(message, title, confirmLabel, confirmCls) {
+            return new Promise(res => {
+                _resolve = res;
+                open({ title: title||'Confirm', message, icon:'❓', iconClass:'',
+                    buttons: [
+                        {label:'Cancel', value:false, cls:'btn-secondary'},
+                        {label: confirmLabel||'OK', value:true, cls:'btn ' + (confirmCls||'')}
                     ] });
             });
         };
