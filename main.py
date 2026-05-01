@@ -209,7 +209,7 @@ def _init_all_routers():
     _api_routes.init(config, _get_user_handler, _app_state['rotation_handler'])
     _mcp_routes.init(server_config, _get_user_handler)
     _user_api_routes.init(config, _get_user_handler)
-    _dash_providers.init(config, templates)
+    _dash_providers.init(config, templates, server_config)
     _dash_settings.init(config, templates)
     _dash_admin.init(config, templates)
     _dash_payments.init(config, templates)

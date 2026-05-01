@@ -4891,7 +4891,13 @@ class AutoselectHandler:
                 continue
 
             # Loop detection on non-streaming response
-            content = response.get('choices', [{}])[0].get('message', {}).get('content', '') or ''
+            if isinstance(response, dict):
+                content = response.get('choices', [{}])[0].get('message', {}).get('content', '') or ''
+            else:
+                try:
+                    content = response.choices[0].message.content or ''
+                except (AttributeError, IndexError):
+                    content = ''
             if not content:
                 logger.warning(f"Model '{selected_model_id}' returned empty content — escalating")
                 failed_models.append(selected_model_id)

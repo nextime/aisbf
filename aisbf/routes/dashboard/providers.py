@@ -17,13 +17,15 @@ import httpx
 router = APIRouter()
 _config = None
 _templates = None
+_server_config = None
 
 logger = logging.getLogger(__name__)
 
-def init(config, templates):
-    global _config, _templates
+def init(config, templates, server_config=None):
+    global _config, _templates, _server_config
     _config = config
     _templates = templates
+    _server_config = server_config
 
 
 def get_user_auth_files_dir(user_id) -> Path:
@@ -69,7 +71,7 @@ async def dashboard_index(request: Request):
                 "providers_count": len(_config.providers) if _config else 0,
                 "rotations_count": len(_config.rotations) if _config else 0,
                 "autoselect_count": len(_config.autoselect) if _config else 0,
-                "server_config": server_config or {},
+                "server_config": _server_config or {},
                 "users_count": users_count,
             }
         )
