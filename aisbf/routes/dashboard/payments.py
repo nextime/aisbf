@@ -20,13 +20,20 @@ except ImportError:
 router = APIRouter()
 _config = None
 _templates = None
+_payment_service = None
 
 logger = logging.getLogger(__name__)
 
-def init(config, templates):
-    global _config, _templates
+def init(config, templates, payment_service=None):
+    global _config, _templates, _payment_service
     _config = config
     _templates = templates
+    _payment_service = payment_service
+
+
+def set_payment_service(service):
+    global _payment_service
+    _payment_service = service
 
 
 @router.get("/dashboard/billing/add-method", response_class=HTMLResponse)
@@ -99,8 +106,8 @@ async def dashboard_add_payment_method_stripe(request: Request):
 
     try:
         # Attach the PM to the Stripe customer so it can be charged later
-        if payment_service and payment_service.stripe_handler:
-            customer_id = await payment_service.stripe_handler._get_or_create_customer(user_id)
+        if _payment_service and _payment_service.stripe_handler:
+            customer_id = await _payment_service.stripe_handler._get_or_create_customer(user_id)
             import stripe as _stripe
             import asyncio as _asyncio
             try:

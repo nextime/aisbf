@@ -540,7 +540,6 @@ class RequestHandler:
             # Apply rate limiting
             logger.info("Applying rate limiting...")
             await handler.apply_rate_limit()
-            await handler.apply_rate_limit()
             logger.info("Rate limiting applied")
 
             logger.info(f"Sending request to provider handler...")
@@ -729,7 +728,14 @@ class RequestHandler:
         else:
             provider_config = self.config.get_provider(provider_id)
 
-        if provider_config.api_key_required:
+        if isinstance(provider_config, dict):
+            api_key_required = provider_config.get('api_key_required', False)
+            _provider_type = provider_config.get('type', '')
+        else:
+            api_key_required = provider_config.api_key_required
+            _provider_type = provider_config.type
+
+        if api_key_required:
             api_key = request_data.get('api_key') or request.headers.get('Authorization', '').replace('Bearer ', '')
             if not api_key:
                 raise HTTPException(status_code=401, detail="API key required")
@@ -745,11 +751,11 @@ class RequestHandler:
         # If seed is present in request, generate unique fingerprint per request
         seed = request_data.get('seed')
         system_fingerprint = generate_system_fingerprint(provider_id, seed)
-        
+
         # Get context configuration and calculate effective context
         model = request_data.get('model')
         messages = request_data.get('messages', [])
-        
+
         context_config = get_context_config_for_model(
             model_name=model,
             provider_config=provider_config,
@@ -807,12 +813,12 @@ class RequestHandler:
                 
                 # Check if this is a Google streaming response by checking provider type from config
                 # This is more reliable than checking response iterability which can cause false positives
-                is_google_stream = provider_config.type == 'google'
-                is_kiro_stream = provider_config.type == 'kiro'
-                is_kilo_stream = provider_config.type in ('kilo', 'kilocode')
-                logger.info(f"Is Google streaming response: {is_google_stream} (provider type: {provider_config.type})")
-                logger.info(f"Is Kiro streaming response: {is_kiro_stream} (provider type: {provider_config.type})")
-                logger.info(f"Is Kilo streaming response: {is_kilo_stream} (provider type: {provider_config.type})")
+                is_google_stream = _provider_type == 'google'
+                is_kiro_stream = _provider_type == 'kiro'
+                is_kilo_stream = _provider_type in ('kilo', 'kilocode')
+                logger.info(f"Is Google streaming response: {is_google_stream} (provider type: {_provider_type})")
+                logger.info(f"Is Kiro streaming response: {is_kiro_stream} (provider type: {_provider_type})")
+                logger.info(f"Is Kilo streaming response: {is_kilo_stream} (provider type: {_provider_type})")
 
                 if is_kilo_stream:
                     # Handle Kilo/KiloCode streaming response
@@ -1797,6 +1803,56 @@ class RequestHandler:
         
         return capabilities
     
+    async def handle_generic_proxy(self, request: Request, provider_id: str, endpoint_path: str, body: dict, method: str = "POST") -> JSONResponse:
+        """Forward a request to the provider's native endpoint and return the response."""
+        import httpx
+        import logging
+        logger = logging.getLogger(__name__)
+
+        # Support user-defined providers (dict format) and global providers (object format)
+        if self.user_id and provider_id in self.user_providers:
+            provider_config = self.user_providers[provider_id]
+            base_url = (provider_config.get('endpoint') or '').rstrip('/')
+            api_key_required = provider_config.get('api_key_required', False)
+            config_api_key = provider_config.get('api_key')
+        else:
+            provider_config = self.config.get_provider(provider_id)
+            base_url = (getattr(provider_config, 'endpoint', '') or '').rstrip('/')
+            api_key_required = getattr(provider_config, 'api_key_required', False)
+            config_api_key = getattr(provider_config, 'api_key', None)
+
+        # Strip trailing /chat/completions or /completions to get the real base
+        for suffix in ['/chat/completions', '/completions']:
+            if base_url.endswith(suffix):
+                base_url = base_url[:-len(suffix)]
+                break
+
+        url = f"{base_url}/{endpoint_path.lstrip('/')}"
+
+        headers = {'Content-Type': 'application/json'}
+        if api_key_required:
+            api_key = request.headers.get('Authorization', '').replace('Bearer ', '') or config_api_key
+            if api_key:
+                headers['Authorization'] = f'Bearer {api_key}'
+
+        logger.info(f"Generic proxy [{method}]: {provider_id} -> {url}")
+        try:
+            async with httpx.AsyncClient(timeout=300) as client:
+                if method == "GET":
+                    resp = await client.get(url, headers=headers)
+                elif method == "DELETE":
+                    resp = await client.delete(url, headers=headers)
+                else:
+                    resp = await client.post(url, json=body, headers=headers)
+                try:
+                    content = resp.json()
+                except Exception:
+                    content = {"detail": resp.text}
+                return JSONResponse(status_code=resp.status_code, content=content)
+        except Exception as e:
+            logger.error(f"Generic proxy error: {e}", exc_info=True)
+            raise HTTPException(status_code=502, detail=str(e))
+
     async def handle_audio_transcription(self, request: Request, provider_id: str, form_data) -> Dict:
         """Handle audio transcription requests"""
         import logging

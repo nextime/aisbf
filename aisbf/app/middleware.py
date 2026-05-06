@@ -4,6 +4,7 @@ All ASGI middleware functions extracted from main.py.
 import time
 import logging
 import threading
+import hmac as _hmac
 from typing import Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -21,7 +22,8 @@ _client_rl_lock = threading.Lock()
 def _get_real_client_ip(request: Request) -> str:
     xff = request.headers.get('X-Forwarded-For', '')
     if xff:
-        return xff.split(',')[0].strip()
+        # Use rightmost IP (appended by the trusted upstream proxy) to prevent spoofing
+        return xff.split(',')[-1].strip()
     client = request.scope.get('client')
     return client[0] if client else 'unknown'
 
@@ -62,7 +64,8 @@ _BLOCK_MESSAGE = "We do not support the Israeli genocide of Palestinian people."
 def _get_client_ip(request: Request) -> Optional[str]:
     xff = request.headers.get("X-Forwarded-For")
     if xff:
-        return xff.split(",")[0].strip()
+        # Use rightmost IP (appended by the trusted upstream proxy) to prevent spoofing
+        return xff.split(",")[-1].strip()
     client = request.scope.get("client")
     return client[0] if client else None
 
@@ -195,7 +198,10 @@ def make_auth_middleware(get_server_config, get_config, get_db, url_for_fn):
 
             token = auth_header.replace('Bearer ', '')
             allowed_tokens = server_config.get('auth_tokens', [])
-            if token in allowed_tokens:
+            _token_valid = False
+            for _t in allowed_tokens:
+                _token_valid |= _hmac.compare_digest(token, _t)
+            if _token_valid:
                 request.state.user_id = None
                 request.state.token_id = None
                 request.state.is_global_token = True

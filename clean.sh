@@ -137,8 +137,8 @@ else
 fi
 
 # Remove _share directory (PyPI packaging artifacts)
-if [ -d "_share" ]; then
-    echo "Removing _share/ directory..."
+if [ -d "aisbf/_share" ]; then
+    echo "Removing aisbf/_share/ directory..."
     rm -rf _share
     echo "  ✓ _share/ removed"
 else

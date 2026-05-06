@@ -222,7 +222,7 @@ class DatabaseManager:
             async def __aenter__(self):
                 return self
             async def __aexit__(self, exc_type, exc_val, exc_tb):
-                pass
+                return False  # never suppress exceptions
         return TransactionContext()
 
 
@@ -416,24 +416,11 @@ class DatabaseManager:
             completion_tokens: Optional number of output/completion tokens
             actual_cost: Optional actual cost returned by provider (in USD)
         """
-        logger.info(f"💾 DB.record_token_usage ENTERED: provider={provider_id}, tokens={tokens_used}, user_id={user_id}")
+        logger.debug(f"DB.record_token_usage: provider={provider_id}, tokens={tokens_used}, user_id={user_id}")
         try:
             # Convert latency to int for storage
             latency_int = int(latency_ms) if latency_ms else 0
-            logger.info(f"🔍 DB.record_token_usage FULL PARAMETERS:")
-            logger.info(f"  provider_id: {provider_id}")
-            logger.info(f"  model_name: {model_name}")
-            logger.info(f"  tokens_used: {tokens_used}")
-            logger.info(f"  user_id: {user_id}")
-            logger.info(f"  success: {success}")
-            logger.info(f"  latency_ms: {latency_ms} → latency_int: {latency_int}")
-            logger.info(f"  error_type: {error_type}")
-            logger.info(f"  token_id: {token_id}")
-            logger.info(f"  prompt_tokens: {prompt_tokens}")
-            logger.info(f"  completion_tokens: {completion_tokens}")
-            logger.info(f"  actual_cost: {actual_cost}")
-            logger.info(f"  db_type: {self.db_type}")
-            logger.info(f"DB.record_token_usage: About to execute SQL - provider={provider_id}, tokens={tokens_used}, success={success}")
+            logger.debug(f"DB.record_token_usage params: provider={provider_id}, model={model_name}, tokens={tokens_used}, user={user_id}, success={success}")
 
             with self._get_connection() as conn:
                 cursor = conn.cursor()
@@ -451,31 +438,26 @@ class DatabaseManager:
                         VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
                     '''
                     params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id, rotation_id, autoselect_id)
-                    logger.info(f"🔍 Trying full INSERT with {len(params)} parameters")
-                    logger.debug(f"🔍 SQL: {sql}")
-                    logger.debug(f"🔍 Params: {params}")
+                    logger.debug(f"Trying full INSERT with {len(params)} parameters")
                     cursor.execute(sql, params)
-                    logger.info(f"✅ Inserted with full column set, rows affected: {cursor.rowcount}")
+                    logger.debug(f"Inserted with full column set, rows affected: {cursor.rowcount}")
                 except Exception as full_insert_error:
                     logger.warning(f"⚠️ Full column insert failed: {full_insert_error}")
                     logger.warning(f"⚠️ Full insert error type: {type(full_insert_error).__name__}")
                     import traceback
                     logger.warning(f"⚠️ Full insert traceback: {traceback.format_exc()}")
-                    logger.info(f"🔍 Falling back to basic insert")
+                    logger.debug("Falling back to basic insert")
                     # Fallback to basic columns only
                     sql = f'''
                         INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, timestamp)
                         VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
                     '''
                     params = (user_id, provider_id, model_name, tokens_used)
-                    logger.info(f"🔍 Trying basic INSERT with {len(params)} parameters")
-                    logger.debug(f"🔍 SQL: {sql}")
-                    logger.debug(f"🔍 Params: {params}")
                     cursor.execute(sql, params)
-                    logger.info(f"✅ Inserted with basic column set, rows affected: {cursor.rowcount}")
+                    logger.debug(f"Inserted with basic column set, rows affected: {cursor.rowcount}")
 
                 conn.commit()
-                logger.info(f"✅ Successfully recorded token usage for {provider_id}/{model_name}: {tokens_used} tokens (user_id={user_id})")
+                logger.info(f"Recorded token usage: {provider_id}/{model_name} {tokens_used} tokens (user_id={user_id})")
         except Exception as e:
             logger.error(f"❌ Failed to record token usage for {provider_id}/{model_name}: {e}")
             logger.error(f"Error details - user_id={user_id}, tokens={tokens_used}, success={success}")
@@ -485,7 +467,7 @@ class DatabaseManager:
                     test_cursor = test_conn.cursor()
                     test_cursor.execute("INSERT INTO token_usage (provider_id, model_name, tokens_used, success) VALUES (?, 'test', 1, 1)" if self.db_type == 'sqlite' else "INSERT INTO token_usage (provider_id, model_name, tokens_used, success) VALUES (%s, 'test', 1, 1)", (f"test-{provider_id}",))
                     test_conn.commit()
-                    logger.info("✅ Test database insert succeeded")
+                    logger.debug("Test database insert succeeded")
             except Exception as test_e:
                 logger.error(f"❌ Even test database insert failed: {test_e}")
             raise

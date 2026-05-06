@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Request, Form, Query, UploadFile, File, HTTPException
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, Response
 from typing import Optional
-import time, logging, secrets, hashlib, os, re
+import time, logging, secrets, hashlib, os, re, hmac
 from pathlib import Path
 from datetime import datetime, timedelta
 from aisbf.database import DatabaseRegistry
@@ -753,7 +753,7 @@ async def dashboard_change_password_save(request: Request, current_password: str
     try:
         if not db.verify_user_password(user_id, current_password):
             return RedirectResponse(url=url_for(request, "/dashboard/change-password?error=Current password is incorrect"), status_code=303)
-        db.update_user_password(user_id, new_password)
+        db.update_user_password(user_id, _db_hash_password(new_password))
         return RedirectResponse(url=url_for(request, "/dashboard/change-password?success=Password changed successfully"), status_code=303)
     except Exception as e:
         return RedirectResponse(url=url_for(request, f"/dashboard/change-password?error=Failed to change password: {str(e)}"), status_code=303)
@@ -961,7 +961,7 @@ async def oauth2_google_callback(request: Request, code: str = Query(...), state
         redirect_uri = f"{base_url}/auth/oauth2/google/callback"
 
         session_state = request.session.get('oauth2_google', {}).get('state')
-        if state != session_state:
+        if not hmac.compare_digest(state, session_state or ''):
             return _templates.TemplateResponse(request=request, name="dashboard/login.html",
                 context={"request": request, "config": _config, "error": "Invalid authentication state"})
 
@@ -1093,7 +1093,7 @@ async def oauth2_github_callback(request: Request, code: str = Query(...), state
         redirect_uri = f"{base_url}/auth/oauth2/github/callback"
 
         session_state = request.session.get('oauth2_github', {}).get('state')
-        if state != session_state:
+        if not hmac.compare_digest(state, session_state or ''):
             return _templates.TemplateResponse(request=request, name="dashboard/login.html",
                 context={"request": request, "config": _config, "error": "Invalid authentication state"})
 

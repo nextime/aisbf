@@ -42,39 +42,6 @@ try:
 except ImportError:
     HAS_CURL_CFFI = False
 
-# Configuration matching the official Claude CLI
-# Try to load client_id from credentials file first, fallback to generated UUID
-import json
-import os
-from pathlib import Path
-
-def _load_client_id_from_credentials():
-    """Attempt to load client_id from existing Claude credentials file"""
-    try:
-        creds_path = Path.home() / ".claude" / ".credentials.json"
-        if creds_path.exists():
-            with open(creds_path, 'r') as f:
-                creds = json.load(f)
-                # Try to extract client_id from various possible locations
-                if 'client_id' in creds:
-                    return creds['client_id']
-                elif 'oauth' in creds and 'client_id' in creds['oauth']:
-                    return creds['oauth']['client_id']
-                elif 'claudeAiOauth' in creds and 'client_id' in creds['claudeAiOauth']:
-                    return creds['claudeAiOauth']['client_id']
-    except Exception:
-        pass
-    return None
-
-def _generate_client_id():
-    """Generate a stable client_id UUID based on machine characteristics"""
-    # Use machine hostname and platform to generate a stable UUID
-    import uuid
-    import platform
-    machine_id = f"{platform.node()}-{platform.machine()}-claude-code"
-    # Generate UUID5 (name-based) from the machine ID
-    return str(uuid.uuid5(uuid.NAMESPACE_DNS, machine_id))
-
 # Claude OAuth2 Configuration
 # These values match the official claude-cli implementation
 CLIENT_ID = "9d1c250a-e61b-44d9-88ed-5944d1962f5e"  # Official Claude Code client ID

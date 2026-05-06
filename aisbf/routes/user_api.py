@@ -98,6 +98,14 @@ async def user_list_models(request: Request, username: str):
             logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
     return {"object": "list", "data": all_models}
 
+@router.get("/api/u/{username}/models/{model_id}")
+async def user_get_model(model_id: str, request: Request, username: str):
+    result = await user_list_models(request, username)
+    for model in (result.get("data", []) if isinstance(result, dict) else []):
+        if model.get("id") == model_id:
+            return model
+    raise HTTPException(status_code=404, detail=f"Model '{model_id}' not found")
+
 @router.get("/api/u/{username}/providers")
 async def user_list_providers(request: Request, username: str):
     user_id = getattr(request.state, 'user_id', None)
@@ -367,3 +375,522 @@ async def user_list_provider_models_by_username(request: Request, username: str,
     except Exception as e:
         logging.getLogger(__name__).warning(f"Error listing models for user provider {user_provider_id}: {e}")
     return {"data": all_models}
+
+
+# ── Shared helpers ────────────────────────────────────────────────────────────
+
+def _check_user_access(request: Request, username: str):
+    """Extract user_id. Access control (global token rejection, username match) is enforced by middleware."""
+    user_id = getattr(request.state, 'user_id', None)
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Authentication required.")
+    return user_id
+
+
+async def _user_generic_proxy(request: Request, username: str, body: dict, endpoint_path: str, method: str = "POST") -> JSONResponse:
+    """Resolve provider from body['model'] scoped to the user and forward to provider endpoint."""
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    model = body.get('model', '')
+    provider_id, actual_model = parse_provider_from_model(model)
+    if not provider_id:
+        raise HTTPException(status_code=400, detail="Model must be in format 'provider/model'")
+    # Resolve rotation/autoselect
+    if provider_id in ("rotation", "rotations"):
+        rot_handler = _get_user_handler('rotation', user_id)
+        if actual_model not in rot_handler.rotations and actual_model not in _config.rotations:
+            raise HTTPException(status_code=400, detail=f"Rotation '{actual_model}' not found")
+        provider_id, actual_model = rot_handler._select_provider_and_model(actual_model)
+    elif provider_id in ("autoselect", "autoselections"):
+        asel_handler = _get_user_handler('autoselect', user_id)
+        asel_cfg = _config.autoselect.get(actual_model) or asel_handler.user_autoselects.get(actual_model)
+        if not asel_cfg:
+            raise HTTPException(status_code=400, detail=f"Autoselect '{actual_model}' not found")
+        fallback = asel_cfg.fallback if hasattr(asel_cfg, 'fallback') else asel_cfg.get('fallback', '')
+        if '/' in fallback:
+            provider_id, actual_model = fallback.split('/', 1)
+        elif fallback in _config.rotations:
+            from aisbf.handlers import RotationHandler
+            provider_id, actual_model = RotationHandler()._select_provider_and_model(fallback)
+        else:
+            raise HTTPException(status_code=400, detail=f"Invalid fallback for autoselect '{actual_model}'")
+    user_providers = getattr(handler, 'user_providers', {})
+    if provider_id not in _config.providers and provider_id not in user_providers:
+        raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found")
+    body['model'] = actual_model
+    return await handler.handle_generic_proxy(request, provider_id, endpoint_path, body, method=method)
+
+
+async def _user_get_proxy(request: Request, username: str, provider: str, endpoint_path: str) -> JSONResponse:
+    """Forward a GET request to the provider endpoint for a specific user."""
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    user_providers = getattr(handler, 'user_providers', {})
+    if not provider or (provider not in _config.providers and provider not in user_providers):
+        available = list(_config.providers.keys()) + list(user_providers.keys())
+        raise HTTPException(status_code=400, detail=f"Query param 'provider' required. Available: {available}")
+    return await handler.handle_generic_proxy(request, provider, endpoint_path, {}, method="GET")
+
+
+async def _user_delete_proxy(request: Request, username: str, provider: str, endpoint_path: str) -> JSONResponse:
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    user_providers = getattr(handler, 'user_providers', {})
+    if not provider or (provider not in _config.providers and provider not in user_providers):
+        raise HTTPException(status_code=400, detail="Query param 'provider' required")
+    return await handler.handle_generic_proxy(request, provider, endpoint_path, {}, method="DELETE")
+
+
+# ── Audio ─────────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/audio/transcriptions")
+async def user_audio_transcriptions(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/transcriptions")
+
+@router.post("/api/u/{username}/audio/speech")
+async def user_audio_speech(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/speech")
+
+@router.post("/api/u/{username}/audio/translations")
+async def user_audio_translations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/translations")
+
+@router.post("/api/u/{username}/audio/generations")
+async def user_audio_generations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/generations")
+
+@router.post("/api/u/{username}/audio/translate")
+async def user_audio_translate(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/translate")
+
+@router.post("/api/u/{username}/audio/identify")
+async def user_audio_identify(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/identify")
+
+@router.post("/api/u/{username}/audio/split")
+async def user_audio_split(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/split")
+
+@router.post("/api/u/{username}/audio/denoise")
+async def user_audio_denoise(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/denoise")
+
+@router.post("/api/u/{username}/audio/label")
+async def user_audio_label(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/label")
+
+@router.post("/api/u/{username}/audio/diarize")
+async def user_audio_diarize(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/audio/diarize")
+
+
+# ── Images ────────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/images/generations")
+async def user_image_generations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/generations")
+
+@router.post("/api/u/{username}/images/edits")
+async def user_image_edits(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/edits")
+
+@router.post("/api/u/{username}/images/variations")
+async def user_image_variations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/variations")
+
+@router.post("/api/u/{username}/images/upscale")
+async def user_image_upscale(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/upscale")
+
+@router.post("/api/u/{username}/images/inpaint")
+async def user_image_inpaint(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/inpaint")
+
+@router.post("/api/u/{username}/images/outpaint")
+async def user_image_outpaint(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/outpaint")
+
+@router.post("/api/u/{username}/images/caption")
+async def user_image_caption(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/caption")
+
+@router.post("/api/u/{username}/images/detect")
+async def user_image_detect(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/detect")
+
+@router.post("/api/u/{username}/images/segment")
+async def user_image_segment(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/segment")
+
+@router.post("/api/u/{username}/images/restore")
+async def user_image_restore(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/restore")
+
+@router.post("/api/u/{username}/images/colorize")
+async def user_image_colorize(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/colorize")
+
+@router.post("/api/u/{username}/images/style-transfer")
+async def user_image_style_transfer(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/style-transfer")
+
+@router.post("/api/u/{username}/images/remove-bg")
+async def user_image_remove_bg(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/images/remove-bg")
+
+
+# ── Video ─────────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/video/generations")
+async def user_video_generations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/generations")
+
+@router.post("/api/u/{username}/video/animations")
+async def user_video_animations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/animations")
+
+@router.post("/api/u/{username}/video/edits")
+async def user_video_edits(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/edits")
+
+@router.post("/api/u/{username}/video/descriptions")
+async def user_video_descriptions(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/descriptions")
+
+@router.post("/api/u/{username}/video/transcriptions")
+async def user_video_transcriptions(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/transcriptions")
+
+@router.post("/api/u/{username}/video/upscale")
+async def user_video_upscale(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/video/upscale")
+
+
+# ── Embeddings ────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/embeddings")
+async def user_embeddings(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/embeddings")
+
+
+# ── Text / NLP ────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/moderations")
+async def user_moderations(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/moderations")
+
+@router.post("/api/u/{username}/translate")
+async def user_translate(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/translate")
+
+@router.post("/api/u/{username}/summarize")
+async def user_summarize(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/summarize")
+
+@router.post("/api/u/{username}/classify")
+async def user_classify(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/classify")
+
+@router.post("/api/u/{username}/sentiment")
+async def user_sentiment(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/sentiment")
+
+@router.post("/api/u/{username}/ner")
+async def user_ner(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/ner")
+
+@router.post("/api/u/{username}/answers")
+async def user_answers(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/answers")
+
+@router.post("/api/u/{username}/reasoning")
+async def user_reasoning(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/reasoning")
+
+@router.post("/api/u/{username}/search")
+async def user_search(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/search")
+
+@router.post("/api/u/{username}/tools")
+async def user_tools(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/tools")
+
+@router.post("/api/u/{username}/function-call")
+async def user_function_call(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/function-call")
+
+@router.post("/api/u/{username}/parse")
+async def user_parse(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/parse")
+
+
+# ── Code ──────────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/code/generate")
+async def user_code_generate(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/generate")
+
+@router.post("/api/u/{username}/code/complete")
+async def user_code_complete(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/complete")
+
+@router.post("/api/u/{username}/code/explain")
+async def user_code_explain(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/explain")
+
+@router.post("/api/u/{username}/code/refactor")
+async def user_code_refactor(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/refactor")
+
+@router.post("/api/u/{username}/code/review")
+async def user_code_review(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/review")
+
+@router.post("/api/u/{username}/code/test")
+async def user_code_test(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/code/test")
+
+@router.post("/api/u/{username}/math")
+async def user_math(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/math")
+
+@router.post("/api/u/{username}/reason")
+async def user_reason(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/reason")
+
+
+# ── Vision / Multimodal ───────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/vision/describe")
+async def user_vision_describe(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/vision/describe")
+
+@router.post("/api/u/{username}/vision/ocr")
+async def user_vision_ocr(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/vision/ocr")
+
+@router.post("/api/u/{username}/vision/analyze")
+async def user_vision_analyze(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/vision/analyze")
+
+@router.post("/api/u/{username}/vision/detect")
+async def user_vision_detect(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/vision/detect")
+
+@router.post("/api/u/{username}/depth")
+async def user_depth(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/depth")
+
+@router.post("/api/u/{username}/pose")
+async def user_pose(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/pose")
+
+
+# ── 3D & Advanced ─────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/3d/generate")
+async def user_3d_generate(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/3d/generate")
+
+@router.post("/api/u/{username}/3d/convert")
+async def user_3d_convert(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/3d/convert")
+
+@router.post("/api/u/{username}/animate")
+async def user_animate(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/animate")
+
+@router.post("/api/u/{username}/avatar")
+async def user_avatar(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/avatar")
+
+@router.post("/api/u/{username}/face-swap")
+async def user_face_swap(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/face-swap")
+
+@router.post("/api/u/{username}/face-restore")
+async def user_face_restore(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/face-restore")
+
+
+# ── Fine-tuning ───────────────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/fine-tunes")
+async def user_list_fine_tunes(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/fine-tunes")
+
+@router.post("/api/u/{username}/fine-tunes")
+async def user_create_fine_tune(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/fine-tunes")
+
+@router.get("/api/u/{username}/fine-tunes/{job_id}")
+async def user_get_fine_tune(job_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/fine-tunes/{job_id}")
+
+@router.post("/api/u/{username}/fine-tunes/{job_id}/cancel")
+async def user_cancel_fine_tune(job_id: str, request: Request, username: str, provider: str = ""):
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    user_providers = getattr(handler, 'user_providers', {})
+    if not provider or (provider not in _config.providers and provider not in user_providers):
+        raise HTTPException(status_code=400, detail="Query param 'provider' required")
+    return await handler.handle_generic_proxy(request, provider, f"v1/fine-tunes/{job_id}/cancel", {})
+
+
+# ── Files ─────────────────────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/files")
+async def user_list_files(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/files")
+
+@router.post("/api/u/{username}/files")
+async def user_upload_file(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/files")
+
+@router.get("/api/u/{username}/files/{file_id}")
+async def user_get_file(file_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/files/{file_id}")
+
+@router.delete("/api/u/{username}/files/{file_id}")
+async def user_delete_file(file_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_delete_proxy(request, username, provider, f"v1/files/{file_id}")
+
+
+# ── Assistants ────────────────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/assistants")
+async def user_list_assistants(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/assistants")
+
+@router.post("/api/u/{username}/assistants")
+async def user_create_assistant(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/assistants")
+
+@router.get("/api/u/{username}/assistants/{assistant_id}")
+async def user_get_assistant(assistant_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/assistants/{assistant_id}")
+
+@router.delete("/api/u/{username}/assistants/{assistant_id}")
+async def user_delete_assistant(assistant_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_delete_proxy(request, username, provider, f"v1/assistants/{assistant_id}")
+
+
+# ── Threads ───────────────────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/threads")
+async def user_list_threads(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/threads")
+
+@router.post("/api/u/{username}/threads")
+async def user_create_thread(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/threads")
+
+@router.get("/api/u/{username}/threads/{thread_id}")
+async def user_get_thread(thread_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/threads/{thread_id}")
+
+@router.post("/api/u/{username}/threads/{thread_id}/runs")
+async def user_create_run(thread_id: str, request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, f"v1/threads/{thread_id}/runs")
+
+@router.get("/api/u/{username}/threads/{thread_id}/runs")
+async def user_list_runs(thread_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/threads/{thread_id}/runs")
+
+
+# ── Vector stores ─────────────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/vector-stores")
+async def user_list_vector_stores(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/vector-stores")
+
+@router.post("/api/u/{username}/vector-stores")
+async def user_create_vector_store(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/vector-stores")
+
+@router.get("/api/u/{username}/vector-stores/{store_id}")
+async def user_get_vector_store(store_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/vector-stores/{store_id}")
+
+@router.delete("/api/u/{username}/vector-stores/{store_id}")
+async def user_delete_vector_store(store_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_delete_proxy(request, username, provider, f"v1/vector-stores/{store_id}")
+
+
+# ── Batch ─────────────────────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/batch")
+async def user_create_batch(request: Request, username: str, body: dict):
+    return await _user_generic_proxy(request, username, body, "v1/batch")
+
+@router.get("/api/u/{username}/batch/{batch_id}")
+async def user_get_batch(batch_id: str, request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, f"v1/batch/{batch_id}")
+
+
+# ── Completions (legacy) ──────────────────────────────────────────────────────
+
+@router.post("/api/u/{username}/completions")
+async def user_completions(request: Request, username: str, body: dict):
+    prompt = body.get("prompt", "")
+    body.setdefault("messages", [{"role": "user", "content": prompt}])
+    return await _user_generic_proxy(request, username, body, "v1/completions")
+
+@router.post("/api/u/{username}/engines/{engine}/completions")
+async def user_engines_completions(engine: str, request: Request, username: str, body: dict):
+    if '--' in engine:
+        provider_id, model = engine.split('--', 1)
+    else:
+        provider_id, model = parse_provider_from_model(engine)
+        if not provider_id:
+            raise HTTPException(status_code=400, detail="Engine must be in format 'provider--model' or 'provider/model'")
+    body['model'] = f"{provider_id}/{model}"
+    return await _user_generic_proxy(request, username, body, "v1/completions")
+
+@router.post("/api/u/{username}/engines/{engine}/embeddings")
+async def user_engines_embeddings(engine: str, request: Request, username: str, body: dict):
+    if '--' in engine:
+        provider_id, model = engine.split('--', 1)
+    else:
+        provider_id, model = parse_provider_from_model(engine)
+        if not provider_id:
+            raise HTTPException(status_code=400, detail="Engine must be in format 'provider--model' or 'provider/model'")
+    body['model'] = f"{provider_id}/{model}"
+    return await _user_generic_proxy(request, username, body, "v1/embeddings")
+
+
+# ── Analytics & monitoring ────────────────────────────────────────────────────
+
+@router.get("/api/u/{username}/usage")
+async def user_usage(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/usage")
+
+@router.get("/api/u/{username}/usage/costs")
+async def user_usage_costs(request: Request, username: str, provider: str = ""):
+    return await _user_get_proxy(request, username, provider, "v1/usage/costs")
+
+@router.get("/api/u/{username}/providers/health")
+async def user_providers_health(request: Request, username: str):
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    from aisbf.providers import get_provider_handler as _get_ph
+    health = {}
+    all_providers = {**_config.providers, **getattr(handler, 'user_providers', {})}
+    for provider_id, provider_config in all_providers.items():
+        try:
+            api_key = provider_config.get('api_key') if isinstance(provider_config, dict) else getattr(provider_config, 'api_key', None)
+            h = _get_ph(provider_id, api_key, user_id=user_id)
+            health[provider_id] = {"status": "unavailable" if h.is_rate_limited() else "ok"}
+        except Exception as e:
+            health[provider_id] = {"status": "error", "detail": str(e)}
+    return health
+
+@router.get("/api/u/{username}/cache/stats")
+async def user_cache_stats(request: Request, username: str):
+    _check_user_access(request, username)
+    from aisbf.cache import get_response_cache
+    cache = get_response_cache()
+    try:
+        return cache.stats() if hasattr(cache, 'stats') else {"status": "unavailable"}
+    except Exception:
+        return {"status": "unavailable"}

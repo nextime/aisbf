@@ -88,19 +88,45 @@ class CodexProviderHandler(BaseProviderHandler):
             )
         
         # Determine mode: API key mode or OAuth2 mode
+        # Treat empty strings and placeholder values as "no key"
+        def _is_real_key(k):
+            return bool(k) and str(k).strip() not in ('', 'placeholder', 'YOUR_API_KEY', 'none', 'null')
+
         _cfg_api_key = (provider_config.get('api_key') if isinstance(provider_config, dict)
                         else getattr(provider_config, 'api_key', None)) if provider_config else None
-        self._use_api_key_mode = bool(api_key or _cfg_api_key)
+        self._use_api_key_mode = _is_real_key(api_key) or _is_real_key(_cfg_api_key)
         self._account_id = None  # Will be extracted from ID token in OAuth2 mode
 
         # Base URL for API requests
         _endpoint = (provider_config.get('endpoint') if isinstance(provider_config, dict)
                      else getattr(provider_config, 'endpoint', None)) if provider_config else None
-        self.base_url = (_endpoint or 'https://chatgpt.com/backend-api').rstrip('/')
+
+        CHATGPT_BACKEND = 'https://chatgpt.com/backend-api'
+        OPENAI_API = 'https://api.openai.com/v1'
+
+        def _is_chatgpt_backend(url: str) -> bool:
+            return url.rstrip('/').startswith(CHATGPT_BACKEND.rstrip('/'))
+
+        if self._use_api_key_mode:
+            # In API key mode, use OpenAI API for any chatgpt.com/backend-api URL
+            # (including subpaths like /codex) — the ChatGPT backend does not support
+            # the standard OpenAI /chat/completions format.
+            if _endpoint and not _is_chatgpt_backend(_endpoint):
+                self.base_url = _endpoint.rstrip('/')
+            else:
+                self.base_url = OPENAI_API
+        else:
+            # In OAuth2 mode, always use the bare ChatGPT backend base URL.
+            # Any /codex or other suffix in the configured endpoint is stripped here;
+            # the specific API path (/codex/responses) is appended later at call time.
+            if _endpoint and not _is_chatgpt_backend(_endpoint):
+                self.base_url = _endpoint.rstrip('/')
+            else:
+                self.base_url = CHATGPT_BACKEND
 
         # Initialize OpenAI client for API key mode
         if self._use_api_key_mode:
-            effective_key = api_key or _cfg_api_key
+            effective_key = (api_key if _is_real_key(api_key) else None) or (_cfg_api_key if _is_real_key(_cfg_api_key) else None)
             self.client = OpenAI(api_key=effective_key, base_url=self.base_url)
         else:
             self.client = None

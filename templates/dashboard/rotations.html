@@ -254,15 +254,15 @@ function buildProviderSelectHtml(uid, currentValue, onChangeFn) {
         const opts = availableProviders.map(p =>
             `<option value="${escHtmlAttr(p)}" ${currentValue === p ? 'selected' : ''}>${escHtmlAttr(p)}</option>`
         ).join('');
-        return `<select id="${uid}" onchange="${onChangeFn}(this.value)" required>
+        return `<select id="${uid}" onchange="(${onChangeFn})(this.value)" required>
             <option value="">${window.i18n.t('rotations.select_provider')}</option>${opts}</select>`;
     } else {
         const dlOpts = availableProviders.map(p => `<option value="${escHtmlAttr(p)}">`).join('');
         return `<div style="position:relative;">
             <input type="text" id="${uid}" value="${escHtmlAttr(currentValue)}" list="${uid}-dl"
                    placeholder="${window.i18n.t('rotations.type_search_provider')}"
-                   oninput="handleProviderInput('${uid}', this.value, ${onChangeFn})"
-                   onchange="handleProviderInput('${uid}', this.value, ${onChangeFn})"
+                   oninput="handleProviderInput('${uid}', this.value, (${onChangeFn}))"
+                   onchange="handleProviderInput('${uid}', this.value, (${onChangeFn}))"
                    style="width:100%;padding:8px;border:1px solid var(--color-border);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
             <datalist id="${uid}-dl">${dlOpts}</datalist>
         </div>`;

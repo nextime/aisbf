@@ -429,9 +429,27 @@ class PayPalPaymentHandler:
                                               'Wallet top up via PayPal')
 
     async def _handle_order_approved(self, resource: dict):
-        """Handle approved order (capture pending)."""
+        """Handle approved order — record pending capture state."""
         order_id = resource.get('id')
-        logger.info(f"PayPal order approved: {order_id}")
+        logger.info(f"PayPal order approved (awaiting capture): {order_id}")
+        try:
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    INSERT OR IGNORE INTO payment_transactions
+                        (gateway, gateway_transaction_id, status, created_at)
+                    VALUES ({placeholder}, {placeholder}, 'pending_capture', CURRENT_TIMESTAMP)
+                    ON CONFLICT(gateway_transaction_id) DO UPDATE SET status='pending_capture'
+                """, ('paypal', order_id)) if self.db.db_type == 'sqlite' else cursor.execute(f"""
+                    INSERT INTO payment_transactions
+                        (gateway, gateway_transaction_id, status, created_at)
+                    VALUES ({placeholder}, {placeholder}, 'pending_capture', CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE status='pending_capture'
+                """, ('paypal', order_id))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"PayPal: could not record approved order {order_id}: {e}")
 
     async def _handle_payment_capture_completed(self, resource: dict):
         """Handle completed payment capture — credit wallet."""
@@ -501,9 +519,24 @@ class PayPalPaymentHandler:
             logger.warning(f"PayPal refund: cannot apply refund {refund_id} — missing user_id/amount")
 
     async def _handle_vault_token_created(self, resource: dict):
-        """Handle vault token creation."""
+        """Handle vault token creation — store as a payment method."""
         token_id = resource.get('id')
         logger.info(f"PayPal vault token created: {token_id}")
+        customer = resource.get('customer', {})
+        merchant_customer_id = customer.get('merchant_customer_id') or resource.get('metadata', {}).get('merchant_customer_id')
+        if not (token_id and merchant_customer_id):
+            logger.warning(f"PayPal vault token {token_id}: missing merchant_customer_id, skipping save")
+            return
+        try:
+            user_id = int(merchant_customer_id)
+        except (ValueError, TypeError):
+            logger.warning(f"PayPal vault token {token_id}: invalid merchant_customer_id {merchant_customer_id!r}")
+            return
+        try:
+            self.db.add_payment_method(user_id, 'paypal', token_id, is_default=False, metadata={'paypal_vault_token': token_id})
+            logger.info(f"Stored PayPal vault token {token_id} as payment method for user {user_id}")
+        except Exception as e:
+            logger.error(f"PayPal: failed to store vault token {token_id} for user {user_id}: {e}")
 
     async def _handle_vault_token_deleted(self, resource: dict):
         """Handle vault token deletion — deactivate matching payment method."""
@@ -590,41 +623,36 @@ class PayPalPaymentHandler:
             logger.error(f"Error creating PayPal top up order: {e}")
             return {'success': False, 'error': str(e)}
 
-    async def _handle_order_completed(self, resource: dict):
-        """Handle completed order (Vault v3)"""
-        order_id = resource.get('id')
-        logger.info(f"PayPal order completed: {order_id}")
-        
-        # Check if this is a top up order
-        purchase_units = resource.get('purchase_units', [])
-        if purchase_units and 'Wallet top up' in purchase_units[0].get('description', ''):
-            amount = Decimal(purchase_units[0]['amount']['value'])
-            user_id = int(resource.get('custom_id', 0))
-            
-            if user_id > 0:
-                from aisbf.payments.wallet.manager import WalletManager
-                from sqlalchemy.ext.asyncio import AsyncSession
-                
-                async with AsyncSession(self.db.engine) as session:
-                    wallet_manager = WalletManager(session)
-                    await wallet_manager.credit_wallet(
-                        user_id=user_id,
-                        amount=amount,
-                        transaction_details={
-                            'payment_gateway': 'paypal',
-                            'gateway_transaction_id': order_id,
-                            'description': 'Wallet top up via PayPal',
-                            'metadata': {'order_id': order_id}
-                        }
-                    )
-                    await session.commit()
-                
-                logger.info(f"Wallet credited successfully for user {user_id}, amount {amount}")
-
     async def _handle_payment_completed(self, resource: dict):
-        """Handle completed payment (legacy)"""
-        logger.info(f"PayPal payment completed: {resource.get('id')}")
+        """Handle completed payment (legacy PAYMENT.SALE.COMPLETED) — credit wallet if applicable."""
+        payment_id = resource.get('id')
+        logger.info(f"PayPal payment completed: {payment_id}")
+        custom_id = resource.get('custom', '') or resource.get('custom_id', '')
+        amount_obj = resource.get('amount', {})
+        try:
+            amount = Decimal(amount_obj.get('total', amount_obj.get('value', '0')))
+            user_id = int(custom_id) if custom_id else 0
+        except (ValueError, TypeError):
+            user_id = 0
+        if user_id > 0 and amount > 0:
+            await self._credit_wallet_for_paypal(user_id, amount, payment_id, 'Payment via PayPal')
+        else:
+            logger.debug(f"PayPal PAYMENT.SALE.COMPLETED {payment_id}: no user_id/amount to credit")
 
     async def _handle_payment_denied(self, resource: dict):
-        """Handle denied payment (legacy)"""
-        logger.warning(f"PayPal payment denied: {resource.get('id')}")
+        """Handle denied payment (legacy PAYMENT.SALE.DENIED) — queue for retry."""
+        payment_id = resource.get('id')
+        logger.warning(f"PayPal payment denied: {payment_id}")
+        try:
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    INSERT INTO payment_retry_queue
+                        (gateway, gateway_transaction_id, status, next_retry_at, created_at)
+                    VALUES ({placeholder}, {placeholder}, 'pending',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, ('paypal', payment_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"PayPal: failed to queue denied payment {payment_id} for retry: {e}")

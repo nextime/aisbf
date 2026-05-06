@@ -319,5 +319,21 @@ class StripePaymentHandler:
             return {"success": False, "error": str(e)}
 
     async def _handle_payment_failed(self, payment_intent: dict):
-        """Handle failed payment"""
-        logger.warning(f"Payment failed: {payment_intent['id']}")
+        """Handle failed payment — queue for retry and log the failure reason."""
+        intent_id = payment_intent.get('id', '')
+        error = payment_intent.get('last_payment_error', {}) or {}
+        reason = error.get('message', 'unknown')
+        logger.warning(f"Stripe payment failed: {intent_id} — {reason}")
+        try:
+            placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
+            with self.db._get_connection() as conn:
+                cursor = conn.cursor()
+                cursor.execute(f"""
+                    INSERT INTO payment_retry_queue
+                        (gateway, gateway_transaction_id, status, next_retry_at, created_at)
+                    VALUES ({placeholder}, {placeholder}, 'pending',
+                            CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                """, ('stripe', intent_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Stripe: failed to queue failed payment {intent_id} for retry: {e}")

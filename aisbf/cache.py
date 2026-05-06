@@ -28,14 +28,11 @@ import logging
 # On read, detect format by attempting JSON first so legacy pickle data still works.
 
 def _cache_encode(value: any) -> bytes:
-    """Encode a cache value. Prefers JSON; falls back to pickle."""
-    try:
-        return b'\x00' + json.dumps(value, ensure_ascii=False).encode('utf-8')
-    except (TypeError, ValueError):
-        return b'\x01' + pickle.dumps(value)
+    """Encode a cache value using JSON only."""
+    return b'\x00' + json.dumps(value, ensure_ascii=False).encode('utf-8')
 
 def _cache_decode(data: bytes) -> any:
-    """Decode a cache value encoded by _cache_encode, or legacy raw pickle bytes."""
+    """Decode a cache value encoded by _cache_encode. Legacy pickle entries are discarded."""
     if isinstance(data, memoryview):
         data = bytes(data)
     if not data:
@@ -43,12 +40,15 @@ def _cache_decode(data: bytes) -> any:
     if data[0:1] == b'\x00':
         return json.loads(data[1:].decode('utf-8'))
     if data[0:1] == b'\x01':
-        return pickle.loads(data[1:])
-    # Legacy: no prefix — assume raw pickle
+        # Legacy pickle-encoded entry — discard; will be recalculated on next miss
+        logger.warning("Discarding legacy pickle-encoded cache entry (will be recalculated)")
+        return None
+    # Legacy: no prefix — try JSON, discard if unparseable
     try:
-        return pickle.loads(data)
-    except Exception:
         return json.loads(data.decode('utf-8'))
+    except Exception:
+        logger.warning("Discarding unrecognised legacy cache entry (will be recalculated)")
+        return None
 from typing import Any, Optional, Dict, List
 from pathlib import Path
 import time
