@@ -217,9 +217,10 @@ def build_catalog_entry(
 
 def _build_named_catalog_entry(
     *,
-    prefix: str,
+    kind: str,
     scope: str,
     owner_id: Optional[int],
+    source_id: str,
     target_id: str,
     label: str,
     description: Optional[str],
@@ -229,8 +230,8 @@ def _build_named_catalog_entry(
     entry = build_catalog_entry(
         scope=scope,
         owner_id=owner_id,
-        kind=prefix,
-        source_id=prefix,
+        kind=kind,
+        source_id=source_id,
         target_id=target_id,
         label=label,
         description=description,
@@ -239,7 +240,7 @@ def _build_named_catalog_entry(
         availability_reason=None,
         metadata=metadata,
     )
-    entry["id"] = f"{prefix}/{prefix}/{target_id}"
+    entry["id"] = f"{kind}/{target_id}"
     return entry
 
 
@@ -345,9 +346,10 @@ def _build_rotation_entries(scope: str, owner_id: Optional[int], rotations: Dict
         config_data = rotation_config if isinstance(rotation_config, dict) else rotation_config.model_dump()
         entries.append(
             _build_named_catalog_entry(
-                prefix="rotation",
+                kind="rotation",
                 scope=scope,
                 owner_id=owner_id,
+                source_id=rotation_id,
                 target_id=rotation_id,
                 label=config_data.get("model_name") or rotation_id,
                 description=config_data.get("description"),
@@ -368,9 +370,10 @@ def _build_autoselect_entries(scope: str, owner_id: Optional[int], autoselects: 
         available_models = config_data.get("available_models") or []
         entries.append(
             _build_named_catalog_entry(
-                prefix="autoselect",
+                kind="autoselect",
                 scope=scope,
                 owner_id=owner_id,
+                source_id=autoselect_id,
                 target_id=autoselect_id,
                 label=config_data.get("model_name") or autoselect_id,
                 description=config_data.get("description"),

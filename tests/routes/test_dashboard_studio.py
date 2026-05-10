@@ -275,12 +275,12 @@ def test_build_studio_catalog_reuses_catalog_entry_contract_for_non_provider_res
 
     rotation_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "rotation")
     autoselect_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "autoselect")
-    assert rotation_entry["source_id"] == "rotation"
+    assert rotation_entry["source_id"] == "team-default"
     assert rotation_entry["target_id"] == "team-default"
-    assert rotation_entry["id"] == "rotation/rotation/team-default"
-    assert autoselect_entry["source_id"] == "autoselect"
+    assert rotation_entry["id"] == "rotation/team-default"
+    assert autoselect_entry["source_id"] == "writer"
     assert autoselect_entry["target_id"] == "writer"
-    assert autoselect_entry["id"] == "autoselect/autoselect/writer"
+    assert autoselect_entry["id"] == "autoselect/writer"
 
 
 def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
@@ -322,8 +322,8 @@ def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
     assert all(entry["owner_scope"] == "user" for entry in catalog["entries"])
     assert {entry["id"] for entry in catalog["entries"]} == {
         "provider/local-openai/gpt-4o-mini",
-        "rotation/rotation/my-rotation",
-        "autoselect/autoselect/my-autoselect",
+        "rotation/my-rotation",
+        "autoselect/my-autoselect",
     }
 
 
