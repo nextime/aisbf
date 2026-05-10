@@ -34,6 +34,8 @@ class Message(BaseModel):
     name: Optional[str] = None
 
     model_config = ConfigDict(extra="allow")
+
+
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Message]
