@@ -23,6 +23,18 @@ EXPECTED_HEADER_SNIPPETS = (
     'You should have received a copy of the GNU General Public License',
 )
 
+TASK_2_STUDIO_FRONTEND_TARGETS = (
+    Path("templates/dashboard/studio.html"),
+    Path("static/dashboard/studio.js"),
+    Path("static/dashboard/studio.css"),
+)
+
+EXPECTED_TASK_2_STUDIO_FRONTEND_TARGETS = (
+    Path("templates/dashboard/studio.html"),
+    Path("static/dashboard/studio.js"),
+    Path("static/dashboard/studio.css"),
+)
+
 
 def _read_top_level_docstring(path: Path) -> str:
     content = path.read_text(encoding="utf-8")
@@ -46,3 +58,18 @@ def test_task_1_studio_python_files_use_aisbf_gpl_docstring_header_convention():
         assert header.startswith('\n'), relative_path.as_posix()
         for snippet in EXPECTED_HEADER_SNIPPETS:
             assert snippet in header, f"{relative_path.as_posix()}: missing {snippet!r}"
+
+
+def test_task_2_header_test_targets_only_the_planned_studio_frontend_files():
+    assert TASK_2_STUDIO_FRONTEND_TARGETS == EXPECTED_TASK_2_STUDIO_FRONTEND_TARGETS
+
+
+def test_task_2_studio_frontend_files_use_aisbf_gpl_comment_header_convention():
+    repo_root = Path(__file__).resolve().parents[1]
+
+    for relative_path in TASK_2_STUDIO_FRONTEND_TARGETS:
+        content = (repo_root / relative_path).read_text(encoding="utf-8")
+        header = content[:700]
+
+        assert "Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>" in header, relative_path.as_posix()
+        assert "GNU General Public License" in header, relative_path.as_posix()
