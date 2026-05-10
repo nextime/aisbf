@@ -37,6 +37,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
 from .config import config
+from .studio import infer_model_capabilities
 from .utils import (
     count_messages_tokens,
     split_messages_into_chunks,
@@ -1669,139 +1670,8 @@ class RequestHandler:
         return 4096
     
     def _detect_capabilities(self, model_name: str, provider_type: str) -> List[str]:
-        """Auto-detect model capabilities based on model name and provider type"""
-        model_lower = model_name.lower()
-        capabilities = []
-        
-        # Text-to-text (default for most models)
-        if not any(keyword in model_lower for keyword in ['embedding', 'embed', 'whisper', 'tts', 'dall-e', 'stable-diffusion']):
-            capabilities.append('t2t')
-        
-        # Text-to-image generation
-        if any(keyword in model_lower for keyword in ['dall-e', 'dalle', 'stable-diffusion', 'sd-', 'sdxl', 'midjourney', 'imagen', 'flux']):
-            capabilities.append('t2i')
-        
-        # Image-to-image (editing, style transfer)
-        if any(keyword in model_lower for keyword in ['stable-diffusion', 'sd-', 'sdxl', 'controlnet', 'img2img']):
-            capabilities.append('i2i')
-        
-        # Vision/Image understanding (image-to-text)
-        if any(keyword in model_lower for keyword in ['vision', 'gpt-4-turbo', 'gpt-4o', 'claude-3', 'gemini-1.5', 'gemini-2.0', 'gemini-pro-vision', 'llava', 'blip']):
-            capabilities.append('vision')
-            capabilities.append('i2t')
-        
-        # Audio transcription (audio-to-text)
-        if any(keyword in model_lower for keyword in ['whisper', 'transcribe', 'speech-to-text', 'stt']):
-            capabilities.append('transcription')
-            capabilities.append('a2t')
-        
-        # Text-to-speech
-        if any(keyword in model_lower for keyword in ['tts', 'text-to-speech', 'elevenlabs', 'bark', 'tortoise']):
-            capabilities.append('tts')
-            capabilities.append('t2a')
-        
-        # Text-to-video generation
-        if any(keyword in model_lower for keyword in ['sora', 'runway', 'pika', 'text-to-video', 't2v']):
-            capabilities.append('t2v')
-        
-        # Image-to-video generation
-        if any(keyword in model_lower for keyword in ['runway', 'pika', 'img2video', 'i2v']):
-            capabilities.append('i2v')
-        
-        # Video-to-video (editing)
-        if any(keyword in model_lower for keyword in ['runway', 'video-edit', 'v2v']):
-            capabilities.append('v2v')
-        
-        # Video understanding (video-to-text)
-        if any(keyword in model_lower for keyword in ['video-llama', 'video-chat', 'v2t']):
-            capabilities.append('v2t')
-        
-        # Audio-to-audio (music generation, audio processing)
-        if any(keyword in model_lower for keyword in ['musicgen', 'audiogen', 'riffusion', 'a2a']):
-            capabilities.append('a2a')
-        
-        # Text embeddings
-        if any(keyword in model_lower for keyword in ['embedding', 'embed', 'ada-002', 'bge', 'e5', 'instructor']):
-            capabilities.append('embeddings')
-        
-        # Function calling / tool use
-        if any(keyword in model_lower for keyword in ['gpt-4', 'gpt-3.5-turbo', 'claude-3', 'gemini', 'function', 'tool']):
-            capabilities.append('function_calling')
-        
-        # Code generation
-        if any(keyword in model_lower for keyword in ['codex', 'code-', 'starcoder', 'codellama', 'deepseek-coder', 'phind']):
-            capabilities.append('code_generation')
-            capabilities.append('code_completion')
-        
-        # Translation
-        if any(keyword in model_lower for keyword in ['translate', 'translation', 'm2m', 'nllb']):
-            capabilities.append('translation')
-        
-        # Summarization
-        if any(keyword in model_lower for keyword in ['summarize', 'summary', 'bart', 'pegasus']):
-            capabilities.append('summarization')
-        
-        # Classification
-        if any(keyword in model_lower for keyword in ['classifier', 'classification', 'bert-', 'roberta-']):
-            capabilities.append('classification')
-        
-        # Sentiment analysis
-        if any(keyword in model_lower for keyword in ['sentiment', 'emotion']):
-            capabilities.append('sentiment_analysis')
-        
-        # Named Entity Recognition
-        if any(keyword in model_lower for keyword in ['ner', 'entity', 'spacy']):
-            capabilities.append('ner')
-        
-        # Question answering
-        if any(keyword in model_lower for keyword in ['qa', 'question', 'squad']):
-            capabilities.append('question_answering')
-        
-        # Reasoning (chain-of-thought)
-        if any(keyword in model_lower for keyword in ['reasoning', 'cot', 'o1', 'o3']):
-            capabilities.append('reasoning')
-        
-        # Search / RAG
-        if any(keyword in model_lower for keyword in ['search', 'retrieval', 'rag']):
-            capabilities.append('search')
-        
-        # Content moderation
-        if any(keyword in model_lower for keyword in ['moderation', 'safety', 'content-filter']):
-            capabilities.append('moderation')
-        
-        # Fine-tuning support
-        if any(keyword in model_lower for keyword in ['fine-tune', 'finetune', 'ft-']):
-            capabilities.append('fine_tuning')
-        
-        # Multimodal (multiple input/output types)
-        if any(keyword in model_lower for keyword in ['gpt-4o', 'gemini', 'claude-3', 'multimodal', 'mm-']):
-            capabilities.append('multimodal')
-        
-        # OCR (Optical Character Recognition)
-        if any(keyword in model_lower for keyword in ['ocr', 'tesseract', 'paddleocr', 'easyocr']):
-            capabilities.append('ocr')
-        
-        # Image captioning
-        if any(keyword in model_lower for keyword in ['caption', 'blip', 'git-']):
-            capabilities.append('image_captioning')
-        
-        # Object detection
-        if any(keyword in model_lower for keyword in ['yolo', 'detection', 'rcnn', 'detr']):
-            capabilities.append('object_detection')
-        
-        # Segmentation
-        if any(keyword in model_lower for keyword in ['segment', 'sam', 'mask']):
-            capabilities.append('segmentation')
-        
-        # 3D generation
-        if any(keyword in model_lower for keyword in ['3d', 'nerf', 'gaussian', 'mesh']):
-            capabilities.append('3d_generation')
-        
-        # Animation
-        if any(keyword in model_lower for keyword in ['animate', 'motion', 'pose']):
-            capabilities.append('animation')
-        
-        return capabilities
+        """Auto-detect model capabilities based on model name and provider type."""
+        return infer_model_capabilities(model_name=model_name, provider_type=provider_type).capabilities
     
     async def handle_generic_proxy(self, request: Request, provider_id: str, endpoint_path: str, body: dict, method: str = "POST") -> JSONResponse:
         """Forward a request to the provider's native endpoint and return the response."""
@@ -3988,42 +3858,8 @@ class RotationHandler:
         return 4096
     
     def _detect_capabilities(self, model_name: str, provider_type: str) -> List[str]:
-        """Auto-detect model capabilities based on model name and provider type"""
-        model_lower = model_name.lower()
-        capabilities = []
-        
-        # Text-to-text is the default capability for all models
-        capabilities.append('t2t')
-        
-        # Image generation models
-        if any(keyword in model_lower for keyword in ['dall-e', 'dalle', 'stable-diffusion', 'sd-', 'midjourney', 'imagen']):
-            capabilities.append('t2i')
-        
-        # Vision models (can process images)
-        if any(keyword in model_lower for keyword in ['vision', 'gpt-4-turbo', 'gpt-4o', 'claude-3', 'gemini-1.5', 'gemini-2.0']):
-            capabilities.append('vision')
-        
-        # Audio transcription models
-        if any(keyword in model_lower for keyword in ['whisper', 'transcribe']):
-            capabilities.append('transcription')
-        
-        # Text-to-speech models
-        if any(keyword in model_lower for keyword in ['tts', 'text-to-speech', 'elevenlabs']):
-            capabilities.append('tts')
-        
-        # Video generation models
-        if any(keyword in model_lower for keyword in ['sora', 'runway', 'pika', 'video']):
-            capabilities.append('i2v')
-        
-        # Embedding models
-        if any(keyword in model_lower for keyword in ['embedding', 'embed', 'ada-002']):
-            capabilities.append('embeddings')
-        
-        # Function calling / tool use
-        if any(keyword in model_lower for keyword in ['gpt-4', 'gpt-3.5-turbo', 'claude-3', 'gemini']):
-            capabilities.append('function_calling')
-        
-        return capabilities
+        """Auto-detect model capabilities based on model name and provider type."""
+        return infer_model_capabilities(model_name=model_name, provider_type=provider_type).capabilities
 
 class AutoselectHandler:
     def __init__(self, user_id=None):
