@@ -264,7 +264,7 @@ async def dashboard_studio_catalog(request: Request):
         return JSONResponse({"entries": [], "error": "unauthorized"}, status_code=401)
 
     current_user_id = request.session.get("user_id")
-    scope = "admin" if current_user_id is None else "user"
+    scope = "admin" if request.session.get("role") == "admin" else "user"
     db = None if scope == "admin" else DatabaseRegistry.get_config_database()
 
     catalog = build_studio_catalog(

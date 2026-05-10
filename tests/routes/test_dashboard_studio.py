@@ -142,6 +142,36 @@ def test_dashboard_studio_catalog_returns_user_resources_for_user(monkeypatch):
     }
 
 
+def test_dashboard_studio_catalog_does_not_treat_user_role_without_user_id_as_admin(monkeypatch):
+    client = TestClient(app)
+    _set_session_cookie(
+        client,
+        {
+            "logged_in": True,
+            "username": "demo",
+            "role": "user",
+            "user_id": None,
+            "expires_at": 4102444800,
+        },
+    )
+
+    monkeypatch.setattr(
+        dashboard_providers,
+        "build_studio_catalog",
+        lambda **kwargs: {
+            "scope": kwargs["scope"],
+            "owner_id": kwargs["owner_id"],
+            "entries": [],
+        },
+    )
+
+    response = client.get("/dashboard/studio/catalog")
+
+    assert response.status_code == 200
+    assert response.json()["scope"] == "user"
+    assert response.json()["owner_id"] is None
+
+
 def test_build_studio_catalog_uses_global_config_for_admin_scope():
     class ModelStub:
         def __init__(self, name, description=None, capabilities=None, context_length=None, architecture=None):
