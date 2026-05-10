@@ -67,3 +67,33 @@ def test_build_catalog_entry_normalizes_provider_model_payload():
     assert entry["owner_id"] == 5
     assert entry["capabilities"] == ["chat", "vision"]
     assert entry["metadata"]["context_length"] == 128000
+
+
+def test_infer_model_capabilities_restores_code_model_families():
+    result = infer_model_capabilities(
+        model_name="deepseek-coder-33b-instruct",
+        provider_type="openai",
+    )
+
+    assert "code_generation" in result.capabilities
+    assert "code_completion" in result.capabilities
+
+
+def test_infer_model_capabilities_does_not_treat_video_understanding_models_as_generation():
+    result = infer_model_capabilities(
+        model_name="video-llama-2",
+        provider_type="openai",
+    )
+
+    assert "video_understanding" in result.capabilities
+    assert "video_generation" not in result.capabilities
+
+
+@pytest.mark.parametrize("model_name", ["dalle-3", "runway-gen3"])
+def test_infer_model_capabilities_does_not_fallback_to_chat_for_media_models(model_name):
+    result = infer_model_capabilities(
+        model_name=model_name,
+        provider_type="openai",
+    )
+
+    assert "chat" not in result.capabilities
