@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+
+{% block title %}Studio - AISBF Dashboard{% endblock %}
+
+{% block extra_css %}
+<link rel="stylesheet" href="{{ url_for(request, '/dashboard/static/dashboard/studio.css') }}">
+{% endblock %}
+
+{% block content %}
+<section class="studio-shell" data-studio-shell="dashboard">
+    <div class="studio-hero">
+        <div>
+            <p class="studio-eyebrow" data-i18n="studio.eyebrow">Workspace</p>
+            <h2 class="studio-title" data-i18n="studio.title">Studio</h2>
+            <p class="studio-subtitle" data-i18n="studio.subtitle">Prepare providers, rotations, and autoselect targets from one dashboard-native workspace.</p>
+        </div>
+        <div class="studio-status-card">
+            <span class="studio-status-label" data-i18n="studio.status_label">Status</span>
+            <strong class="studio-status-value" data-i18n="studio.status_placeholder">Catalog wiring arrives in the next task.</strong>
+        </div>
+    </div>
+
+    <div class="studio-grid">
+        <section class="studio-panel">
+            <header class="studio-panel-header">
+                <h3 data-i18n="studio.catalog_title">Catalog</h3>
+                <span class="studio-chip" data-i18n="studio.catalog_scope">Dashboard shell</span>
+            </header>
+            <p class="studio-copy" data-i18n="studio.catalog_description">This page reserves the full Studio workspace and navigation entry while backend catalog data is still under construction.</p>
+            <div class="studio-placeholder-list" aria-hidden="true">
+                <div class="studio-placeholder-item"></div>
+                <div class="studio-placeholder-item"></div>
+                <div class="studio-placeholder-item"></div>
+            </div>
+        </section>
+
+        <section class="studio-panel studio-panel-emphasis">
+            <header class="studio-panel-header">
+                <h3 data-i18n="studio.workspace_title">Workspace</h3>
+                <span class="studio-chip" data-i18n="studio.workspace_mode">UI shell only</span>
+            </header>
+            <p class="studio-copy" data-i18n="studio.workspace_description">Frontend hooks, theme mapping, and bootstrap wiring are in place for the upcoming catalog endpoints.</p>
+            <div class="studio-diagnostics" id="studio-diagnostics" data-empty-message="No diagnostics yet.">
+                <span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>
+            </div>
+        </section>
+    </div>
+</section>
+
+<script id="studio-bootstrap" type="application/json">{{ studio_bootstrap_json|safe }}</script>
+{% endblock %}
+
+{% block extra_js %}
+<script src="{{ url_for(request, '/dashboard/static/dashboard/studio.js') }}"></script>
+{% endblock %}

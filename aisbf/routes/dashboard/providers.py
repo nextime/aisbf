@@ -234,6 +234,27 @@ async def dashboard_providers(request: Request):
         }
         )
 
+
+@router.get("/dashboard/studio", response_class=HTMLResponse)
+async def dashboard_studio(request: Request):
+    """Dashboard Studio shell page."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    return _templates.TemplateResponse(
+        request=request,
+        name="dashboard/studio.html",
+        context={
+            "request": request,
+            "session": request.session,
+            "__version__": __version__,
+            "studio_bootstrap_json": json.dumps({}),
+            "studio_body_mode": "wide",
+        },
+    )
+
+
 async def _auto_detect_provider_models(provider_key: str, provider: dict) -> list:
     """
     Auto-detect models from a provider's API endpoint.

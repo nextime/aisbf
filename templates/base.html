@@ -130,6 +130,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         * { margin: 0; padding: 0; box-sizing: border-box; }
         body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, sans-serif; background: var(--bg-page); color: var(--color-text); }
         .container { max-width: 1452px; margin: 0 auto; padding: 20px; }
+        .container-wide { max-width: min(1680px, calc(100vw - 32px)); }
         .header { background: var(--bg-panel); color: var(--color-text); padding: 20px 0; margin-bottom: 30px; border-bottom: 2px solid var(--color-border); }
         .header .container { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px; }
         .header h1 { font-size: 24px; font-weight: 600; }
@@ -139,6 +140,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         .nav a:hover { background: var(--bg-accent); color: var(--color-text); }
         .nav a.active { background: var(--color-primary); color: white; }
         .content { background: var(--bg-panel); padding: 30px; border-radius: 8px; box-shadow: 0 2px 4px var(--shadow); }
+        .content-wide { padding: 0; background: transparent; box-shadow: none; }
         .form-group { margin-bottom: 20px; }
         .form-group label { display: block; margin-bottom: 5px; font-weight: 500; color: var(--color-text); }
         .form-group input, .form-group textarea, .form-group select { width: 100%; padding: 10px; border: 1px solid var(--color-border); border-radius: 4px; font-size: 14px; background: var(--bg-input); color: var(--color-text); }
@@ -829,6 +831,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <div class="nav">
             <a href="{{ url_for(request, '/dashboard') }}" {% if request.path == '/dashboard' %}class="active"{% endif %} data-i18n="nav.overview">Overview</a>
             <a href="{{ url_for(request, '/dashboard/providers') }}" {% if '/providers' in request.path %}class="active"{% endif %} data-i18n="nav.providers">Providers</a>
+            <a href="{{ url_for(request, '/dashboard/studio') }}" {% if '/studio' in request.path %}class="active"{% endif %} data-i18n="nav.studio">Studio</a>
             <a href="{{ url_for(request, '/dashboard/rotations') }}" {% if '/rotations' in request.path %}class="active"{% endif %} data-i18n="nav.rotations">Rotations</a>
             <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %} data-i18n="nav.autoselect">Autoselect</a>
             <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %} data-i18n="nav.prompts">Prompts</a>
@@ -892,8 +895,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
     {% endif %}
     
-    <div class="container">
-        <div class="content">
+    <div class="container{% if studio_body_mode == 'wide' %} container-wide{% endif %}">
+        <div class="content{% if studio_body_mode == 'wide' %} content-wide{% endif %}">
             {% block content %}{% endblock %}
         </div>
     </div>

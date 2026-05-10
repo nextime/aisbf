@@ -11,6 +11,7 @@
   "nav": {
     "overview": "Overview",
     "providers": "Providers",
+    "studio": "Studio",
     "rotations": "Rotations",
     "autoselect": "Autoselect",
     "prompts": "Prompts",
@@ -105,6 +106,20 @@
     "close": "Close",
     "yes": "Yes",
     "no": "No"
+  },
+  "studio": {
+    "eyebrow": "Workspace",
+    "title": "Studio",
+    "subtitle": "Prepare providers, rotations, and autoselect targets from one dashboard-native workspace.",
+    "status_label": "Status",
+    "status_placeholder": "Catalog wiring arrives in the next task.",
+    "catalog_title": "Catalog",
+    "catalog_scope": "Dashboard shell",
+    "catalog_description": "This page reserves the full Studio workspace and navigation entry while backend catalog data is still under construction.",
+    "workspace_title": "Workspace",
+    "workspace_mode": "UI shell only",
+    "workspace_description": "Frontend hooks, theme mapping, and bootstrap wiring are in place for the upcoming catalog endpoints.",
+    "diagnostics_empty": "No diagnostics yet."
   },
   "providers": {
     "no_providers": "No providers found.",
