@@ -23,7 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 A modular proxy server for managing multiple AI provider integrations.
 """
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 from typing import Dict, List, Optional, Union
 
 class Message(BaseModel):
@@ -33,8 +33,7 @@ class Message(BaseModel):
     tool_call_id: Optional[str] = None
     name: Optional[str] = None
 
-    class Config:
-        extra = "allow"  # Allow extra fields not defined in the model
+    model_config = ConfigDict(extra="allow")
 class ChatCompletionRequest(BaseModel):
     model: str
     messages: List[Message]

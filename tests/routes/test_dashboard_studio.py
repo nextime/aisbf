@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import inspect
 import json
 from pathlib import Path
 import sys
@@ -30,6 +31,8 @@ from itsdangerous import TimestampSigner
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from aisbf.routes.dashboard import providers as dashboard_providers
+from aisbf.routes.dashboard import settings as dashboard_settings
+from aisbf.models import Message
 from aisbf.database import DatabaseRegistry
 from aisbf.studio import build_studio_catalog
 from main import app
@@ -570,6 +573,31 @@ def test_search_provider_models_refresh_uses_autodetect_flow_without_exposing_st
 
     assert response.status_code == 200
     assert response.json() == {"models": ["whisper-large-v3"], "fetched_live": True}
+
+
+def test_message_model_uses_pydantic_v2_model_config():
+    assert Message.model_config.get("extra") == "allow"
+    assert "Config" not in Message.__dict__
+
+
+def test_dashboard_user_query_uses_pattern_constraints():
+    route = next(route for route in dashboard_settings.router.routes if route.endpoint is dashboard_settings.dashboard_users)
+    query_params = {param.name: param for param in route.dependant.query_params}
+
+    assert query_params["order_by"].field_info.json_schema_extra == {"pattern": "^(username|last_login|created_at|tier_name)$"}
+    assert query_params["direction"].field_info.json_schema_extra == {"pattern": "^(asc|desc)$"}
+    assert query_params["status_filter"].field_info.json_schema_extra == {"pattern": "^(active|inactive)$"}
+    assert query_params["role_filter"].field_info.json_schema_extra == {"pattern": "^(admin|user)$"}
+
+    source = inspect.getsource(dashboard_settings.dashboard_users)
+    assert "regex=" not in source
+
+
+def test_fastapi_app_uses_lifespan_instead_of_on_event_decorators():
+    lifespan_context = getattr(app.router, "lifespan_context", None)
+    assert lifespan_context is not None
+    assert not getattr(app.router, "on_startup", [])
+    assert not getattr(app.router, "on_shutdown", [])
 
 
 class DummyOpen:
