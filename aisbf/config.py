@@ -48,6 +48,11 @@ class ProviderModelConfig(BaseModel):
     privacy: bool = False  # Model can handle privacy-sensitive content
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this model (None = use provider default)
+    # Studio capability metadata
+    studio_capabilities: Optional[List[str]] = None
+    studio_capability_source: Optional[str] = None
+    studio_capability_unknown: Optional[bool] = None
+    studio_capability_notes: Optional[List[str]] = None
 
 
 class CondensationConfig(BaseModel):

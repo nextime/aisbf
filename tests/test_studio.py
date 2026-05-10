@@ -5,6 +5,7 @@ from aisbf.studio import (
     build_catalog_entry,
     infer_model_capabilities,
     merge_capabilities,
+    stamp_inferred_capabilities,
 )
 
 
@@ -97,3 +98,45 @@ def test_infer_model_capabilities_does_not_fallback_to_chat_for_media_models(mod
     )
 
     assert "chat" not in result.capabilities
+
+
+def test_stamp_inferred_capabilities_persists_inferred_metadata_for_model_dict():
+    stamped = stamp_inferred_capabilities(
+        {
+            "name": "whisper-large-v3",
+            "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+        },
+        provider_type="openai",
+    )
+
+    assert stamped["studio_capabilities"] == ["audio_input", "transcription"]
+    assert stamped["studio_capability_source"] in {"provider_metadata", "heuristic"}
+    assert stamped["studio_capability_unknown"] is False
+    assert stamped["capabilities"] == ["audio_input", "transcription"]
+
+
+def test_build_catalog_entry_uses_persisted_studio_capability_metadata_when_available():
+    entry = build_catalog_entry(
+        scope="admin",
+        owner_id=None,
+        kind="provider_model",
+        source_id="openai",
+        target_id="whisper-large-v3",
+        label="Whisper Large V3",
+        description=None,
+        capabilities=["audio_input", "transcription"],
+        availability_state="ready",
+        availability_reason=None,
+        metadata={
+            "provider_type": "openai",
+            "capability_source": "heuristic",
+            "capability_notes": [],
+            "studio_capabilities": ["audio_input", "transcription"],
+            "studio_capability_source": "heuristic",
+            "studio_capability_unknown": False,
+        },
+    )
+
+    assert entry["metadata"]["studio_capabilities"] == ["audio_input", "transcription"]
+    assert entry["metadata"]["studio_capability_source"] == "heuristic"
+    assert entry["metadata"]["studio_capability_unknown"] is False

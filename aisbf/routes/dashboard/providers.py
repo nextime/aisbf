@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 from aisbf.database import DatabaseRegistry
 from aisbf.database import _hash_password as _db_hash_password
 from aisbf import __version__
-from aisbf.studio import build_studio_catalog
+from aisbf.studio import build_studio_catalog, stamp_inferred_capabilities
 from aisbf.app.templates import url_for, get_base_url
 from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_provider, _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path, _autoselect_json_path, _claude_cli_mode
 from aisbf.app.middleware import _is_local_client
@@ -21,6 +21,19 @@ _templates = None
 _server_config = None
 
 logger = logging.getLogger(__name__)
+
+
+def _stamp_provider_models(provider_config: dict) -> dict:
+    stamped = dict(provider_config)
+    provider_type = stamped.get("type", "openai")
+    models = stamped.get("models")
+    if isinstance(models, list):
+        stamped["models"] = [
+            stamp_inferred_capabilities(model, provider_type)
+            if isinstance(model, dict) else model
+            for model in models
+        ]
+    return stamped
 
 def init(config, templates, server_config=None):
     global _config, _templates, _server_config
@@ -398,6 +411,8 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
                     'max_request_tokens': int(context_size) if context_size else 100000,
                     'context_size': int(context_size) if context_size else 100000
                 })
+
+        detected_models = [stamp_inferred_capabilities(model, provider_type) for model in detected_models]
         
         logger.info(f"Auto-detected {len(detected_models)} models for provider '{provider_key}' from {models_url}")
         return detected_models
@@ -429,6 +444,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     if 'condense_method' in model and model.get('condense_method'):
                         if 'condense_context' not in model or model.get('condense_context') is None:
                             model['condense_context'] = 80
+            providers_data[provider_key] = _stamp_provider_models(provider)
         
         if is_config_admin:
             # Config admin: save to JSON files
@@ -1452,6 +1468,7 @@ async def api_provider_save(request: Request):
             return JSONResponse({"success": False, "error": "provider_id required"}, status_code=400)
 
         _apply_condense_defaults_provider(provider_config)
+        provider_config = _stamp_provider_models(provider_config)
 
         if is_config_admin:
             config_path = _providers_json_path()

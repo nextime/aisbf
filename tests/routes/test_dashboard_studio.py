@@ -327,6 +327,109 @@ def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
     }
 
 
+def test_api_provider_save_persists_inferred_studio_metadata_for_manual_models(monkeypatch):
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    saved_payload = {}
+
+    monkeypatch.setattr(dashboard_providers, "_providers_json_path", lambda: Path("/tmp/providers-source.json"))
+    monkeypatch.setattr(dashboard_providers, "_reload_global_config", lambda: None)
+    monkeypatch.setattr(dashboard_providers, "open", lambda *args, **kwargs: DummyOpen(saved_payload), raising=False)
+
+    response = client.post(
+        "/dashboard/api/provider",
+        json={
+            "provider_id": "openai",
+            "config": {
+                "type": "openai",
+                "models": [
+                    {
+                        "name": "whisper-large-v3",
+                        "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+                    }
+                ],
+            },
+        },
+    )
+
+    assert response.status_code == 200
+    saved = json.loads(saved_payload["writes"][-1])
+    model = saved["providers"]["openai"]["models"][0]
+    assert model["studio_capabilities"] == ["audio_input", "transcription"]
+    assert model["studio_capability_source"] in {"provider_metadata", "heuristic"}
+    assert model["studio_capability_unknown"] is False
+
+
+def test_dashboard_providers_save_persists_inferred_studio_metadata_for_bulk_save(monkeypatch):
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    saved_payload = {}
+    monkeypatch.setattr(dashboard_providers, "_reload_global_config", lambda: None)
+    monkeypatch.setattr(dashboard_providers, "open", lambda *args, **kwargs: DummyOpen(saved_payload), raising=False)
+
+    response = client.post(
+        "/dashboard/providers",
+        data={
+            "config": json.dumps(
+                {
+                    "openai": {
+                        "type": "openai",
+                        "models": [
+                            {
+                                "name": "whisper-large-v3",
+                                "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+                            }
+                        ],
+                    }
+                }
+            )
+        },
+    )
+
+    assert response.status_code == 200
+    saved = json.loads(saved_payload["writes"][-1])
+    model = saved["providers"]["openai"]["models"][0]
+    assert model["studio_capabilities"] == ["audio_input", "transcription"]
+    assert model["studio_capability_source"] in {"provider_metadata", "heuristic"}
+    assert model["studio_capability_unknown"] is False
+
+
+class DummyOpen:
+    def __init__(self, sink):
+        self.sink = sink
+        self.buffer = ""
+        self.sink.setdefault("writes", [])
+
+    def __call__(self, path, mode="r", *args, **kwargs):
+        self.path = str(path)
+        self.mode = mode
+        self.buffer = ""
+        return self
+
+    def __enter__(self):
+        if "w" in getattr(self, "mode", ""):
+            self.sink.setdefault("writes", []).append("")
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def read(self):
+        if any(token in getattr(self, "path", "") for token in ["providers-source", ".aisbf/providers.json", "routes/dashboard/config/providers.json"]):
+            return json.dumps({"providers": {}})
+        writes = self.sink.get("writes") or []
+        return writes[-1] if writes else json.dumps({"providers": {}})
+
+    def write(self, data):
+        self.buffer += data
+        self.sink.setdefault("writes", [""])
+        if not self.sink["writes"]:
+            self.sink["writes"].append("")
+        self.sink["writes"][-1] = self.buffer
+
+
 def _find_session_secret() -> str:
     for middleware in app.user_middleware:
         kwargs = getattr(middleware, "kwargs", {})

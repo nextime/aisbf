@@ -93,6 +93,27 @@ def normalize_capabilities(values: Optional[Iterable[str]]) -> List[str]:
     return _dedupe(normalized)
 
 
+def stamp_inferred_capabilities(model: Dict[str, Any], provider_type: str) -> Dict[str, Any]:
+    stamped = dict(model)
+    capability_result = infer_model_capabilities(
+        model_name=stamped.get("name") or stamped.get("id") or "",
+        provider_type=provider_type,
+        explicit_capabilities=stamped.get("capabilities") or stamped.get("studio_capabilities"),
+        architecture=stamped.get("architecture"),
+        provider_metadata=stamped,
+    )
+
+    stamped["capabilities"] = capability_result.capabilities
+    stamped["studio_capabilities"] = capability_result.capabilities
+    stamped["studio_capability_source"] = capability_result.source
+    stamped["studio_capability_unknown"] = capability_result.unknown
+    if capability_result.notes:
+        stamped["studio_capability_notes"] = capability_result.notes
+    elif "studio_capability_notes" in stamped:
+        stamped.pop("studio_capability_notes", None)
+    return stamped
+
+
 def infer_model_capabilities(
     model_name: str,
     provider_type: str,
