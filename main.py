@@ -1,3 +1,4 @@
+from contextlib import asynccontextmanager
 from decimal import Decimal
 """
 Copyleft (C) 2026 Stefy Lanza <stefy@nexlab.net>
@@ -104,7 +105,20 @@ def _get_user_handler(handler_type: str, user_id=None):
 # ---------------------------------------------------------------------------
 # FastAPI app
 # ---------------------------------------------------------------------------
-app = FastAPI(title="AI Proxy Server", max_request_size=100 * 1024 * 1024)
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    await _run_startup()
+    try:
+        yield
+    finally:
+        await _run_shutdown()
+
+
+app = FastAPI(
+    title="AI Proxy Server",
+    max_request_size=100 * 1024 * 1024,
+    lifespan=lifespan,
+)
 
 _static_dir = Path(__file__).parent / 'static'
 _static_dir.mkdir(parents=True, exist_ok=True)
@@ -236,8 +250,7 @@ async def _check_server_ip_country() -> None:
         logger.warning(f"Could not determine server public IP country: {e}")
 
 
-@app.on_event("startup")
-async def startup_event():
+async def _run_startup() -> None:
     global _server_ip_blocked
 
     await _check_server_ip_country()
@@ -344,8 +357,7 @@ async def startup_event():
     logger.info(f"Providers: {list(config.providers.keys()) if config else []}")
 
 
-@app.on_event("shutdown")
-async def shutdown_event():
+async def _run_shutdown() -> None:
     tor_service = _app_state.get('tor_service')
     if tor_service:
         tor_service.disconnect()
