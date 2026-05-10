@@ -18,5 +18,7 @@
     diagnosticsEl.dataset.state = targets > 0 ? "ready" : "empty";
     if (targets > 0) {
         diagnosticsEl.textContent = "Studio bootstrap payload loaded.";
+    } else if (!diagnosticsEl.textContent.trim()) {
+        diagnosticsEl.textContent = diagnosticsEl.dataset.emptyMessage || "No diagnostics yet.";
     }
 })();
