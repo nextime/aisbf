@@ -584,10 +584,14 @@ def test_dashboard_user_query_uses_pattern_constraints():
     route = next(route for route in dashboard_settings.router.routes if route.endpoint is dashboard_settings.dashboard_users)
     query_params = {param.name: param for param in route.dependant.query_params}
 
-    assert query_params["order_by"].field_info.json_schema_extra == {"pattern": "^(username|last_login|created_at|tier_name)$"}
-    assert query_params["direction"].field_info.json_schema_extra == {"pattern": "^(asc|desc)$"}
-    assert query_params["status_filter"].field_info.json_schema_extra == {"pattern": "^(active|inactive)$"}
-    assert query_params["role_filter"].field_info.json_schema_extra == {"pattern": "^(admin|user)$"}
+    def pattern_for(param_name):
+        metadata = query_params[param_name].field_info.metadata
+        return next((item.pattern for item in metadata if hasattr(item, "pattern")), None)
+
+    assert pattern_for("order_by") == "^(username|last_login|created_at|tier_name)$"
+    assert pattern_for("direction") == "^(asc|desc)$"
+    assert pattern_for("status_filter") == "^(active|inactive)$"
+    assert pattern_for("role_filter") == "^(admin|user)$"
 
     source = inspect.getsource(dashboard_settings.dashboard_users)
     assert "regex=" not in source

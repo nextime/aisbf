@@ -756,11 +756,11 @@ async def dashboard_users(
     page: int = Query(1, ge=1),
     limit: int = Query(25, ge=1, le=100),
     search: str = Query(None, max_length=100),
-    order_by: str = Query('created_at', regex='^(username|last_login|created_at|tier_name)$'),
-    direction: str = Query('desc', regex='^(asc|desc)$'),
-    status_filter: str = Query(None, regex='^(active|inactive)$'),
-    role_filter: str = Query(None, regex='^(admin|user)$')
-):
+    order_by: str = Query('created_at', pattern='^(username|last_login|created_at|tier_name)$'),
+    direction: str = Query('desc', pattern='^(asc|desc)$'),
+    status_filter: str = Query(None, pattern='^(active|inactive)$'),
+    role_filter: str = Query(None, pattern='^(admin|user)$')
+): 
     """Admin user management page"""
     auth_check = require_admin(request)
     if auth_check:
