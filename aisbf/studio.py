@@ -207,9 +207,12 @@ def merge_capabilities(
 
 
 def derive_aggregate_capabilities(capability_sets: Iterable[Optional[Iterable[str]]]) -> StudioCapabilityMergeResult:
+    capability_sets = list(capability_sets)
     normalized_sets = [normalize_capabilities(capabilities) for capabilities in capability_sets if capabilities]
     if not normalized_sets:
         return StudioCapabilityMergeResult(capabilities=[], partial_capabilities=[])
+
+    has_unknown_member = any(not normalize_capabilities(capabilities) for capabilities in capability_sets)
 
     aggregate = list(normalized_sets[0])
     partial: List[str] = []
@@ -217,6 +220,10 @@ def derive_aggregate_capabilities(capability_sets: Iterable[Optional[Iterable[st
         merged = merge_capabilities(aggregate, capability_set, support_mode="intersection")
         aggregate = merged.capabilities
         partial = _dedupe([*partial, *merged.partial_capabilities, *[capability for capability in capability_set if capability not in aggregate]])
+
+    if has_unknown_member:
+        partial = _dedupe([*partial, *aggregate])
+        aggregate = []
 
     partial = [capability for capability in partial if capability not in aggregate]
     return StudioCapabilityMergeResult(capabilities=aggregate, partial_capabilities=partial)

@@ -256,6 +256,16 @@ async def dashboard_studio(request: Request):
     if auth_check:
         return auth_check
 
+    current_user_id = request.session.get("user_id")
+    scope = "admin" if request.session.get("role") == "admin" else "user"
+    db = None if scope == "admin" else DatabaseRegistry.get_config_database()
+    catalog = build_studio_catalog(
+        scope=scope,
+        owner_id=current_user_id,
+        config=_config,
+        db=db,
+    )
+
     return _templates.TemplateResponse(
         request=request,
         name="dashboard/studio.html",
@@ -263,7 +273,7 @@ async def dashboard_studio(request: Request):
             "request": request,
             "session": request.session,
             "__version__": __version__,
-            "studio_bootstrap_json": json.dumps({}),
+            "studio_bootstrap_json": json.dumps(catalog),
             "studio_body_mode": "wide",
         },
     )

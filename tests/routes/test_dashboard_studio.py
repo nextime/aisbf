@@ -80,7 +80,35 @@ def test_dashboard_studio_renders_empty_diagnostics_contract_for_shell_boot():
     assert response.status_code == 200
     assert 'id="studio-diagnostics" data-empty-message="No diagnostics yet."' in response.text
     assert '<span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>' in response.text
-    assert '<script id="studio-bootstrap" type="application/json">{}</script>' in response.text
+
+
+def test_dashboard_studio_bootstraps_initial_catalog_data(monkeypatch):
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    monkeypatch.setattr(
+        dashboard_providers,
+        "build_studio_catalog",
+        lambda **kwargs: {
+            "scope": kwargs["scope"],
+            "owner_id": kwargs["owner_id"],
+            "entries": [
+                {
+                    "id": "rotation/creative-rotation",
+                    "kind": "rotation",
+                    "label": "Creative Rotation",
+                    "capabilities": ["chat"],
+                    "partial_capabilities": ["vision"],
+                }
+            ],
+        },
+    )
+
+    response = client.get("/dashboard/studio")
+
+    assert response.status_code == 200
+    assert '"id": "rotation/creative-rotation"' in response.text
+    assert '"partial_capabilities": ["vision"]' in response.text
 
 
 def test_dashboard_studio_catalog_returns_global_resources_for_admin(monkeypatch):

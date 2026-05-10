@@ -3,6 +3,7 @@ import pytest
 from aisbf.studio import (
     StudioCapabilityResult,
     build_catalog_entry,
+    derive_aggregate_capabilities,
     infer_model_capabilities,
     merge_capabilities,
     stamp_inferred_capabilities,
@@ -234,3 +235,13 @@ def test_merge_capabilities_reports_partial_support_for_rotation_intersection():
 
     assert merged.capabilities == ["chat", "vision"]
     assert merged.partial_capabilities == ["image_generation"]
+
+
+def test_derive_aggregate_capabilities_marks_missing_member_capabilities_as_uncertain():
+    derived = derive_aggregate_capabilities([
+        ["chat", "vision"],
+        None,
+    ])
+
+    assert derived.capabilities == []
+    assert derived.partial_capabilities == ["chat", "vision"]
