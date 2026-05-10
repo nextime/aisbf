@@ -176,3 +176,61 @@ def test_build_catalog_entry_prefers_persisted_studio_capabilities_over_legacy_c
     )
 
     assert entry["capabilities"] == ["audio_input", "transcription"]
+
+
+def test_build_catalog_entry_uses_aggregate_capabilities_for_rotation_without_explicit_capabilities():
+    entry = build_catalog_entry(
+        scope="admin",
+        owner_id=None,
+        kind="rotation",
+        source_id="creative-rotation",
+        target_id="creative-rotation",
+        label="Creative Rotation",
+        description=None,
+        capabilities=None,
+        availability_state="ready",
+        availability_reason=None,
+        metadata={
+            "aggregate_capabilities": ["chat", "vision"],
+            "aggregate_partial_capabilities": ["image_generation"],
+            "aggregate_capability_source": "derived",
+        },
+    )
+
+    assert entry["capabilities"] == ["chat", "vision"]
+    assert entry["partial_capabilities"] == ["image_generation"]
+    assert entry["metadata"]["aggregate_capability_source"] == "derived"
+
+
+def test_build_catalog_entry_preserves_explicit_capabilities_when_aggregate_capabilities_exist():
+    entry = build_catalog_entry(
+        scope="admin",
+        owner_id=None,
+        kind="autoselect",
+        source_id="balanced-autoselect",
+        target_id="balanced-autoselect",
+        label="Balanced Autoselect",
+        description=None,
+        capabilities=["chat"],
+        availability_state="ready",
+        availability_reason=None,
+        metadata={
+            "aggregate_capabilities": ["chat", "vision"],
+            "aggregate_partial_capabilities": ["image_generation"],
+            "aggregate_capability_source": "derived",
+        },
+    )
+
+    assert entry["capabilities"] == ["chat"]
+    assert entry["partial_capabilities"] == []
+
+
+def test_merge_capabilities_reports_partial_support_for_rotation_intersection():
+    merged = merge_capabilities(
+        base_capabilities=["chat", "vision", "image_generation"],
+        override_capabilities=["chat", "vision", "tool_use"],
+        support_mode="intersection",
+    )
+
+    assert merged.capabilities == ["chat", "vision"]
+    assert merged.partial_capabilities == ["image_generation"]

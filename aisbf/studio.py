@@ -206,6 +206,22 @@ def merge_capabilities(
     return StudioCapabilityMergeResult(capabilities=capabilities, partial_capabilities=[])
 
 
+def derive_aggregate_capabilities(capability_sets: Iterable[Optional[Iterable[str]]]) -> StudioCapabilityMergeResult:
+    normalized_sets = [normalize_capabilities(capabilities) for capabilities in capability_sets if capabilities]
+    if not normalized_sets:
+        return StudioCapabilityMergeResult(capabilities=[], partial_capabilities=[])
+
+    aggregate = list(normalized_sets[0])
+    partial: List[str] = []
+    for capability_set in normalized_sets[1:]:
+        merged = merge_capabilities(aggregate, capability_set, support_mode="intersection")
+        aggregate = merged.capabilities
+        partial = _dedupe([*partial, *merged.partial_capabilities, *[capability for capability in capability_set if capability not in aggregate]])
+
+    partial = [capability for capability in partial if capability not in aggregate]
+    return StudioCapabilityMergeResult(capabilities=aggregate, partial_capabilities=partial)
+
+
 def build_catalog_entry(
     scope: str,
     owner_id: Optional[int],
@@ -220,7 +236,14 @@ def build_catalog_entry(
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     metadata = metadata or {}
-    effective_capabilities = metadata.get("studio_capabilities") or capabilities
+    explicit_capabilities = metadata.get("studio_capabilities") or capabilities
+    aggregate_capabilities = metadata.get("aggregate_capabilities")
+    effective_capabilities = aggregate_capabilities if not explicit_capabilities else explicit_capabilities
+    partial_capabilities = []
+    if explicit_capabilities:
+        partial_capabilities = []
+    elif aggregate_capabilities:
+        partial_capabilities = normalize_capabilities(metadata.get("aggregate_partial_capabilities"))
     return {
         "id": f"provider/{source_id}/{target_id}",
         "kind": kind,
@@ -231,6 +254,7 @@ def build_catalog_entry(
         "label": label,
         "description": description,
         "capabilities": normalize_capabilities(effective_capabilities),
+        "partial_capabilities": partial_capabilities,
         "availability_state": availability_state,
         "availability_reason": availability_reason,
         "metadata": metadata,
@@ -387,6 +411,9 @@ def _build_rotation_entries(scope: str, owner_id: Optional[int], rotations: Dict
     entries: List[Dict[str, Any]] = []
     for rotation_id, rotation_config in rotations.items():
         config_data = rotation_config if isinstance(rotation_config, dict) else rotation_config.model_dump()
+        aggregate_capabilities = derive_aggregate_capabilities(
+            provider.get("capabilities") for provider in (config_data.get("providers") or [])
+        )
         entries.append(
             _build_named_catalog_entry(
                 kind="rotation",
@@ -400,6 +427,9 @@ def _build_rotation_entries(scope: str, owner_id: Optional[int], rotations: Dict
                 metadata={
                     "provider_count": len(config_data.get("providers") or []),
                     "context_length": config_data.get("context_length"),
+                    "aggregate_capabilities": aggregate_capabilities.capabilities,
+                    "aggregate_partial_capabilities": aggregate_capabilities.partial_capabilities,
+                    "aggregate_capability_source": "derived",
                 },
             )
         )
@@ -411,6 +441,9 @@ def _build_autoselect_entries(scope: str, owner_id: Optional[int], autoselects: 
     for autoselect_id, autoselect_config in autoselects.items():
         config_data = autoselect_config if isinstance(autoselect_config, dict) else autoselect_config.model_dump()
         available_models = config_data.get("available_models") or []
+        aggregate_capabilities = derive_aggregate_capabilities(
+            model.get("capabilities") if isinstance(model, dict) else None for model in available_models
+        )
         entries.append(
             _build_named_catalog_entry(
                 kind="autoselect",
@@ -425,6 +458,9 @@ def _build_autoselect_entries(scope: str, owner_id: Optional[int], autoselects: 
                     "available_model_count": len(available_models),
                     "fallback": config_data.get("fallback"),
                     "selection_model": config_data.get("selection_model"),
+                    "aggregate_capabilities": aggregate_capabilities.capabilities,
+                    "aggregate_partial_capabilities": aggregate_capabilities.partial_capabilities,
+                    "aggregate_capability_source": "derived",
                 },
             )
         )
