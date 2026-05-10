@@ -98,12 +98,11 @@ def stamp_inferred_capabilities(model: Dict[str, Any], provider_type: str) -> Di
     capability_result = infer_model_capabilities(
         model_name=stamped.get("name") or stamped.get("id") or "",
         provider_type=provider_type,
-        explicit_capabilities=stamped.get("capabilities") or stamped.get("studio_capabilities"),
+        explicit_capabilities=stamped.get("studio_capabilities") or stamped.get("capabilities"),
         architecture=stamped.get("architecture"),
         provider_metadata=stamped,
     )
 
-    stamped["capabilities"] = capability_result.capabilities
     stamped["studio_capabilities"] = capability_result.capabilities
     stamped["studio_capability_source"] = capability_result.source
     stamped["studio_capability_unknown"] = capability_result.unknown
@@ -220,6 +219,8 @@ def build_catalog_entry(
     availability_reason: Optional[str],
     metadata: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
+    metadata = metadata or {}
+    effective_capabilities = metadata.get("studio_capabilities") or capabilities
     return {
         "id": f"provider/{source_id}/{target_id}",
         "kind": kind,
@@ -229,10 +230,10 @@ def build_catalog_entry(
         "target_id": target_id,
         "label": label,
         "description": description,
-        "capabilities": normalize_capabilities(capabilities),
+        "capabilities": normalize_capabilities(effective_capabilities),
         "availability_state": availability_state,
         "availability_reason": availability_reason,
-        "metadata": metadata or {},
+        "metadata": metadata,
     }
 
 
@@ -324,13 +325,26 @@ def _build_provider_entries(scope: str, owner_id: Optional[int], providers: Dict
             if not target_id:
                 continue
 
-            capability_result = infer_model_capabilities(
-                model_name=target_id,
-                provider_type=provider_type,
-                explicit_capabilities=model.get("capabilities"),
-                architecture=model.get("architecture"),
-                provider_metadata=model,
-            )
+            persisted_studio_capabilities = model.get("studio_capabilities")
+            persisted_source = model.get("studio_capability_source")
+            persisted_unknown = model.get("studio_capability_unknown")
+            persisted_notes = model.get("studio_capability_notes")
+
+            if persisted_studio_capabilities is not None:
+                capability_result = StudioCapabilityResult(
+                    capabilities=normalize_capabilities(persisted_studio_capabilities),
+                    source=persisted_source or "persisted",
+                    unknown=bool(persisted_unknown),
+                    notes=list(persisted_notes or []),
+                )
+            else:
+                capability_result = infer_model_capabilities(
+                    model_name=target_id,
+                    provider_type=provider_type,
+                    explicit_capabilities=None,
+                    architecture=model.get("architecture"),
+                    provider_metadata=model,
+                )
             metadata = {
                 "provider_type": provider_type,
             }
@@ -338,6 +352,14 @@ def _build_provider_entries(scope: str, owner_id: Optional[int], providers: Dict
                 metadata["context_length"] = model.get("context_length")
             if model.get("architecture") is not None:
                 metadata["architecture"] = model.get("architecture")
+            if model.get("studio_capabilities") is not None:
+                metadata["studio_capabilities"] = normalize_capabilities(model.get("studio_capabilities"))
+            if model.get("studio_capability_source") is not None:
+                metadata["studio_capability_source"] = model.get("studio_capability_source")
+            if model.get("studio_capability_unknown") is not None:
+                metadata["studio_capability_unknown"] = model.get("studio_capability_unknown")
+            if model.get("studio_capability_notes"):
+                metadata["studio_capability_notes"] = model.get("studio_capability_notes")
             if capability_result.source:
                 metadata["capability_source"] = capability_result.source
             if capability_result.notes:

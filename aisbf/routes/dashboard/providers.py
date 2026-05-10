@@ -409,7 +409,9 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
                     'name': model_id,
                     'rate_limit': 0,
                     'max_request_tokens': int(context_size) if context_size else 100000,
-                    'context_size': int(context_size) if context_size else 100000
+                    'context_size': int(context_size) if context_size else 100000,
+                    'capabilities': model_data.get('capabilities'),
+                    'architecture': model_data.get('architecture'),
                 })
 
         detected_models = [stamp_inferred_capabilities(model, provider_type) for model in detected_models]

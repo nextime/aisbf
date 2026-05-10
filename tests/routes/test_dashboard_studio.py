@@ -394,6 +394,135 @@ def test_dashboard_providers_save_persists_inferred_studio_metadata_for_bulk_sav
     assert model["studio_capabilities"] == ["audio_input", "transcription"]
     assert model["studio_capability_source"] in {"provider_metadata", "heuristic"}
     assert model["studio_capability_unknown"] is False
+    assert "capabilities" not in model
+
+
+def test_build_studio_catalog_prefers_persisted_studio_capabilities_over_legacy_capabilities():
+    class ConfigStub:
+        providers = {
+            "openai": {
+                "type": "openai",
+                "models": [
+                    {
+                        "name": "whisper-large-v3",
+                        "capabilities": ["chat"],
+                        "studio_capabilities": ["audio_input", "transcription"],
+                        "studio_capability_source": "heuristic",
+                        "studio_capability_unknown": False,
+                    }
+                ],
+            }
+        }
+        rotations = {}
+        autoselect = {}
+
+    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+
+    provider_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "provider_model")
+    assert provider_entry["capabilities"] == ["audio_input", "transcription"]
+    assert provider_entry["metadata"]["studio_capabilities"] == ["audio_input", "transcription"]
+
+
+@pytest.mark.asyncio
+async def test_auto_detect_provider_models_persists_studio_metadata_without_overwriting_legacy_capabilities(monkeypatch):
+    class ResponseStub:
+        status_code = 200
+
+        def json(self):
+            return {
+                "data": [
+                    {
+                        "id": "whisper-large-v3",
+                        "capabilities": ["legacy-audio"],
+                        "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+                    }
+                ]
+            }
+
+    class ClientStub:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return ResponseStub()
+
+    monkeypatch.setattr(dashboard_providers.httpx, "AsyncClient", lambda *args, **kwargs: ClientStub())
+
+    models = await dashboard_providers._auto_detect_provider_models(
+        "openai",
+        {"type": "openai", "endpoint": "https://example.test", "api_key": "secret"},
+    )
+
+    assert models[0]["capabilities"] == ["legacy-audio"]
+    assert models[0]["studio_capabilities"] == ["legacy-audio"]
+    assert models[0]["studio_capability_source"] == "explicit"
+
+
+def test_search_provider_models_refresh_uses_autodetect_flow_without_exposing_studio_metadata(monkeypatch):
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    class SourceOpen:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def read(self):
+            return json.dumps(
+                {
+                    "providers": {
+                        "openai": {
+                            "type": "openai",
+                            "endpoint": "https://example.test",
+                            "api_key": "secret",
+                            "models": [],
+                        }
+                    }
+                }
+            )
+
+    async def fake_fetch_provider_models(provider_id, user_id=None):
+        return await dashboard_providers._auto_detect_provider_models(
+            provider_id,
+            {"type": "openai", "endpoint": "https://example.test", "api_key": "secret"},
+        )
+
+    class ResponseStub:
+        status_code = 200
+
+        def json(self):
+            return {
+                "data": [
+                    {
+                        "id": "whisper-large-v3",
+                        "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+                    }
+                ]
+            }
+
+    class ClientStub:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, exc_type, exc, tb):
+            return False
+
+        async def get(self, url, headers=None):
+            return ResponseStub()
+
+    monkeypatch.setattr(dashboard_providers, "open", lambda *args, **kwargs: SourceOpen(), raising=False)
+    monkeypatch.setattr(dashboard_providers, "fetch_provider_models", fake_fetch_provider_models)
+    monkeypatch.setattr(dashboard_providers.httpx, "AsyncClient", lambda *args, **kwargs: ClientStub())
+
+    response = client.get("/dashboard/providers/openai/search-models?refresh=true")
+
+    assert response.status_code == 200
+    assert response.json() == {"models": ["whisper-large-v3"], "fetched_live": True}
 
 
 class DummyOpen:

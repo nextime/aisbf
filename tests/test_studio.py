@@ -112,7 +112,21 @@ def test_stamp_inferred_capabilities_persists_inferred_metadata_for_model_dict()
     assert stamped["studio_capabilities"] == ["audio_input", "transcription"]
     assert stamped["studio_capability_source"] in {"provider_metadata", "heuristic"}
     assert stamped["studio_capability_unknown"] is False
-    assert stamped["capabilities"] == ["audio_input", "transcription"]
+    assert "capabilities" not in stamped
+
+
+def test_stamp_inferred_capabilities_preserves_existing_legacy_capabilities():
+    stamped = stamp_inferred_capabilities(
+        {
+            "name": "whisper-large-v3",
+            "capabilities": ["legacy-audio"],
+            "architecture": {"input_modalities": ["audio"], "output_modalities": ["text"]},
+        },
+        provider_type="openai",
+    )
+
+    assert stamped["capabilities"] == ["legacy-audio"]
+    assert stamped["studio_capabilities"] == ["legacy-audio"]
 
 
 def test_build_catalog_entry_uses_persisted_studio_capability_metadata_when_available():
@@ -140,3 +154,25 @@ def test_build_catalog_entry_uses_persisted_studio_capability_metadata_when_avai
     assert entry["metadata"]["studio_capabilities"] == ["audio_input", "transcription"]
     assert entry["metadata"]["studio_capability_source"] == "heuristic"
     assert entry["metadata"]["studio_capability_unknown"] is False
+
+
+def test_build_catalog_entry_prefers_persisted_studio_capabilities_over_legacy_capabilities():
+    entry = build_catalog_entry(
+        scope="admin",
+        owner_id=None,
+        kind="provider_model",
+        source_id="openai",
+        target_id="whisper-large-v3",
+        label="Whisper Large V3",
+        description=None,
+        capabilities=["chat"],
+        availability_state="ready",
+        availability_reason=None,
+        metadata={
+            "studio_capabilities": ["audio_input", "transcription"],
+            "studio_capability_source": "heuristic",
+            "studio_capability_unknown": False,
+        },
+    )
+
+    assert entry["capabilities"] == ["audio_input", "transcription"]
