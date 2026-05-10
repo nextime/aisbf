@@ -2,6 +2,7 @@ import json
 from pathlib import Path
 import sys
 from base64 import b64encode
+from uuid import uuid4
 
 import pytest
 from fastapi.testclient import TestClient
@@ -10,6 +11,8 @@ from itsdangerous import TimestampSigner
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 
 from aisbf.routes.dashboard import providers as dashboard_providers
+from aisbf.database import DatabaseRegistry
+from aisbf.studio import build_studio_catalog
 from main import app
 from main import templates
 
@@ -78,6 +81,159 @@ def test_dashboard_studio_renders_empty_diagnostics_contract_for_shell_boot():
     assert 'id="studio-diagnostics" data-empty-message="No diagnostics yet."' in response.text
     assert '<span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>' in response.text
     assert '<script id="studio-bootstrap" type="application/json">{}</script>' in response.text
+
+
+def test_dashboard_studio_catalog_returns_global_resources_for_admin(monkeypatch):
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    monkeypatch.setattr(
+        dashboard_providers,
+        "build_studio_catalog",
+        lambda **kwargs: {
+            "scope": kwargs["scope"],
+            "owner_id": kwargs["owner_id"],
+            "entries": [{"id": "provider/openai/gpt-4o", "owner_scope": "admin"}],
+        },
+    )
+
+    response = client.get("/dashboard/studio/catalog")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "scope": "admin",
+        "owner_id": None,
+        "entries": [{"id": "provider/openai/gpt-4o", "owner_scope": "admin"}],
+    }
+
+
+def test_dashboard_studio_catalog_returns_user_resources_for_user(monkeypatch):
+    client = TestClient(app)
+    db = DatabaseRegistry.get_config_database()
+    user_id = db.create_user(f"studio-demo-{uuid4().hex}", "not-used", role="user")
+    _set_session_cookie(
+        client,
+        {
+            "logged_in": True,
+            "username": "demo",
+            "role": "user",
+            "user_id": user_id,
+            "expires_at": 4102444800,
+        },
+    )
+
+    monkeypatch.setattr(
+        dashboard_providers,
+        "build_studio_catalog",
+        lambda **kwargs: {
+            "scope": kwargs["scope"],
+            "owner_id": kwargs["owner_id"],
+            "entries": [{"id": "provider/demo/gpt-4o-mini", "owner_scope": "user"}],
+        },
+    )
+
+    response = client.get("/dashboard/studio/catalog")
+
+    assert response.status_code == 200
+    assert response.json() == {
+        "scope": "user",
+        "owner_id": user_id,
+        "entries": [{"id": "provider/demo/gpt-4o-mini", "owner_scope": "user"}],
+    }
+
+
+def test_build_studio_catalog_uses_global_config_for_admin_scope():
+    class ModelStub:
+        def __init__(self, name, description=None, capabilities=None, context_length=None, architecture=None):
+            self.name = name
+            self.description = description
+            self.capabilities = capabilities
+            self.context_length = context_length
+            self.architecture = architecture
+
+    class ProviderStub:
+        def __init__(self, provider_type, models):
+            self.type = provider_type
+            self.models = models
+
+    class ConfigStub:
+        providers = {
+            "openai": ProviderStub(
+                "openai",
+                [ModelStub("gpt-4o", description="Flagship", capabilities=["chat", "vision"], context_length=128000)],
+            )
+        }
+        rotations = {
+            "team-default": {
+                "model_name": "Team default",
+                "providers": [{"provider": "openai", "model": "gpt-4o"}],
+                "capabilities": ["chat"],
+            }
+        }
+        autoselect = {
+            "writer": {
+                "model_name": "Writer",
+                "description": "General writing",
+                "fallback": "openai/gpt-4o",
+                "selection_model": "internal",
+                "available_models": [{"model_id": "openai/gpt-4o", "description": "Primary"}],
+                "capabilities": ["chat"],
+            }
+        }
+
+    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+
+    assert catalog["scope"] == "admin"
+    assert catalog["owner_id"] is None
+    assert {entry["kind"] for entry in catalog["entries"]} == {"provider_model", "rotation", "autoselect"}
+    provider_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "provider_model")
+    assert provider_entry["id"] == "provider/openai/gpt-4o"
+    assert provider_entry["owner_scope"] == "admin"
+    assert provider_entry["metadata"]["context_length"] == 128000
+
+
+def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
+    class DbStub:
+        def get_user_providers(self, user_id):
+            assert user_id == 17
+            return [{
+                "provider_id": "local-openai",
+                "config": {
+                    "type": "openai",
+                    "models": [{"name": "gpt-4o-mini", "description": "Mini", "capabilities": ["chat"]}],
+                },
+            }]
+
+        def get_user_rotations(self, user_id):
+            assert user_id == 17
+            return [{
+                "rotation_id": "my-rotation",
+                "config": {"model_name": "My rotation", "providers": [{"provider": "local-openai", "model": "gpt-4o-mini"}]},
+            }]
+
+        def get_user_autoselects(self, user_id):
+            assert user_id == 17
+            return [{
+                "autoselect_id": "my-autoselect",
+                "config": {
+                    "model_name": "My autoselect",
+                    "description": "Pick best model",
+                    "fallback": "local-openai/gpt-4o-mini",
+                    "selection_model": "internal",
+                    "available_models": [{"model_id": "local-openai/gpt-4o-mini", "description": "Mini"}],
+                },
+            }]
+
+    catalog = build_studio_catalog(scope="user", owner_id=17, db=DbStub())
+
+    assert catalog["scope"] == "user"
+    assert catalog["owner_id"] == 17
+    assert all(entry["owner_scope"] == "user" for entry in catalog["entries"])
+    assert {entry["id"] for entry in catalog["entries"]} == {
+        "provider/local-openai/gpt-4o-mini",
+        "rotation/my-rotation",
+        "autoselect/my-autoselect",
+    }
 
 
 def _find_session_secret() -> str:

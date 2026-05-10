@@ -7,6 +7,7 @@ from datetime import datetime, timedelta
 from aisbf.database import DatabaseRegistry
 from aisbf.database import _hash_password as _db_hash_password
 from aisbf import __version__
+from aisbf.studio import build_studio_catalog
 from aisbf.app.templates import url_for, get_base_url
 from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_provider, _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path, _autoselect_json_path, _claude_cli_mode
 from aisbf.app.middleware import _is_local_client
@@ -253,6 +254,26 @@ async def dashboard_studio(request: Request):
             "studio_body_mode": "wide",
         },
     )
+
+
+@router.get("/dashboard/studio/catalog")
+async def dashboard_studio_catalog(request: Request):
+    """Return Studio catalog for the current dashboard principal."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"entries": [], "error": "unauthorized"}, status_code=401)
+
+    current_user_id = request.session.get("user_id")
+    scope = "admin" if current_user_id is None else "user"
+    db = None if scope == "admin" else DatabaseRegistry.get_config_database()
+
+    catalog = build_studio_catalog(
+        scope=scope,
+        owner_id=current_user_id,
+        config=_config,
+        db=db,
+    )
+    return JSONResponse(catalog)
 
 
 async def _auto_detect_provider_models(provider_key: str, provider: dict) -> list:
