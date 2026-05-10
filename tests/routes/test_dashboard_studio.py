@@ -68,21 +68,16 @@ def test_dashboard_studio_nav_entry_is_present_for_user_session_shell():
     assert 'data-studio-shell="dashboard"' in response.text
 
 
-def test_dashboard_studio_preserves_empty_diagnostics_copy_before_targets_load():
-    diagnostics_text = "No diagnostics yet."
+def test_dashboard_studio_renders_empty_diagnostics_contract_for_shell_boot():
+    client = TestClient(app)
+    _login_as_admin(client)
 
-    rendered = _render_studio_bootstrap({})
+    response = client.get("/dashboard/studio")
 
-    assert rendered["dataset_state"] == "empty"
-    assert rendered["text"] == diagnostics_text
-
-
-def _render_studio_bootstrap(payload: dict) -> dict:
-    diagnostics_text = "No diagnostics yet."
-    targets = payload.get("targets") if isinstance(payload, dict) else None
-    if isinstance(targets, list) and targets:
-        return {"dataset_state": "ready", "text": "Studio bootstrap payload loaded."}
-    return {"dataset_state": "empty", "text": diagnostics_text}
+    assert response.status_code == 200
+    assert 'id="studio-diagnostics" data-empty-message="No diagnostics yet."' in response.text
+    assert '<span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>' in response.text
+    assert '<script id="studio-bootstrap" type="application/json">{}</script>' in response.text
 
 
 def _find_session_secret() -> str:
