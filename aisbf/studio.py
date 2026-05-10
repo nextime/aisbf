@@ -215,6 +215,34 @@ def build_catalog_entry(
     }
 
 
+def _build_named_catalog_entry(
+    *,
+    prefix: str,
+    scope: str,
+    owner_id: Optional[int],
+    target_id: str,
+    label: str,
+    description: Optional[str],
+    capabilities: Optional[Iterable[str]],
+    metadata: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
+    entry = build_catalog_entry(
+        scope=scope,
+        owner_id=owner_id,
+        kind=prefix,
+        source_id=prefix,
+        target_id=target_id,
+        label=label,
+        description=description,
+        capabilities=capabilities,
+        availability_state="ready",
+        availability_reason=None,
+        metadata=metadata,
+    )
+    entry["id"] = f"{prefix}/{prefix}/{target_id}"
+    return entry
+
+
 def _coerce_model_dict(model: Any) -> Dict[str, Any]:
     if isinstance(model, dict):
         return model
@@ -243,10 +271,12 @@ def _provider_models_from_config(provider_config: Any) -> List[Dict[str, Any]]:
     return [_coerce_model_dict(model) for model in (models or [])]
 
 
-def _load_global_providers_from_disk() -> Dict[str, Dict[str, Any]]:
+def _load_global_providers_from_source() -> Dict[str, Dict[str, Any]]:
     config_path = Path.home() / ".aisbf" / "providers.json"
     if not config_path.exists():
-        return {}
+        config_path = Path(__file__).parent.parent / "config" / "providers.json"
+        if not config_path.exists():
+            return {}
 
     with open(config_path) as handle:
         payload = json.load(handle)
@@ -314,23 +344,19 @@ def _build_rotation_entries(scope: str, owner_id: Optional[int], rotations: Dict
     for rotation_id, rotation_config in rotations.items():
         config_data = rotation_config if isinstance(rotation_config, dict) else rotation_config.model_dump()
         entries.append(
-            {
-                "id": f"rotation/{rotation_id}",
-                "kind": "rotation",
-                "owner_scope": scope,
-                "owner_id": owner_id,
-                "source_id": rotation_id,
-                "target_id": rotation_id,
-                "label": config_data.get("model_name") or rotation_id,
-                "description": config_data.get("description"),
-                "capabilities": normalize_capabilities(config_data.get("capabilities")),
-                "availability_state": "ready",
-                "availability_reason": None,
-                "metadata": {
+            _build_named_catalog_entry(
+                prefix="rotation",
+                scope=scope,
+                owner_id=owner_id,
+                target_id=rotation_id,
+                label=config_data.get("model_name") or rotation_id,
+                description=config_data.get("description"),
+                capabilities=config_data.get("capabilities"),
+                metadata={
                     "provider_count": len(config_data.get("providers") or []),
                     "context_length": config_data.get("context_length"),
                 },
-            }
+            )
         )
     return entries
 
@@ -341,24 +367,20 @@ def _build_autoselect_entries(scope: str, owner_id: Optional[int], autoselects: 
         config_data = autoselect_config if isinstance(autoselect_config, dict) else autoselect_config.model_dump()
         available_models = config_data.get("available_models") or []
         entries.append(
-            {
-                "id": f"autoselect/{autoselect_id}",
-                "kind": "autoselect",
-                "owner_scope": scope,
-                "owner_id": owner_id,
-                "source_id": autoselect_id,
-                "target_id": autoselect_id,
-                "label": config_data.get("model_name") or autoselect_id,
-                "description": config_data.get("description"),
-                "capabilities": normalize_capabilities(config_data.get("capabilities")),
-                "availability_state": "ready",
-                "availability_reason": None,
-                "metadata": {
+            _build_named_catalog_entry(
+                prefix="autoselect",
+                scope=scope,
+                owner_id=owner_id,
+                target_id=autoselect_id,
+                label=config_data.get("model_name") or autoselect_id,
+                description=config_data.get("description"),
+                capabilities=config_data.get("capabilities"),
+                metadata={
                     "available_model_count": len(available_models),
                     "fallback": config_data.get("fallback"),
                     "selection_model": config_data.get("selection_model"),
                 },
-            }
+            )
         )
     return entries
 
@@ -378,7 +400,7 @@ def build_studio_catalog(
         rotations = {row["rotation_id"]: row.get("config", {}) for row in rotation_rows}
         autoselects = {row["autoselect_id"]: row.get("config", {}) for row in autoselect_rows}
     else:
-        providers = getattr(config, "providers", None) or _load_global_providers_from_disk()
+        providers = getattr(config, "providers", None) or _load_global_providers_from_source()
         rotations = getattr(config, "rotations", None) or {}
         autoselects = getattr(config, "autoselect", None) or {}
 

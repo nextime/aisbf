@@ -259,9 +259,9 @@ async def dashboard_studio(request: Request):
 @router.get("/dashboard/studio/catalog")
 async def dashboard_studio_catalog(request: Request):
     """Return Studio catalog for the current dashboard principal."""
-    auth_check = require_dashboard_auth(request)
+    auth_check = require_api_auth(request)
     if auth_check:
-        return JSONResponse({"entries": [], "error": "unauthorized"}, status_code=401)
+        return auth_check
 
     current_user_id = request.session.get("user_id")
     scope = "admin" if request.session.get("role") == "admin" else "user"

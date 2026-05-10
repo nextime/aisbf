@@ -107,6 +107,15 @@ def test_dashboard_studio_catalog_returns_global_resources_for_admin(monkeypatch
     }
 
 
+def test_dashboard_studio_catalog_uses_api_auth_json_when_logged_out():
+    client = TestClient(app)
+
+    response = client.get("/dashboard/studio/catalog")
+
+    assert response.status_code == 401
+    assert response.json() == {"error": "Authentication required"}
+
+
 def test_dashboard_studio_catalog_returns_user_resources_for_user(monkeypatch):
     client = TestClient(app)
     db = DatabaseRegistry.get_config_database()
@@ -222,6 +231,58 @@ def test_build_studio_catalog_uses_global_config_for_admin_scope():
     assert provider_entry["metadata"]["context_length"] == 128000
 
 
+def test_build_studio_catalog_falls_back_to_dashboard_global_provider_source(monkeypatch):
+    monkeypatch.setattr(
+        "aisbf.studio._load_global_providers_from_source",
+        lambda: {
+            "fallback-openai": {
+                "type": "openai",
+                "models": [{"name": "gpt-4.1-mini", "description": "Fallback model", "capabilities": ["chat"]}],
+            }
+        },
+    )
+
+    catalog = build_studio_catalog(scope="admin", owner_id=None, config=None)
+
+    assert catalog["scope"] == "admin"
+    provider_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "provider_model")
+    assert provider_entry["id"] == "provider/fallback-openai/gpt-4.1-mini"
+    assert provider_entry["owner_scope"] == "admin"
+
+
+def test_build_studio_catalog_reuses_catalog_entry_contract_for_non_provider_resources():
+    class ConfigStub:
+        providers = {}
+        rotations = {
+            "team-default": {
+                "model_name": "Team default",
+                "providers": [{"provider": "openai", "model": "gpt-4o"}],
+                "capabilities": ["chat"],
+            }
+        }
+        autoselect = {
+            "writer": {
+                "model_name": "Writer",
+                "description": "General writing",
+                "fallback": "openai/gpt-4o",
+                "selection_model": "internal",
+                "available_models": [{"model_id": "openai/gpt-4o", "description": "Primary"}],
+                "capabilities": ["chat"],
+            }
+        }
+
+    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+
+    rotation_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "rotation")
+    autoselect_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "autoselect")
+    assert rotation_entry["source_id"] == "rotation"
+    assert rotation_entry["target_id"] == "team-default"
+    assert rotation_entry["id"] == "rotation/rotation/team-default"
+    assert autoselect_entry["source_id"] == "autoselect"
+    assert autoselect_entry["target_id"] == "writer"
+    assert autoselect_entry["id"] == "autoselect/autoselect/writer"
+
+
 def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
     class DbStub:
         def get_user_providers(self, user_id):
@@ -261,8 +322,8 @@ def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
     assert all(entry["owner_scope"] == "user" for entry in catalog["entries"])
     assert {entry["id"] for entry in catalog["entries"]} == {
         "provider/local-openai/gpt-4o-mini",
-        "rotation/my-rotation",
-        "autoselect/my-autoselect",
+        "rotation/rotation/my-rotation",
+        "autoselect/autoselect/my-autoselect",
     }
 
 
