@@ -35,6 +35,17 @@ EXPECTED_TASK_2_STUDIO_FRONTEND_TARGETS = (
     Path("static/dashboard/studio.css"),
 )
 
+EXPECTED_TASK_2_FRONTEND_HEADER_SNIPPETS = (
+    'Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>',
+    'AISBF - AI Service Broker Framework || AI Should Be Free',
+    'This program is free software: you can redistribute it and/or modify',
+    'it under the terms of the GNU General Public License as published by',
+    'This program is distributed in the hope that it will be useful,',
+    'MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.',
+    'GNU General Public License for more details.',
+    'You should have received a copy of the GNU General Public License',
+)
+
 
 def _read_top_level_docstring(path: Path) -> str:
     content = path.read_text(encoding="utf-8")
@@ -71,5 +82,5 @@ def test_task_2_studio_frontend_files_use_aisbf_gpl_comment_header_convention():
         content = (repo_root / relative_path).read_text(encoding="utf-8")
         header = content[:700]
 
-        assert "Copyright (C) 2026 Stefy Lanza <stefy@nexlab.net>" in header, relative_path.as_posix()
-        assert "GNU General Public License" in header, relative_path.as_posix()
+        for snippet in EXPECTED_TASK_2_FRONTEND_HEADER_SNIPPETS:
+            assert snippet in header, f"{relative_path.as_posix()}: missing {snippet!r}"
