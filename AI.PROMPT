@@ -141,7 +141,14 @@ Request handling logic:
 - `RequestHandler` - Handles chat completions and model lists
 - `RotationHandler` - Handles provider rotation
 - `AutoselectHandler` - Handles AI-powered model selection
+- Reuses shared Studio capability inference for model metadata normalization
 - Supports both streaming and non-streaming responses
+
+### aisbf/studio.py
+Shared Studio integration helpers:
+- Normalizes dashboard-visible provider, rotation, and autoselect resources into a unified Studio catalog
+- Infers and merges Studio capability metadata for autodetected and manually configured models
+- Supports admin/global and user-owned dashboard catalog scopes
 
 ### main.py
 FastAPI application:
@@ -945,6 +952,12 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 - Dashboard automatically initializes kiro_config when provider type is changed to "kiro"
 - Dashboard automatically removes kiro_config when provider type is changed from "kiro" to another type
 - Updated AI.PROMPT documentation to clarify kiro provider configuration differences
+
+**2026-05-10 - Dashboard Studio Integration**
+- Added `aisbf/studio.py` to build the dashboard Studio catalog for provider models, rotations, and autoselect entries
+- Added `/dashboard/studio` and `/dashboard/studio/catalog` for role-aware Studio access inside the dashboard shell
+- Provider model save and autodetect flows now persist normalized Studio capability metadata for manual and inferred models
+- Studio catalog entries can expose partial aggregate capabilities so incomplete metadata stays visible instead of disappearing
 
 **2026-03-22 - Configuration Refactoring**
 - Centralized API key storage in providers.json
