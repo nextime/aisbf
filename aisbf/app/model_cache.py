@@ -272,6 +272,7 @@ async def _refresh_provider_usage_if_stale(provider_id: str, user_id):
             return
         usage_data = await handler.get_usage()
         if usage_data:
+            usage_data = handler.normalize_usage_data(usage_data)
             db.save_provider_usage(user_id, provider_id, usage_data)
             _apply_usage_disable(db, user_id, provider_id, usage_data)
     except Exception as e:

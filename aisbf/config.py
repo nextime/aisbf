@@ -94,6 +94,11 @@ class ProviderConfig(BaseModel):
     cache_ttl: Optional[int] = None  # Cache TTL in seconds for Google Context Caching API
     min_cacheable_tokens: Optional[int] = 1024  # Minimum token count for content to be cacheable (default matches OpenAI)
     prompt_cache_key: Optional[str] = None  # Optional cache key for OpenAI's load balancer routing optimization
+    free_tier_limit: Optional[int] = None  # Upstream provider free-tier quota amount
+    free_tier_period: Optional[str] = None  # Upstream free-tier period: day, week, month
+    free_tier_limit_type: Optional[str] = None  # requests or tokens
+    premium_reference_monthly_cost: Optional[float] = None  # Equivalent premium value for one extra upstream free tier
+    free_tier_description: Optional[str] = None  # Human description for upstream free tier
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this provider (None = use global default)
 
@@ -421,7 +426,7 @@ class Config:
                 print(f"Created default config file: {dst}")
         
         # Copy markdown prompt files if they don't exist
-        for prompt_file in ['condensation_conversational.md', 'condensation_semantic.md', 'autoselect.md']:
+        for prompt_file in ['condensation_conversational.md', 'condensation_semantic.md', 'autoselect.md', 'STUDIO_SYSTEM.md']:
             src = source_dir / prompt_file
             dst = config_dir / prompt_file
             

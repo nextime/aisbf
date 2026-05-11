@@ -603,8 +603,14 @@ window.onclick = function(event) {
     
     <div style="background: #3498db; color: white; padding: 20px; border-radius: 8px;">
         <h4 style="font-size: 14px; margin-bottom: 10px;">💰 Estimated Savings</h4>
-        <p style="font-size: 28px; font-weight: bold;" id="savings-amount">{{ currency_symbol }}0.00</p>
-        <small style="color: rgba(255,255,255,0.8);">From cache hits & optimization</small>
+        <p style="font-size: 28px; font-weight: bold;" id="savings-amount">{{ currency_symbol }}{{ "%.2f"|format((optimization_savings.total_cost_saved if optimization_savings else 0) or 0) }}</p>
+        <small style="color: rgba(255,255,255,0.8);">
+            {% if optimization_savings and optimization_savings.provider_equivalents %}
+            Provider free-tier equivalents + optimization
+            {% else %}
+            Cache hits & optimization
+            {% endif %}
+        </small>
     </div>
     
     {% for pc in cost_overview.providers %}
@@ -634,6 +640,48 @@ window.onclick = function(event) {
         <small style="color: rgba(255,255,255,0.8);">From optimizations</small>
     </div>
 </div>
+
+{% if optimization_savings.provider_equivalents %}
+<div style="background: var(--bg-page); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
+    <h4 style="margin: 0 0 10px 0;">Free-Tier Equivalent Savings</h4>
+    <p style="margin: 0 0 10px 0; color: var(--color-muted);">
+        The table below estimates provider-side free-tier equivalents using known upstream free limits such as weekly or monthly request allowances.
+        When the filtered usage exceeds a provider's base free allowance, the overflow is counted as additional free-tier-equivalent capacity and translated into token and premium-value equivalents.
+    </p>
+    <table>
+        <tr>
+            <th>Provider</th>
+            <th>Used Tokens</th>
+            <th>Requests</th>
+            <th>Measured Usage</th>
+            <th>Free Limit</th>
+            <th>Extra Free Tiers</th>
+            <th>Equivalent Saved Tokens</th>
+            <th>Premium Reference</th>
+            <th>Equivalent Saved Cost</th>
+        </tr>
+        {% for item in optimization_savings.provider_equivalents %}
+        <tr>
+            <td><strong>{{ item.provider_id }}</strong></td>
+            <td>{{ format_tokens(item.tokens_used) }}</td>
+            <td>{{ item.request_count }}</td>
+            <td>{{ item.usage_amount }} {{ item.free_tier_limit_type }}</td>
+            <td>{{ item.free_tier_limit }}/{{ item.free_tier_period }} {{ item.free_tier_limit_type }} <small style="color: var(--color-muted);">({{ item.quota_source }})</small></td>
+            <td>{{ item.extra_free_tiers }}</td>
+            <td>{{ format_tokens(item.equivalent_saved_tokens) }}</td>
+            <td>
+                {% if item.premium_reference_name %}
+                {{ item.premium_reference_name }} ({{ currency_symbol }}{{ "%.2f"|format(item.premium_reference_monthly_cost) }}/mo)
+                {% else %}
+                N/A
+                {% endif %}
+            </td>
+            <td>{{ currency_symbol }}{{ "%.2f"|format(item.equivalent_saved_cost) }}</td>
+        </tr>
+        {% endfor %}
+    </table>
+</div>
+{% endif %}
 
 {% if optimization_savings.savings_by_type %}
 <table>
@@ -666,25 +714,8 @@ window.onclick = function(event) {
 </table>
 {% endif %}
 {% else %}
-<p style="color: var(--color-muted);">No optimization savings recorded yet. Enable deduplication, condensation, batching, or caching to see savings.</p>
+<p style="color: var(--color-muted);">No optimization savings recorded yet. Increase usage on providers with known upstream free tiers, or enable deduplication, condensation, batching, or caching to see savings.</p>
 {% endif %}
-
-<script>
-// Fetch and display savings estimation
-fetch('{{ url_for(request, "/dashboard/response-cache/stats") }}')
-    .then(response => response.json())
-    .then(data => {
-        if (data.enabled && data.hits > 0) {
-            // Estimate savings: assume average cost of $0.002 per cached request
-            const avgCostPerRequest = 0.002;
-            const estimatedSavings = data.hits * avgCostPerRequest;
-            document.getElementById('savings-amount').textContent = '{{ currency_symbol }}' + estimatedSavings.toFixed(2);
-        }
-    })
-    .catch(error => {
-        console.error('Error fetching cache stats:', error);
-    });
-</script>
 
 <h3 style="margin-top: 30px; margin-bottom: 15px;">Model Performance</h3>
 {% if model_performance %}
@@ -1015,6 +1046,7 @@ function confirmDeleteAnalytics(scope) {
 
 <div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">
     <a href="/dashboard" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>
+    <a href="{{ url_for(request, '/dashboard/analytics/provider-quotas') }}" class="btn btn-secondary">Provider Quota Debug</a>
     {% if is_admin %}
     <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn">Rate Limits</a>
     <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn">Response Cache</a>

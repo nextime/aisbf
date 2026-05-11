@@ -25,6 +25,50 @@ from typing import Dict, Optional, Any
 logger = logging.getLogger(__name__)
 
 
+def _coerce_cost_value(value: Any) -> Optional[float]:
+    if value is None or value == '':
+        return None
+    try:
+        if isinstance(value, dict):
+            for key in ('usd', 'amount', 'value', 'total'):
+                if key in value:
+                    coerced = _coerce_cost_value(value[key])
+                    if coerced is not None:
+                        return coerced
+            return None
+        if isinstance(value, str):
+            cleaned = value.strip().replace('$', '')
+            if cleaned.lower().startswith('usd '):
+                cleaned = cleaned[4:]
+            return float(cleaned)
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _find_nested_cost(obj: Any) -> Optional[float]:
+    if isinstance(obj, dict):
+        prioritized_keys = (
+            'cost', 'total_cost', 'total_price', 'price', 'amount', 'usd_cost',
+            'billed_cost', 'request_cost', 'charge', 'credits_cost'
+        )
+        for key in prioritized_keys:
+            if key in obj:
+                coerced = _coerce_cost_value(obj.get(key))
+                if coerced is not None:
+                    return coerced
+        for value in obj.values():
+            nested = _find_nested_cost(value)
+            if nested is not None:
+                return nested
+    elif isinstance(obj, list):
+        for item in obj:
+            nested = _find_nested_cost(item)
+            if nested is not None:
+                return nested
+    return None
+
+
 def extract_cost_from_response(response: Dict[str, Any], provider_id: str) -> Optional[float]:
     """
     Extract actual cost from provider response if available.
@@ -40,49 +84,18 @@ def extract_cost_from_response(response: Dict[str, Any], provider_id: str) -> Op
         return None
     
     try:
-        # AWS Bedrock - may include cost in usage
-        if provider_id in ['amazon', 'bedrock', 'aws']:
-            usage = response.get('usage', {})
-            if isinstance(usage, dict):
-                cost = usage.get('cost')
-                if cost is not None:
-                    return float(cost)
-        
-        # Cohere - has billed_units but not direct cost
-        # Would need pricing config to convert
-        if provider_id == 'cohere':
-            meta = response.get('meta', {})
-            if isinstance(meta, dict):
-                billed_units = meta.get('billed_units', {})
-                if billed_units:
-                    # Return None - we'll calculate from tokens
-                    # Could enhance this to calculate from billed_units
-                    pass
-        
-        # Replicate - has prediction time
-        if provider_id == 'replicate':
-            metrics = response.get('metrics', {})
-            if isinstance(metrics, dict):
-                predict_time = metrics.get('predict_time')
-                if predict_time:
-                    # Would need pricing per second to calculate
-                    # Return None for now - calculate from tokens
-                    pass
-        
-        # Check for generic cost fields that some providers might use
-        for cost_field in ['cost', 'price', 'amount', 'total_cost']:
-            if cost_field in response:
-                cost = response[cost_field]
-                if cost is not None:
-                    return float(cost)
-            
-            # Check in usage object
-            usage = response.get('usage', {})
-            if isinstance(usage, dict) and cost_field in usage:
-                cost = usage[cost_field]
-                if cost is not None:
-                    return float(cost)
-        
+        provider_id_lower = (provider_id or '').lower()
+
+        if 'x_openai_metadata' in response:
+            cost = _find_nested_cost(response['x_openai_metadata'])
+            if cost is not None:
+                return cost
+
+        if provider_id_lower in ['amazon', 'bedrock', 'aws', 'openrouter', 'openai', 'codex', 'claude', 'anthropic', 'google', 'qwen', 'kiro', 'kilo', 'replicate', 'cohere']:
+            cost = _find_nested_cost(response)
+            if cost is not None:
+                return cost
+
         return None
         
     except Exception as e:
@@ -108,20 +121,7 @@ def extract_cost_from_streaming_chunk(chunk: Dict[str, Any], provider_id: str) -
         return None
     
     try:
-        # Check if this is a final chunk with usage/cost info
-        usage = chunk.get('usage', {})
-        if isinstance(usage, dict):
-            # Try to extract cost from usage
-            cost = usage.get('cost')
-            if cost is not None:
-                return float(cost)
-        
-        # Some providers might include cost at top level in final chunk
-        cost = chunk.get('cost')
-        if cost is not None:
-            return float(cost)
-        
-        return None
+        return _find_nested_cost(chunk)
         
     except Exception as e:
         logger.debug(f"Error extracting cost from {provider_id} streaming chunk: {e}")

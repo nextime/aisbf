@@ -24,6 +24,7 @@ Database module for persistent tracking of context dimensions and rate limiting.
 import sqlite3
 import json
 import hashlib
+import time
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
@@ -398,7 +399,8 @@ class DatabaseManager:
         completion_tokens: Optional[int] = None,
         actual_cost: Optional[float] = None,
         rotation_id: Optional[str] = None,
-        autoselect_id: Optional[str] = None
+        autoselect_id: Optional[str] = None,
+        analytics_kind: str = 'execution'
     ):
         """
         Record token usage for rate limiting and analytics.
@@ -434,10 +436,10 @@ class DatabaseManager:
                 try:
                     # Try to insert with all columns
                     sql = f'''
-                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, rotation_id, autoselect_id, timestamp)
-                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                        INSERT INTO token_usage (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_ms, error_type, token_id, rotation_id, autoselect_id, analytics_kind, timestamp)
+                        VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
                     '''
-                    params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id, rotation_id, autoselect_id)
+                    params = (user_id, provider_id, model_name, tokens_used, prompt_tokens, completion_tokens, actual_cost, success, latency_int, error_type, token_id, rotation_id, autoselect_id, analytics_kind)
                     logger.debug(f"Trying full INSERT with {len(params)} parameters")
                     cursor.execute(sql, params)
                     logger.debug(f"Inserted with full column set, rows affected: {cursor.rowcount}")
@@ -953,6 +955,212 @@ class DatabaseManager:
                     'profile_pic': row[9] or None
                 }
             return None
+
+    def list_studio_assets(self, user_id: int, asset_type: str) -> List[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT name, description, metadata_json, files_json, quote_text, created_at, updated_at
+                FROM studio_assets
+                WHERE user_id = {placeholder} AND asset_type = {placeholder}
+                ORDER BY updated_at DESC
+            ''', (user_id, asset_type))
+            rows = cursor.fetchall()
+            items = []
+            for row in rows:
+                meta = _studio_json_loads(row[2], {})
+                files = _studio_json_loads(row[3], [])
+                item = {
+                    'name': row[0],
+                    'description': row[1] or '',
+                    'kind': asset_type,
+                    'created_at': self._normalize_db_timestamp(row[5]),
+                    'updated_at': self._normalize_db_timestamp(row[6]),
+                }
+                item.update(meta)
+                if asset_type in ('character', 'environment'):
+                    item['ref_images'] = files
+                    item['image_count'] = len(files)
+                elif asset_type == 'voice':
+                    item['sample_files'] = files
+                    item['quote'] = row[4] or ''
+                    item['transcript'] = row[4] or ''
+                items.append(item)
+            return items
+
+    def get_studio_asset(self, user_id: int, asset_type: str, name: str) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT name, description, metadata_json, files_json, quote_text, created_at, updated_at
+                FROM studio_assets
+                WHERE user_id = {placeholder} AND asset_type = {placeholder} AND name = {placeholder}
+            ''', (user_id, asset_type, name))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            meta = _studio_json_loads(row[2], {})
+            files = _studio_json_loads(row[3], [])
+            item = {
+                'name': row[0],
+                'description': row[1] or '',
+                'kind': asset_type,
+                'created_at': self._normalize_db_timestamp(row[5]),
+                'updated_at': self._normalize_db_timestamp(row[6]),
+            }
+            item.update(meta)
+            if asset_type in ('character', 'environment'):
+                item['ref_images'] = files
+                item['image_count'] = len(files)
+            elif asset_type == 'voice':
+                item['sample_files'] = files
+                item['quote'] = row[4] or ''
+                item['transcript'] = row[4] or ''
+            return item
+
+    def upsert_studio_asset(self, user_id: int, asset_type: str, name: str, description: str, metadata: Dict, files: List[str], quote_text: str = '') -> Dict:
+        existing = self.get_studio_asset(user_id, asset_type, name)
+        created_at = existing.get('created_at') if existing else int(time.time())
+        now = int(time.time())
+        payload_meta = dict(metadata or {})
+        payload_meta.setdefault('name', name)
+        payload_meta.setdefault('kind', asset_type)
+        payload_meta['created_at'] = created_at
+        payload_meta['updated_at'] = now
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT INTO studio_assets (user_id, asset_type, name, description, metadata_json, files_json, quote_text, created_at, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, datetime({placeholder}, 'unixepoch'), datetime({placeholder}, 'unixepoch'))
+                    ON CONFLICT(user_id, asset_type, name) DO UPDATE SET
+                        description=excluded.description,
+                        metadata_json=excluded.metadata_json,
+                        files_json=excluded.files_json,
+                        quote_text=excluded.quote_text,
+                        updated_at=excluded.updated_at
+                ''', (user_id, asset_type, name, description, _studio_json_dumps(payload_meta), _studio_json_dumps(files), quote_text, created_at, now))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO studio_assets (user_id, asset_type, name, description, metadata_json, files_json, quote_text, created_at, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, FROM_UNIXTIME({placeholder}), FROM_UNIXTIME({placeholder}))
+                    ON DUPLICATE KEY UPDATE
+                        description=VALUES(description),
+                        metadata_json=VALUES(metadata_json),
+                        files_json=VALUES(files_json),
+                        quote_text=VALUES(quote_text),
+                        updated_at=VALUES(updated_at)
+                ''', (user_id, asset_type, name, description, _studio_json_dumps(payload_meta), _studio_json_dumps(files), quote_text, created_at, now))
+            conn.commit()
+        return self.get_studio_asset(user_id, asset_type, name)
+
+    def delete_studio_asset(self, user_id: int, asset_type: str, name: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'DELETE FROM studio_assets WHERE user_id = {placeholder} AND asset_type = {placeholder} AND name = {placeholder}', (user_id, asset_type, name))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def list_studio_pipelines(self, user_id: int) -> List[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT pipeline_id, name, description, steps_json, created_at, updated_at
+                FROM studio_pipelines
+                WHERE user_id = {placeholder}
+                ORDER BY updated_at DESC
+            ''', (user_id,))
+            rows = cursor.fetchall()
+            return [{
+                'id': row[0],
+                'name': row[1],
+                'description': row[2] or '',
+                'steps': _studio_json_loads(row[3], []),
+                'created_at': self._normalize_db_timestamp(row[4]),
+                'updated_at': self._normalize_db_timestamp(row[5]),
+            } for row in rows]
+
+    def get_studio_pipeline(self, user_id: int, pipeline_id: str) -> Optional[Dict]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'''
+                SELECT pipeline_id, name, description, steps_json, created_at, updated_at
+                FROM studio_pipelines
+                WHERE user_id = {placeholder} AND pipeline_id = {placeholder}
+            ''', (user_id, pipeline_id))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                'id': row[0],
+                'name': row[1],
+                'description': row[2] or '',
+                'steps': _studio_json_loads(row[3], []),
+                'created_at': self._normalize_db_timestamp(row[4]),
+                'updated_at': self._normalize_db_timestamp(row[5]),
+            }
+
+    def upsert_studio_pipeline(self, user_id: int, pipeline_id: str, name: str, description: str, steps: List[Dict]) -> Dict:
+        existing = self.get_studio_pipeline(user_id, pipeline_id)
+        created_at = existing.get('created_at') if existing else int(time.time())
+        now = int(time.time())
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT INTO studio_pipelines (user_id, pipeline_id, name, description, steps_json, created_at, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, datetime({placeholder}, 'unixepoch'), datetime({placeholder}, 'unixepoch'))
+                    ON CONFLICT(user_id, pipeline_id) DO UPDATE SET
+                        name=excluded.name,
+                        description=excluded.description,
+                        steps_json=excluded.steps_json,
+                        updated_at=excluded.updated_at
+                ''', (user_id, pipeline_id, name, description, _studio_json_dumps(steps), created_at, now))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO studio_pipelines (user_id, pipeline_id, name, description, steps_json, created_at, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, FROM_UNIXTIME({placeholder}), FROM_UNIXTIME({placeholder}))
+                    ON DUPLICATE KEY UPDATE
+                        name=VALUES(name),
+                        description=VALUES(description),
+                        steps_json=VALUES(steps_json),
+                        updated_at=VALUES(updated_at)
+                ''', (user_id, pipeline_id, name, description, _studio_json_dumps(steps), created_at, now))
+            conn.commit()
+        return self.get_studio_pipeline(user_id, pipeline_id)
+
+    def delete_studio_pipeline(self, user_id: int, pipeline_id: str) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(f'DELETE FROM studio_pipelines WHERE user_id = {placeholder} AND pipeline_id = {placeholder}', (user_id, pipeline_id))
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def _normalize_db_timestamp(self, value) -> int:
+        if value is None:
+            return int(time.time())
+        if isinstance(value, datetime):
+            return int(value.timestamp())
+        if isinstance(value, str):
+            try:
+                return int(datetime.fromisoformat(value).timestamp())
+            except Exception:
+                try:
+                    return int(datetime.strptime(value, '%Y-%m-%d %H:%M:%S').timestamp())
+                except Exception:
+                    return int(time.time())
+        try:
+            return int(value)
+        except Exception:
+            return int(time.time())
 
     def set_verification_token(self, user_id: int, token: str, expires_at: datetime):
         """
@@ -3723,6 +3931,7 @@ def DatabaseManager__initialize_database(self):
                     token_id INTEGER,
                     rotation_id VARCHAR(255),
                     autoselect_id VARCHAR(255),
+                    analytics_kind VARCHAR(32) DEFAULT 'execution',
                     timestamp TIMESTAMP DEFAULT {timestamp_default}
                 )
             ''')
@@ -3742,6 +3951,7 @@ def DatabaseManager__initialize_database(self):
                         ('token_id', 'INTEGER'),
                         ('rotation_id', 'VARCHAR(255)'),
                         ('autoselect_id', 'VARCHAR(255)'),
+                        ('analytics_kind', "VARCHAR(32) DEFAULT 'execution'"),
                     ]:
                         if col not in columns:
                             cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
@@ -3762,6 +3972,7 @@ def DatabaseManager__initialize_database(self):
                         ('token_id', 'INTEGER'),
                         ('rotation_id', 'VARCHAR(255)'),
                         ('autoselect_id', 'VARCHAR(255)'),
+                        ('analytics_kind', "VARCHAR(32) DEFAULT 'execution'"),
                     ]:
                         if col not in existing:
                             cursor.execute(f'ALTER TABLE token_usage ADD COLUMN {col} {defn}')
@@ -3806,6 +4017,19 @@ def DatabaseManager__initialize_database(self):
         logger.info(f"Database tables initialized successfully for {self.database_type} database")
 
 
+def _studio_json_dumps(value: Any) -> str:
+    return json.dumps(value)
+
+
+def _studio_json_loads(value: Any, default):
+    if not value:
+        return default
+    try:
+        return json.loads(value)
+    except Exception:
+        return default
+
+
 def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp_default, boolean_type):
     """Create only temporary cache tables (CACHE DB ONLY)"""
     
@@ -3824,6 +4048,7 @@ def DatabaseManager__create_cache_tables(self, cursor, auto_increment, timestamp
             latency_ms INTEGER,
             error_type VARCHAR(255),
             token_id INTEGER,
+            analytics_kind VARCHAR(32) DEFAULT 'execution',
             timestamp TIMESTAMP DEFAULT {timestamp_default}
         )
     ''')
@@ -3997,6 +4222,44 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created missing account_tiers table")
     except Exception as e:
         logger.warning(f"Migration check for account_tiers table: {e}")
+
+    try:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS studio_assets (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                asset_type VARCHAR(32) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                metadata_json TEXT,
+                files_json TEXT,
+                quote_text TEXT,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, asset_type, name)
+            )
+        ''')
+    except Exception as e:
+        logger.warning(f"Migration check for studio_assets table: {e}")
+
+    try:
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS studio_pipelines (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                pipeline_id VARCHAR(255) NOT NULL,
+                name VARCHAR(255) NOT NULL,
+                description TEXT,
+                steps_json TEXT,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                UNIQUE(user_id, pipeline_id)
+            )
+        ''')
+    except Exception as e:
+        logger.warning(f"Migration check for studio_pipelines table: {e}")
 
     # Migration: Add missing columns to account_tiers
     try:

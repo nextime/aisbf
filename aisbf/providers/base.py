@@ -1541,6 +1541,24 @@ class BaseProviderHandler:
         """Fetch current usage/quota data from the provider. Returns None if unsupported."""
         return None
 
+    def normalize_usage_data(self, usage_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        """Normalize provider usage/quota data into a shared schema when possible."""
+        if not usage_data or not isinstance(usage_data, dict):
+            return usage_data
+
+        normalized = dict(usage_data)
+        free_tier = normalized.get('free_tier')
+        if isinstance(free_tier, dict):
+            normalized['free_tier'] = {
+                'limit': free_tier.get('limit'),
+                'used': free_tier.get('used'),
+                'remaining': free_tier.get('remaining'),
+                'period': free_tier.get('period'),
+                'limit_type': free_tier.get('limit_type', 'requests'),
+                'source': free_tier.get('source', 'provider')
+            }
+        return normalized
+
     async def handle_request_with_batching(self, model: str, messages: List[Dict], max_tokens: Optional[int] = None,
                                           temperature: Optional[float] = 1.0, stream: Optional[bool] = False,
                                           tools: Optional[List[Dict]] = None, tool_choice: Optional[Union[str, Dict]] = None) -> Union[Dict, object]:

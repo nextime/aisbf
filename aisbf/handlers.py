@@ -38,6 +38,7 @@ from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
 from .config import config
 from .studio import infer_model_capabilities
+from .studio_adapters import effective_studio_adapter, infer_studio_adapter_profile, adapt_studio_payload_with_profile
 from .utils import (
     count_messages_tokens,
     split_messages_into_chunks,
@@ -120,6 +121,66 @@ class RequestHandler:
             self.user_providers = {}
             self.user_rotations = {}
             self.user_autoselects = {}
+
+    def _get_provider_config(self, provider_id: str):
+        if self.user_id and provider_id in getattr(self, 'user_providers', {}):
+            return self.user_providers[provider_id]
+        return self.config.get_provider(provider_id)
+
+    def _get_provider_type(self, provider_id: str) -> str:
+        provider_config = self._get_provider_config(provider_id)
+        if isinstance(provider_config, dict):
+            return provider_config.get('type', 'openai') or 'openai'
+        return getattr(provider_config, 'type', 'openai') or 'openai'
+
+    def _adapt_studio_workflow_payload(self, provider_id: str, endpoint_path: str, body: Dict) -> Dict:
+        payload = dict(body or {})
+        provider_type = (self._get_provider_type(provider_id) or '').lower()
+        model_metadata = payload.get('_studio_model_metadata') if isinstance(payload.get('_studio_model_metadata'), dict) else {}
+        if provider_id and '_studio_provider_id' not in payload:
+            payload['_studio_provider_id'] = provider_id
+        if model_metadata.get('provider_endpoint') and '_studio_provider_endpoint' not in payload:
+            payload['_studio_provider_endpoint'] = model_metadata.get('provider_endpoint')
+        adapter = effective_studio_adapter(provider_type, model_metadata)
+        profile = infer_studio_adapter_profile(provider_id, provider_type, model_metadata)
+
+        def first_value(*keys):
+            for key in keys:
+                value = payload.get(key)
+                if isinstance(value, str) and value.strip():
+                    return value.strip()
+            return None
+
+        if endpoint_path == 'v1/video/dub':
+            selected = first_value('video_model', 'stt_model', 'tts_model', 'model')
+            if selected:
+                payload['model'] = selected
+        elif endpoint_path == 'v1/audio/clone':
+            selected = first_value('model', 'tts_model')
+            if selected:
+                payload['model'] = selected
+        elif endpoint_path == 'v1/audio/convert':
+            selected = first_value('model', 'audio_model', 'tts_model', 'stt_model')
+            if selected:
+                payload['model'] = selected
+        elif endpoint_path in {'v1/audio/split', 'v1/audio/denoise'}:
+            selected = first_value('model', 'audio_model')
+            if selected:
+                payload['model'] = selected
+        elif endpoint_path in {'v1/images/faceswap', 'v1/images/outfit'}:
+            selected = first_value('model', 'image_model', 'video_model')
+            if selected:
+                payload['model'] = selected
+        elif endpoint_path in {'v1/images/to3d', 'v1/images/from3d', 'v1/video/to3d', 'v1/video/from3d', 'v1/3d/generate'}:
+            selected = first_value('model', 'render_model', 'image_model', 'video_model')
+            if selected:
+                payload['model'] = selected
+
+        payload = adapt_studio_payload_with_profile(adapter, profile, endpoint_path, payload)
+        payload.pop('_studio_model_metadata', None)
+        payload.pop('_studio_provider_id', None)
+        payload.pop('_studio_provider_endpoint', None)
+        return payload
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
@@ -662,7 +723,8 @@ class RequestHandler:
                         token_id=getattr(request.state, 'token_id', None),
                         prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
                         completion_tokens=completion_tokens if completion_tokens > 0 else None,
-                        actual_cost=actual_cost
+                        actual_cost=actual_cost,
+                        analytics_kind='execution'
                     )
                     
                     # Record context dimensions for model performance tracking
@@ -715,7 +777,8 @@ class RequestHandler:
                     token_id=getattr(request.state, 'token_id', None),
                     prompt_tokens=prompt_tokens,
                     completion_tokens=completion_tokens,
-                    actual_cost=None
+                    actual_cost=None,
+                    analytics_kind='execution'
                 )
             except Exception as analytics_error:
                 logger.warning(f"Analytics recording for failed request failed: {analytics_error}")
@@ -1355,7 +1418,8 @@ class RequestHandler:
                         token_id=getattr(request.state, 'token_id', None),
                         prompt_tokens=effective_context,
                         completion_tokens=completion_tokens,
-                        actual_cost=None  # Streaming responses typically don't include cost
+                        actual_cost=None,
+                        analytics_kind='execution'
                     )
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for streaming request failed: {analytics_error}")
@@ -1393,7 +1457,8 @@ class RequestHandler:
                         token_id=getattr(request.state, 'token_id', None),
                         prompt_tokens=prompt_tokens,
                         completion_tokens=completion_tokens,
-                        actual_cost=None
+                        actual_cost=None,
+                        analytics_kind='execution'
                     )
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for failed streaming request failed: {analytics_error}")
@@ -1678,6 +1743,7 @@ class RequestHandler:
         import httpx
         import logging
         logger = logging.getLogger(__name__)
+        body = self._adapt_studio_workflow_payload(provider_id, endpoint_path, body)
 
         # Support user-defined providers (dict format) and global providers (object format)
         if self.user_id and provider_id in self.user_providers:
@@ -2990,7 +3056,8 @@ class RotationHandler:
                                 token_id=token_id,
                                 prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
                                 completion_tokens=completion_tokens if completion_tokens > 0 else None,
-                                actual_cost=actual_cost
+                                actual_cost=actual_cost,
+                                analytics_kind='execution'
                             )
                     except Exception as analytics_error:
                         logger.warning(f"Analytics recording failed: {analytics_error}")
@@ -3065,7 +3132,8 @@ class RotationHandler:
                 token_id=token_id,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
-                actual_cost=None
+                actual_cost=None,
+                analytics_kind='selector'
             )
         except Exception as analytics_error:
             logger.warning(f"Analytics recording for failed rotation failed: {analytics_error}")
@@ -3735,7 +3803,8 @@ class RotationHandler:
                         token_id=token_id,
                         prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
                         completion_tokens=completion_tokens_count if completion_tokens_count > 0 else None,
-                        actual_cost=None
+                        actual_cost=None,
+                        analytics_kind='execution'
                     )
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for streaming rotation failed: {analytics_error}")
@@ -4852,7 +4921,8 @@ class AutoselectHandler:
                     token_id=token_id,
                     prompt_tokens=prompt_tokens if prompt_tokens > 0 else None,
                     completion_tokens=completion_tokens if completion_tokens > 0 else None,
-                    actual_cost=None
+                    actual_cost=None,
+                    analytics_kind='selector'
                 )
         except Exception as analytics_error:
             logger.warning(f"Analytics recording for autoselect failed: {analytics_error}")

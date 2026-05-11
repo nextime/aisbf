@@ -957,6 +957,28 @@ class ClaudeProviderHandler(BaseProviderHandler):
             return True
         
         return False
+
+    def normalize_usage_data(self, usage_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        normalized = super().normalize_usage_data(usage_data)
+        if not normalized or not isinstance(normalized, dict):
+            return normalized
+
+        utilization = normalized.get('quota_7d_utilization')
+        if utilization is not None:
+            try:
+                util_float = float(str(utilization).rstrip('%'))
+                normalized['free_tier'] = {
+                    'limit': 100,
+                    'used': max(util_float, 0.0),
+                    'remaining': max(100.0 - util_float, 0.0),
+                    'period': 'week',
+                    'limit_type': 'percent',
+                    'source': 'provider'
+                }
+            except (TypeError, ValueError):
+                pass
+
+        return normalized
     
     async def _ensure_session(self):
         """Ensure session is initialized and valid before making requests."""

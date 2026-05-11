@@ -89,6 +89,11 @@ class Provider(BaseModel):
     is_subscription: bool = False  # If True, pricing is 0 (subscription-based provider)
     price_per_million_prompt: Optional[float] = None  # Price per million prompt tokens (USD)
     price_per_million_completion: Optional[float] = None  # Price per million completion tokens (USD)
+    free_tier_limit: Optional[int] = None
+    free_tier_period: Optional[str] = None
+    free_tier_limit_type: Optional[str] = None
+    premium_reference_monthly_cost: Optional[float] = None
+    free_tier_description: Optional[str] = None
 
 class ErrorTracking(BaseModel):
     failures: int

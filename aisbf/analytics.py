@@ -57,6 +57,37 @@ class Analytics:
         'kilo': {'prompt': 0.0, 'completion': 0.0},  # Kilo providers are free/subscription
         'codex': {'prompt': 2.5, 'completion': 10.0},  # ChatGPT pricing (input cheaper, output more expensive)
     }
+
+    PROVIDER_FREE_TIER_DEFAULTS = {
+        'codex': {
+            'period': 'week',
+            'limit_type': 'requests',
+            'limit': 1,
+            'premium_monthly_cost': 20.0,
+            'description': 'Codex/ChatGPT free tier equivalent'
+        },
+        'kiro': {
+            'period': 'month',
+            'limit_type': 'requests',
+            'limit': 50,
+            'premium_monthly_cost': 19.0,
+            'description': 'Kiro free tier equivalent'
+        },
+        'claude': {
+            'period': 'month',
+            'limit_type': 'requests',
+            'limit': 1,
+            'premium_monthly_cost': 20.0,
+            'description': 'Claude subscription/free-tier equivalent'
+        },
+        'kilo': {
+            'period': 'month',
+            'limit_type': 'requests',
+            'limit': 1,
+            'premium_monthly_cost': 0.0,
+            'description': 'Kilo subscription/free-tier equivalent'
+        },
+    }
     
     def __init__(self, db_manager, pricing: Optional[Dict] = None):
         """
@@ -118,6 +149,123 @@ class Analytics:
         
         # Ultimate fallback
         return self.pricing.get('openrouter', {'prompt': 5.0, 'completion': 15.0})
+
+    def _get_provider_model_pricing(self, provider_id: str, model_name: Optional[str] = None) -> Dict[str, float]:
+        pricing = self._get_provider_pricing(provider_id)
+
+        if not model_name:
+            return pricing
+
+        try:
+            from .config import config
+            provider_config = config.get_provider(provider_id, warn=False)
+            if provider_config:
+                for model in getattr(provider_config, 'models', []) or []:
+                    if getattr(model, 'name', None) != model_name:
+                        continue
+                    model_pricing = getattr(model, 'pricing', None) or {}
+                    prompt_price = model_pricing.get('prompt')
+                    completion_price = model_pricing.get('completion')
+                    if prompt_price is not None or completion_price is not None:
+                        return {
+                            'prompt': float(prompt_price) if prompt_price is not None else pricing.get('prompt', 0.0),
+                            'completion': float(completion_price) if completion_price is not None else pricing.get('completion', 0.0)
+                        }
+        except Exception:
+            pass
+
+        return pricing
+
+    def _estimate_completion_ratio(self, prompt_tokens: float, completion_tokens: float, total_tokens: float) -> float:
+        if completion_tokens > 0 and total_tokens > 0:
+            return min(max(completion_tokens / total_tokens, 0.05), 0.95)
+        if prompt_tokens > 0 and total_tokens > prompt_tokens:
+            return min(max((total_tokens - prompt_tokens) / total_tokens, 0.05), 0.95)
+        if total_tokens >= 32000:
+            return 0.2
+        if total_tokens >= 8000:
+            return 0.3
+        if total_tokens >= 2000:
+            return 0.4
+        return 0.5
+
+    def _get_provider_free_tier_info(self, provider_id: str) -> Optional[Dict[str, Any]]:
+        try:
+            from .config import config
+            provider_config = config.get_provider(provider_id, warn=False)
+            if provider_config and getattr(provider_config, 'free_tier_limit', None):
+                return {
+                    'period': getattr(provider_config, 'free_tier_period', None) or 'month',
+                    'limit_type': getattr(provider_config, 'free_tier_limit_type', None) or 'requests',
+                    'limit': int(getattr(provider_config, 'free_tier_limit', 0) or 0),
+                    'premium_monthly_cost': float(getattr(provider_config, 'premium_reference_monthly_cost', 0) or 0),
+                    'description': getattr(provider_config, 'free_tier_description', None) or f'{provider_id} free tier',
+                    'provider_family': provider_id,
+                    'source': 'config'
+                }
+        except Exception:
+            pass
+
+        provider_lower = (provider_id or '').lower()
+        for key, info in self.PROVIDER_FREE_TIER_DEFAULTS.items():
+            if key in provider_lower:
+                return {**info, 'provider_family': key, 'source': 'default'}
+        return None
+
+    def _derive_quota_from_usage(self, provider_id: str, usage_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        if not usage_data or not isinstance(usage_data, dict):
+            return None
+
+        free_tier = usage_data.get('free_tier')
+        if isinstance(free_tier, dict) and free_tier.get('limit'):
+            return {
+                'limit_type': free_tier.get('limit_type', 'requests'),
+                'limit': int(free_tier.get('limit') or 0),
+                'period': free_tier.get('period') or 'month',
+                'used': free_tier.get('used') or 0,
+                'remaining': free_tier.get('remaining'),
+                'source': free_tier.get('source', 'provider')
+            }
+
+        provider_lower = (provider_id or '').lower()
+
+        if 'codex' in provider_lower:
+            for key in ('weekly_requests_limit', 'weekly_limit', 'free_requests_per_week'):
+                if usage_data.get(key):
+                    return {
+                        'limit_type': 'requests',
+                        'limit': int(usage_data.get(key) or 0),
+                        'period': 'week',
+                        'used': int(usage_data.get('weekly_requests_used') or usage_data.get('used_requests') or 0),
+                        'source': 'derived'
+                    }
+
+        if 'kiro' in provider_lower:
+            if usage_data.get('monthly_requests_limit') or usage_data.get('free_requests_per_month'):
+                return {
+                    'limit_type': 'requests',
+                    'limit': int(usage_data.get('monthly_requests_limit') or usage_data.get('free_requests_per_month') or 0),
+                    'period': 'month',
+                    'used': int(usage_data.get('monthly_requests_used') or usage_data.get('used_requests') or 0),
+                    'source': 'derived'
+                }
+
+        if 'claude' in provider_lower:
+            if usage_data.get('quota_7d_utilization'):
+                try:
+                    utilization = float(str(usage_data.get('quota_7d_utilization')).rstrip('%'))
+                except (TypeError, ValueError):
+                    utilization = None
+                if utilization is not None:
+                    return {
+                        'limit_type': 'requests',
+                        'limit': 1,
+                        'period': 'week',
+                        'used': max(1, int(utilization // 100)),
+                        'source': 'derived'
+                    }
+
+        return None
     
     
     def record_request(
@@ -134,7 +282,8 @@ class Analytics:
         token_id: Optional[int] = None,
         prompt_tokens: Optional[int] = None,
         completion_tokens: Optional[int] = None,
-        actual_cost: Optional[float] = None
+        actual_cost: Optional[float] = None,
+        analytics_kind: str = 'execution'
     ):
         """
         Record a request for analytics.
@@ -153,6 +302,7 @@ class Analytics:
             prompt_tokens: Optional number of input/prompt tokens
             completion_tokens: Optional number of output/completion tokens
             actual_cost: Optional actual cost returned by provider (in USD)
+            analytics_kind: Whether this row represents actual execution or selector metadata
         """
         logger.info(f"🎯 Analytics.record_request ENTERED: provider={provider_id}, model={model_name}, tokens={tokens_used}, user_id={user_id}, success={success}")
 
@@ -181,7 +331,7 @@ class Analytics:
         if tokens_used > 0:
             logger.info(f"Analytics.record_request: Recording to DB - provider={provider_id}, latency_ms={latency_ms}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
             try:
-                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost, rotation_id, autoselect_id)
+                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost, rotation_id, autoselect_id, analytics_kind)
                 logger.info(f"✅ Analytics recording completed successfully for {provider_id}")
             except Exception as e:
                 logger.error(f"❌ Analytics recording FAILED for {provider_id}: {e}")
@@ -359,12 +509,68 @@ class Analytics:
                 'actual_cost': total_actual_cost  # Actual cost from provider responses
             }
     
+    def _build_analytics_filters(
+        self,
+        placeholder: str,
+        user_filter: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None,
+        analytics_kind: Optional[str] = 'execution'
+    ):
+        conditions = []
+        params = []
+
+        if user_filter == -1:
+            conditions.append("user_id IS NULL")
+        elif user_filter is not None:
+            conditions.append(f"user_id = {placeholder}")
+            params.append(user_filter)
+
+        if provider_filter:
+            conditions.append(f"provider_id = {placeholder}")
+            params.append(provider_filter)
+        if model_filter:
+            conditions.append(f"model_name = {placeholder}")
+            params.append(model_filter)
+        if rotation_filter:
+            conditions.append(f"rotation_id = {placeholder}")
+            params.append(rotation_filter)
+        if autoselect_filter:
+            conditions.append(f"autoselect_id = {placeholder}")
+            params.append(autoselect_filter)
+        if analytics_kind:
+            conditions.append(f"analytics_kind = {placeholder}")
+            params.append(analytics_kind)
+
+        return conditions, params
+
+    def _estimate_aggregate_cost(self, provider_totals: Dict[str, Dict[str, Any]]) -> float:
+        total_cost = 0.0
+        for provider_id, usage in provider_totals.items():
+            actual_cost = usage.get('actual_cost')
+            if actual_cost is not None and actual_cost > 0:
+                total_cost += actual_cost
+                continue
+            total_cost += self.estimate_cost(
+                provider_id,
+                usage.get('tokens_used', 0),
+                usage.get('prompt_tokens', 0),
+                usage.get('completion_tokens', 0),
+                model_name=usage.get('model_name')
+            )
+        return total_cost
+
     def get_token_usage_by_date_range(
         self,
         provider_id: Optional[str] = None,
         from_datetime: Optional[datetime] = None,
         to_datetime: Optional[datetime] = None,
-        user_filter: Optional[int] = None
+        user_filter: Optional[int] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None
     ) -> Dict[str, Any]:
         """
         Get token usage for a specific date range.
@@ -388,45 +594,70 @@ class Analytics:
             formatted_start = self._format_timestamp(start)
             formatted_end = self._format_timestamp(end)
             
-            # Build user condition
-            if user_filter == -1:
-                user_condition = " AND user_id IS NULL"
-                params_suffix = []
-            elif user_filter is not None:
-                user_condition = f" AND user_id = {placeholder}"
-                params_suffix = [user_filter]
-            else:
-                user_condition = ""
-                params_suffix = []
-            
+            filter_conditions, filter_params = self._build_analytics_filters(
+                placeholder,
+                user_filter=user_filter,
+                provider_filter=provider_id,
+                model_filter=model_filter,
+                rotation_filter=rotation_filter,
+                autoselect_filter=autoselect_filter,
+                analytics_kind='execution'
+            )
+            extra_where = ''.join(f" AND {condition}" for condition in filter_conditions)
+
+            provider_tokens = {}
+            provider_prompt_tokens = {}
+            provider_completion_tokens = {}
+
             if provider_id:
-                params = [provider_id, formatted_start, formatted_end] + params_suffix
+                params = [formatted_start, formatted_end] + filter_params
                 cursor.execute(f'''
-                    SELECT SUM(tokens_used) as total_tokens
+                    SELECT SUM(tokens_used) as total_tokens,
+                           SUM(COALESCE(prompt_tokens, 0)) as total_prompt_tokens,
+                           SUM(COALESCE(completion_tokens, 0)) as total_completion_tokens
                     FROM token_usage
-                    WHERE provider_id = {placeholder} AND timestamp >= {placeholder} AND timestamp <= {placeholder}
-                      {user_condition}
+                    WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
+                      {extra_where}
                 ''', params)
                 row = cursor.fetchone()
                 total_tokens = row[0] if row and row[0] else 0
+                total_prompt_tokens = row[1] if row and row[1] else 0
+                total_completion_tokens = row[2] if row and row[2] else 0
             else:
-                params = [formatted_start, formatted_end] + params_suffix
+                params = [formatted_start, formatted_end] + filter_params
                 cursor.execute(f'''
-                    SELECT provider_id, SUM(tokens_used) as total_tokens
+                    SELECT provider_id,
+                           SUM(tokens_used) as total_tokens,
+                           SUM(COALESCE(prompt_tokens, 0)) as total_prompt_tokens,
+                           SUM(COALESCE(completion_tokens, 0)) as total_completion_tokens
                     FROM token_usage
                     WHERE timestamp >= {placeholder} AND timestamp <= {placeholder}
-                      {user_condition}
+                      {extra_where}
                     GROUP BY provider_id
                 ''', params)
-                
-                provider_tokens = {}
+
                 total_tokens = 0
+                total_prompt_tokens = 0
+                total_completion_tokens = 0
                 for row in cursor.fetchall():
                     provider_tokens[row[0]] = row[1]
+                    provider_prompt_tokens[row[0]] = row[2] or 0
+                    provider_completion_tokens[row[0]] = row[3] or 0
                     total_tokens += row[1]
-            
-            # Calculate cost
-            cost = self.estimate_cost(provider_id or 'all', total_tokens)
+                    total_prompt_tokens += row[2] or 0
+                    total_completion_tokens += row[3] or 0
+
+            if provider_id:
+                cost = self.estimate_cost(provider_id, total_tokens, total_prompt_tokens, total_completion_tokens)
+            else:
+                cost = self._estimate_aggregate_cost({
+                    pid: {
+                        'tokens_used': tokens,
+                        'prompt_tokens': provider_prompt_tokens.get(pid, 0),
+                        'completion_tokens': provider_completion_tokens.get(pid, 0)
+                    }
+                    for pid, tokens in provider_tokens.items()
+                })
             
             # Calculate duration in days for display
             duration_days = (end - start).total_seconds() / 86400
@@ -437,7 +668,9 @@ class Analytics:
                 'start': start.isoformat(),
                 'end': end.isoformat(),
                 'duration_days': duration_days,
-                'provider_tokens': provider_tokens if not provider_id else None
+                'provider_tokens': provider_tokens if not provider_id else None,
+                'prompt_tokens': total_prompt_tokens,
+                'completion_tokens': total_completion_tokens
             }
     
     def get_all_providers_stats(
@@ -462,29 +695,17 @@ class Analytics:
             cursor = conn.cursor()
             placeholder = '?' if self.db.db_type == 'sqlite' else '%s'
 
-            if user_filter == -1:
-                user_condition = " AND user_id IS NULL"
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-            elif user_filter is not None:
-                user_condition = f" AND user_id = {placeholder}"
-                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
-            else:
-                user_condition = ""
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-
-            extra_conditions = ""
-            if provider_filter:
-                extra_conditions += f" AND provider_id = {placeholder}"
-                params.append(provider_filter)
-            if model_filter:
-                extra_conditions += f" AND model_name = {placeholder}"
-                params.append(model_filter)
-            if rotation_filter:
-                extra_conditions += f" AND rotation_id = {placeholder}"
-                params.append(rotation_filter)
-            if autoselect_filter:
-                extra_conditions += f" AND autoselect_id = {placeholder}"
-                params.append(autoselect_filter)
+            filter_conditions, filter_params = self._build_analytics_filters(
+                placeholder,
+                user_filter=user_filter,
+                provider_filter=provider_filter,
+                model_filter=model_filter,
+                rotation_filter=rotation_filter,
+                autoselect_filter=autoselect_filter,
+                analytics_kind='execution'
+            )
+            params = [self._format_timestamp(start), self._format_timestamp(end)] + filter_params
+            extra_conditions = ''.join(f" AND {condition}" for condition in filter_conditions)
 
             cursor.execute(f'''
                 SELECT
@@ -502,7 +723,6 @@ class Analytics:
                 FROM token_usage
                 WHERE timestamp >= {placeholder}
                   AND timestamp <= {placeholder}
-                  {user_condition}
                   {extra_conditions}
                 GROUP BY provider_id, model_name, rotation_id, autoselect_id
                 ORDER BY provider_id, model_name, rotation_id, autoselect_id
@@ -675,24 +895,17 @@ class Analytics:
             conditions = [f"timestamp >= {placeholder}", f"timestamp <= {placeholder}"]
             params = [formatted_cutoff, formatted_end_time]
 
-            if user_filter == -1:
-                conditions.append("user_id IS NULL")
-            elif user_filter is not None:
-                conditions.append(f"user_id = {placeholder}")
-                params.append(user_filter)
-
-            if provider_id:
-                conditions.append(f"provider_id = {placeholder}")
-                params.append(provider_id)
-            if model_filter:
-                conditions.append(f"model_name = {placeholder}")
-                params.append(model_filter)
-            if rotation_filter:
-                conditions.append(f"rotation_id = {placeholder}")
-                params.append(rotation_filter)
-            if autoselect_filter:
-                conditions.append(f"autoselect_id = {placeholder}")
-                params.append(autoselect_filter)
+            filter_conditions, filter_params = self._build_analytics_filters(
+                placeholder,
+                user_filter=user_filter,
+                provider_filter=provider_id,
+                model_filter=model_filter,
+                rotation_filter=rotation_filter,
+                autoselect_filter=autoselect_filter,
+                analytics_kind='execution'
+            )
+            conditions.extend(filter_conditions)
+            params.extend(filter_params)
 
             where_clause = " AND ".join(conditions)
 
@@ -767,6 +980,20 @@ class Analytics:
             elif user_filter is not None:
                 query += f' AND user_id = {placeholder}'
                 params.append(user_filter)
+            query += f' AND analytics_kind = {placeholder}'
+            params.append('execution')
+            if provider_filter:
+                query += f' AND provider_id = {placeholder}'
+                params.append(provider_filter)
+            if model_filter:
+                query += f' AND model_name = {placeholder}'
+                params.append(model_filter)
+            if rotation_filter:
+                query += f' AND rotation_id = {placeholder}'
+                params.append(rotation_filter)
+            if autoselect_filter:
+                query += f' AND autoselect_id = {placeholder}'
+                params.append(autoselect_filter)
 
             query += ' ORDER BY provider_id, model_name'
             cursor.execute(query, params)
@@ -819,11 +1046,17 @@ class Analytics:
                 if not is_autoselect or (autoselect_id and autoselect_id != autoselect_filter):
                     continue
 
-            # Get provider request stats with date range
-            provider_stats = self.get_provider_stats(provider_id, from_datetime, to_datetime, user_filter)
-            
-            # Skip if no data for this provider in the selected time range
-            if provider_stats['requests']['total'] == 0:
+            combo_stats = next((item for item in self.get_all_providers_stats(
+                from_datetime,
+                to_datetime,
+                user_filter=user_filter,
+                provider_filter=provider_id,
+                model_filter=model_name,
+                rotation_filter=rotation_id if rotation_id else rotation_filter,
+                autoselect_filter=autoselect_id if autoselect_id else autoselect_filter
+            ) if item['provider_id'] == provider_id and item['model_name'] == model_name and item['rotation_id'] == rotation_id and item['autoselect_id'] == autoselect_id), None)
+
+            if not combo_stats or combo_stats['requests']['total'] == 0:
                 continue
             
             # Get provider type from config or user providers
@@ -855,11 +1088,11 @@ class Analytics:
                 'effective_context': dim.get('effective_context'),
                 'condense_context': dim.get('condense_context'),
                 'condense_method': dim.get('condense_method'),
-                'tokens_per_minute': provider_stats['tokens']['TPM'],
-                'tokens_per_hour': provider_stats['tokens']['TPH'],
-                'tokens_per_day': provider_stats['tokens']['TPD'],
-                'error_rate': provider_stats.get('error_rate', 0),
-                'avg_latency_ms': provider_stats.get('avg_latency_ms', 0),
+                'tokens_per_minute': combo_stats['tokens']['TPM'],
+                'tokens_per_hour': combo_stats['tokens']['TPH'],
+                'tokens_per_day': combo_stats['tokens']['TPD'],
+                'error_rate': combo_stats.get('error_rate', 0),
+                'avg_latency_ms': combo_stats.get('avg_latency_ms', 0),
                 'is_rotation': is_rotation,
                 'is_autoselect': is_autoselect,
                 'rotation_id': rotation_id,
@@ -931,7 +1164,8 @@ class Analytics:
         provider_id: str,
         tokens_used: int,
         prompt_tokens: Optional[int] = None,
-        completion_tokens: Optional[int] = None
+        completion_tokens: Optional[int] = None,
+        model_name: Optional[str] = None
     ) -> float:
         """
         Estimate cost for token usage.
@@ -945,14 +1179,10 @@ class Analytics:
         Returns:
             Estimated cost in USD
         """
-        # Handle special case for 'all' providers (aggregate stats)
         if provider_id == 'all':
-            # For aggregate stats across all providers, skip cost estimation
-            # as it would require complex per-provider calculation
             return 0.0
 
-        # Get provider-specific pricing (checks subscription status and custom pricing)
-        provider_pricing = self._get_provider_pricing(provider_id)
+        provider_pricing = self._get_provider_model_pricing(provider_id, model_name)
 
         logger.info(f"💰 Cost calculation for {provider_id}:")
         logger.info(f"  tokens_used: {tokens_used}, prompt: {prompt_tokens}, completion: {completion_tokens}")
@@ -979,14 +1209,127 @@ class Analytics:
             logger.info(f"  Calculated (estimated completion): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
             return total_cost
         else:
-            # No reliable breakdown — use estimation (25% input, 75% output is typical for chat)
-            prompt_tokens_est = tokens_used * 0.25
-            completion_tokens_est = tokens_used * 0.75
+            completion_ratio = self._estimate_completion_ratio(prompt_tokens, completion_tokens, tokens_used)
+            prompt_tokens_est = tokens_used * (1 - completion_ratio)
+            completion_tokens_est = tokens_used * completion_ratio
             prompt_cost = (prompt_tokens_est / 1_000_000) * provider_pricing.get('prompt', 0)
             completion_cost = (completion_tokens_est / 1_000_000) * provider_pricing.get('completion', 0)
             total_cost = prompt_cost + completion_cost
-            logger.info(f"  Calculated (estimated breakdown 25/75): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
+            logger.info(f"  Calculated (estimated breakdown {1 - completion_ratio:.2f}/{completion_ratio:.2f}): ${prompt_cost:.8f} + ${completion_cost:.8f} = ${total_cost:.8f}")
             return total_cost
+
+    def get_savings_overview(
+        self,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None,
+        user_filter: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None
+    ) -> Dict[str, Any]:
+        start = from_datetime or (datetime.now() - timedelta(days=1))
+        end = to_datetime or datetime.now()
+
+        provider_stats = self.get_all_providers_stats(
+            from_datetime,
+            to_datetime,
+            user_filter=user_filter,
+            provider_filter=provider_filter,
+            model_filter=model_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter
+        )
+
+        provider_totals: Dict[str, Dict[str, Any]] = {}
+        for row in provider_stats:
+            bucket = provider_totals.setdefault(row['provider_id'], {
+                'tokens_used': 0,
+                'prompt_tokens': 0,
+                'completion_tokens': 0,
+                'actual_cost': 0.0,
+                'request_count': 0
+            })
+            bucket['tokens_used'] += row['tokens'].get('total', 0) or 0
+            bucket['prompt_tokens'] += row['tokens'].get('prompt', 0) or 0
+            bucket['completion_tokens'] += row['tokens'].get('completion', 0) or 0
+            bucket['actual_cost'] += row.get('actual_cost', 0) or 0
+            bucket['request_count'] += row['requests'].get('total', 0) or 0
+
+        equivalent_token_savings = 0
+        equivalent_cost_savings = 0.0
+        provider_equivalents = []
+        for provider_id, usage in provider_totals.items():
+            if usage['tokens_used'] <= 0:
+                continue
+            tier_info = self._get_provider_free_tier_info(provider_id)
+            if not tier_info:
+                continue
+
+            cached_usage = None
+            try:
+                cached_row = self.db.get_provider_usage(None if user_filter == -1 else user_filter, provider_id)
+                if cached_row:
+                    cached_usage = cached_row.get('usage_data')
+            except Exception:
+                cached_usage = None
+
+            runtime_quota = self._derive_quota_from_usage(provider_id, cached_usage)
+            free_limit = max(int((runtime_quota or {}).get('limit') or tier_info.get('limit', 0) or 0), 1)
+            limit_type = (runtime_quota or {}).get('limit_type') or tier_info.get('limit_type') or 'requests'
+            period = (runtime_quota or {}).get('period') or tier_info.get('period') or 'month'
+
+            if limit_type == 'tokens':
+                usage_amount = usage.get('tokens_used', 0) or 0
+            else:
+                usage_amount = (runtime_quota or {}).get('used') or usage.get('request_count', 0) or 0
+
+            if usage_amount <= free_limit:
+                continue
+
+            extra_free_tiers = usage_amount // free_limit
+            if extra_free_tiers <= 0:
+                continue
+
+            saved_tokens = usage['tokens_used'] * extra_free_tiers
+            equivalent_token_savings += saved_tokens
+            premium_price = float(tier_info.get('premium_monthly_cost', 0) or 0)
+            premium_equivalent_cost = premium_price * extra_free_tiers
+            provider_equivalents.append({
+                'provider_id': provider_id,
+                'tokens_used': usage['tokens_used'],
+                'request_count': usage.get('request_count', 0) or 0,
+                'usage_amount': usage_amount,
+                'free_tier_limit': free_limit,
+                'free_tier_period': period,
+                'free_tier_limit_type': limit_type,
+                'extra_free_tiers': extra_free_tiers,
+                'equivalent_saved_tokens': saved_tokens,
+                'premium_reference_name': tier_info.get('description'),
+                'premium_reference_monthly_cost': premium_price,
+                'equivalent_saved_cost': premium_equivalent_cost,
+                'quota_source': 'runtime' if runtime_quota else tier_info.get('source', 'default')
+            })
+            equivalent_cost_savings += premium_equivalent_cost
+
+        return {
+            'total_tokens_saved': equivalent_token_savings,
+            'total_cost_saved': equivalent_cost_savings,
+            'date_range': {
+                'start': start.isoformat(),
+                'end': end.isoformat()
+            },
+            'provider_equivalents': provider_equivalents,
+            'savings_by_type': {
+                'free_tier_equivalent': {
+                    'count': len(provider_equivalents),
+                    'tokens_saved': equivalent_token_savings,
+                    'cost_saved': equivalent_cost_savings,
+                    'avg_tokens_saved': int(equivalent_token_savings / len(provider_equivalents)) if provider_equivalents else 0,
+                    'max_tokens_saved': max((item['equivalent_saved_tokens'] for item in provider_equivalents), default=0)
+                }
+            } if provider_equivalents else {}
+        }
     
     def get_cost_overview(
         self,
@@ -1013,9 +1356,6 @@ class Analytics:
         start = from_datetime or (datetime.now() - timedelta(days=1))
         end = to_datetime or datetime.now()
         
-        # Get token usage by date range
-        range_usage = self.get_token_usage_by_date_range(None, start, end, user_filter)
-        
         # Get providers that have data
         providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter,
                                                   provider_filter, model_filter, rotation_filter, autoselect_filter)
@@ -1025,6 +1365,7 @@ class Analytics:
         
         for provider in providers:
             provider_id = provider['provider_id']
+            model_name = provider.get('model_name')
             tokens = provider['tokens']
             
             # Get token usage for this provider in the date range
@@ -1038,12 +1379,13 @@ class Analytics:
             if actual_cost > 0:
                 cost = actual_cost
             else:
-                cost = self.estimate_cost(provider_id, total_tokens, prompt_tokens, completion_tokens)
+                cost = self.estimate_cost(provider_id, total_tokens, prompt_tokens, completion_tokens, model_name=model_name)
             
             total_cost += cost
             
             provider_costs.append({
                 'provider_id': provider_id,
+                'model_name': model_name,
                 'tokens_today': total_tokens,
                 'estimated_cost': cost,
                 'is_actual': actual_cost > 0
@@ -1208,6 +1550,9 @@ class Analytics:
         to_datetime: Optional[datetime] = None,
         user_filter: Optional[int] = None,
         rotation_filter: Optional[str] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Per-rotation breakdown: which provider/model received what share of hits and tokens.
@@ -1221,20 +1566,17 @@ class Analytics:
             cursor = conn.cursor()
             ph = '?' if self.db.db_type == 'sqlite' else '%s'
 
-            if user_filter == -1:
-                user_cond = " AND user_id IS NULL"
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-            elif user_filter is not None:
-                user_cond = f" AND user_id = {ph}"
-                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
-            else:
-                user_cond = ""
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-
-            rot_cond = ""
-            if rotation_filter:
-                rot_cond = f" AND rotation_id = {ph}"
-                params.append(rotation_filter)
+            filter_conditions, filter_params = self._build_analytics_filters(
+                ph,
+                user_filter=user_filter,
+                provider_filter=provider_filter,
+                model_filter=model_filter,
+                rotation_filter=rotation_filter,
+                autoselect_filter=autoselect_filter,
+                analytics_kind='execution'
+            )
+            params = [self._format_timestamp(start), self._format_timestamp(end)] + filter_params
+            filter_clause = ''.join(f" AND {condition}" for condition in filter_conditions)
 
             cursor.execute(f'''
                 SELECT rotation_id, provider_id, model_name,
@@ -1244,7 +1586,7 @@ class Analytics:
                 FROM token_usage
                 WHERE rotation_id IS NOT NULL
                   AND timestamp >= {ph} AND timestamp <= {ph}
-                  {user_cond} {rot_cond}
+                  {filter_clause}
                 GROUP BY rotation_id, provider_id, model_name
                 ORDER BY rotation_id, requests DESC
             ''', params)
@@ -1277,6 +1619,9 @@ class Analytics:
         to_datetime: Optional[datetime] = None,
         user_filter: Optional[int] = None,
         autoselect_filter: Optional[str] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """
         Per-autoselect breakdown: which rotation/model was selected, hit %, tokens, and selection latency.
@@ -1291,20 +1636,17 @@ class Analytics:
             cursor = conn.cursor()
             ph = '?' if self.db.db_type == 'sqlite' else '%s'
 
-            if user_filter == -1:
-                user_cond = " AND user_id IS NULL"
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-            elif user_filter is not None:
-                user_cond = f" AND user_id = {ph}"
-                params = [self._format_timestamp(start), self._format_timestamp(end), user_filter]
-            else:
-                user_cond = ""
-                params = [self._format_timestamp(start), self._format_timestamp(end)]
-
-            as_cond = ""
-            if autoselect_filter:
-                as_cond = f" AND autoselect_id = {ph}"
-                params.append(autoselect_filter)
+            filter_conditions, filter_params = self._build_analytics_filters(
+                ph,
+                user_filter=user_filter,
+                provider_filter=provider_filter,
+                model_filter=model_filter,
+                rotation_filter=rotation_filter,
+                autoselect_filter=autoselect_filter,
+                analytics_kind='execution'
+            )
+            params = [self._format_timestamp(start), self._format_timestamp(end)] + filter_params
+            filter_clause = ''.join(f" AND {condition}" for condition in filter_conditions)
 
             cursor.execute(f'''
                 SELECT autoselect_id, model_name,
@@ -1314,7 +1656,7 @@ class Analytics:
                 FROM token_usage
                 WHERE autoselect_id IS NOT NULL
                   AND timestamp >= {ph} AND timestamp <= {ph}
-                  {user_cond} {as_cond}
+                  {filter_clause}
                 GROUP BY autoselect_id, model_name
                 ORDER BY autoselect_id, requests DESC
             ''', params)
@@ -1411,9 +1753,9 @@ class Analytics:
                 'tokens_1d': tokens_1d,
                 'tokens_7d': tokens_7d,
                 'provider_totals': provider_totals,
-                'estimated_cost_1h': self.estimate_cost('global', tokens_1h),
-                'estimated_cost_1d': self.estimate_cost('global', tokens_1d),
-                'estimated_cost_7d': self.estimate_cost('global', tokens_7d)
+                'estimated_cost_1h': self._estimate_aggregate_cost({pid: {'tokens_used': total} for pid, total in provider_totals.items()}),
+                'estimated_cost_1d': self._estimate_aggregate_cost({pid: {'tokens_used': total} for pid, total in provider_totals.items()}),
+                'estimated_cost_7d': self._estimate_aggregate_cost({pid: {'tokens_used': total} for pid, total in provider_totals.items()})
             }
     
     def get_user_token_usage_over_time(

@@ -29,7 +29,7 @@ import json
 import uuid
 import logging
 from pathlib import Path
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union
 
 from ...config import config
 from ...models import Model
@@ -365,6 +365,30 @@ class KiroProviderHandler(BaseProviderHandler):
             logging.info(f"KiroProviderHandler: Response includes {len(tool_calls)} tool calls")
 
         return openai_response
+
+    def normalize_usage_data(self, usage_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
+        normalized = super().normalize_usage_data(usage_data)
+        if not normalized or not isinstance(normalized, dict):
+            return normalized
+
+        monthly_limit = normalized.get('monthly_requests_limit') or normalized.get('free_requests_per_month')
+        monthly_used = normalized.get('monthly_requests_used') or normalized.get('used_requests')
+        if monthly_limit is not None:
+            try:
+                monthly_limit_int = int(monthly_limit)
+                monthly_used_int = int(monthly_used or 0)
+                normalized['free_tier'] = {
+                    'limit': monthly_limit_int,
+                    'used': monthly_used_int,
+                    'remaining': max(monthly_limit_int - monthly_used_int, 0),
+                    'period': 'month',
+                    'limit_type': 'requests',
+                    'source': 'provider'
+                }
+            except (TypeError, ValueError):
+                pass
+
+        return normalized
 
     async def _handle_streaming_request(self, kiro_api_url: str, payload: dict, headers: dict, model: str):
         """Handle streaming request to Kiro API."""

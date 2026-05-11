@@ -1,5 +1,50 @@
 {
   "providers": {
+    "codex": {
+      "id": "codex",
+      "name": "Codex / ChatGPT OAuth2",
+      "endpoint": "https://chatgpt.com/backend-api",
+      "type": "codex",
+      "api_key_required": false,
+      "is_subscription": true,
+      "free_tier_limit": 1,
+      "free_tier_period": "week",
+      "free_tier_limit_type": "requests",
+      "premium_reference_monthly_cost": 20,
+      "free_tier_description": "Codex upstream weekly free-tier equivalent",
+      "rate_limit": 0,
+      "models": []
+    },
+    "kiro": {
+      "id": "kiro",
+      "name": "Kiro CLI",
+      "endpoint": "https://api.kiro.dev",
+      "type": "kiro",
+      "api_key_required": false,
+      "is_subscription": true,
+      "free_tier_limit": 50,
+      "free_tier_period": "month",
+      "free_tier_limit_type": "requests",
+      "premium_reference_monthly_cost": 19,
+      "free_tier_description": "Kiro upstream 50 requests/month free tier",
+      "rate_limit": 0,
+      "models": []
+    },
+    "claude": {
+      "id": "claude",
+      "name": "Claude OAuth2",
+      "endpoint": "https://api.anthropic.com",
+      "type": "claude",
+      "api_key_required": false,
+      "is_subscription": true,
+      "free_tier_limit": 1,
+      "free_tier_period": "month",
+      "free_tier_limit_type": "requests",
+      "premium_reference_monthly_cost": 20,
+      "free_tier_description": "Claude upstream subscription/free-tier equivalent",
+      "rate_limit": 0,
+      "models": []
+    },
     "kilo": {
       "id": "kilo",
       "name": "Kilocode (OAuth2)",
@@ -7,6 +52,11 @@
       "type": "kilo",
       "api_key_required": false,
       "is_subscription": true,
+      "free_tier_limit": 1,
+      "free_tier_period": "month",
+      "free_tier_limit_type": "requests",
+      "premium_reference_monthly_cost": 0,
+      "free_tier_description": "Kilo upstream free-tier/subscription equivalent",
       "rate_limit": 0,
       "kilo_config": {
         "credentials_file": "~/.kilo_credentials.json"

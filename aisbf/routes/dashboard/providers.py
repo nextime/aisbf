@@ -7,7 +7,9 @@ from datetime import datetime, timedelta
 from aisbf.database import DatabaseRegistry
 from aisbf.database import _hash_password as _db_hash_password
 from aisbf import __version__
-from aisbf.studio import build_studio_catalog, stamp_inferred_capabilities
+from aisbf.studio import build_studio_catalog, stamp_inferred_capabilities, serialize_studio_capability_choices, derive_aggregate_capabilities, normalize_capabilities
+from aisbf.studio_adapters import serialize_studio_adapter_choices, serialize_studio_adapter_profile_choices, effective_studio_adapter, infer_studio_adapter_profile
+from aisbf.studio_services import studio_service
 from aisbf.app.templates import url_for, get_base_url
 from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_provider, _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path, _autoselect_json_path, _claude_cli_mode
 from aisbf.app.middleware import _is_local_client
@@ -23,16 +25,80 @@ _server_config = None
 logger = logging.getLogger(__name__)
 
 
+def _serialize_provider_usage_snapshot(snapshot):
+    if not snapshot:
+        return None
+    last_updated = snapshot.get('last_updated')
+    if isinstance(last_updated, datetime):
+        last_updated = last_updated.isoformat()
+    return {
+        'usage_data': snapshot.get('usage_data'),
+        'last_updated': last_updated,
+    }
+
+
+def _provider_model_capability_lookup(providers: dict) -> dict[str, list[str]]:
+    lookup: dict[str, list[str]] = {}
+    for provider_id, provider_config in (providers or {}).items():
+        models = provider_config.get('models') if isinstance(provider_config, dict) else getattr(provider_config, 'models', None)
+        provider_type = provider_config.get('type', 'openai') if isinstance(provider_config, dict) else getattr(provider_config, 'type', 'openai')
+        for model in models or []:
+            stamped = stamp_inferred_capabilities(model if isinstance(model, dict) else model.model_dump(), provider_type)
+            model_name = stamped.get('name') or stamped.get('id')
+            if model_name:
+                lookup[f"{provider_id}/{model_name}"] = normalize_capabilities(stamped.get('studio_capabilities'))
+    return lookup
+
+
+def _rotation_inherited_capabilities(rotation_config: dict, provider_lookup: dict[str, list[str]]) -> dict:
+    capability_sets = []
+    for provider in rotation_config.get('providers') or []:
+        provider_id = provider.get('provider_id')
+        models = provider.get('models') or []
+        for model in models:
+            model_name = model.get('name')
+            if provider_id and model_name:
+                capability_sets.append(provider_lookup.get(f"{provider_id}/{model_name}", []))
+    derived = derive_aggregate_capabilities(capability_sets)
+    rotation_config['capabilities'] = derived.capabilities
+    rotation_config['partial_capabilities'] = derived.partial_capabilities
+    return rotation_config
+
+
+def _autoselect_inherited_capabilities(autoselect_config: dict, provider_lookup: dict[str, list[str]], rotations: dict | None = None) -> dict:
+    capability_sets = []
+    rotations = rotations or {}
+    for model in autoselect_config.get('available_models') or []:
+        model_id = (model.get('model_id') or '').strip()
+        if not model_id:
+            continue
+        if model_id in rotations:
+            rot_caps = normalize_capabilities(rotations[model_id].get('capabilities'))
+            capability_sets.append(rot_caps)
+        else:
+            capability_sets.append(provider_lookup.get(model_id, []))
+    derived = derive_aggregate_capabilities(capability_sets)
+    autoselect_config['capabilities'] = derived.capabilities
+    autoselect_config['partial_capabilities'] = derived.partial_capabilities
+    return autoselect_config
+
+
 def _stamp_provider_models(provider_config: dict) -> dict:
     stamped = dict(provider_config)
+    provider_id = stamped.get("provider_id") or ""
     provider_type = stamped.get("type", "openai")
     models = stamped.get("models")
     if isinstance(models, list):
-        stamped["models"] = [
-            stamp_inferred_capabilities(model, provider_type)
-            if isinstance(model, dict) else model
-            for model in models
-        ]
+        stamped_models = []
+        for model in models:
+            if not isinstance(model, dict):
+                stamped_models.append(model)
+                continue
+            stamped_model = stamp_inferred_capabilities(model, provider_type)
+            stamped_model["studio_adapter"] = effective_studio_adapter(provider_type, stamped_model)
+            stamped_model["studio_adapter_profile"] = infer_studio_adapter_profile(provider_id, provider_type, {**stamped_model, "provider_endpoint": stamped.get("endpoint")})
+            stamped_models.append(stamped_model)
+        stamped["models"] = stamped_models
     return stamped
 
 def init(config, templates, server_config=None):
@@ -226,6 +292,9 @@ async def dashboard_providers(request: Request):
             "session": request.session,
             "__version__": __version__,
             "providers_json": json.dumps(providers_data),
+            "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+            "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+            "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
             "claude_cli_mode": _claude_cli_mode,
             "is_local_client": _is_local_client(request),
             "success": "Configuration saved successfully!" if success else None
@@ -241,6 +310,9 @@ async def dashboard_providers(request: Request):
             "session": request.session,
             "__version__": __version__,
             "user_providers_json": json.dumps(providers_data),
+            "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+            "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+            "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
             "user_id": current_user_id,
             "claude_cli_mode": _claude_cli_mode,
             "is_local_client": _is_local_client(request),
@@ -257,8 +329,9 @@ async def dashboard_studio(request: Request):
         return auth_check
 
     current_user_id = request.session.get("user_id")
-    scope = "admin" if request.session.get("role") == "admin" else "user"
-    db = None if scope == "admin" else DatabaseRegistry.get_config_database()
+    is_config_admin = request.session.get("role") == "admin" and current_user_id is None
+    scope = "admin" if is_config_admin else "user"
+    db = None if is_config_admin else DatabaseRegistry.get_config_database()
     catalog = build_studio_catalog(
         scope=scope,
         owner_id=current_user_id,
@@ -274,6 +347,10 @@ async def dashboard_studio(request: Request):
             "session": request.session,
             "__version__": __version__,
             "studio_bootstrap_json": json.dumps(catalog),
+            "studio_root_path_json": json.dumps("/api/v1") if is_config_admin else json.dumps(f"/api/u/{request.session.get('username', '')}"),
+            "studio_username_json": json.dumps(request.session.get("username", "")),
+            "studio_is_global_admin_json": json.dumps(is_config_admin),
+            "studio_system_prompt_json": json.dumps(studio_service.load_studio_system_prompt(scope, current_user_id)),
             "studio_body_mode": "wide",
         },
     )
@@ -507,6 +584,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
+                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
                     "success": success_msg
@@ -523,6 +603,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "user_providers_json": json.dumps(providers_data),
+                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
@@ -555,6 +638,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_json": json.dumps(providers_data),
+                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
                     "error": f"Invalid JSON: {str(e)}"
@@ -572,6 +658,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "user_providers_json": json.dumps(user_providers),
+                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
+                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
+                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
@@ -934,6 +1023,8 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
     
     try:
         rotations_data = json.loads(config)
+        provider_source = getattr(_config, 'providers', {}) if is_config_admin else {row['provider_id']: row['config'] for row in DatabaseRegistry.get_config_database().get_user_providers(current_user_id)}
+        provider_lookup = _provider_model_capability_lookup(provider_source)
         
         # Apply defaults: if condense_method is set but condense_context is not, default to 80
         if 'rotations' in rotations_data:
@@ -945,6 +1036,7 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
                                 if 'condense_method' in model and model.get('condense_method'):
                                     if 'condense_context' not in model or model.get('condense_context') is None:
                                         model['condense_context'] = 80
+                rotations_data['rotations'][rotation_key] = _rotation_inherited_capabilities(rotation, provider_lookup)
         
         if is_config_admin:
             # Config admin: save to JSON files
@@ -1213,6 +1305,9 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
     
     try:
         autoselect_data = json.loads(config)
+        provider_source = getattr(_config, 'providers', {}) if is_config_admin else {row['provider_id']: row['config'] for row in DatabaseRegistry.get_config_database().get_user_providers(current_user_id)}
+        provider_lookup = _provider_model_capability_lookup(provider_source)
+        rotation_source = getattr(_config, 'rotations', {}) if is_config_admin else {row['rotation_id']: row['config'] for row in DatabaseRegistry.get_config_database().get_user_rotations(current_user_id)}
 
         # Sanitize every autoselect entry before saving
         for key, cfg in autoselect_data.items():
@@ -1225,6 +1320,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             # Default selection_model to "internal" when blank
             if not (cfg.get('selection_model') or '').strip():
                 cfg['selection_model'] = 'internal'
+            autoselect_data[key] = _autoselect_inherited_capabilities(cfg, provider_lookup, rotation_source)
 
         if is_config_admin:
             # Config admin: save to JSON files
@@ -1580,6 +1676,7 @@ async def api_provider_usage(request: Request, provider_id: str):
             if cached:
                 return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data'], "stale": True})
             return JSONResponse({"success": True, "supported": True, "usage": None})
+        usage_data = handler.normalize_usage_data(usage_data)
         db.save_provider_usage(current_user_id, provider_id, usage_data)
         _apply_usage_disable(db, current_user_id, provider_id, usage_data)
         return JSONResponse({"success": True, "supported": True, "usage": usage_data})
@@ -1871,18 +1968,48 @@ async def dashboard_analytics(
         provider_filter=effective_provider_filter, model_filter=effective_model_filter,
         rotation_filter=rotation_filter, autoselect_filter=autoselect_filter
     )
+    optimization_savings = analytics.get_savings_overview(
+        from_datetime,
+        to_datetime,
+        user_filter=user_filter_int,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter
+    )
 
     date_range_usage = None
     if from_datetime or to_datetime:
         start = from_datetime or (datetime.now() - timedelta(days=1))
         end = to_datetime or datetime.now()
         date_range_usage = analytics.get_token_usage_by_date_range(
-            effective_provider_filter, start, end, user_filter=user_filter_int)
+            effective_provider_filter,
+            start,
+            end,
+            user_filter=user_filter_int,
+            model_filter=effective_model_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter
+        )
 
     rotation_breakdown = analytics.get_rotation_breakdown(
-        from_datetime, to_datetime, user_filter=user_filter_int, rotation_filter=rotation_filter)
+        from_datetime,
+        to_datetime,
+        user_filter=user_filter_int,
+        rotation_filter=rotation_filter,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
+        autoselect_filter=autoselect_filter
+    )
     autoselect_breakdown = analytics.get_autoselect_breakdown(
-        from_datetime, to_datetime, user_filter=user_filter_int, autoselect_filter=autoselect_filter)
+        from_datetime,
+        to_datetime,
+        user_filter=user_filter_int,
+        autoselect_filter=autoselect_filter,
+        provider_filter=effective_provider_filter,
+        model_filter=effective_model_filter,
+        rotation_filter=rotation_filter
+    )
 
     is_config_admin = is_admin and current_user_id is None
 
@@ -1904,7 +2031,7 @@ async def dashboard_analytics(
             "model_performance": model_performance,
             "cost_overview": cost_overview,
             "recommendations": [],
-            "optimization_savings": 0,
+            "optimization_savings": optimization_savings,
             "selected_time_range": time_range,
             "from_date": from_date,
             "to_date": to_date,
@@ -1923,5 +2050,70 @@ async def dashboard_analytics(
             "currency_symbol": db.get_currency_settings().get('currency_symbol', '$'),
             "rotation_breakdown": rotation_breakdown,
             "autoselect_breakdown": autoselect_breakdown,
+        }
+    )
+
+
+@router.get("/dashboard/analytics/provider-quotas", response_class=HTMLResponse)
+async def dashboard_analytics_provider_quotas(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    db = DatabaseRegistry.get_config_database()
+    current_user_id = request.session.get('user_id')
+    is_admin = request.session.get('role') == 'admin'
+
+    provider_ids = []
+    if _config and getattr(_config, 'providers', None):
+        provider_ids.extend(list(_config.providers.keys()))
+
+    if current_user_id is not None:
+        try:
+            for provider in db.get_user_providers(current_user_id):
+                provider_id = provider.get('provider_id')
+                if provider_id and provider_id not in provider_ids:
+                    provider_ids.append(provider_id)
+        except Exception:
+            pass
+
+    provider_rows = []
+    analytics = None
+    try:
+        from aisbf.analytics import get_analytics
+        analytics = get_analytics(db)
+    except Exception:
+        analytics = None
+
+    for provider_id in sorted(set(provider_ids)):
+        global_snapshot = _serialize_provider_usage_snapshot(db.get_provider_usage(None, provider_id)) if is_admin else None
+        user_snapshot = _serialize_provider_usage_snapshot(db.get_provider_usage(current_user_id, provider_id)) if current_user_id is not None else None
+
+        free_tier_info = analytics._get_provider_free_tier_info(provider_id) if analytics else None
+        normalized_quota = None
+        if analytics:
+            source_usage = None
+            if user_snapshot and user_snapshot.get('usage_data'):
+                source_usage = user_snapshot['usage_data']
+            elif global_snapshot and global_snapshot.get('usage_data'):
+                source_usage = global_snapshot['usage_data']
+            normalized_quota = analytics._derive_quota_from_usage(provider_id, source_usage)
+
+        provider_rows.append({
+            'provider_id': provider_id,
+            'free_tier_info': free_tier_info,
+            'normalized_quota': normalized_quota,
+            'global_snapshot': global_snapshot,
+            'user_snapshot': user_snapshot,
+        })
+
+    return _templates.TemplateResponse(
+        request=request,
+        name="dashboard/provider_quotas.html",
+        context={
+            'request': request,
+            'session': request.session,
+            'is_admin': is_admin,
+            'provider_rows': provider_rows,
         }
     )

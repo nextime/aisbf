@@ -14,6 +14,8 @@ _IPNet  = Union[ipaddress.IPv4Network, ipaddress.IPv6Network]
 # failures are not cached so they are retried on the next request.
 _CACHE_TTL = 30 * 24 * 3600  # 30 days
 _subnet_cache: Dict[str, Tuple[str, float]] = {}
+_failure_cache: Dict[str, float] = {}
+_FAILURE_TTL = 15 * 60
 
 
 def _fallback_prefix(addr: _IPAddr) -> _IPNet:
@@ -69,12 +71,25 @@ async def get_ip_country(ip: str) -> Optional[str]:
     if cached is not None:
         return cached
 
+    failure_expires = _failure_cache.get(ip)
+    if failure_expires and time.time() < failure_expires:
+        logger.debug("geo lookup: skipping %s due to recent failure backoff", ip)
+        return None
+
     logger.debug("geo lookup: querying ipapi.co for %s", ip)
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             response = await client.get(f"https://ipapi.co/{ip}/json/")
             if response.status_code != 200:
                 logger.debug("geo lookup: %s returned HTTP %d", ip, response.status_code)
+                retry_after = response.headers.get('Retry-After') or response.headers.get('retry-after')
+                wait_seconds = _FAILURE_TTL
+                if retry_after:
+                    try:
+                        wait_seconds = max(int(retry_after), _FAILURE_TTL)
+                    except (TypeError, ValueError):
+                        pass
+                _failure_cache[ip] = time.time() + wait_seconds
                 return None
 
             data = response.json()
@@ -99,6 +114,7 @@ async def get_ip_country(ip: str) -> Optional[str]:
 
     except Exception as exc:
         logger.debug("geo lookup: %s failed with %s: %s", ip, type(exc).__name__, exc)
+        _failure_cache[ip] = time.time() + _FAILURE_TTL
         return None
 
 

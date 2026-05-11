@@ -155,6 +155,7 @@ setup(
             'config/autoselect.md',
             'config/condensation_conversational.md',
             'config/condensation_semantic.md',
+            'config/STUDIO_SYSTEM.md',
             'config/aisbf.json',
         ]),
         # Install aisbf package to share directory for venv installation
@@ -307,6 +308,7 @@ setup(
             'templates/dashboard/providers.html',
             'templates/dashboard/pricing.html',
             'templates/dashboard/paypal_connect.html',
+            'templates/dashboard/provider_quotas.html',
             'templates/dashboard/error.html',
             'templates/dashboard/forgot_password.html',
             'templates/dashboard/rate_limits.html',

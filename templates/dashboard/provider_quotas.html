@@ -1,0 +1,69 @@
+{% extends "base.html" %}
+
+{% block title %}Provider Quotas - AISBF Dashboard{% endblock %}
+
+{% block content %}
+<h2 style="margin-bottom: 20px;">Provider Quota Debug</h2>
+<p style="color: var(--color-muted); margin-bottom: 20px;">
+    Debug view for normalized provider quota/free-tier data persisted from upstream usage endpoints. This page is intentionally not linked from the main navigation.
+</p>
+
+{% if provider_rows %}
+<table>
+    <tr>
+        <th>Provider</th>
+        <th>Configured Free Tier</th>
+        <th>Normalized Runtime Quota</th>
+        <th>User Snapshot</th>
+        {% if is_admin %}<th>Global Snapshot</th>{% endif %}
+    </tr>
+    {% for row in provider_rows %}
+    <tr>
+        <td><strong>{{ row.provider_id }}</strong></td>
+        <td>
+            {% if row.free_tier_info %}
+            <div><strong>{{ row.free_tier_info.description or row.provider_id }}</strong></div>
+            <div style="color: var(--color-muted); font-size: 13px;">
+                {{ row.free_tier_info.limit }}/{{ row.free_tier_info.period }} {{ row.free_tier_info.limit_type }}
+                · {{ row.free_tier_info.source }}
+            </div>
+            {% else %}
+            <span style="color: var(--color-muted);">N/A</span>
+            {% endif %}
+        </td>
+        <td>
+            {% if row.normalized_quota %}
+            <div class="code">{{ row.normalized_quota | tojson(indent=2) }}</div>
+            {% else %}
+            <span style="color: var(--color-muted);">N/A</span>
+            {% endif %}
+        </td>
+        <td>
+            {% if row.user_snapshot %}
+            <div style="margin-bottom: 8px; color: var(--color-muted); font-size: 13px;">{{ row.user_snapshot.last_updated or 'unknown time' }}</div>
+            <div class="code">{{ row.user_snapshot.usage_data | tojson(indent=2) }}</div>
+            {% else %}
+            <span style="color: var(--color-muted);">N/A</span>
+            {% endif %}
+        </td>
+        {% if is_admin %}
+        <td>
+            {% if row.global_snapshot %}
+            <div style="margin-bottom: 8px; color: var(--color-muted); font-size: 13px;">{{ row.global_snapshot.last_updated or 'unknown time' }}</div>
+            <div class="code">{{ row.global_snapshot.usage_data | tojson(indent=2) }}</div>
+            {% else %}
+            <span style="color: var(--color-muted);">N/A</span>
+            {% endif %}
+        </td>
+        {% endif %}
+    </tr>
+    {% endfor %}
+</table>
+{% else %}
+<p style="color: var(--color-muted);">No provider quota data available.</p>
+{% endif %}
+
+<div style="margin-top: 24px; display: flex; gap: 10px; flex-wrap: wrap;">
+    <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary">Back to Analytics</a>
+</div>
+{% endblock %}

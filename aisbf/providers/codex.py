@@ -996,7 +996,24 @@ class CodexProviderHandler(BaseProviderHandler):
                 data = response.json()
                 import json as _json
                 logger.debug(f"CodexProviderHandler: Usage raw body for {self.provider_id}:\n{_json.dumps(data, indent=2)}")
-                return data
+                normalized = dict(data)
+                weekly_limit = data.get('weekly_requests_limit') or data.get('weekly_limit') or data.get('free_requests_per_week')
+                weekly_used = data.get('weekly_requests_used') or data.get('used_requests') or data.get('requests_used')
+                if weekly_limit is not None:
+                    try:
+                        weekly_limit_int = int(weekly_limit)
+                        weekly_used_int = int(weekly_used or 0)
+                        normalized['free_tier'] = {
+                            'limit': weekly_limit_int,
+                            'used': weekly_used_int,
+                            'remaining': max(weekly_limit_int - weekly_used_int, 0),
+                            'period': 'week',
+                            'limit_type': 'requests',
+                            'source': 'provider'
+                        }
+                    except (TypeError, ValueError):
+                        pass
+                return self.normalize_usage_data(normalized)
         except Exception as e:
             logger.warning(f"CodexProviderHandler: Failed to fetch usage: {e}")
             return None
