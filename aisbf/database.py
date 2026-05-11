@@ -887,6 +887,41 @@ class DatabaseManager:
             ''', (username, email, password_hash, role, created_by, 1 if email_verified else 0, display_name or username))
             conn.commit()
             return cursor.lastrowid
+
+    def delete_stale_unverified_signup_users(self, inactivity_days: int = 14) -> int:
+        """
+        Delete self-registered users who never logged in within the grace period.
+
+        Args:
+            inactivity_days: Number of days after registration before deletion.
+
+        Returns:
+            Number of deleted users.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+
+            if self.db_type == 'sqlite':
+                cutoff_expr = f"datetime('now', '-' || {placeholder} || ' days')"
+            else:
+                cutoff_expr = f"DATE_SUB(NOW(), INTERVAL {placeholder} DAY)"
+
+            cursor.execute(f'''
+                SELECT id
+                FROM users
+                WHERE role = 'user'
+                  AND created_by IS NULL
+                  AND last_login IS NULL
+                  AND email_verified = 0
+                  AND created_at <= {cutoff_expr}
+            ''', (inactivity_days,))
+            user_ids = [row[0] for row in cursor.fetchall()]
+
+            for user_id in user_ids:
+                self.delete_user(user_id)
+
+            return len(user_ids)
     
     def get_user_by_email(self, email: str) -> Optional[Dict]:
         """

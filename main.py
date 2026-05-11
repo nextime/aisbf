@@ -349,6 +349,14 @@ async def _run_startup() -> None:
     # Initialize routers with config/templates
     _init_all_routers()
 
+    try:
+        from aisbf.routes.auth import cleanup_stale_signup_users
+        deleted_stale_users = cleanup_stale_signup_users()
+        if deleted_stale_users:
+            logger.info(f"Startup cleanup removed {deleted_stale_users} stale self-registered user(s)")
+    except Exception as e:
+        logger.error(f"Failed to clean up stale self-registered users: {e}")
+
     # Background tasks
     from aisbf.app.model_cache import prefetch_global_provider_models, refresh_model_cache
     asyncio.create_task(prefetch_global_provider_models(config))

@@ -31,6 +31,15 @@ def init(config, templates, server_config):
 logger = logging.getLogger(__name__)
 
 
+def cleanup_stale_signup_users() -> int:
+    """Delete self-registered users who never logged in within 14 days."""
+    db = DatabaseRegistry.get_config_database()
+    deleted_count = db.delete_stale_unverified_signup_users(inactivity_days=14)
+    if deleted_count:
+        logger.info(f"Deleted {deleted_count} stale self-registered user(s) with no login activity")
+    return deleted_count
+
+
 @router.get("/dashboard/profile-pic")
 async def dashboard_profile_pic(request: Request):
     """Serve the logged-in user's profile picture from the database."""
@@ -129,6 +138,8 @@ async def auth_logincheck(request: Request):
 async def dashboard_login(request: Request, username: str = Form(...), password: str = Form(...), remember_me: bool = Form(False)):
     """Handle dashboard login"""
     client_ip = request.client.host if request.client else "unknown"
+
+    cleanup_stale_signup_users()
 
     if _login_rate_limit_check(client_ip, username):
         return RedirectResponse(
