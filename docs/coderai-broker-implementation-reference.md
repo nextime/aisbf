@@ -607,6 +607,8 @@ The resulting session snapshot tracks:
 - average total tokens
 - success rate
 
+CoderAI should prefer sending exact `latency_ms` and `tokens_per_second` whenever it can measure them internally. AISBF estimation is only a fallback for implementations that cannot yet provide exact metrics.
+
 ### Error
 
 ```json

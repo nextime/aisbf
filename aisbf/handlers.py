@@ -1527,7 +1527,7 @@ class RequestHandler:
                     enhanced_models = []
                     current_time = int(time_module.time())
                     for model in models:
-                        model_dict = model.dict()
+                        model_dict = model.model_dump() if hasattr(model, 'model_dump') else model.dict()
                         model_name = model_dict.get('id', '')
                         
                         # Add OpenAI-compatible required fields
@@ -1627,7 +1627,7 @@ class RequestHandler:
             enhanced_models = []
             current_time = int(time_module.time())
             for model in models:
-                model_dict = model.dict()
+                model_dict = model.model_dump() if hasattr(model, 'model_dump') else model.dict()
                 model_name = model_dict.get('id', '')
                 
                 # Add OpenAI-compatible required fields

@@ -844,7 +844,8 @@ class BaseProviderHandler:
         # Initialize adaptive rate limiter
         adaptive_config = None
         if config.aisbf and config.aisbf.adaptive_rate_limiting:
-            adaptive_config = config.aisbf.adaptive_rate_limiting.dict()
+            adaptive_obj = config.aisbf.adaptive_rate_limiting
+            adaptive_config = adaptive_obj.model_dump() if hasattr(adaptive_obj, 'model_dump') else adaptive_obj.dict()
         self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config, user_id)
         # Load rate-limit disabled state from cache (persists across restarts)
         self._load_disabled_until_from_cache()

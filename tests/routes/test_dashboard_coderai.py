@@ -248,9 +248,26 @@ def test_dashboard_providers_page_includes_broker_status_for_coderai(monkeypatch
             StubWebSocket(),
             "coderai",
             "workstation-01",
-            metadata={"owner_user_id": None, "endpoint": "ws://nat-client", "transport": "websocket", "studio_endpoints": ["v1/images/generate"]},
+            metadata={
+                "owner_user_id": None,
+                "endpoint": "ws://nat-client",
+                "transport": "websocket",
+                "studio_endpoints": ["v1/images/generate"],
+                "gpus": [{"name": "RTX 4090", "total_vram_mb": 24576, "available_vram_mb": 20480}],
+                "gpu_count": 1,
+                "total_vram_mb": 24576,
+                "available_vram_mb": 20480,
+            },
             capabilities={"studio": {"enabled": True}},
         )
+        session = await broker.get_session("coderai", "workstation-01")
+        session.recent_requests.append({
+            "latency_ms": 842.0,
+            "tokens_per_second": 54.6,
+            "total_tokens": 460,
+            "success": True,
+            "recorded_at": 0,
+        })
 
     asyncio.run(_clear_broker_sessions())
     asyncio.run(scenario())
@@ -259,7 +276,8 @@ def test_dashboard_providers_page_includes_broker_status_for_coderai(monkeypatch
         assert response.status_code == 200
         assert "Broker Session Status" in response.text
         assert "workstation-01" in response.text
-        assert "workstation-01" in response.text
+        assert "RTX 4090" in response.text
+        assert "54.6 tok/s" in response.text
     finally:
         asyncio.run(_clear_broker_sessions())
         if original_provider is None:

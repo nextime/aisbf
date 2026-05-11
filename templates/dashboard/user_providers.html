@@ -173,6 +173,32 @@ window.AISBF_PROVIDERS_PAGE = { serverUrl: window.location.origin + BASE_PATH };
 // Global cache settings cache (pun intended)
 let cacheSettings = [];
 
+function formatVramMb(value) {
+    if (value == null || value === '') return 'Unknown';
+    const mb = Number(value);
+    if (!Number.isFinite(mb)) return 'Unknown';
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${Math.round(mb)} MB`;
+}
+
+function formatPerfNumber(value, digits = 1, suffix = '') {
+    if (value == null || value === '') return 'Unknown';
+    const num = Number(value);
+    if (!Number.isFinite(num)) return 'Unknown';
+    return `${num.toFixed(digits)}${suffix}`;
+}
+
+function renderGpuSummary(metadata) {
+    const gpus = Array.isArray(metadata?.gpus) ? metadata.gpus : [];
+    if (!gpus.length) return 'None reported';
+    return gpus.map((gpu, index) => {
+        const name = gpu?.name || `GPU ${gpu?.index ?? index}`;
+        const free = formatVramMb(gpu?.available_vram_mb);
+        const total = formatVramMb(gpu?.total_vram_mb);
+        return `${name} (${free} free / ${total} total)`;
+    }).join('; ');
+}
+
 async function setCacheSetting(provider_id, model_name, enabled) {
     try {
         const response = await fetch('{{ url_for(request, "/dashboard/api/cache-settings") }}', {
@@ -805,6 +831,8 @@ function renderProviderDetails(key) {
     const brokerSession = coderaiConfig.broker_session || {};
     const brokerConnected = !!brokerSession.connected;
     const ownerLabel = brokerSession.owner_user_id == null ? 'Global admin' : `User #${brokerSession.owner_user_id}`;
+    const brokerMetadata = brokerSession.metadata || {};
+    const performance = brokerSession.performance || {};
     
     // Build authentication fields based on provider type
     let authFieldsHtml = '';
@@ -1077,6 +1105,14 @@ function renderProviderDetails(key) {
                         <div><strong>Connected At:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.connected_at))}</div>
                         <div><strong>Remote Endpoint:</strong> ${escHtmlAttr(brokerSession.endpoint || 'Unknown')}</div>
                         <div><strong>Transport:</strong> ${escHtmlAttr(brokerSession.transport || 'broker')}</div>
+                        <div><strong>GPU Count:</strong> ${escHtmlAttr(String(brokerMetadata.gpu_count ?? (Array.isArray(brokerMetadata.gpus) ? brokerMetadata.gpus.length : 0) || '0'))}</div>
+                        <div><strong>VRAM:</strong> ${escHtmlAttr(formatVramMb(brokerMetadata.available_vram_mb))} free / ${escHtmlAttr(formatVramMb(brokerMetadata.total_vram_mb))} total</div>
+                        <div><strong>GPUs:</strong> ${escHtmlAttr(renderGpuSummary(brokerMetadata))}</div>
+                        <div><strong>Avg Latency:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_latency_ms, 1, ' ms'))}</div>
+                        <div><strong>Avg Throughput:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_tokens_per_second, 2, ' tok/s'))}</div>
+                        <div><strong>Avg Tokens:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_total_tokens, 1))}</div>
+                        <div><strong>Success Rate:</strong> ${escHtmlAttr(formatPerfNumber((performance.success_rate ?? 0) * 100, 1, '%'))}</div>
+                        <div><strong>Samples:</strong> ${escHtmlAttr(String(performance.sample_count ?? 0))} / ${escHtmlAttr(String(performance.window_size ?? 100))}</div>
                         <div><strong>Studio Endpoints:</strong> ${escHtmlAttr((brokerSession.studio_endpoints || []).join(', ') || 'None advertised')}</div>
                     </div>
                 </div>
