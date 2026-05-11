@@ -26,25 +26,77 @@ def _is_broker_only_coderai(provider_config) -> bool:
     return bool(coderai_config.get('broker_mode', False))
 
 
+def _cache_key_for_provider(provider_id: str, user_id: Optional[int] = None) -> str:
+    return f"{provider_id}:{user_id}" if user_id is not None else provider_id
+
+
+def _endpoint_cache_key(provider_config) -> Optional[str]:
+    if provider_config is None:
+        return None
+    prov_type = getattr(provider_config, 'type', '') or ''
+    endpoint = getattr(provider_config, 'endpoint', '') or ''
+    if not prov_type and not endpoint:
+        return None
+    return f"{prov_type}:{endpoint}"
+
+
+def _get_cached_provider_models(cache_key: str) -> Optional[list]:
+    cached_at = _model_cache_timestamps.get(cache_key)
+    if cached_at is None:
+        return None
+    if time.time() - cached_at >= _cache_refresh_interval:
+        return None
+    return _model_cache.get(cache_key)
+
+
+def _store_provider_models_in_cache(cache_key: str, models: list, cached_at: Optional[float] = None) -> float:
+    now = cached_at if cached_at is not None else time.time()
+    _model_cache[cache_key] = models
+    _model_cache_timestamps[cache_key] = now
+    return now
+
+
+def _get_cached_endpoint_models(endpoint_key: Optional[str]) -> Optional[tuple[list, float]]:
+    if not endpoint_key:
+        return None
+    cached = _endpoint_model_cache.get(endpoint_key)
+    if not cached:
+        return None
+    cached_models, cached_at = cached
+    if time.time() - cached_at >= _cache_refresh_interval:
+        return None
+    return cached_models, cached_at
+
+
+def _store_endpoint_models_in_cache(endpoint_key: Optional[str], models: list, cached_at: float) -> None:
+    if not endpoint_key:
+        return
+    _endpoint_model_cache[endpoint_key] = (models, cached_at)
+
+
 async def fetch_provider_models(provider_id: str, config, user_id: Optional[int] = None) -> list:
     global _model_cache, _model_cache_timestamps, _endpoint_model_cache
 
-    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
+    cache_key = _cache_key_for_provider(provider_id, user_id)
     try:
-        if not user_id and config is not None:
+        cached_models = _get_cached_provider_models(cache_key)
+        if cached_models is not None:
+            return cached_models
+
+        provider_config = None
+        endpoint_key = None
+        if config is not None:
             try:
-                prov_cfg = config.get_provider(provider_id)
-                prov_type = getattr(prov_cfg, 'type', '')
-                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
-                endpoint_key = f"{prov_type}:{endpoint}"
-                if endpoint_key and endpoint_key in _endpoint_model_cache:
-                    cached_models, cached_at = _endpoint_model_cache[endpoint_key]
-                    if time.time() - cached_at < _cache_refresh_interval:
-                        _model_cache[cache_key] = cached_models
-                        _model_cache_timestamps[cache_key] = cached_at
-                        return cached_models
+                provider_config = config.get_provider(provider_id)
+                endpoint_key = _endpoint_cache_key(provider_config) if user_id is None else None
             except Exception:
-                pass
+                provider_config = None
+
+        endpoint_cached = _get_cached_endpoint_models(endpoint_key)
+        if endpoint_cached is not None:
+            cached_models, cached_at = endpoint_cached
+            _store_provider_models_in_cache(cache_key, cached_models, cached_at)
+            return cached_models
 
         from aisbf.handlers import RequestHandler
         from starlette.requests import Request as StarletteRequest
@@ -56,20 +108,8 @@ async def fetch_provider_models(provider_id: str, config, user_id: Optional[int]
 
         models = await request_handler.handle_model_list(dummy_request, provider_id)
 
-        now = time.time()
-        _model_cache[cache_key] = models
-        _model_cache_timestamps[cache_key] = now
-
-        if not user_id and config is not None:
-            try:
-                prov_cfg = config.get_provider(provider_id)
-                prov_type = getattr(prov_cfg, 'type', '')
-                endpoint = getattr(prov_cfg, 'endpoint', '') or ''
-                endpoint_key = f"{prov_type}:{endpoint}"
-                if endpoint_key and endpoint_key not in _endpoint_model_cache:
-                    _endpoint_model_cache[endpoint_key] = (models, now)
-            except Exception:
-                pass
+        now = _store_provider_models_in_cache(cache_key, models)
+        _store_endpoint_models_in_cache(endpoint_key, models, now)
 
         logger.info(f"Cached {len(models)} models from provider: {provider_id}")
         return models
@@ -127,24 +167,21 @@ async def get_provider_models(provider_id: str, provider_config, config, user_id
             for model in provider_config.models
         ]
 
-    cache_key = f"{provider_id}:{user_id}" if user_id else provider_id
-    if cache_key in _model_cache:
-        cache_age = time.time() - _model_cache_timestamps.get(cache_key, 0)
-        if cache_age < _cache_refresh_interval:
-            cached_models = _model_cache[cache_key]
-            if cached_models:
-                models = []
-                for model in cached_models:
-                    mc = model.copy()
-                    mc['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
-                    mc.setdefault('object', 'model')
-                    mc.setdefault('created', current_time)
-                    mc.setdefault('owned_by', provider_config.name)
-                    mc['provider'] = provider_id
-                    mc['type'] = 'provider'
-                    mc['source'] = 'api_cache'
-                    models.append(mc)
-                return models
+    cache_key = _cache_key_for_provider(provider_id, user_id)
+    cached_models = _get_cached_provider_models(cache_key)
+    if cached_models:
+        models = []
+        for model in cached_models:
+            mc = model.copy()
+            mc['id'] = f"{provider_id}/{model.get('id', model.get('name', ''))}"
+            mc.setdefault('object', 'model')
+            mc.setdefault('created', current_time)
+            mc.setdefault('owned_by', provider_config.name)
+            mc['provider'] = provider_id
+            mc['type'] = 'provider'
+            mc['source'] = 'api_cache'
+            models.append(mc)
+        return models
 
     api_key = getattr(provider_config, 'api_key', None)
     api_key_required = getattr(provider_config, 'api_key_required', True)
