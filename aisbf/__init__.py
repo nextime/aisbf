@@ -42,6 +42,7 @@ from .providers import (
     ClaudeProviderHandler,
     KiloProviderHandler,
     OllamaProviderHandler,
+    CoderAIProviderHandler,
     QwenProviderHandler,
     get_provider_handler,
     PROVIDER_HANDLERS
@@ -77,6 +78,7 @@ __all__ = [
     "OpenAIProviderHandler",
     "AnthropicProviderHandler",
     "OllamaProviderHandler",
+    "CoderAIProviderHandler",
     "ClaudeProviderHandler",
     "KiloProviderHandler",
     "KiroProviderHandler",

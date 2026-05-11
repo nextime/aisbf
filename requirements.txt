@@ -8,6 +8,7 @@ passlib[bcrypt]
 python-dotenv
 google-genai
 openai
+websockets
 anthropic
 langchain-text-splitters
 tiktoken

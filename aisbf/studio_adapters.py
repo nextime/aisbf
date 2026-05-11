@@ -46,6 +46,10 @@ def _is_kiro_like(signature: str, provider_type: str) -> bool:
     return provider_type == "kiro" or any(token in signature for token in ["kiro", "amazon q", "amazonaws.com"])
 
 
+def _is_coderai_like(signature: str, provider_type: str) -> bool:
+    return provider_type == "coderai" or "coderai" in signature
+
+
 def _media_hint(body: Dict[str, Any], *keys: str) -> str:
     bits: list[str] = []
     for key in keys:
@@ -108,7 +112,7 @@ def infer_studio_adapter(provider_type: str, model: Optional[Dict[str, Any]] = N
         return "google_gemini_media"
     if provider_type == "ollama":
         return "ollama_openai_compat"
-    if provider_type in {"openai", "qwen", "codex", "kilocode", "kilo", "claude", "kiro"}:
+    if provider_type in {"openai", "qwen", "codex", "kilocode", "kilo", "claude", "kiro", "coderai"}:
         media_caps = {
             "image_generation", "image_edit", "video_generation", "audio_generation",
             "audio_to_audio", "speech_generation", "transcription", "3d_generation",
@@ -156,9 +160,11 @@ def infer_studio_adapter_profile(provider_id: str, provider_type: str, model_met
         return "openai_responses_style"
     if _is_kiro_like(signature, provider_type):
         return "openai_default"
+    if _is_coderai_like(signature, provider_type):
+        return "openai_default"
     if "openrouter" in signature:
         return "openrouter_media"
-    if provider_type in {"openai", "codex", "qwen", "kilocode", "kilo", "claude"}:
+    if provider_type in {"openai", "codex", "qwen", "kilocode", "kilo", "claude", "coderai"}:
         return "openai_responses_style" if any(token in provider_id for token in ["responses", "azure", "github"]) else "openai_default"
     return "passthrough"
 

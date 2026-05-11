@@ -2,6 +2,7 @@ from fastapi import APIRouter, Request, Form, Query, HTTPException, UploadFile, 
 from fastapi.responses import JSONResponse, RedirectResponse, HTMLResponse, Response, StreamingResponse, FileResponse
 from typing import Optional
 import json, logging, os, time, re
+import secrets
 from pathlib import Path
 from datetime import datetime, timedelta
 from aisbf.database import DatabaseRegistry
@@ -99,6 +100,70 @@ def _stamp_provider_models(provider_config: dict) -> dict:
             stamped_model["studio_adapter_profile"] = infer_studio_adapter_profile(provider_id, provider_type, {**stamped_model, "provider_endpoint": stamped.get("endpoint")})
             stamped_models.append(stamped_model)
         stamped["models"] = stamped_models
+    return stamped
+
+
+def _ensure_coderai_token(provider_config: dict) -> dict:
+    stamped = dict(provider_config or {})
+    if stamped.get('type') != 'coderai':
+        return stamped
+    coderai_config = stamped.get('coderai_config')
+    if not isinstance(coderai_config, dict):
+        coderai_config = {}
+    if 'registration_token' not in coderai_config:
+        coderai_config['registration_token'] = secrets.token_urlsafe(32)
+    stamped['coderai_config'] = coderai_config
+    return stamped
+
+
+def _validate_coderai_provider_config(provider_id: str, provider_config: dict) -> None:
+    if not isinstance(provider_config, dict) or provider_config.get('type') != 'coderai':
+        return
+    coderai_config = provider_config.get('coderai_config') or {}
+    broker_enabled = coderai_config.get('broker_enabled', True)
+    broker_mode = coderai_config.get('broker_mode', False)
+    registration_token = coderai_config.get('registration_token')
+    token_provided = isinstance(registration_token, str) and registration_token.strip() != ''
+    if isinstance(registration_token, str):
+        registration_token = registration_token.strip()
+        coderai_config['registration_token'] = registration_token
+    if (broker_enabled or broker_mode) and not token_provided:
+        raise ValueError(f"CoderAI provider '{provider_id}' requires a registration token when broker sessions are enabled")
+    provider_config['coderai_config'] = coderai_config
+
+
+async def _load_coderai_broker_status_map() -> dict[str, dict]:
+    from aisbf.coderai_broker import broker
+
+    status_map: dict[str, dict] = {}
+    for session in await broker.list_sessions():
+        provider_id = session.get('provider_id')
+        if not provider_id:
+            continue
+        status_map[provider_id] = session
+    return status_map
+
+
+def _augment_provider_broker_status(provider_id: str, provider_config: dict, broker_status_map: dict[str, dict]) -> dict:
+    stamped = dict(provider_config)
+    if stamped.get('type') != 'coderai':
+        return stamped
+    status = broker_status_map.get(provider_id)
+    coderai_config = dict(stamped.get('coderai_config') or {})
+    coderai_config['broker_session'] = {
+        'connected': bool(status),
+        'client_id': status.get('client_id') if status else None,
+        'session_id': status.get('session_id') if status else None,
+        'connected_at': status.get('connected_at') if status else None,
+        'last_seen': status.get('last_seen') if status else None,
+        'owner_user_id': ((status or {}).get('metadata') or {}).get('owner_user_id'),
+        'transport': ((status or {}).get('metadata') or {}).get('transport'),
+        'endpoint': ((status or {}).get('metadata') or {}).get('endpoint'),
+        'studio_endpoints': ((status or {}).get('metadata') or {}).get('studio_endpoints') or [],
+        'capabilities': (status or {}).get('capabilities') or {},
+        'connection_state': ((status or {}).get('metadata') or {}).get('connection_state') or ('connected' if status else 'disconnected'),
+    }
+    stamped['coderai_config'] = coderai_config
     return stamped
 
 def init(config, templates, server_config=None):
@@ -243,6 +308,8 @@ async def dashboard_providers(request: Request):
     current_user_id = request.session.get('user_id')
     is_config_admin = current_user_id is None
     
+    broker_status_map = await _load_coderai_broker_status_map()
+
     if is_config_admin:
         # Config admin: load from JSON files
         config_path = Path.home() / '.aisbf' / 'providers.json'
@@ -258,6 +325,10 @@ async def dashboard_providers(request: Request):
         else:
             # Fallback for flat structure (backward compatibility)
             providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+        providers_data = {
+            provider_id: _augment_provider_broker_status(provider_id, _ensure_coderai_token(provider_config), broker_status_map)
+            for provider_id, provider_config in providers_data.items()
+        }
     else:
         # Database user: load from database
         db = DatabaseRegistry.get_config_database()
@@ -277,6 +348,12 @@ async def dashboard_providers(request: Request):
                 provider['updated_at'] = provider['updated_at'].isoformat() if hasattr(provider['updated_at'], 'isoformat') else str(provider['updated_at'])
 
         # Always pass raw user providers format to the template (array)
+        for provider in user_providers:
+            provider['config'] = _augment_provider_broker_status(
+                provider['provider_id'],
+                _ensure_coderai_token(provider['config']),
+                broker_status_map,
+            )
         providers_data = user_providers
     
     # Check for success parameter
@@ -406,8 +483,9 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
         if api_key and api_key.startswith('YOUR_'):
             api_key = ''
         
-        # Check if this is a Kilo provider (by type or by endpoint URL)
+        # Check if this is a Kilo or CoderAI provider (by type or by endpoint URL)
         is_kilo_provider = provider_type in ('kilo', 'kilocode')
+        is_coderai_provider = provider_type == 'coderai'
         if not is_kilo_provider:
             # Also check endpoint URL for Kilo domains
             kilo_domains = ['kilocode.ai', 'api.kilo.ai', 'kilo.ai']
@@ -415,6 +493,27 @@ async def _auto_detect_provider_models(provider_key: str, provider: dict) -> lis
                 if domain in endpoint:
                     is_kilo_provider = True
                     break
+
+        if is_coderai_provider:
+            from aisbf.providers.coderai import CoderAIProviderHandler
+            handler = CoderAIProviderHandler(provider_key, api_key=api_key or None, provider_config=provider)
+            models = await handler.get_models()
+            detected_models = []
+            for model in models:
+                detected_models.append({
+                    'name': model.name,
+                    'rate_limit': 0,
+                    'max_request_tokens': int(model.context_length) if model.context_length else 100000,
+                    'context_size': int(model.context_length) if model.context_length else 100000,
+                    'architecture': model.architecture,
+                    'pricing': model.pricing,
+                    'supported_parameters': model.supported_parameters,
+                    'default_parameters': model.default_parameters,
+                    'description': model.description,
+                })
+            detected_models = [stamp_inferred_capabilities(model, provider_type) for model in detected_models]
+            logger.info(f"Auto-detected {len(detected_models)} models for CoderAI provider '{provider_key}'")
+            return detected_models
         
         # For Kilo providers, try to get OAuth2 token
         if is_kilo_provider:
@@ -528,6 +627,8 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         
         # Apply defaults: if condense_method is set but condense_context is not, default to 80
         for provider_key, provider in providers_data.items():
+            provider = _ensure_coderai_token(provider)
+            _validate_coderai_provider_config(provider_key, provider)
             if 'models' in provider and isinstance(provider['models'], list):
                 for model in provider['models']:
                     if 'condense_method' in model and model.get('condense_method'):
@@ -1576,6 +1677,8 @@ async def api_provider_save(request: Request):
             return JSONResponse({"success": False, "error": "provider_id required"}, status_code=400)
 
         _apply_condense_defaults_provider(provider_config)
+        provider_config = _ensure_coderai_token(provider_config)
+        _validate_coderai_provider_config(provider_id, provider_config)
         provider_config = _stamp_provider_models(provider_config)
 
         if is_config_admin:
@@ -1598,6 +1701,70 @@ async def api_provider_save(request: Request):
     except Exception as e:
         logger.error(f"api_provider_save error: {e}", exc_info=True)
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/dashboard/api/provider/{provider_id:path}/coderai-token")
+async def api_provider_coderai_token_rotate(request: Request, provider_id: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+
+    try:
+        if is_config_admin:
+            config_path = _providers_json_path()
+            with open(config_path) as f:
+                full_config = json.load(f)
+            providers = full_config.get('providers', full_config)
+            provider_config = providers.get(provider_id)
+            if not isinstance(provider_config, dict) or provider_config.get('type') != 'coderai':
+                return JSONResponse({"success": False, "error": "CoderAI provider not found"}, status_code=404)
+            provider_config.setdefault('coderai_config', {})
+            provider_config['coderai_config']['registration_token'] = secrets.token_urlsafe(32)
+            providers[provider_id] = provider_config
+            full_config['providers'] = providers
+            save_path = Path.home() / '.aisbf' / 'providers.json'
+            save_path.parent.mkdir(parents=True, exist_ok=True)
+            with open(save_path, 'w') as f:
+                json.dump(full_config, f, indent=2)
+            _reload_global_config()
+        else:
+            db = DatabaseRegistry.get_config_database()
+            record = db.get_user_provider(current_user_id, provider_id)
+            provider_config = record['config'] if record else None
+            if not isinstance(provider_config, dict) or provider_config.get('type') != 'coderai':
+                return JSONResponse({"success": False, "error": "CoderAI provider not found"}, status_code=404)
+            provider_config.setdefault('coderai_config', {})
+            provider_config['coderai_config']['registration_token'] = secrets.token_urlsafe(32)
+            db.save_user_provider(current_user_id, provider_id, provider_config)
+
+        token = provider_config['coderai_config']['registration_token']
+        return JSONResponse({"success": True, "registration_token": token})
+    except Exception as e:
+        logger.error(f"api_provider_coderai_token_rotate error: {e}", exc_info=True)
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@router.get("/dashboard/api/coderai/broker/sessions")
+async def api_coderai_broker_sessions(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    from aisbf.coderai_broker import broker
+
+    current_user_id = request.session.get('user_id')
+    is_config_admin = current_user_id is None
+    sessions = await broker.list_sessions()
+    filtered = []
+    for session in sessions:
+        owner_user_id = ((session.get('metadata') or {}).get('owner_user_id'))
+        if not is_config_admin and owner_user_id != current_user_id:
+            continue
+        filtered.append(session)
+    return JSONResponse({"success": True, "sessions": filtered})
 
 
 @router.delete("/dashboard/api/provider/{provider_id:path}")

@@ -1886,9 +1886,31 @@ class DatabaseManager:
             for row in cursor.fetchall():
                 providers.append({
                     'provider_id': row[0],
+                    'user_id': user_id,
                     'config': json.loads(row[1]),
                     'created_at': row[2],
                     'updated_at': row[3]
+                })
+            return providers
+
+    def get_all_user_providers(self) -> List[Dict]:
+        """Get all user-specific provider configurations across all users."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute('''
+                SELECT user_id, provider_id, config, created_at, updated_at
+                FROM user_providers
+                ORDER BY user_id, provider_id
+            ''')
+
+            providers = []
+            for row in cursor.fetchall():
+                providers.append({
+                    'user_id': row[0],
+                    'provider_id': row[1],
+                    'config': json.loads(row[2]),
+                    'created_at': row[3],
+                    'updated_at': row[4]
                 })
             return providers
 

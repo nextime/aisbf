@@ -62,6 +62,27 @@
         "credentials_file": "~/.kilo_credentials.json"
       },
       "models": []
+    },
+    "coderai": {
+      "id": "coderai",
+      "name": "CoderAI Local Bridge",
+      "endpoint": "http://127.0.0.1:11437",
+      "type": "coderai",
+      "api_key_required": false,
+      "rate_limit": 0,
+      "coderai_config": {
+        "transport": "http",
+        "http_enabled": true,
+        "websocket_enabled": true,
+        "broker_enabled": true,
+        "broker_mode": false,
+        "broker_preferred": true,
+        "discovery_enabled": true,
+        "client_id": "aisbf-default",
+        "bridge_path": "/coderai/ws",
+        "registration_path": "/coderai/register"
+      },
+      "models": []
     }
   }
 }

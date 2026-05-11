@@ -51,6 +51,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="kilocode">Kilocode (OAuth2)</option>
             <option value="qwen">Qwen (OAuth2)</option>
             <option value="codex">Codex (OpenAI OAuth2)</option>
+            <option value="coderai">CoderAI</option>
         </select>
         <small style="color: var(--color-muted); display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
@@ -267,6 +268,13 @@ function showToast(message, type) {
 
 function escHtmlAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+}
+
+function formatBrokerTimestamp(ts) {
+    if (!ts) return 'Never';
+    const date = new Date(ts * 1000);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return date.toLocaleString();
 }
 
 async function apiCall(method, url, body) {
@@ -734,6 +742,7 @@ function renderProviderDetails(key) {
     const isKiloProvider = provider.type === 'kilocode';
     const isQwenProvider = provider.type === 'qwen';
     const isCodexProvider = provider.type === 'codex';
+    const isCoderAIProvider = provider.type === 'coderai';
     
     // Initialize kiro_config if this is a kiro provider and doesn't have it
     if (isKiroProvider && !provider.kiro_config) {
@@ -773,12 +782,29 @@ function renderProviderDetails(key) {
             issuer: 'https://auth.openai.com'
         };
     }
+    if (isCoderAIProvider && !provider.coderai_config) {
+        provider.coderai_config = {
+            transport: 'http',
+            broker_enabled: true,
+            broker_mode: false,
+            broker_preferred: true,
+            discovery_enabled: true,
+            client_id: key,
+            bridge_path: '/coderai/ws',
+            registration_path: '/coderai/register',
+            registration_token: ''
+        };
+    }
     
     const kiroConfig = provider.kiro_config || {};
     const claudeConfig = provider.claude_config || {};
     const kiloConfig = provider.kilo_config || {};
     const qwenConfig = provider.qwen_config || {};
     const codexConfig = provider.codex_config || {};
+    const coderaiConfig = provider.coderai_config || {};
+    const brokerSession = coderaiConfig.broker_session || {};
+    const brokerConnected = !!brokerSession.connected;
+    const ownerLabel = brokerSession.owner_user_id == null ? 'Global admin' : `User #${brokerSession.owner_user_id}`;
     
     // Build authentication fields based on provider type
     let authFieldsHtml = '';
@@ -994,6 +1020,68 @@ function renderProviderDetails(key) {
                     <br>• We are not affiliated with Anthropic and cannot guarantee compatibility or continued functionality
                     <br><br>✅ <strong>CLI mode is different:</strong> when "Use Claude CLI mode" is enabled, AISBF proxies requests through the official <code style="background:#e8e0b0;padding:1px 4px;border-radius:3px;">claude</code> binary using <code style="background:#e8e0b0;padding:1px 4px;border-radius:3px;">claude -p</code>, which is the intended programmatic use of the official Anthropic CLI and is permitted by Claude's terms of service.
                 </p>
+            </div>
+        `;
+    } else if (isCoderAIProvider) {
+        authFieldsHtml = `
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">CoderAI Broker Registration</h4>
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
+                    This token belongs to your provider configuration. Share it only with the matching CoderAI instance for this provider.
+                </small>
+
+                <div class="form-group">
+                    <label>Client ID</label>
+                    <input type="text" value="${coderaiConfig.client_id || key}" onchange="updateCoderAIConfig('${key}', 'client_id', this.value)" placeholder="workstation-01">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Stable identifier AISBF uses to bind your provider to one specific client machine.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Registration Token</label>
+                    <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
+                        <input type="password" value="${coderaiConfig.registration_token || ''}" onchange="updateCoderAIConfig('${key}', 'registration_token', this.value)" placeholder="Provider-scoped token" style="flex:1; min-width:320px;">
+                        <button type="button" class="btn btn-secondary" onclick="rotateCoderAIToken('${safeKey}')">Rotate Token</button>
+                    </div>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Stored directly in this provider configuration for your account. Rotating immediately invalidates the old token for future broker registrations.</small>
+                    <div id="coderai-token-status-${key}" style="margin-top:10px; font-size:13px; color: var(--color-muted);"></div>
+                </div>
+
+                <div class="form-group">
+                    <label>Transport</label>
+                    <select onchange="updateCoderAIConfig('${key}', 'transport', this.value)">
+                        <option value="http" ${coderaiConfig.transport === 'http' || !coderaiConfig.transport ? 'selected' : ''}>HTTP</option>
+                        <option value="websocket" ${coderaiConfig.transport === 'websocket' ? 'selected' : ''}>WebSocket</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                        <input type="checkbox" ${coderaiConfig.broker_enabled !== false ? 'checked' : ''} onchange="updateCoderAIConfig('${key}', 'broker_enabled', this.checked)">
+                        <span>Enable AISBF broker sessions</span>
+                    </label>
+                </div>
+
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                        <input type="checkbox" ${coderaiConfig.broker_preferred !== false ? 'checked' : ''} onchange="updateCoderAIConfig('${key}', 'broker_preferred', this.checked)">
+                        <span>Prefer outbound broker session when available</span>
+                    </label>
+                </div>
+
+                <div class="form-group" style="margin-top:20px; padding:14px; border-radius:6px; background:${brokerConnected ? 'rgba(34,197,94,0.08)' : 'rgba(248,113,113,0.08)'}; border:1px solid ${brokerConnected ? 'rgba(34,197,94,0.35)' : 'rgba(248,113,113,0.35)'};">
+                    <label>Broker Session Status</label>
+                    <div style="font-size:14px; color:var(--color-text); line-height:1.6;">
+                        <div><strong>Status:</strong> ${brokerConnected ? 'Connected' : 'Disconnected'}</div>
+                        <div><strong>Owner:</strong> ${escHtmlAttr(ownerLabel)}</div>
+                        <div><strong>Client ID:</strong> ${escHtmlAttr(brokerSession.client_id || coderaiConfig.client_id || key)}</div>
+                        <div><strong>Connection State:</strong> ${escHtmlAttr(brokerSession.connection_state || (brokerConnected ? 'connected' : 'disconnected'))}</div>
+                        <div><strong>Last Seen:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.last_seen))}</div>
+                        <div><strong>Connected At:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.connected_at))}</div>
+                        <div><strong>Remote Endpoint:</strong> ${escHtmlAttr(brokerSession.endpoint || 'Unknown')}</div>
+                        <div><strong>Transport:</strong> ${escHtmlAttr(brokerSession.transport || coderaiConfig.transport || 'http')}</div>
+                        <div><strong>Studio Endpoints:</strong> ${escHtmlAttr((brokerSession.studio_endpoints || []).join(', ') || 'None advertised')}</div>
+                    </div>
+                </div>
             </div>
         `;
     } else if (isQwenProvider) {
@@ -1528,7 +1616,8 @@ function updateNewProviderDefaults() {
         'claude': 'Claude Code provider. Uses OAuth2 authentication (browser-based login). Endpoint: https://api.anthropic.com/v1',
         'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
         'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
-        'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1'
+        'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1',
+        'coderai': 'CoderAI provider. Uses local OpenAI-compatible HTTP or AISBF broker/WebSocket registration with a provider-scoped token. Endpoint: http://127.0.0.1:11437'
     };
 
     descriptionEl.textContent = descriptions[providerType] || window.i18n.t('providers.standard_config');
@@ -2243,6 +2332,38 @@ function updateCodexConfig(key, field, value) {
     providersData[key].codex_config[field] = value;
 }
 
+function updateCoderAIConfig(key, field, value) {
+    if (!providersData[key].coderai_config) {
+        providersData[key].coderai_config = {};
+    }
+    providersData[key].coderai_config[field] = value;
+}
+
+async function rotateCoderAIToken(key) {
+    const statusEl = document.getElementById(`coderai-token-status-${key}`);
+    if (statusEl) {
+        statusEl.textContent = 'Rotating token...';
+        statusEl.style.color = 'var(--color-muted)';
+    }
+    try {
+        const result = await apiCall('POST', `/dashboard/api/provider/${encodeURIComponent(key)}/coderai-token`, {});
+        if (!result.success) throw new Error(result.error || 'Unknown error');
+        if (!providersData[key].coderai_config) providersData[key].coderai_config = {};
+        providersData[key].coderai_config.registration_token = result.registration_token;
+        renderProviderDetails(key);
+        const refreshedStatusEl = document.getElementById(`coderai-token-status-${key}`);
+        if (refreshedStatusEl) {
+            refreshedStatusEl.textContent = 'Token rotated successfully';
+            refreshedStatusEl.style.color = '#4ade80';
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = 'Error: ' + e.message;
+            statusEl.style.color = '#f87171';
+        }
+    }
+}
+
 function updateProviderType(key, value) {
     providersData[key].type = value;
     const defaultEndpoint = getDefaultEndpoint(value);
@@ -2308,7 +2429,7 @@ async function confirmAddProvider() {
         name: key.charAt(0).toUpperCase() + key.slice(1),
         endpoint: getDefaultEndpoint(type),
         type: type,
-        api_key_required: type !== 'ollama' && type !== 'kiro' && type !== 'claude' && type !== 'kilocode' && type !== 'qwen' && type !== 'codex',
+        api_key_required: type !== 'ollama' && type !== 'kiro' && type !== 'claude' && type !== 'kilocode' && type !== 'qwen' && type !== 'codex' && type !== 'coderai',
         rate_limit: 0,
         models: []
     };
@@ -2337,6 +2458,18 @@ async function confirmAddProvider() {
     } else if (type === 'codex') {
         providersData[key].codex_config = {
             issuer: 'https://auth.openai.com'
+        };
+    } else if (type === 'coderai') {
+        providersData[key].coderai_config = {
+            transport: 'http',
+            broker_enabled: true,
+            broker_mode: false,
+            broker_preferred: true,
+            discovery_enabled: true,
+            client_id: key,
+            bridge_path: '/coderai/ws',
+            registration_path: '/coderai/register',
+            registration_token: ''
         };
     }
 
@@ -2372,7 +2505,8 @@ function getDefaultEndpoint(type) {
         'claude': 'https://api.anthropic.com/v1',
         'kilocode': 'https://api.kilo.ai/api/gateway',
         'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
-        'codex': 'https://api.openai.com/v1'
+        'codex': 'https://api.openai.com/v1',
+        'coderai': 'http://127.0.0.1:11437'
     };
     return defaults[type] || '';
 }

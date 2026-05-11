@@ -1,0 +1,152 @@
+import json
+from unittest.mock import Mock
+
+import pytest
+
+from aisbf.providers.coderai import CoderAIProviderHandler
+from aisbf.config import config
+from aisbf.config import ProviderConfig
+
+
+@pytest.fixture(autouse=True)
+def mock_coderai_error_tracking():
+    original = dict(config.error_tracking)
+    config.error_tracking["coderai_local"] = {
+        "enabled": True,
+        "max_errors": 5,
+        "cooldown_seconds": 60,
+        "failures": 0,
+        "last_failure": 0,
+        "disabled_until": None,
+    }
+    config.error_tracking["coderai_nat"] = {
+        "enabled": True,
+        "max_errors": 5,
+        "cooldown_seconds": 60,
+        "failures": 0,
+        "last_failure": 0,
+        "disabled_until": None,
+    }
+    config.providers["coderai_local"] = ProviderConfig(
+        id="coderai_local",
+        name="CoderAI",
+        endpoint="http://127.0.0.1:11437",
+        type="coderai",
+        api_key_required=False,
+        rate_limit=0,
+    )
+    config.providers["coderai_nat"] = ProviderConfig(
+        id="coderai_nat",
+        name="CoderAI NAT",
+        endpoint="wss://broker.example.test/coderai/ws",
+        type="coderai",
+        api_key_required=False,
+        rate_limit=0,
+    )
+    yield
+    config.error_tracking.clear()
+    config.error_tracking.update(original)
+    config.providers.pop("coderai_local", None)
+    config.providers.pop("coderai_nat", None)
+
+
+@pytest.mark.asyncio
+async def test_coderai_http_models_parses_openai_shape(monkeypatch):
+    provider_config = {
+        "id": "coderai_local",
+        "name": "CoderAI",
+        "endpoint": "http://127.0.0.1:11437",
+        "type": "coderai",
+        "api_key_required": False,
+        "coderai_config": {"transport": "http"},
+    }
+    handler = CoderAIProviderHandler("coderai_local", provider_config=provider_config)
+
+    class ModelsStub:
+        def list(self):
+            return [
+                {
+                    "id": "llama3.1:8b",
+                    "context_length": 131072,
+                    "description": "Local model",
+                    "supported_parameters": ["temperature"],
+                }
+            ]
+
+    handler.client = Mock(models=ModelsStub())
+
+    models = await handler.get_models()
+
+    assert len(models) == 1
+    assert models[0].id == "llama3.1:8b"
+    assert models[0].context_length == 131072
+    assert models[0].supported_parameters == ["temperature"]
+
+
+@pytest.mark.asyncio
+async def test_coderai_websocket_models_parses_bridge_payload(monkeypatch):
+    provider_config = {
+        "id": "coderai_nat",
+        "name": "CoderAI NAT",
+        "endpoint": "wss://broker.example.test/coderai/ws",
+        "type": "coderai",
+        "api_key_required": False,
+        "coderai_config": {"transport": "websocket", "bridge_path": "/coderai/ws"},
+    }
+    handler = CoderAIProviderHandler("coderai_nat", provider_config=provider_config)
+
+    async def fake_roundtrip(op, payload, timeout=None):
+        assert op == "models.list"
+        return {
+            "status": "ok",
+            "payload": {
+                "data": [
+                    {
+                        "id": "qwen2.5-coder:32b",
+                        "context_window": 65536,
+                        "architecture": {"input_modalities": ["text"]},
+                    }
+                ]
+            },
+        }
+
+    monkeypatch.setattr(handler, "_ws_roundtrip", fake_roundtrip)
+
+    models = await handler.get_models()
+
+    assert len(models) == 1
+    assert models[0].id == "qwen2.5-coder:32b"
+    assert models[0].context_length == 65536
+
+
+@pytest.mark.asyncio
+async def test_coderai_websocket_stream_emits_sse_bytes(monkeypatch):
+    provider_config = {
+        "id": "coderai_nat",
+        "name": "CoderAI NAT",
+        "endpoint": "wss://broker.example.test/coderai/ws",
+        "type": "coderai",
+        "api_key_required": False,
+        "coderai_config": {"transport": "websocket", "bridge_path": "/coderai/ws"},
+    }
+    handler = CoderAIProviderHandler("coderai_nat", provider_config=provider_config)
+
+    async def fake_stream(op, payload, timeout=None):
+        assert op == "chat.completions"
+        yield b"data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\n"
+        yield b"data: [DONE]\n\n"
+
+    monkeypatch.setattr(handler, "_ws_stream", fake_stream)
+
+    stream = await handler.handle_request(
+        model="llama3.1",
+        messages=[{"role": "user", "content": "hello"}],
+        stream=True,
+    )
+
+    chunks = []
+    async for chunk in stream:
+        chunks.append(chunk)
+
+    assert chunks[0].startswith(b"data: ")
+    assert chunks[-1] == b"data: [DONE]\n\n"

@@ -188,6 +188,7 @@ app.add_middleware(ProxyHeadersMiddleware)
 # ---------------------------------------------------------------------------
 import aisbf.routes.auth as _auth_routes
 import aisbf.routes.api as _api_routes
+import aisbf.routes.coderai_broker as _coderai_broker_routes
 import aisbf.routes.mcp as _mcp_routes
 import aisbf.routes.user_api as _user_api_routes
 import aisbf.routes.dashboard.providers as _dash_providers
@@ -198,6 +199,7 @@ import aisbf.routes.dashboard.provider_auth as _dash_provider_auth
 
 app.include_router(_auth_routes.router)
 app.include_router(_api_routes.router)
+app.include_router(_coderai_broker_routes.router)
 app.include_router(_mcp_routes.router)
 app.include_router(_user_api_routes.router)
 app.include_router(_dash_providers.router)

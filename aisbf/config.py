@@ -79,6 +79,7 @@ class ProviderConfig(BaseModel):
     claude_config: Optional[Dict] = None  # Optional Claude-specific configuration (credentials file path) - DEPRECATED
     codex_config: Optional[Dict] = None  # Optional Codex-specific configuration - DEPRECATED
     qwen_config: Optional[Dict] = None  # Optional Qwen-specific configuration - DEPRECATED
+    coderai_config: Optional[Dict] = None  # Optional CoderAI-specific configuration
     # Default settings for models in this provider
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None

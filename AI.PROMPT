@@ -1349,6 +1349,67 @@ After deploying behind a proxy:
 - All dashboard route handlers in [`main.py`](main.py): Updated RedirectResponse calls to use url_for()
 - [`DOCUMENTATION.md`](DOCUMENTATION.md): Added comprehensive nginx proxy configuration examples
 
+## CoderAI Broker Mode
+
+AISBF now includes an AISBF-side broker for NAT-friendly CoderAI integration.
+
+### Overview
+
+- New provider type: `coderai`
+- Supports direct HTTP, direct WebSocket bridge, and AISBF-hosted outbound broker sessions
+- Broker endpoint lives inside AISBF and lets remote CoderAI clients maintain an outbound persistent WebSocket when AISBF cannot reach them directly
+
+### Key Files
+
+- `aisbf/providers/coderai.py` - CoderAI provider handler with broker-aware routing
+- `aisbf/coderai_broker.py` - in-memory broker/session registry and request correlation
+- `aisbf/routes/coderai_broker.py` - WebSocket/session status routes for the broker
+- `docs/coderai-integration.md` - external integration contract for CoderAI-side implementation
+
+### Broker Routes
+
+- `GET /api/coderai/broker/sessions` - list active broker sessions
+- `GET /api/coderai/broker/providers/{provider_id}/status` - inspect active session status for a provider/client
+- `WS /api/coderai/broker/ws` - persistent outbound WebSocket endpoint used by CoderAI behind NAT
+
+### Broker Request Flow
+
+1. CoderAI opens outbound WebSocket to AISBF broker
+2. AISBF registers a live session keyed by `provider_id` and `client_id`
+3. CoderAI sends `register` metadata/capabilities over that socket
+4. `CoderAIProviderHandler` prefers the live broker session when `coderai_config.broker_preferred=true`
+5. AISBF forwards `models.list`, `chat.completions`, `capabilities`, `register`, and `proxy` operations through the active session
+6. Response envelopes are correlated by `request_id` and returned to the original AISBF request
+
+### Configuration Notes
+
+`coderai_config` now supports:
+
+- `broker_enabled`
+- `broker_mode`
+- `broker_preferred`
+- `client_id`
+- `bridge_path`
+- `registration_path`
+- `registration_token`
+
+The dashboard provider editors now expose `coderai_config.registration_token` directly for both:
+
+- global admin-managed CoderAI providers
+- user-owned CoderAI providers
+
+Token rotation is performed inline from the provider editor and updates the owning provider configuration immediately.
+
+### Dashboard Visibility
+
+- Admin and user provider pages display live broker session status directly inside each `coderai` provider card
+- Visible metadata includes owner, client id, transport, endpoint, last seen, connected-at time, and advertised Studio endpoints
+- `GET /dashboard/api/coderai/broker/sessions` returns broker sessions filtered to the current dashboard principal
+
+### Important Limitation
+
+Active broker routing still requires a live WebSocket, but AISBF now persists broker session metadata snapshots in `~/.aisbf/coderai_broker_sessions.json` so the dashboard can show last-known broker status after restart. Remote CoderAI must still reconnect before requests can be routed again.
+
 ### Security Considerations
 
 When deploying behind a proxy:

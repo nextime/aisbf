@@ -2019,6 +2019,20 @@ async def dashboard_provider_auth_check(request: Request, provider_name: str):
                     result["expires_at"] = expires
             return JSONResponse(result)
 
+        elif provider_type == 'coderai':
+            from aisbf.providers.coderai import CoderAIProviderHandler
+
+            handler = CoderAIProviderHandler(provider_name, provider_config=provider_config, user_id=current_user_id)
+            result = {"authenticated": True, "transport": handler._transport}
+            try:
+                capabilities = await handler.discover_capabilities()
+                if capabilities:
+                    result["capabilities"] = capabilities
+            except Exception as e:
+                result["authenticated"] = False
+                result["error"] = str(e)
+            return JSONResponse(result)
+
         else:
             return JSONResponse(
                 status_code=400,

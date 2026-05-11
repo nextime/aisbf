@@ -41,6 +41,7 @@ from .kiro import KiroProviderHandler
 from .kilo import KiloProviderHandler
 from .ollama import OllamaProviderHandler
 from .codex import CodexProviderHandler
+from .coderai import CoderAIProviderHandler
 from .qwen import QwenProviderHandler
 from ..config import config
 
@@ -55,6 +56,7 @@ PROVIDER_HANDLERS = {
     'kilo': KiloProviderHandler,
     'kilocode': KiloProviderHandler,  # Kilocode provider with OAuth2 support
     'codex': CodexProviderHandler,  # Codex provider with OAuth2 support (OpenAI protocol)
+    'coderai': CoderAIProviderHandler,  # CoderAI provider with HTTP/WebSocket bridge support
     'qwen': QwenProviderHandler  # Qwen provider with OAuth2 support (OpenAI-compatible)
 }
 

@@ -174,10 +174,12 @@ async def prefetch_global_provider_models(config):
             continue
 
         provider_type = getattr(provider_config, 'type', '')
-        if provider_type in ('kilo', 'kilocode'):
+        if provider_type in ('kilo', 'kilocode', 'coderai'):
             has_valid_auth = False
             api_key = getattr(provider_config, 'api_key', None)
             if api_key and not api_key.startswith('YOUR_'):
+                has_valid_auth = True
+            if provider_type == 'coderai':
                 has_valid_auth = True
             if not has_valid_auth:
                 try:

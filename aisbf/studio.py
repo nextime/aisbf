@@ -100,7 +100,7 @@ STUDIO_CAPABILITY_CHOICES = [
     "animation",
 ]
 
-DEFAULT_CHAT_PROVIDER_TYPES = {"openai", "anthropic", "google", "kilo", "claude", "qwen", "codex"}
+DEFAULT_CHAT_PROVIDER_TYPES = {"openai", "anthropic", "google", "kilo", "claude", "qwen", "codex", "coderai"}
 NON_CHAT_MEDIA_TOKENS = {
     "dall-e",
     "dalle",

@@ -3371,7 +3371,8 @@ class RotationHandler:
         # Check if this is a Google or Kilo provider based on configuration
         is_google_provider = provider_type == 'google'
         is_kilo_provider = provider_type in ('kilo', 'kilocode')
-        logger.info(f"Creating streaming response for provider type: {provider_type}, is_google: {is_google_provider}, is_kilo: {is_kilo_provider}")
+        is_coderai_provider = provider_type == 'coderai'
+        logger.info(f"Creating streaming response for provider type: {provider_type}, is_google: {is_google_provider}, is_kilo: {is_kilo_provider}, is_coderai: {is_coderai_provider}")
         
         # Generate system_fingerprint for this request
         # If seed is present in request, generate unique fingerprint per request
@@ -3650,9 +3651,9 @@ class RotationHandler:
                     yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
                     # Yield control to event loop to ensure final chunk is flushed to client
                     await asyncio.sleep(0)
-                elif is_kilo_provider:
+                elif is_kilo_provider or is_coderai_provider:
                     # Handle Kilo/KiloCode streaming response
-                    # Kilo returns an async generator that yields OpenAI-compatible SSE bytes
+                    # Kilo/CoderAI return async generators that yield OpenAI-compatible SSE bytes
                     accumulated_response_text = ""
                     chunk_count = 0
 
@@ -3687,10 +3688,10 @@ class RotationHandler:
                             else:
                                 yield f"data: {json.dumps(chunk)}\n\n".encode('utf-8')
                         except Exception as chunk_error:
-                            logger.warning(f"Error processing Kilo chunk: {chunk_error}")
+                            logger.warning(f"Error processing {provider_type} chunk: {chunk_error}")
                             continue
 
-                    logger.info(f"Kilo streaming processed {chunk_count} chunks total")
+                    logger.info(f"{provider_type} streaming processed {chunk_count} chunks total")
                 else:
                     # Handle OpenAI/Anthropic/Kiro streaming responses
                     # Some providers return async generators, others return sync iterables
