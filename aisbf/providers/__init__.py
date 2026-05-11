@@ -43,6 +43,7 @@ from .ollama import OllamaProviderHandler
 from .codex import CodexProviderHandler
 from .coderai import CoderAIProviderHandler
 from .qwen import QwenProviderHandler
+from .runpod import RunpodProviderHandler
 from ..config import config
 
 
@@ -57,7 +58,8 @@ PROVIDER_HANDLERS = {
     'kilocode': KiloProviderHandler,  # Kilocode provider with OAuth2 support
     'codex': CodexProviderHandler,  # Codex provider with OAuth2 support (OpenAI protocol)
     'coderai': CoderAIProviderHandler,  # CoderAI provider with HTTP/WebSocket bridge support
-    'qwen': QwenProviderHandler  # Qwen provider with OAuth2 support (OpenAI-compatible)
+    'qwen': QwenProviderHandler,  # Qwen provider with OAuth2 support (OpenAI-compatible)
+    'runpod': RunpodProviderHandler,
 }
 
 

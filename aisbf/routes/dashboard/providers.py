@@ -16,6 +16,7 @@ from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_pr
 from aisbf.app.middleware import _is_local_client
 from aisbf.app.model_cache import fetch_provider_models
 from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_api_admin, require_admin
+from aisbf.providers.runpod import RunpodProviderHandler
 import httpx
 
 router = APIRouter()
@@ -116,6 +117,55 @@ def _ensure_coderai_token(provider_config: dict) -> dict:
     return stamped
 
 
+def _normalize_runpod_provider_config(provider_id: str, provider_config: dict) -> dict:
+    stamped = dict(provider_config or {})
+    if stamped.get('type') != 'runpod':
+        return stamped
+
+    runpod_config = stamped.get('runpod_config')
+    if not isinstance(runpod_config, dict):
+        runpod_config = {}
+
+    mode = str(runpod_config.get('mode') or 'pod').strip().lower()
+    wrapper_mode = str(runpod_config.get('wrapper_mode') or 'openai').strip().lower()
+    runpod_config['mode'] = mode
+    runpod_config['management_api'] = str(runpod_config.get('management_api') or 'auto').strip().lower() or 'auto'
+    runpod_config['account_name'] = str(runpod_config.get('account_name') or provider_id).strip() or provider_id
+    runpod_config['startup_poll_interval_ms'] = int(runpod_config.get('startup_poll_interval_ms') or 3000)
+    runpod_config['startup_timeout_ms'] = int(runpod_config.get('startup_timeout_ms') or 300000)
+    runpod_config['idle_shutdown_ms'] = int(runpod_config.get('idle_shutdown_ms') or 900000)
+    runpod_config['public_endpoint_protocol_default'] = str(runpod_config.get('public_endpoint_protocol_default') or 'auto').strip().lower() or 'auto'
+
+    if mode == 'public':
+        public_models = runpod_config.get('public_models')
+        if not isinstance(public_models, dict):
+            runpod_config['public_models'] = {}
+    else:
+        runpod_config['wrapper_mode'] = wrapper_mode
+
+    stamped['runpod_config'] = runpod_config
+    if not stamped.get('endpoint'):
+        stamped['endpoint'] = 'https://rest.runpod.io/v1'
+    return stamped
+
+
+def _validate_runpod_provider_config(provider_id: str, provider_config: dict) -> None:
+    if not isinstance(provider_config, dict) or provider_config.get('type') != 'runpod':
+        return
+    runpod_config = provider_config.get('runpod_config') or {}
+    mode = str(runpod_config.get('mode') or 'pod').strip().lower()
+    if mode not in {'pod', 'serverless_template', 'public'}:
+        raise ValueError(f"RunPod provider '{provider_id}' has unsupported mode '{mode}'")
+    if mode != 'public':
+        wrapper_mode = str(runpod_config.get('wrapper_mode') or 'openai').strip().lower()
+        if wrapper_mode not in {'openai', 'ollama', 'coderai'}:
+            raise ValueError(f"RunPod provider '{provider_id}' has unsupported wrapper_mode '{wrapper_mode}'")
+    if mode == 'pod' and not str(runpod_config.get('pod_id') or '').strip():
+        raise ValueError(f"RunPod provider '{provider_id}' requires runpod_config.pod_id in pod mode")
+    if mode == 'serverless_template' and not (str(runpod_config.get('endpoint_id') or '').strip() or str(runpod_config.get('serverless_template_id') or '').strip() or str(runpod_config.get('template_id') or '').strip()):
+        raise ValueError(f"RunPod provider '{provider_id}' requires endpoint_id or template_id in serverless_template mode")
+
+
 def _validate_coderai_provider_config(provider_id: str, provider_config: dict) -> None:
     if not isinstance(provider_config, dict) or provider_config.get('type') != 'coderai':
         return
@@ -187,6 +237,34 @@ def get_admin_auth_files_dir() -> Path:
 
 def _apply_usage_disable(db, user_id, provider_id: str, usage_data: dict):
     pass
+
+
+def _resolve_dashboard_provider_config(request: Request, provider_id: str) -> tuple[dict, Optional[int]]:
+    current_user_id = request.session.get('user_id')
+    db = DatabaseRegistry.get_config_database()
+
+    if current_user_id is None:
+        provider = _config.providers.get(provider_id) if _config else None
+        if provider is None:
+            raise HTTPException(status_code=404, detail="Provider not found")
+        if hasattr(provider, "model_dump"):
+            return provider.model_dump(), None
+        if hasattr(provider, "dict"):
+            return provider.dict(), None
+        return dict(provider), None
+
+    provider_row = db.get_user_provider(current_user_id, provider_id)
+    if not provider_row:
+        raise HTTPException(status_code=404, detail="Provider not found")
+    return dict(provider_row.get("config") or {}), current_user_id
+
+
+def _build_dashboard_runpod_handler(request: Request, provider_id: str) -> RunpodProviderHandler:
+    provider_config, owner_user_id = _resolve_dashboard_provider_config(request, provider_id)
+    if provider_config.get("type") != "runpod":
+        raise HTTPException(status_code=404, detail="RunPod provider not found")
+    api_key = provider_config.get("api_key")
+    return RunpodProviderHandler(provider_id, api_key=api_key, user_id=owner_user_id, provider_config=provider_config)
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
@@ -628,7 +706,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         # Apply defaults: if condense_method is set but condense_context is not, default to 80
         for provider_key, provider in providers_data.items():
             provider = _ensure_coderai_token(provider)
+            provider = _normalize_runpod_provider_config(provider_key, provider)
             _validate_coderai_provider_config(provider_key, provider)
+            _validate_runpod_provider_config(provider_key, provider)
             if 'models' in provider and isinstance(provider['models'], list):
                 for model in provider['models']:
                     if 'condense_method' in model and model.get('condense_method'):
@@ -959,6 +1039,41 @@ async def search_provider_models_api(request: Request, provider_id: str, query: 
         models = [m for m in models if q in m.lower()]
 
     return JSONResponse({"models": models[:200], "fetched_live": fetched_live})
+
+
+@router.get("/dashboard/providers/{provider_id}/runpod-status")
+async def api_runpod_provider_status(provider_id: str, request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        handler = _build_dashboard_runpod_handler(request, provider_id)
+        return JSONResponse({"success": True, "status": handler.build_runtime_status()})
+    except HTTPException as exc:
+        return JSONResponse({"success": False, "error": exc.detail}, status_code=exc.status_code)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
+
+
+@router.post("/dashboard/providers/{provider_id}/runpod-refresh")
+async def api_runpod_provider_refresh(provider_id: str, request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    try:
+        handler = _build_dashboard_runpod_handler(request, provider_id)
+        catalog = await handler.refresh_public_catalog()
+        return JSONResponse({
+            "success": True,
+            "catalog_count": len(catalog),
+            "status": handler.build_runtime_status(),
+        })
+    except HTTPException as exc:
+        return JSONResponse({"success": False, "error": exc.detail}, status_code=exc.status_code)
+    except Exception as exc:
+        return JSONResponse({"success": False, "error": str(exc)}, status_code=500)
 
 
 @router.get("/dashboard/search-all-models")

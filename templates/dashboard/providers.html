@@ -52,6 +52,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <option value="qwen">Qwen (OAuth2)</option>
             <option value="codex">Codex (OpenAI OAuth2)</option>
             <option value="coderai">CoderAI</option>
+            <option value="runpod">RunPod</option>
         </select>
         <small style="color: var(--color-muted); display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
@@ -188,6 +189,98 @@ function formatPerfNumber(value, digits = 1, suffix = '') {
     const num = Number(value);
     if (!Number.isFinite(num)) return 'Unknown';
     return `${num.toFixed(digits)}${suffix}`;
+}
+
+function formatRunpodTimestamp(value) {
+    if (value == null || value === '') return 'Never';
+    const date = new Date(Number(value) * 1000);
+    if (Number.isNaN(date.getTime())) return 'Unknown';
+    return date.toLocaleString();
+}
+
+function runpodStatusBadgeColor(status) {
+    const normalized = String(status || '').toLowerCase();
+    if (['ready', 'running', 'healthy', 'active'].includes(normalized)) return '#22c55e';
+    if (['starting', 'pending', 'provisioning'].includes(normalized)) return '#f59e0b';
+    if (['stopped', 'exited', 'terminated', 'idle'].includes(normalized)) return '#94a3b8';
+    return '#f87171';
+}
+
+function renderRunpodRuntimeStatus(providerKey, payload, errorMessage) {
+    const container = document.getElementById(`runpod-runtime-status-${providerKey}`);
+    if (!container) return;
+
+    if (errorMessage) {
+        container.innerHTML = `<div style="padding:12px; border-radius:6px; background:rgba(248,113,113,0.08); border:1px solid rgba(248,113,113,0.35); color:#fca5a5;">${escHtmlAttr(errorMessage)}</div>`;
+        return;
+    }
+
+    const status = payload || {};
+    const catalog = status.catalog || {};
+    const badgeColor = runpodStatusBadgeColor(status.status);
+    const models = Array.isArray(catalog.models) ? catalog.models : [];
+    const modelPreview = models.slice(0, 6).map(model => `<code style="background:var(--bg-page);padding:2px 6px;border-radius:4px;">${escHtmlAttr(model.id || model.name || 'unknown')}</code>`).join(' ');
+
+    container.innerHTML = `
+        <div style="padding:14px; border-radius:6px; background: var(--bg-page); border:1px solid var(--color-border); display:flex; flex-direction:column; gap:10px;">
+            <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap;">
+                <strong style="color:var(--color-text);">RunPod Runtime Status</strong>
+                <span style="display:inline-flex; align-items:center; gap:8px; background:rgba(15,23,42,0.25); border:1px solid var(--color-border); border-radius:999px; padding:4px 10px; color:var(--color-text);">
+                    <span style="width:10px; height:10px; border-radius:50%; background:${badgeColor}; display:inline-block;"></span>
+                    ${escHtmlAttr(status.status || 'unknown')}
+                </span>
+            </div>
+            <div style="display:grid; grid-template-columns:repeat(auto-fit, minmax(220px, 1fr)); gap:10px; font-size:13px; color:var(--color-text); line-height:1.5;">
+                <div><strong>Mode:</strong> ${escHtmlAttr(status.mode || 'unknown')}</div>
+                <div><strong>Wrapper:</strong> ${escHtmlAttr(status.wrapper_mode || 'n/a')}</div>
+                <div><strong>Resource:</strong> ${escHtmlAttr(status.resource_kind || 'n/a')} ${status.resource_id ? `(${escHtmlAttr(status.resource_id)})` : ''}</div>
+                <div><strong>Endpoint:</strong> ${escHtmlAttr(status.endpoint_url || 'Unknown')}</div>
+                <div><strong>Catalog Count:</strong> ${escHtmlAttr(String(catalog.item_count ?? models.length ?? 0))}</div>
+                <div><strong>Catalog Source:</strong> ${escHtmlAttr(catalog.source || 'unknown')}</div>
+                <div><strong>Catalog Refreshed:</strong> ${escHtmlAttr(formatRunpodTimestamp(catalog.refreshed_at))}</div>
+                <div><strong>Last Used:</strong> ${escHtmlAttr(formatRunpodTimestamp(status.last_used_at))}</div>
+            </div>
+            ${catalog.refresh_error ? `<div style="padding:10px; border-radius:6px; background:rgba(245,158,11,0.1); border:1px solid rgba(245,158,11,0.35); color:#fcd34d;"><strong>Last Refresh Error:</strong> ${escHtmlAttr(catalog.refresh_error)}</div>` : ''}
+            ${modelPreview ? `<div style="display:flex; flex-wrap:wrap; gap:6px; align-items:center;"><strong style="color:var(--color-text);">Catalog Models:</strong> ${modelPreview}</div>` : ''}
+        </div>
+    `;
+}
+
+async function loadRunpodRuntimeStatus(providerKey) {
+    const container = document.getElementById(`runpod-runtime-status-${providerKey}`);
+    if (!container) return;
+    container.innerHTML = `<div style="color: var(--color-muted);">Loading RunPod runtime status...</div>`;
+
+    try {
+        const result = await apiCall('GET', `${BASE_PATH}/dashboard/providers/${encodeURIComponent(providerKey)}/runpod-status`);
+        if (!result.success) throw new Error(result.error || 'Failed to load RunPod status');
+        renderRunpodRuntimeStatus(providerKey, result.status, null);
+    } catch (error) {
+        renderRunpodRuntimeStatus(providerKey, null, `Unable to load RunPod status: ${error.message}`);
+    }
+}
+
+async function refreshRunpodCatalog(providerKey) {
+    const actionStatus = document.getElementById(`runpod-runtime-action-${providerKey}`);
+    if (actionStatus) {
+        actionStatus.style.color = 'var(--color-muted)';
+        actionStatus.textContent = 'Refreshing public catalog...';
+    }
+
+    try {
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/providers/${encodeURIComponent(providerKey)}/runpod-refresh`, {});
+        if (!result.success) throw new Error(result.error || 'Failed to refresh catalog');
+        renderRunpodRuntimeStatus(providerKey, result.status, null);
+        if (actionStatus) {
+            actionStatus.style.color = '#4ade80';
+            actionStatus.textContent = `Public catalog refreshed (${result.catalog_count} models).`;
+        }
+    } catch (error) {
+        if (actionStatus) {
+            actionStatus.style.color = '#f87171';
+            actionStatus.textContent = `Refresh failed: ${error.message}`;
+        }
+    }
 }
 
 function renderGpuSummary(metadata) {
@@ -717,6 +810,7 @@ function renderProviderDetails(key) {
     const isQwenProvider = provider.type === 'qwen';
     const isCodexProvider = provider.type === 'codex';
     const isCoderAIProvider = provider.type === 'coderai';
+    const isRunpodProvider = provider.type === 'runpod';
     
     // Initialize kiro_config if this is a kiro provider and doesn't have it
     if (isKiroProvider && !provider.kiro_config) {
@@ -776,6 +870,23 @@ function renderProviderDetails(key) {
             registration_token: ''
         };
     }
+    if (isRunpodProvider && !provider.runpod_config) {
+        provider.runpod_config = {
+            mode: 'pod',
+            wrapper_mode: 'openai',
+            account_name: key,
+            management_api: 'auto',
+            idle_shutdown_ms: 900000,
+            startup_poll_interval_ms: 3000,
+            startup_timeout_ms: 300000,
+            pod_id: '',
+            template_id: '',
+            endpoint_id: '',
+            serverless_template_id: '',
+            public_endpoint_protocol_default: 'auto',
+            public_models: {}
+        };
+    }
     
     const kiroConfig = provider.kiro_config || {};
     const claudeConfig = provider.claude_config || {};
@@ -783,6 +894,7 @@ function renderProviderDetails(key) {
     const qwenConfig = provider.qwen_config || {};
     const codexConfig = provider.codex_config || {};
     const coderaiConfig = provider.coderai_config || {};
+    const runpodConfig = provider.runpod_config || {};
     const brokerSession = coderaiConfig.broker_session || {};
     const brokerConnected = !!brokerSession.connected;
     const ownerLabel = brokerSession.owner_user_id == null ? 'Global admin' : `User #${brokerSession.owner_user_id}`;
@@ -1121,6 +1233,128 @@ function renderProviderDetails(key) {
                 </div>
             </div>
         `;
+    } else if (isRunpodProvider) {
+        const publicModels = runpodConfig.public_models || {};
+        const overrideRows = Object.entries(publicModels).map(([modelId, modelConfig]) => `
+            <div style="display:grid; grid-template-columns:minmax(220px, 1fr) minmax(180px, 220px); gap:10px; margin-bottom:10px; align-items:center;">
+                <input type="text" value="${escHtmlAttr(modelId)}" onchange="renameRunpodPublicModelOverride('${key}', '${escHtmlAttr(modelId)}', this.value)" placeholder="model-slug">
+                <select onchange="updateRunpodPublicModelProtocol('${key}', '${escHtmlAttr(modelId)}', this.value)">
+                    <option value="auto" ${(modelConfig.protocol || 'auto') === 'auto' ? 'selected' : ''}>Auto detect</option>
+                    <option value="runpod_public" ${modelConfig.protocol === 'runpod_public' ? 'selected' : ''}>RunPod public</option>
+                    <option value="openai" ${modelConfig.protocol === 'openai' ? 'selected' : ''}>OpenAI</option>
+                    <option value="ollama" ${modelConfig.protocol === 'ollama' ? 'selected' : ''}>Ollama</option>
+                    <option value="coderai" ${modelConfig.protocol === 'coderai' ? 'selected' : ''}>CoderAI</option>
+                </select>
+            </div>
+        `).join('');
+
+        authFieldsHtml = `
+            <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">RunPod Runtime Configuration</h4>
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
+                    RunPod providers use the REST management API to start pods, resolve serverless endpoints, and cache discovered public models across AISBF instances.
+                </small>
+
+                <div class="form-group">
+                    <label>Account Label</label>
+                    <input type="text" value="${runpodConfig.account_name || key}" onchange="updateRunpodConfig('${key}', 'account_name', this.value)" placeholder="personal-runpod">
+                </div>
+
+                <div class="form-group">
+                    <label>Management API Key</label>
+                    <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="RunPod API key">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Used for RunPod REST management calls and public endpoint requests.</small>
+                </div>
+
+                <div class="form-group">
+                    <label>Mode</label>
+                    <select onchange="updateRunpodMode('${key}', this.value)">
+                        <option value="pod" ${runpodConfig.mode === 'pod' ? 'selected' : ''}>Pod-backed</option>
+                        <option value="serverless_template" ${runpodConfig.mode === 'serverless_template' ? 'selected' : ''}>Serverless template</option>
+                        <option value="public" ${runpodConfig.mode === 'public' ? 'selected' : ''}>Public catalog</option>
+                    </select>
+                </div>
+
+                <div id="runpod-non-public-${key}" style="display:${runpodConfig.mode === 'public' ? 'none' : 'block'};">
+                    <div class="form-group">
+                        <label>Wrapper Mode</label>
+                        <select onchange="updateRunpodConfig('${key}', 'wrapper_mode', this.value)">
+                            <option value="openai" ${(runpodConfig.wrapper_mode || 'openai') === 'openai' ? 'selected' : ''}>OpenAI</option>
+                            <option value="ollama" ${runpodConfig.wrapper_mode === 'ollama' ? 'selected' : ''}>Ollama</option>
+                            <option value="coderai" ${runpodConfig.wrapper_mode === 'coderai' ? 'selected' : ''}>CoderAI</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group" style="display:${runpodConfig.mode === 'pod' ? 'block' : 'none'};" id="runpod-pod-id-group-${key}">
+                        <label>Pod ID</label>
+                        <input type="text" value="${runpodConfig.pod_id || ''}" onchange="updateRunpodConfig('${key}', 'pod_id', this.value)" placeholder="abc123">
+                    </div>
+
+                    <div class="form-group" style="display:${runpodConfig.mode === 'serverless_template' ? 'block' : 'none'};" id="runpod-endpoint-id-group-${key}">
+                        <label>Endpoint ID</label>
+                        <input type="text" value="${runpodConfig.endpoint_id || ''}" onchange="updateRunpodConfig('${key}', 'endpoint_id', this.value)" placeholder="endpoint id (optional if template set)">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Template ID</label>
+                        <input type="text" value="${runpodConfig.template_id || ''}" onchange="updateRunpodConfig('${key}', 'template_id', this.value)" placeholder="tmpl_xyz">
+                    </div>
+
+                    <div class="form-group" style="display:${runpodConfig.mode === 'serverless_template' ? 'block' : 'none'};" id="runpod-serverless-template-group-${key}">
+                        <label>Serverless Template ID</label>
+                        <input type="text" value="${runpodConfig.serverless_template_id || ''}" onchange="updateRunpodConfig('${key}', 'serverless_template_id', this.value)" placeholder="serverless template id">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Idle Shutdown (ms)</label>
+                        <input type="number" value="${runpodConfig.idle_shutdown_ms || 900000}" onchange="updateRunpodNumberConfig('${key}', 'idle_shutdown_ms', this.value)">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Startup Poll Interval (ms)</label>
+                        <input type="number" value="${runpodConfig.startup_poll_interval_ms || 3000}" onchange="updateRunpodNumberConfig('${key}', 'startup_poll_interval_ms', this.value)">
+                    </div>
+
+                    <div class="form-group">
+                        <label>Startup Timeout (ms)</label>
+                        <input type="number" value="${runpodConfig.startup_timeout_ms || 300000}" onchange="updateRunpodNumberConfig('${key}', 'startup_timeout_ms', this.value)">
+                    </div>
+                </div>
+
+                <div id="runpod-public-${key}" style="display:${runpodConfig.mode === 'public' ? 'block' : 'none'};">
+                    <div class="form-group">
+                        <label>Default Public Protocol</label>
+                        <select onchange="updateRunpodConfig('${key}', 'public_endpoint_protocol_default', this.value)">
+                            <option value="auto" ${(runpodConfig.public_endpoint_protocol_default || 'auto') === 'auto' ? 'selected' : ''}>Auto detect</option>
+                            <option value="runpod_public" ${runpodConfig.public_endpoint_protocol_default === 'runpod_public' ? 'selected' : ''}>RunPod public</option>
+                            <option value="openai" ${runpodConfig.public_endpoint_protocol_default === 'openai' ? 'selected' : ''}>OpenAI</option>
+                            <option value="ollama" ${runpodConfig.public_endpoint_protocol_default === 'ollama' ? 'selected' : ''}>Ollama</option>
+                            <option value="coderai" ${runpodConfig.public_endpoint_protocol_default === 'coderai' ? 'selected' : ''}>CoderAI</option>
+                        </select>
+                    </div>
+
+                    <div class="form-group">
+                        <label>Per-model Protocol Overrides</label>
+                        <div style="background: var(--bg-page); border: 1px solid var(--color-border); border-radius: 6px; padding: 12px;">
+                            ${overrideRows || '<small style="color: var(--color-muted); display:block;">No overrides configured.</small>'}
+                            <button type="button" class="btn btn-secondary" style="margin-top:10px;" onclick="addRunpodPublicModelOverride('${key}')">Add Override</button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-group" style="margin-top: 20px;">
+                    <div style="display:flex; justify-content:space-between; gap:10px; align-items:center; flex-wrap:wrap; margin-bottom:10px;">
+                        <label style="margin:0;">RunPod Runtime Status</label>
+                        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+                            <button type="button" class="btn btn-secondary" onclick="loadRunpodRuntimeStatus('${safeKey}')">Refresh Status</button>
+                            ${runpodConfig.mode === 'public' ? `<button type="button" class="btn" onclick="refreshRunpodCatalog('${safeKey}')">Refresh Public Catalog</button>` : ''}
+                        </div>
+                    </div>
+                    <div id="runpod-runtime-status-${key}" style="margin-top:10px;"></div>
+                    <div id="runpod-runtime-action-${key}" style="margin-top:8px; font-size:13px; color: var(--color-muted);"></div>
+                </div>
+            </div>
+        `;
     } else if (isQwenProvider) {
         // Qwen authentication fields - supports both API key and OAuth2
         authFieldsHtml = `
@@ -1313,6 +1547,7 @@ function renderProviderDetails(key) {
                 <option value="qwen" ${provider.type === 'qwen' ? 'selected' : ''}>Qwen (OAuth2)</option>
                 <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
                 <option value="coderai" ${provider.type === 'coderai' ? 'selected' : ''}>CoderAI</option>
+                <option value="runpod" ${provider.type === 'runpod' ? 'selected' : ''}>RunPod</option>
             </select>
         </div>
         
@@ -1469,6 +1704,10 @@ function renderProviderDetails(key) {
     `;
 
     renderModels(key);
+
+    if (isRunpodProvider) {
+        setTimeout(() => loadRunpodRuntimeStatus(key), 0);
+    }
 
     // Fetch full usage data for codex providers when panel is expanded
     if (isCodexProvider) {
@@ -1643,7 +1882,8 @@ function updateNewProviderDefaults() {
         'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
         'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1',
-        'coderai': 'CoderAI provider. In broker mode, CoderAI connects inbound to AISBF using a provider-scoped registration token. In direct mode, AISBF calls it as an OpenAI-compatible endpoint. Default endpoint: http://127.0.0.1:11437'
+        'coderai': 'CoderAI provider. In broker mode, CoderAI connects inbound to AISBF using a provider-scoped registration token. In direct mode, AISBF calls it as an OpenAI-compatible endpoint. Default endpoint: http://127.0.0.1:11437',
+        'runpod': 'RunPod provider. Uses the RunPod REST management API for pod lifecycle, serverless endpoints, and public endpoint catalogs. Default endpoint: https://rest.runpod.io/v1'
     };
 
     descriptionEl.textContent = descriptions[providerType] || window.i18n.t('providers.standard_config');
@@ -2369,6 +2609,61 @@ function updateCoderAIConfig(key, field, value) {
     providersData[key].coderai_config[field] = value;
 }
 
+function updateRunpodConfig(key, field, value) {
+    if (!providersData[key].runpod_config) {
+        providersData[key].runpod_config = {};
+    }
+    providersData[key].runpod_config[field] = value;
+}
+
+function updateRunpodNumberConfig(key, field, value) {
+    if (!providersData[key].runpod_config) {
+        providersData[key].runpod_config = {};
+    }
+    providersData[key].runpod_config[field] = value === '' ? null : parseInt(value, 10);
+}
+
+function updateRunpodMode(key, value) {
+    if (!providersData[key].runpod_config) {
+        providersData[key].runpod_config = {};
+    }
+    providersData[key].runpod_config.mode = value;
+    renderProviderDetails(key);
+}
+
+function addRunpodPublicModelOverride(key) {
+    if (!providersData[key].runpod_config) providersData[key].runpod_config = {};
+    if (!providersData[key].runpod_config.public_models) providersData[key].runpod_config.public_models = {};
+    let candidate = 'model-slug';
+    let counter = 1;
+    while (providersData[key].runpod_config.public_models[candidate]) {
+        counter += 1;
+        candidate = `model-slug-${counter}`;
+    }
+    providersData[key].runpod_config.public_models[candidate] = { protocol: 'auto', capabilities: [] };
+    renderProviderDetails(key);
+}
+
+function renameRunpodPublicModelOverride(key, previousModelId, nextModelId) {
+    if (!providersData[key].runpod_config || !providersData[key].runpod_config.public_models) return;
+    const current = providersData[key].runpod_config.public_models[previousModelId];
+    if (!current) return;
+    const trimmed = String(nextModelId || '').trim();
+    if (!trimmed || trimmed === previousModelId) return;
+    delete providersData[key].runpod_config.public_models[previousModelId];
+    providersData[key].runpod_config.public_models[trimmed] = current;
+    renderProviderDetails(key);
+}
+
+function updateRunpodPublicModelProtocol(key, modelId, protocol) {
+    if (!providersData[key].runpod_config) providersData[key].runpod_config = {};
+    if (!providersData[key].runpod_config.public_models) providersData[key].runpod_config.public_models = {};
+    if (!providersData[key].runpod_config.public_models[modelId]) {
+        providersData[key].runpod_config.public_models[modelId] = { capabilities: [] };
+    }
+    providersData[key].runpod_config.public_models[modelId].protocol = protocol;
+}
+
 function updateCoderAIBrokerMode(key, enabled) {
     if (!providersData[key].coderai_config) {
         providersData[key].coderai_config = {};
@@ -2442,6 +2737,23 @@ function updateProviderType(key, value) {
     const defaultEndpoint = getDefaultEndpoint(value);
     if (defaultEndpoint) {
         providersData[key].endpoint = defaultEndpoint;
+    }
+    if (value === 'runpod' && !providersData[key].runpod_config) {
+        providersData[key].runpod_config = {
+            mode: 'pod',
+            wrapper_mode: 'openai',
+            account_name: key,
+            management_api: 'auto',
+            idle_shutdown_ms: 900000,
+            startup_poll_interval_ms: 3000,
+            startup_timeout_ms: 300000,
+            pod_id: '',
+            template_id: '',
+            endpoint_id: '',
+            serverless_template_id: '',
+            public_endpoint_protocol_default: 'auto',
+            public_models: {}
+        };
     }
     // Re-render to update the configuration fields
     renderProvidersList();
@@ -2551,6 +2863,22 @@ async function confirmAddProvider() {
             registration_path: '/coderai/register',
             registration_token: ''
         };
+    } else if (type === 'runpod') {
+        providersData[key].runpod_config = {
+            mode: 'pod',
+            wrapper_mode: 'openai',
+            account_name: key,
+            management_api: 'auto',
+            idle_shutdown_ms: 900000,
+            startup_poll_interval_ms: 3000,
+            startup_timeout_ms: 300000,
+            pod_id: '',
+            template_id: '',
+            endpoint_id: '',
+            serverless_template_id: '',
+            public_endpoint_protocol_default: 'auto',
+            public_models: {}
+        };
     }
 
     // Immediately persist the new provider
@@ -2587,7 +2915,8 @@ function getDefaultEndpoint(type) {
         'kilocode': 'https://api.kilo.ai/api/gateway',
         'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'https://api.openai.com/v1',
-        'coderai': 'http://127.0.0.1:11437'
+        'coderai': 'http://127.0.0.1:11437',
+        'runpod': 'https://rest.runpod.io/v1'
     };
     return defaults[type] || '';
 }

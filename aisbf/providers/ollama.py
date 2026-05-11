@@ -29,15 +29,17 @@ from .base import BaseProviderHandler, AISBF_DEBUG
 
 
 class OllamaProviderHandler(BaseProviderHandler):
-    def __init__(self, provider_id: str, api_key: Optional[str] = None):
-        super().__init__(provider_id, api_key)
+    def __init__(self, provider_id: str, api_key: Optional[str] = None, user_id: Optional[int] = None, provider_config=None):
+        self.provider_config = provider_config if provider_config is not None else config.providers[provider_id]
+        super().__init__(provider_id, api_key, user_id=user_id)
         timeout = httpx.Timeout(
             connect=60.0,
             read=300.0,
             write=60.0,
             pool=60.0
         )
-        self.client = httpx.AsyncClient(base_url=config.providers[provider_id].endpoint, timeout=timeout)
+        endpoint = self.provider_config.get("endpoint") if isinstance(self.provider_config, dict) else self.provider_config.endpoint
+        self.client = httpx.AsyncClient(base_url=endpoint, timeout=timeout)
     
     def validate_credentials(self) -> bool:
         """

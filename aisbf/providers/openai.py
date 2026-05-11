@@ -30,9 +30,11 @@ from .base import BaseProviderHandler, AISBF_DEBUG
 
 
 class OpenAIProviderHandler(BaseProviderHandler):
-    def __init__(self, provider_id: str, api_key: str):
-        super().__init__(provider_id, api_key)
-        self.client = OpenAI(base_url=config.providers[provider_id].endpoint, api_key=api_key)
+    def __init__(self, provider_id: str, api_key: str, user_id: Optional[int] = None, provider_config=None):
+        self.provider_config = provider_config if provider_config is not None else config.providers[provider_id]
+        super().__init__(provider_id, api_key, user_id=user_id)
+        endpoint = self.provider_config.get("endpoint") if isinstance(self.provider_config, dict) else self.provider_config.endpoint
+        self.client = OpenAI(base_url=endpoint, api_key=api_key)
     
     def validate_credentials(self) -> bool:
         """Validate OpenAI API key presence."""

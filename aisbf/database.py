@@ -2069,6 +2069,189 @@ class DatabaseManager:
             ''', (user_id, provider_name))
             conn.commit()
 
+    def get_runpod_provider_state(self, provider_scope: str, owner_user_id: Optional[int], provider_id: str) -> Optional[Dict[str, Any]]:
+        """Get stored RunPod runtime state for a provider."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            owner_clause = 'owner_user_id IS NULL' if owner_user_id is None else f'owner_user_id = {placeholder}'
+            params = [provider_scope]
+            if owner_user_id is not None:
+                params.append(owner_user_id)
+            params.append(provider_id)
+            cursor.execute(f'''
+                SELECT provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id,
+                       resource_kind, status, endpoint_url, public_catalog_json, metadata,
+                       last_used_at, last_status_sync_at, updated_at
+                FROM runpod_provider_state
+                WHERE provider_scope = {placeholder} AND {owner_clause} AND provider_id = {placeholder}
+                LIMIT 1
+            ''', tuple(params))
+            row = cursor.fetchone()
+            return self._row_to_runpod_provider_state(row)
+
+    def save_runpod_provider_state(self, provider_scope: str, owner_user_id: Optional[int], provider_id: str, mode: str,
+                                   wrapper_mode: Optional[str], resource_id: Optional[str], resource_kind: str,
+                                   status: str, endpoint_url: Optional[str] = None, public_catalog_json: Optional[Any] = None,
+                                   metadata: Optional[Dict[str, Any]] = None, last_used_at: Optional[Any] = None,
+                                   last_status_sync_at: Optional[Any] = None) -> Dict[str, Any]:
+        """Persist RunPod runtime state for a provider."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            catalog_payload = json.dumps(public_catalog_json or [])
+            metadata_payload = json.dumps(metadata or {})
+            sync_value = last_status_sync_at if last_status_sync_at is not None else time.time()
+            used_value = last_used_at
+
+            if owner_user_id is None:
+                cursor.execute(f'''
+                    UPDATE runpod_provider_state
+                    SET provider_scope = {placeholder},
+                        mode = {placeholder},
+                        wrapper_mode = {placeholder},
+                        resource_id = {placeholder},
+                        resource_kind = {placeholder},
+                        status = {placeholder},
+                        endpoint_url = {placeholder},
+                        public_catalog_json = {placeholder},
+                        metadata = {placeholder},
+                        last_used_at = {placeholder},
+                        last_status_sync_at = {placeholder},
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE provider_scope = {placeholder} AND owner_user_id IS NULL AND provider_id = {placeholder}
+                ''', (
+                    provider_scope, mode, wrapper_mode, resource_id, resource_kind, status,
+                    endpoint_url, catalog_payload, metadata_payload, used_value, sync_value,
+                    provider_scope, provider_id,
+                ))
+                if cursor.rowcount:
+                    conn.commit()
+                    return self.get_runpod_provider_state(provider_scope, owner_user_id, provider_id)
+
+            if self.db_type == 'sqlite':
+                cursor.execute(f'''
+                    INSERT INTO runpod_provider_state (
+                        provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id,
+                        resource_kind, status, endpoint_url, public_catalog_json, metadata,
+                        last_used_at, last_status_sync_at, updated_at
+                    ) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                              {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                              {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON CONFLICT(owner_user_id, provider_id) DO UPDATE SET
+                        provider_scope = excluded.provider_scope,
+                        mode = excluded.mode,
+                        wrapper_mode = excluded.wrapper_mode,
+                        resource_id = excluded.resource_id,
+                        resource_kind = excluded.resource_kind,
+                        status = excluded.status,
+                        endpoint_url = excluded.endpoint_url,
+                        public_catalog_json = excluded.public_catalog_json,
+                        metadata = excluded.metadata,
+                        last_used_at = excluded.last_used_at,
+                        last_status_sync_at = excluded.last_status_sync_at,
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id, resource_kind,
+                      status, endpoint_url, catalog_payload, metadata_payload, used_value, sync_value))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO runpod_provider_state (
+                        provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id,
+                        resource_kind, status, endpoint_url, public_catalog_json, metadata,
+                        last_used_at, last_status_sync_at, updated_at
+                    ) VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                              {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                              {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ON DUPLICATE KEY UPDATE
+                        provider_scope = VALUES(provider_scope),
+                        mode = VALUES(mode),
+                        wrapper_mode = VALUES(wrapper_mode),
+                        resource_id = VALUES(resource_id),
+                        resource_kind = VALUES(resource_kind),
+                        status = VALUES(status),
+                        endpoint_url = VALUES(endpoint_url),
+                        public_catalog_json = VALUES(public_catalog_json),
+                        metadata = VALUES(metadata),
+                        last_used_at = VALUES(last_used_at),
+                        last_status_sync_at = VALUES(last_status_sync_at),
+                        updated_at = CURRENT_TIMESTAMP
+                ''', (provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id, resource_kind,
+                      status, endpoint_url, catalog_payload, metadata_payload, used_value, sync_value))
+            conn.commit()
+        return self.get_runpod_provider_state(provider_scope, owner_user_id, provider_id)
+
+    def touch_runpod_provider_state(self, provider_scope: str, owner_user_id: Optional[int], provider_id: str,
+                                    last_used_at: Optional[Any] = None) -> None:
+        """Update last-used timestamp for a RunPod state row."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            owner_clause = 'owner_user_id IS NULL' if owner_user_id is None else f'owner_user_id = {placeholder}'
+            params = [last_used_at if last_used_at is not None else time.time(), provider_scope]
+            if owner_user_id is not None:
+                params.append(owner_user_id)
+            params.append(provider_id)
+            cursor.execute(f'''
+                UPDATE runpod_provider_state
+                SET last_used_at = {placeholder}, updated_at = CURRENT_TIMESTAMP
+                WHERE provider_scope = {placeholder} AND {owner_clause} AND provider_id = {placeholder}
+            ''', tuple(params))
+            conn.commit()
+
+    def list_runpod_provider_states(self, provider_scope: Optional[str] = None) -> List[Dict[str, Any]]:
+        """List stored RunPod runtime state rows."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if provider_scope is None:
+                cursor.execute('''
+                    SELECT provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id,
+                           resource_kind, status, endpoint_url, public_catalog_json, metadata,
+                           last_used_at, last_status_sync_at, updated_at
+                    FROM runpod_provider_state
+                    ORDER BY updated_at DESC
+                ''')
+            else:
+                cursor.execute(f'''
+                    SELECT provider_scope, owner_user_id, provider_id, mode, wrapper_mode, resource_id,
+                           resource_kind, status, endpoint_url, public_catalog_json, metadata,
+                           last_used_at, last_status_sync_at, updated_at
+                    FROM runpod_provider_state
+                    WHERE provider_scope = {placeholder}
+                    ORDER BY updated_at DESC
+                ''', (provider_scope,))
+            return [state for state in (self._row_to_runpod_provider_state(row) for row in cursor.fetchall()) if state]
+
+    def _row_to_runpod_provider_state(self, row) -> Optional[Dict[str, Any]]:
+        if not row:
+            return None
+        public_catalog_payload = row[9]
+        metadata_payload = row[10]
+        try:
+            public_catalog = json.loads(public_catalog_payload) if public_catalog_payload else []
+        except Exception:
+            public_catalog = []
+        try:
+            metadata = json.loads(metadata_payload) if metadata_payload else {}
+        except Exception:
+            metadata = {}
+        return {
+            'provider_scope': row[0],
+            'owner_user_id': row[1],
+            'provider_id': row[2],
+            'mode': row[3],
+            'wrapper_mode': row[4],
+            'resource_id': row[5],
+            'resource_kind': row[6],
+            'status': row[7],
+            'endpoint_url': row[8],
+            'public_catalog_json': public_catalog,
+            'metadata': metadata,
+            'last_used_at': row[11],
+            'last_status_sync_at': row[12],
+            'updated_at': row[13],
+        }
+
     # User-specific rotation methods
     def save_user_rotation(self, user_id: int, rotation_name: str, config: Dict):
         """
@@ -5601,6 +5784,62 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created provider_disabled_state table")
     except Exception as e:
         logger.warning(f"Migration check for provider_disabled_state table: {e}")
+
+    # Migration: Create runpod_provider_state table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(runpod_provider_state)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE runpod_provider_state (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        provider_scope VARCHAR(16) NOT NULL,
+                        owner_user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        mode VARCHAR(64) NOT NULL,
+                        wrapper_mode VARCHAR(64),
+                        resource_id VARCHAR(255),
+                        resource_kind VARCHAR(64) NOT NULL,
+                        status VARCHAR(64) NOT NULL,
+                        endpoint_url TEXT,
+                        public_catalog_json TEXT,
+                        metadata TEXT,
+                        last_used_at REAL,
+                        last_status_sync_at REAL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(owner_user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created runpod_provider_state table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'runpod_provider_state'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE runpod_provider_state (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        provider_scope VARCHAR(16) NOT NULL,
+                        owner_user_id INTEGER NULL,
+                        provider_id VARCHAR(255) NOT NULL,
+                        mode VARCHAR(64) NOT NULL,
+                        wrapper_mode VARCHAR(64) NULL,
+                        resource_id VARCHAR(255) NULL,
+                        resource_kind VARCHAR(64) NOT NULL,
+                        status VARCHAR(64) NOT NULL,
+                        endpoint_url TEXT NULL,
+                        public_catalog_json LONGTEXT NULL,
+                        metadata LONGTEXT NULL,
+                        last_used_at DOUBLE NULL,
+                        last_status_sync_at DOUBLE NULL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE KEY uniq_runpod_provider_state (owner_user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created runpod_provider_state table")
+    except Exception as e:
+        logger.warning(f"Migration check for runpod_provider_state table: {e}")
 
     # Migration: Create user_sort_order table if missing
     try:
