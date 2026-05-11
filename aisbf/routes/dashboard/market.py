@@ -234,6 +234,52 @@ def _apply_listing_derived_fields(listing: dict, db):
     return _attach_analytics_snapshot(listing)
 
 
+def _listing_scope_priority(listing: dict) -> int:
+    return 1 if listing.get('source_scope') == 'global' else 0
+
+
+def _listing_match_priority(listing: dict, query: str, model_name: str, capabilities: list[str], model_type: str, size: str) -> int:
+    metadata = listing.get('metadata') or {}
+    title = str(listing.get('title') or '').lower()
+    description = str(listing.get('description') or '').lower()
+    provider_id = str(listing.get('provider_id') or '').lower()
+    listed_model = str(listing.get('model_id') or metadata.get('model_name') or '').lower()
+    capability_values = listing.get('capabilities') or []
+    listing_model_type = listing.get('model_type_label') or ''
+    listing_size = listing.get('size_label') or ''
+
+    score = 0
+    if query:
+        if query == title:
+            score += 12
+        elif query in title:
+            score += 10
+        elif query == provider_id or query == listed_model:
+            score += 9
+        elif query in listed_model or query in provider_id:
+            score += 8
+        elif query in description:
+            score += 4
+    if model_name:
+        if model_name == listed_model:
+            score += 8
+        elif model_name in listed_model:
+            score += 6
+    if capabilities:
+        score += sum(3 for cap in capabilities if cap in capability_values)
+    if model_type:
+        if model_type == listing_model_type:
+            score += 4
+        elif model_type in listing_model_type:
+            score += 2
+    if size:
+        if size == listing_size:
+            score += 4
+        elif size in listing_size:
+            score += 2
+    return score
+
+
 async def _build_provider_listing_payload(provider_id: str, provider_config, owner_user_id: int, owner_username: str, source_scope: str, form: dict):
     safe_config = _safe_provider_config(provider_config)
     models = []
@@ -385,22 +431,31 @@ async def api_market_listings(request: Request):
         listing['online'] = _listing_online(listing)
         if online_only and not listing['online']:
             continue
+        listing['_scope_priority'] = _listing_scope_priority(listing)
+        listing['_match_priority'] = _listing_match_priority(listing, query, model_name, capabilities, model_type, size)
         filtered.append(listing)
 
     if sort_by == 'price_asc':
-        filtered.sort(key=lambda item: (item.get('price_per_million_tokens') or 0, item.get('price_per_1000_requests') or 0, -(item.get('votes', {}).get('listing', {}).get('score', 0))))
+        filtered.sort(key=lambda item: (item.get('price_per_million_tokens') or 0, item.get('price_per_1000_requests') or 0, -item.get('_match_priority', 0), item.get('_scope_priority', 0), -(item.get('votes', {}).get('listing', {}).get('score', 0))))
     elif sort_by == 'price_desc':
-        filtered.sort(key=lambda item: (-(item.get('price_per_million_tokens') or 0), -(item.get('price_per_1000_requests') or 0)))
+        filtered.sort(key=lambda item: (-(item.get('price_per_million_tokens') or 0), -(item.get('price_per_1000_requests') or 0), -item.get('_match_priority', 0), item.get('_scope_priority', 0)))
     elif sort_by == 'upvotes':
-        filtered.sort(key=lambda item: (-(item.get('votes', {}).get('listing', {}).get('score', 0)), -(item.get('votes', {}).get('user', {}).get('score', 0))))
+        filtered.sort(key=lambda item: (-(item.get('votes', {}).get('listing', {}).get('score', 0)), -(item.get('votes', {}).get('user', {}).get('score', 0)), -item.get('_match_priority', 0), item.get('_scope_priority', 0)))
     elif sort_by == 'performance':
-        filtered.sort(key=lambda item: ((item.get('analytics', {}).get('avg_latency_ms') or 10**9), -(item.get('analytics', {}).get('request_count') or 0)))
+        filtered.sort(key=lambda item: ((item.get('analytics', {}).get('avg_latency_ms') or 10**9), -(item.get('analytics', {}).get('request_count') or 0), -item.get('_match_priority', 0), item.get('_scope_priority', 0)))
     elif sort_by == 'requests':
-        filtered.sort(key=lambda item: (-(item.get('stats', {}).get('total_requests') or 0), -(item.get('analytics', {}).get('request_count') or 0)))
+        filtered.sort(key=lambda item: (-(item.get('stats', {}).get('total_requests') or 0), -(item.get('analytics', {}).get('request_count') or 0), -item.get('_match_priority', 0), item.get('_scope_priority', 0)))
     elif sort_by == 'revenue':
-        filtered.sort(key=lambda item: (-(item.get('stats', {}).get('gross_revenue') or 0), -(item.get('stats', {}).get('provider_revenue') or 0)))
+        filtered.sort(key=lambda item: (-(item.get('stats', {}).get('gross_revenue') or 0), -(item.get('stats', {}).get('provider_revenue') or 0), -item.get('_match_priority', 0), item.get('_scope_priority', 0)))
     else:
-        filtered.sort(key=lambda item: str(item.get('created_at') or ''), reverse=True)
+        if query or model_name or capabilities or model_type or size:
+            filtered.sort(key=lambda item: (-item.get('_match_priority', 0), item.get('_scope_priority', 0), str(item.get('created_at') or '')), reverse=False)
+        else:
+            filtered.sort(key=lambda item: (item.get('_scope_priority', 0), str(item.get('created_at') or '')), reverse=False)
+
+    for listing in filtered:
+        listing.pop('_scope_priority', None)
+        listing.pop('_match_priority', None)
 
     return JSONResponse({'listings': filtered})
 
