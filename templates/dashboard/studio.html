@@ -25,47 +25,1728 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% endblock %}
 
 {% block content %}
-<section class="studio-shell" data-studio-shell="dashboard">
-    <div class="studio-hero">
-        <div>
-            <p class="studio-eyebrow" data-i18n="studio.eyebrow">Workspace</p>
-            <h2 class="studio-title" data-i18n="studio.title">Studio</h2>
-            <p class="studio-subtitle" data-i18n="studio.subtitle">Prepare providers, rotations, and autoselect targets from one dashboard-native workspace.</p>
-        </div>
-        <div class="studio-status-card">
-            <span class="studio-status-label" data-i18n="studio.status_label">Status</span>
-            <strong class="studio-status-value" data-i18n="studio.status_placeholder">Catalog wiring arrives in the next task.</strong>
-        </div>
-    </div>
-
-    <div class="studio-grid">
-        <section class="studio-panel">
-            <header class="studio-panel-header">
-                <h3 data-i18n="studio.catalog_title">Catalog</h3>
-                <span class="studio-chip" data-i18n="studio.catalog_scope">Dashboard shell</span>
-            </header>
-            <p class="studio-copy" data-i18n="studio.catalog_description">Review provider, rotation, and autoselect capability coverage from one dashboard-native workspace.</p>
-            <div class="studio-targets" id="studio-targets" data-empty-message="No Studio targets available.">
-                <span data-i18n="studio.catalog_loading">Loading Studio targets.</span>
-            </div>
-        </section>
-
-        <section class="studio-panel studio-panel-emphasis">
-            <header class="studio-panel-header">
-                <h3 data-i18n="studio.workspace_title">Workspace</h3>
-                <span class="studio-chip" data-i18n="studio.workspace_mode">Capability coverage</span>
-            </header>
-            <p class="studio-copy" data-i18n="studio.workspace_description">Partial capability states call out what rotations and autoselects only support on some underlying targets.</p>
-            <div class="studio-diagnostics" id="studio-diagnostics" data-empty-message="No diagnostics yet.">
-                <span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>
-            </div>
-        </section>
-    </div>
-</section>
-
 <script id="studio-bootstrap" type="application/json">{{ studio_bootstrap_json|safe }}</script>
+
+<div class="studio">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-hd">Bindings</div>
+    <div class="model-list" id="model-list"><div class="muted small" style="padding:.5rem .6rem">Loading…</div></div>
+  </aside>
+
+  <div class="studio-main">
+
+    <!-- Level-1 tabs (category) -->
+    <div class="tabbar1" id="tabbar1">
+      <button class="t1btn active" data-cat="chat" onclick="selectCat('chat')">Chat <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="image" onclick="selectCat('image')">Image <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="video" onclick="selectCat('video')">Video <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="audio" onclick="selectCat('audio')">Audio <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="embed" onclick="selectCat('embed')">Embed <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="3d" onclick="selectCat('3d')">3D <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="profiles" onclick="selectCat('profiles')">Profiles <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="pipe" onclick="selectCat('pipe')">Pipelines <span class="tab-status" hidden></span></button>
+      <button class="t1btn" data-cat="archive" onclick="selectCat('archive')">Archive <span class="tab-status" hidden></span></button>
+    </div>
+
+    <!-- Level-2 tabs (sub-mode) -->
+    <div class="tabbar2" id="tabbar2">
+      <!-- Image sub-tabs -->
+      <button class="t2btn" data-sub="img-gen" onclick="selectSub('img-gen')">Generate <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-edit" onclick="selectSub('img-edit')">Edit (i2i) <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-inpaint" onclick="selectSub('img-inpaint')">Inpaint <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-upscale" onclick="selectSub('img-upscale')">Upscale <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-depth" onclick="selectSub('img-depth')">Depth <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-seg" onclick="selectSub('img-seg')">Segment <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-faceswap" onclick="selectSub('img-faceswap')">Face Swap <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-deblur" onclick="selectSub('img-deblur')">Deblur <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-unpix" onclick="selectSub('img-unpix')">Unpixelate <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-outfit" onclick="selectSub('img-outfit')">Outfit Change <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-to3d" onclick="selectSub('img-to3d')">2D→3D <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="img-from3d" onclick="selectSub('img-from3d')">3D→2D <span class="tab-status" hidden></span></button>
+      <!-- Video sub-tabs -->
+      <button class="t2btn" data-sub="vid-t2v" onclick="selectSub('vid-t2v')">Text→Video <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-i2v" onclick="selectSub('vid-i2v')">Image→Video <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-v2v" onclick="selectSub('vid-v2v')">Vid→Vid <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-ti2v" onclick="selectSub('vid-ti2v')">Ti2V <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-interp" onclick="selectSub('vid-interp')">Interpolate <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-sub" onclick="selectSub('vid-sub')">Subtitles <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-dub" onclick="selectSub('vid-dub')">Dub <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-up" onclick="selectSub('vid-up')">Upscale <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-faceswap" onclick="selectSub('vid-faceswap')">Face Swap <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-outfit" onclick="selectSub('vid-outfit')">Outfit Change <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-to3d" onclick="selectSub('vid-to3d')">2D→3D <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="vid-from3d" onclick="selectSub('vid-from3d')">3D→Video <span class="tab-status" hidden></span></button>
+      <!-- 3D sub-tabs -->
+      <button class="t2btn" data-sub="3d-generate" onclick="selectSub('3d-generate')">Generate Model <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="3d-img-to3d" onclick="selectSub('3d-img-to3d')">Image→3D <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="3d-vid-to3d" onclick="selectSub('3d-vid-to3d')">Video→3D <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="3d-from3d" onclick="selectSub('3d-from3d')">3D→Render <span class="tab-status" hidden></span></button>
+      <!-- Audio sub-tabs -->
+      <button class="t2btn" data-sub="aud-gen" onclick="selectSub('aud-gen')">Generate Music/SFX <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-music-dub" onclick="selectSub('aud-music-dub')">Music Dub <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-tts" onclick="selectSub('aud-tts')">TTS <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-clone" onclick="selectSub('aud-clone')">Voice Clone <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-convert" onclick="selectSub('aud-convert')">Voice Convert <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-stt" onclick="selectSub('aud-stt')">Transcribe <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-understand" onclick="selectSub('aud-understand')">Understand <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-stems" onclick="selectSub('aud-stems')">Stems <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="aud-clean" onclick="selectSub('aud-clean')">Clean <span class="tab-status" hidden></span></button>
+      <!-- Profiles sub-tabs -->
+      <button class="t2btn" data-sub="prof-char" onclick="selectSub('prof-char')">Characters <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="prof-env" onclick="selectSub('prof-env')">Environments <span class="tab-status" hidden></span></button>
+      <button class="t2btn" data-sub="prof-voice" onclick="selectSub('prof-voice')">Voices <span class="tab-status" hidden></span></button>
+    </div>
+
+    <!-- ═══════════════ CHAT ═══════════════ -->
+    <div class="panel active" id="panel-chat">
+      <div class="chat-msgs" id="chat-msgs">
+        <div class="chat-empty"><h3>CoderAI Studio</h3><p>Select a functionality and bind the required models in the sidebar</p></div>
+      </div>
+      <div class="chat-foot">
+        <div class="attach-bar" id="attach-bar" style="display:none">
+          <img id="attach-thumb" class="attach-thumb" src="" alt="">
+          <span style="font-size:11px;color:var(--text-3)" id="attach-name"></span>
+          <button class="btn btn-ghost btn-sm" onclick="clearAttach()" style="margin-left:auto">✕</button>
+        </div>
+        <div id="typing" class="progress" style="margin-bottom:.2rem;font-family:var(--mono)"></div>
+        <div class="chat-row">
+          <label id="attach-btn" style="display:none;cursor:pointer;align-self:flex-end;padding:.35rem" title="Attach image">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" style="width:15px;height:15px"><path d="M2 10l4-4 3 3 2-2 3 3"/><rect x="1" y="1" width="14" height="14" rx="2"/></svg>
+            <input type="file" accept="image/*" id="vision-input" style="display:none" onchange="attachImg(this)">
+          </label>
+          <textarea id="chat-in" class="chat-ta" placeholder="Send a message…" rows="1"></textarea>
+          <button class="btn btn-primary" id="send-btn" onclick="sendChat()" style="padding:.45rem .7rem;align-self:flex-end">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" style="width:13px;height:13px"><line x1="14" y1="2" x2="7" y2="9"/><polygon points="14 2 10 14 7 9 2 6 14 2"/></svg>
+          </button>
+        </div>
+        <div class="chat-hint">Enter to send · Shift+Enter for newline</div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ IMAGE ═══════════════ -->
+
+    <!-- Generate -->
+    <div class="panel" id="panel-img-gen">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-gen"></div>
+          <div class="frow"><label class="fl">Prompt</label><textarea id="ig-prompt" class="fs" placeholder="Describe the image…" rows="4"></textarea></div>
+          <div class="frow"><label class="fl">Negative prompt</label><textarea id="ig-neg" class="fs" placeholder="Things to avoid…" rows="2"></textarea></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Width</label><input type="number" id="ig-w" class="fi" value="1024" step="64"></div>
+            <div class="frow"><label class="fl">Height</label><input type="number" id="ig-h" class="fi" value="1024" step="64"></div>
+          </div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Steps</label><input type="number" id="ig-steps" class="fi" value="30" min="1"></div>
+            <div class="frow"><label class="fl">CFG</label><input type="number" id="ig-cfg" class="fi" value="7.5" step="0.5"></div>
+          </div>
+          <div class="frow"><label class="fl">Seed</label><input type="number" id="ig-seed" class="fi" placeholder="random"></div>
+          <div class="frow"><label class="fl">Count (n)</label><input type="number" id="ig-n" class="fi" value="1" min="1" max="8"></div>
+          <div class="frow"><label class="fl" title="Removes the model's built-in safety checker. Only use with uncensored/NSFW fine-tunes.">Disable safety filter</label><input type="checkbox" id="ig-nosafe"></div>
+          <div class="frow" style="align-items:flex-start">
+            <label class="fl" style="padding-top:.3rem">Characters</label>
+            <div style="flex:1;display:flex;flex-direction:column;gap:.3rem">
+              <div id="ig-char-profile-slots"></div>
+              <button class="btn btn-ghost btn-sm" id="ig-add-char-btn" onclick="addCharProfileSlot('ig')" style="align-self:flex-start;font-size:11px">+ Add character</button>
+            </div>
+          </div>
+          <div class="frow"><label class="fl">Character strength <span id="ig-char-sv">0.6</span></label>
+            <input type="range" id="ig-char-str" min="0" max="1" step="0.05" value="0.6" oninput="$('ig-char-sv').textContent=this.value" style="width:100%">
+          </div>
+          <div class="frow" style="align-items:flex-start">
+            <label class="fl" style="padding-top:.3rem">Environments</label>
+            <div style="flex:1;display:flex;flex-direction:column;gap:.3rem">
+              <div id="ig-env-profile-slots"></div>
+              <button class="btn btn-ghost btn-sm" id="ig-add-env-btn" onclick="addEnvProfileSlot('ig')" style="align-self:flex-start;font-size:11px">+ Add environment</button>
+            </div>
+          </div>
+          <div class="frow"><label class="fl">Environment strength <span id="ig-env-sv">0.6</span></label>
+            <input type="range" id="ig-env-str" min="0" max="1" step="0.05" value="0.6" oninput="$('ig-env-sv').textContent=this.value" style="width:100%">
+          </div>
+          <div class="req-preview" id="ig-preview"></div>
+          <button class="btn btn-primary" onclick="genImage()">Generate</button>
+          <div class="progress" id="ig-prog"></div>
+          <div class="gen-progress-wrap" id="ig-pbar-wrap">
+            <div class="gen-progress-bar-bg"><div class="gen-progress-bar-fill" id="ig-pbar-fill"></div></div>
+            <div class="gen-progress-label" id="ig-pbar-label"></div>
+          </div>
+        </div>
+        <div class="gen-out" id="ig-out"><div class="gen-empty">Image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Edit (i2i) -->
+    <div class="panel" id="panel-img-edit">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-edit"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="ie-src" accept="image/*" class="fi"></div>
+          <div class="frow"><label class="fl">Prompt</label><textarea id="ie-prompt" class="fs" rows="4" placeholder="Describe the desired change…"></textarea></div>
+          <div class="frow"><label class="fl">Strength <span id="ie-sv">0.75</span></label>
+            <input type="range" id="ie-str" min="0" max="1" step="0.05" value="0.75" oninput="$('ie-sv').textContent=this.value" style="width:100%"></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Steps</label><input type="number" id="ie-steps" class="fi" value="30"></div>
+            <div class="frow"><label class="fl">CFG</label><input type="number" id="ie-cfg" class="fi" value="7.5" step="0.5"></div>
+          </div>
+          <div class="frow"><label class="fl">Seed</label><input type="number" id="ie-seed" class="fi" placeholder="random"></div>
+          <button class="btn btn-primary" onclick="genEdit()">Edit Image</button>
+          <div class="progress" id="ie-prog"></div>
+        </div>
+        <div class="gen-out" id="ie-out"><div class="gen-empty">Edited image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Inpaint -->
+    <div class="panel" id="panel-img-inpaint">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-inpaint"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="ip-src" accept="image/*" class="fi"></div>
+          <div class="frow"><label class="fl">Mask image <span style="font-weight:400">(white = fill area)</span></label><input type="file" id="ip-mask" accept="image/*" class="fi"></div>
+          <div class="frow"><label class="fl">Prompt</label><textarea id="ip-prompt" class="fs" rows="4" placeholder="What to fill the masked area with…"></textarea></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Steps</label><input type="number" id="ip-steps" class="fi" value="30"></div>
+            <div class="frow"><label class="fl">CFG</label><input type="number" id="ip-cfg" class="fi" value="7.5" step="0.5"></div>
+          </div>
+          <div class="frow"><label class="fl">Strength <span id="ip-sv">0.99</span></label>
+            <input type="range" id="ip-str" min="0" max="1" step="0.05" value="0.99" oninput="$('ip-sv').textContent=this.value" style="width:100%"></div>
+          <div class="frow"><label class="fl">Seed</label><input type="number" id="ip-seed" class="fi" placeholder="random"></div>
+          <button class="btn btn-primary" onclick="genInpaint()">Inpaint</button>
+          <div class="progress" id="ip-prog"></div>
+        </div>
+        <div class="gen-out" id="ip-out"><div class="gen-empty">Result will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Upscale image -->
+    <div class="panel" id="panel-img-upscale">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-upscale"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="iu-src" accept="image/*" class="fi"></div>
+          <div class="frow"><label class="fl">Scale factor</label>
+            <select id="iu-scale" class="fselect"><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option></select>
+          </div>
+          <button class="btn btn-primary" onclick="genImgUpscale()">Upscale</button>
+          <div class="progress" id="iu-prog"></div>
+        </div>
+        <div class="gen-out" id="iu-out"><div class="gen-empty">Upscaled image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Depth -->
+    <div class="panel" id="panel-img-depth">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-depth"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="id-src" accept="image/*" class="fi"></div>
+          <button class="btn btn-primary" onclick="genDepth()">Estimate Depth</button>
+          <div class="progress" id="id-prog"></div>
+        </div>
+        <div class="gen-out" id="id-out"><div class="gen-empty">Depth map will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Segment -->
+    <div class="panel" id="panel-img-seg">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-seg"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="is-src" accept="image/*" class="fi"></div>
+          <div class="frow"><label class="fl">Point prompts (optional)</label>
+            <input type="text" id="is-pts" class="fi" placeholder='[[x,y], [x,y]]'></div>
+          <div class="frow"><label class="fl">Box prompts (optional)</label>
+            <input type="text" id="is-boxes" class="fi" placeholder='[[x1,y1,x2,y2]]'></div>
+          <button class="btn btn-primary" onclick="genSegment()">Segment</button>
+          <div class="progress" id="is-prog"></div>
+        </div>
+        <div class="gen-out" id="is-out"><div class="gen-empty">Segmented image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Face Swap -->
+    <div class="panel" id="panel-img-faceswap">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-faceswap"></div>
+          <div class="cap-card" id="cap-vid-faceswap" style="display:none"></div>
+          <div class="frow"><label class="fl">Source face</label>
+            <div class="media-input-group">
+              <input type="file" id="fs-src" accept="image/*" class="fi" onchange="previewMediaInput('fs-src','fs-src-preview')">
+              <button class="btn btn-ghost btn-sm" onclick="openWebcam('fs-src-cam','fs-src','fs-src-preview','photo')">📷 Webcam</button>
+            </div>
+          </div>
+          <div id="fs-src-preview" class="media-preview"></div>
+          <div id="fs-src-cam" class="webcam-box" style="display:none"></div>
+
+          <div class="frow"><label class="fl">Target type</label>
+            <select id="fs-type" class="fselect" onchange="fsFaceSwapTypeChange()">
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+
+          <div class="frow" id="fs-tgt-wrap"><label class="fl">Target image</label>
+            <div class="media-input-group">
+              <input type="file" id="fs-tgt" accept="image/*,video/*" class="fi" onchange="previewMediaInput('fs-tgt','fs-tgt-preview')">
+              <button class="btn btn-ghost btn-sm" id="fs-tgt-cam-btn" onclick="openWebcam('fs-tgt-cam','fs-tgt','fs-tgt-preview','photo')">📷 Webcam</button>
+            </div>
+          </div>
+          <div id="fs-tgt-preview" class="media-preview"></div>
+          <div id="fs-tgt-cam" class="webcam-box" style="display:none"></div>
+
+          <button class="btn btn-primary" onclick="genFaceSwap()">Swap Face</button>
+          <div class="progress" id="fs-prog"></div>
+        </div>
+        <div class="gen-out" id="fs-out"><div class="gen-empty">Result will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Deblur -->
+    <div class="panel" id="panel-img-deblur">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-deblur"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="db-src" accept="image/*" class="fi" onchange="previewMediaInput('db-src','db-src-preview')"></div>
+          <div id="db-src-preview" class="media-preview"></div>
+          <div class="frow"><label class="fl">Strength <span id="db-sv">0.5</span></label>
+            <input type="range" id="db-str" min="0.1" max="1" step="0.05" value="0.5" oninput="$('db-sv').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+          <button class="btn btn-primary" onclick="genDeblur()">Deblur</button>
+          <div class="progress" id="db-prog"></div>
+        </div>
+        <div class="gen-out" id="db-out"><div class="gen-empty">Deblurred image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Unpixelate -->
+    <div class="panel" id="panel-img-unpix">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-unpix"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="up-src" accept="image/*" class="fi" onchange="previewMediaInput('up-src','up-src-preview')"></div>
+          <div id="up-src-preview" class="media-preview"></div>
+          <div class="frow"><label class="fl">Scale</label>
+            <select id="up-scale" class="fselect"><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option></select>
+          </div>
+          <button class="btn btn-primary" onclick="genUnpixelate()">Unpixelate</button>
+          <div class="progress" id="up-prog"></div>
+        </div>
+        <div class="gen-out" id="up-out"><div class="gen-empty">Restored image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Outfit Change -->
+    <div class="panel" id="panel-img-outfit">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-outfit"></div>
+          <div class="cap-card" id="cap-vid-outfit" style="display:none"></div>
+          <div class="frow"><label class="fl">Target type</label>
+            <select id="ot-type" class="fselect" onchange="otOutfitTypeChange()">
+              <option value="image">Image</option>
+              <option value="video">Video</option>
+            </select>
+          </div>
+          <div class="frow" id="ot-img-wrap"><label class="fl">Source image</label><input type="file" id="ot-src" accept="image/*" class="fi" onchange="previewMediaInput('ot-src','ot-src-preview')"></div>
+          <div class="frow" id="ot-vid-wrap" style="display:none"><label class="fl">Source video</label><input type="file" id="ot-vid" accept="video/*" class="fi"></div>
+          <div id="ot-src-preview" class="media-preview"></div>
+          <div class="frow"><label class="fl">New outfit prompt</label><textarea id="ot-prompt" class="fs" rows="3" placeholder="e.g. red evening dress, formal suit, casual jeans and t-shirt…"></textarea></div>
+          <div class="frow"><label class="fl">Negative prompt</label><input id="ot-neg" class="fi" placeholder="ugly, deformed…"></div>
+          <div class="frow"><label class="fl">Mask (optional — auto-generated if blank)</label><input type="file" id="ot-mask" accept="image/*" class="fi"></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Steps</label><input type="number" id="ot-steps" class="fi" value="30"></div>
+            <div class="frow"><label class="fl">CFG</label><input type="number" id="ot-cfg" class="fi" value="7.5" step="0.5"></div>
+          </div>
+          <div class="frow"><label class="fl">Seed</label><input type="number" id="ot-seed" class="fi" placeholder="random"></div>
+          <button class="btn btn-primary" onclick="genOutfit()">Change Outfit</button>
+          <div class="progress" id="ot-prog"></div>
+        </div>
+        <div class="gen-out" id="ot-out"><div class="gen-empty">Result will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Image 2D → 3D -->
+    <div class="panel" id="panel-img-to3d">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-to3d"></div>
+          <div class="frow"><label class="fl">Source image</label><input type="file" id="i3-src" accept="image/*" class="fi" onchange="previewMediaInput('i3-src','i3-src-preview')"></div>
+          <div id="i3-src-preview" class="media-preview"></div>
+          <div class="frow"><label class="fl">Output method</label>
+            <select id="i3-method" class="fselect">
+              <option value="stereo">Stereo (side-by-side)</option>
+              <option value="anaglyph">Anaglyph (red-cyan)</option>
+              <option value="depth">Depth map</option>
+              <option value="mesh">3D mesh (GLB)</option>
+            </select>
+          </div>
+          <div class="frow" id="i3-shift-row"><label class="fl">Parallax shift <span id="i3-sv">20</span>px</label>
+            <input type="range" id="i3-shift" min="5" max="50" step="1" value="20" oninput="$('i3-sv').textContent=this.value" style="width:100%">
+          </div>
+          <button class="btn btn-primary" onclick="genImageTo3D()">Convert to 3D</button>
+          <div class="progress" id="i3-prog"></div>
+        </div>
+        <div class="gen-out" id="i3-out"><div class="gen-empty">3D output will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Image 3D → 2D -->
+    <div class="panel" id="panel-img-from3d">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-img-from3d"></div>
+          <div class="frow"><label class="fl">3D model file (GLB/OBJ)</label><input type="file" id="f3-src" accept=".glb,.obj,.gltf" class="fi"></div>
+          <div class="frow"><label class="fl">Format</label>
+            <select id="f3-fmt" class="fselect">
+              <option value="glb">GLB</option>
+              <option value="obj">OBJ</option>
+            </select>
+          </div>
+          <div class="g3">
+            <div class="frow"><label class="fl">Distance</label><input type="number" id="f3-dist" class="fi" value="2.0" step="0.5"></div>
+            <div class="frow"><label class="fl">Elevation°</label><input type="number" id="f3-elev" class="fi" value="30" step="5"></div>
+            <div class="frow"><label class="fl">Azimuth°</label><input type="number" id="f3-azim" class="fi" value="45" step="5"></div>
+          </div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Width</label><input type="number" id="f3-w" class="fi" value="512" step="64"></div>
+            <div class="frow"><label class="fl">Height</label><input type="number" id="f3-h" class="fi" value="512" step="64"></div>
+          </div>
+          <button class="btn btn-primary" onclick="genImageFrom3D()">Render to Image</button>
+          <div class="progress" id="f3-prog"></div>
+        </div>
+        <div class="gen-out" id="f3-out"><div class="gen-empty">Rendered image will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ VIDEO ═══════════════ -->
+
+    <!-- T2V -->
+    <div class="panel" id="panel-vid-t2v"><div class="gen-wrap">
+      <div class="gen-ctrl" id="vid-shared-ctrl-t2v">
+        {# vid_ctrl and vid_postproc are injected by JS below #}
+        <button class="btn btn-primary" onclick="genVideo('t2v')">Generate Video</button>
+        <div class="progress" id="vt-prog"></div>
+      </div>
+      <div class="gen-out" id="vt-out"><div class="gen-empty">Video will appear here</div></div>
+    </div></div>
+
+    <!-- I2V -->
+    <div class="panel" id="panel-vid-i2v"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-i2v"></div>
+          <div class="cap-card" id="cap-vid-t2v"></div>
+        <div class="frow"><label class="fl">Source image</label><input type="file" id="vi-src" accept="image/*" class="fi"></div>
+        <div class="frow"><label class="fl">Motion prompt (optional)</label><textarea id="vi-prompt" class="fs" rows="2" placeholder="How should the image animate?"></textarea></div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Frames</label><input type="number" id="vi-frames" class="fi" value="16"></div>
+          <div class="frow"><label class="fl">FPS</label><input type="number" id="vi-fps" class="fi" value="8"></div>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Steps</label><input type="number" id="vi-steps" class="fi" value="25"></div>
+          <div class="frow"><label class="fl">Guidance</label><input type="number" id="vi-cfg" class="fi" value="7.5" step="0.5"></div>
+        </div>
+        <div class="frow"><label class="fl">Seed</label><input type="number" id="vi-seed" class="fi" placeholder="random"></div>
+        <div class="frow"><label class="fl">Camera motion</label>
+          <select id="vi-cam" class="fselect">
+            <option value="">None</option>
+            <option value="zoom-in">Zoom in</option><option value="zoom-out">Zoom out</option>
+            <option value="pan-left">Pan left</option><option value="pan-right">Pan right</option>
+            <option value="tilt-up">Tilt up</option><option value="tilt-down">Tilt down</option>
+            <option value="rotate">Rotate</option>
+          </select>
+        </div>
+        <!-- Character consistency -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Characters &amp; Environment</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.6rem">
+            <div id="vi-char-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="vi-add-char-btn" onclick="addCharProfileSlot('vi')" style="align-self:flex-start;font-size:11px">+ Add saved character</button>
+            <div id="vi-char-slots"></div>
+            <button class="btn btn-ghost btn-sm" onclick="addCharSlot('vi')" style="align-self:flex-start;font-size:11px">+ Add character images</button>
+            <div class="frow"><label class="fl">Character strength <span id="vi-cs">0.80</span></label>
+              <input type="range" id="vi-cstr" min="0" max="1" step="0.05" value="0.8" oninput="$('vi-cs').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+            <div id="vi-env-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="vi-add-env-btn" onclick="addEnvProfileSlot('vi')" style="align-self:flex-start;font-size:11px">+ Add environment</button>
+            <div class="frow"><label class="fl">Environment strength <span id="vi-es">0.60</span></label>
+              <input type="range" id="vi-estr" min="0" max="1" step="0.05" value="0.6" oninput="$('vi-es').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+          </div>
+        </details>
+        <div id="vi-dialog-section"></div>
+        <button class="btn btn-primary" onclick="genVideo('i2v')">Animate</button>
+        <div class="progress" id="vi-prog"></div>
+        <div class="gen-progress-wrap" id="vi-pbar-wrap">
+          <div class="gen-progress-bar-bg"><div class="gen-progress-bar-fill" id="vi-pbar-fill"></div></div>
+          <div class="gen-progress-label" id="vi-pbar-label"></div>
+        </div>
+      </div>
+      <div class="gen-out" id="vi-out"><div class="gen-empty">Animated video will appear here</div></div>
+    </div></div>
+
+    <!-- V2V -->
+    <div class="panel" id="panel-vid-v2v"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-v2v"></div>
+        <div class="frow"><label class="fl">Source video</label><input type="file" id="vv-src" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">Prompt</label><textarea id="vv-prompt" class="fs" rows="3" placeholder="Describe the transformation…"></textarea></div>
+        <div class="frow"><label class="fl">Strength <span id="vv-sv">0.70</span></label>
+          <input type="range" id="vv-str" min="0" max="1" step="0.05" value="0.70" oninput="$('vv-sv').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Steps</label><input type="number" id="vv-steps" class="fi" value="25"></div>
+          <div class="frow"><label class="fl">Guidance</label><input type="number" id="vv-cfg" class="fi" value="7.5" step="0.5"></div>
+        </div>
+        <div class="frow"><label class="fl">Seed</label><input type="number" id="vv-seed" class="fi" placeholder="random"></div>
+        <div class="frow"><label class="fl">Camera motion</label>
+          <select id="vv-cam" class="fselect">
+            <option value="">None</option>
+            <option value="zoom-in">Zoom in</option><option value="zoom-out">Zoom out</option>
+            <option value="pan-left">Pan left</option><option value="pan-right">Pan right</option>
+            <option value="tilt-up">Tilt up</option><option value="tilt-down">Tilt down</option>
+            <option value="rotate">Rotate</option>
+          </select>
+        </div>
+        <!-- Characters & Environment -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Characters &amp; Environment</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.6rem">
+            <div id="vv-char-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="vv-add-char-btn" onclick="addCharProfileSlot('vv')" style="align-self:flex-start;font-size:11px">+ Add saved character</button>
+            <div id="vv-char-slots"></div>
+            <button class="btn btn-ghost btn-sm" onclick="addCharSlot('vv')" style="align-self:flex-start;font-size:11px">+ Add character images</button>
+            <div class="frow"><label class="fl">Character strength <span id="vv-cs">0.80</span></label>
+              <input type="range" id="vv-cstr" min="0" max="1" step="0.05" value="0.8" oninput="$('vv-cs').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+            <div id="vv-env-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="vv-add-env-btn" onclick="addEnvProfileSlot('vv')" style="align-self:flex-start;font-size:11px">+ Add environment</button>
+            <div class="frow"><label class="fl">Environment strength <span id="vv-es">0.60</span></label>
+              <input type="range" id="vv-estr" min="0" max="1" step="0.05" value="0.6" oninput="$('vv-es').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+          </div>
+        </details>
+        <div id="vv-dialog-section"></div>
+        <button class="btn btn-primary" onclick="genVideo('v2v')">Transform</button>
+        <div class="progress" id="vv-prog"></div>
+        <div class="gen-progress-wrap" id="vv-pbar-wrap">
+          <div class="gen-progress-bar-bg"><div class="gen-progress-bar-fill" id="vv-pbar-fill"></div></div>
+          <div class="gen-progress-label" id="vv-pbar-label"></div>
+        </div>
+      </div>
+      <div class="gen-out" id="vv-out"><div class="gen-empty">Transformed video will appear here</div></div>
+    </div></div>
+
+    <!-- Ti2V: Text + Image → Video -->
+    <div class="panel" id="panel-vid-ti2v"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-ti2v"></div>
+        <div class="frow"><label class="fl">Initial image</label><input type="file" id="ti-init" accept="image/*" class="fi"></div>
+        <div class="frow"><label class="fl">End image (optional — for frame interpolation)</label><input type="file" id="ti-end" accept="image/*" class="fi"></div>
+        <div class="frow"><label class="fl">Source video (optional — enables V2V mode, overrides image)</label><input type="file" id="ti-vid" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">Strength (V2V denoising) <span id="ti-vs">0.70</span></label>
+          <input type="range" id="ti-vstr" min="0" max="1" step="0.05" value="0.70" oninput="$('ti-vs').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+        <div class="frow"><label class="fl">Prompt</label><textarea id="ti-prompt" class="fs" rows="3" placeholder="Describe the video motion / story…"></textarea></div>
+        <div class="frow"><label class="fl">Negative prompt</label><textarea id="ti-neg" class="fs" rows="2" placeholder="Things to avoid…"></textarea></div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Width</label><input type="number" id="ti-w" class="fi" value="512" step="64"></div>
+          <div class="frow"><label class="fl">Height</label><input type="number" id="ti-h" class="fi" value="512" step="64"></div>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Frames</label><input type="number" id="ti-frames" class="fi" value="16"></div>
+          <div class="frow"><label class="fl">FPS</label><input type="number" id="ti-fps" class="fi" value="8"></div>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Steps</label><input type="number" id="ti-steps" class="fi" value="25"></div>
+          <div class="frow"><label class="fl">Guidance</label><input type="number" id="ti-cfg" class="fi" value="7.5" step="0.5"></div>
+        </div>
+        <div class="frow"><label class="fl">Camera motion</label>
+          <select id="ti-cam" class="fselect">
+            <option value="">None</option>
+            <option value="zoom-in">Zoom in</option><option value="zoom-out">Zoom out</option>
+            <option value="pan-left">Pan left</option><option value="pan-right">Pan right</option>
+            <option value="tilt-up">Tilt up</option><option value="tilt-down">Tilt down</option>
+            <option value="rotate">Rotate</option>
+          </select>
+        </div>
+        <div class="frow"><label class="fl">Seed</label><input type="number" id="ti-seed" class="fi" placeholder="random"></div>
+        <div class="frow"><label class="fl" title="Removes the model's built-in safety checker. Only use with uncensored/NSFW fine-tunes.">Disable safety filter</label><input type="checkbox" id="ti-nosafe"></div>
+        <!-- Characters & Environment -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Characters &amp; Environment</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.6rem">
+            <div id="ti-char-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="ti-add-char-btn" onclick="addCharProfileSlot('ti')" style="align-self:flex-start;font-size:11px">+ Add saved character</button>
+            <div id="ti-char-slots"></div>
+            <button class="btn btn-ghost btn-sm" onclick="addCharSlot('ti')" style="align-self:flex-start;font-size:11px">+ Add character images</button>
+            <div class="frow"><label class="fl">Character strength <span id="ti-cs">0.80</span></label>
+              <input type="range" id="ti-cstr" min="0" max="1" step="0.05" value="0.8" oninput="$('ti-cs').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+            <div id="ti-env-profile-slots"></div>
+            <button class="btn btn-ghost btn-sm" id="ti-add-env-btn" onclick="addEnvProfileSlot('ti')" style="align-self:flex-start;font-size:11px">+ Add environment</button>
+            <div class="frow"><label class="fl">Environment strength <span id="ti-es">0.60</span></label>
+              <input type="range" id="ti-estr" min="0" max="1" step="0.05" value="0.6" oninput="$('ti-es').textContent=(+this.value).toFixed(2)" style="width:100%"></div>
+          </div>
+        </details>
+        <div id="ti-dialog-section"></div>
+        <!-- Audio -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Add audio</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+            <div class="frow"><label class="fl">Audio type</label>
+              <select id="ti-atype" class="fselect">
+                <option value="">None</option>
+                <option value="music">Music</option><option value="sfx">SFX</option>
+                <option value="speech">Speech / TTS</option><option value="ambient">Ambient</option>
+              </select>
+            </div>
+            <div class="frow"><label class="fl">Audio prompt</label><textarea id="ti-aprompt" class="fs" rows="2" placeholder="e.g. epic orchestral soundtrack"></textarea></div>
+            <div class="frow"><label class="fl">TTS text (for speech)</label><textarea id="ti-ttstext" class="fs" rows="2"></textarea></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">TTS voice</label><input id="ti-voice" class="fi" placeholder="af_sky"></div>
+              <div class="frow"><label class="fl">Speed</label><input type="number" id="ti-speed" class="fi" value="1.0" step="0.1" min="0.5"></div>
+            </div>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer">
+              <input type="checkbox" id="ti-lipsync"> Lip-sync to speech
+            </label>
+          </div>
+        </details>
+        <!-- Subtitles -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Subtitles</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="ti-gensub"> Generate subtitles</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="ti-burnsub"> Burn subtitles into video</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="ti-transsub"> Translate subtitles</label>
+            <div class="frow"><label class="fl">Target language</label><input id="ti-sublang" class="fi" placeholder="es, fr, de, it…"></div>
+          </div>
+        </details>
+        <!-- Post-processing -->
+        <details style="margin-top:.25rem">
+          <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Post-processing</summary>
+          <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="ti-upscale"> Upscale output</label>
+            <div class="frow"><label class="fl">Upscale factor</label>
+              <select id="ti-upfact" class="fselect"><option value="2">2×</option><option value="4">4×</option></select>
+            </div>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="ti-interp"> Frame interpolation</label>
+            <div class="frow"><label class="fl">FPS multiplier</label>
+              <select id="ti-fmult" class="fselect"><option value="2">2×</option><option value="4">4×</option></select>
+            </div>
+          </div>
+        </details>
+        <button class="btn btn-primary" onclick="genTi2V()" style="margin-top:.25rem">Generate</button>
+        <div class="progress" id="ti-prog"></div>
+        <div class="gen-progress-wrap" id="ti-pbar-wrap">
+          <div class="gen-progress-bar-bg"><div class="gen-progress-bar-fill" id="ti-pbar-fill"></div></div>
+          <div class="gen-progress-label" id="ti-pbar-label"></div>
+        </div>
+      </div>
+      <div class="gen-out" id="ti-out"><div class="gen-empty">Video will appear here</div></div>
+    </div></div>
+
+    <!-- Interpolate -->
+    <div class="panel" id="panel-vid-interp"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-interp"></div>
+        <div class="frow"><label class="fl">Source video (or use frame images below)</label><input type="file" id="vc-src" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">— OR — First frame</label><input type="file" id="vc-init" accept="image/*" class="fi"></div>
+        <div class="frow"><label class="fl">Last frame</label><input type="file" id="vc-end" accept="image/*" class="fi"></div>
+        <div class="frow"><label class="fl">FPS multiplier</label>
+          <select id="vc-mult" class="fselect"><option value="2">2×</option><option value="4">4×</option><option value="8">8×</option></select>
+        </div>
+        <button class="btn btn-primary" onclick="genInterp()">Interpolate</button>
+        <div class="progress" id="vc-prog"></div>
+      </div>
+      <div class="gen-out" id="vc-out"><div class="gen-empty">Interpolated video will appear here</div></div>
+    </div></div>
+
+    <!-- Subtitles -->
+    <div class="panel" id="panel-vid-sub"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-sub"></div>
+        <div class="frow"><label class="fl">Source video</label><input type="file" id="vs-src" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">Language hint</label><input id="vs-lang" class="fi" placeholder="en, fr, de… (auto-detect if blank)"></div>
+        <div class="frow"><label class="fl">Output format</label>
+          <select id="vs-fmt" class="fselect"><option value="srt">SRT text</option><option value="burned_video">Burn into video</option></select>
+        </div>
+        <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="vs-translate"> Translate subtitles</label>
+        <div class="frow"><label class="fl">Target language</label><input id="vs-tlang" class="fi" placeholder="es, fr, de…"></div>
+        <button class="btn btn-primary" onclick="genSubtitles()">Generate Subtitles</button>
+        <div class="progress" id="vs-prog"></div>
+      </div>
+      <div class="gen-out" id="vs-out"><div class="gen-empty">Result will appear here</div></div>
+    </div></div>
+
+    <!-- Dub -->
+    <div class="panel" id="panel-vid-dub"><div class="gen-wrap">
+      <div class="gen-ctrl">
+        <div class="cap-card" id="cap-vid-dub"></div>
+        <div class="cap-preserve-note" id="vd-preserve-note">Voice identity, timing, emotion, and singing preservation depend on model support and may fall back to a simpler dubbed track.</div>
+        <div class="frow"><label class="fl">Source video</label><input type="file" id="vd-src" accept="video/*" class="fi"></div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Source lang</label><input id="vd-slang" class="fi" placeholder="en"></div>
+          <div class="frow"><label class="fl">Target lang</label><input id="vd-tlang" class="fi" placeholder="es, fr, de…"></div>
+        </div>
+        <div class="g2">
+          <label class="cap-toggle"><input type="checkbox" id="vd-preserve-voice" checked> Preserve speaker identity</label>
+          <label class="cap-toggle"><input type="checkbox" id="vd-preserve-tone" checked> Preserve emotional tone</label>
+        </div>
+        <div class="g2">
+          <label class="cap-toggle"><input type="checkbox" id="vd-preserve-timing" checked> Preserve pacing / timing</label>
+          <label class="cap-toggle"><input type="checkbox" id="vd-preserve-singing"> Preserve singing style</label>
+        </div>
+        <label class="cap-toggle"><input type="checkbox" id="vd-lyrics"> Translate detected lyrics</label>
+        <div class="frow"><label class="fl">Fallback mode</label>
+          <select id="vd-track-mode" class="fselect">
+            <option value="speech-only">Replace spoken track only</option>
+            <option value="localized-mix">Rebuild localized track</option>
+          </select>
+        </div>
+        <label class="cap-toggle"><input type="checkbox" id="vd-burn"> Burn subtitles into result</label>
+        <div class="req-preview" id="vd-preview"></div>
+        <button class="btn btn-primary" onclick="genDub()">Dub Video</button>
+        <div class="progress" id="vd-prog"></div>
+      </div>
+      <div class="gen-out" id="vd-out"><div class="gen-empty">Dubbed video will appear here</div></div>
+    </div></div>
+
+    <!-- Video upscale -->
+    <div class="panel" id="panel-vid-up"><div class="gen-wrap">
+      <div class="gen-ctrl">
+          <div class="cap-card" id="cap-vid-up"></div>
+        <div class="frow"><label class="fl">Source video</label><input type="file" id="vu-src" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">Scale factor</label>
+          <select id="vu-scale" class="fselect"><option value="2">2×</option><option value="4">4×</option></select>
+        </div>
+        <button class="btn btn-primary" onclick="genVidUpscale()">Upscale</button>
+        <div class="progress" id="vu-prog"></div>
+      </div>
+      <div class="gen-out" id="vu-out"><div class="gen-empty">Upscaled video will appear here</div></div>
+    </div></div>
+
+    <!-- Video 2D → 3D -->
+    <div class="panel" id="panel-vid-to3d"><div class="gen-wrap">
+      <div class="gen-ctrl">
+        <div class="cap-card" id="cap-vid-to3d"></div>
+        <div class="frow"><label class="fl">Source video</label><input type="file" id="v3-src" accept="video/*" class="fi"></div>
+        <div class="frow"><label class="fl">Output method</label>
+          <select id="v3-method" class="fselect">
+            <option value="anaglyph">Anaglyph (red-cyan)</option>
+            <option value="stereo">Stereo (side-by-side)</option>
+            <option value="depth">Depth video</option>
+          </select>
+        </div>
+        <div class="frow"><label class="fl">Parallax shift <span id="v3-sv">15</span>px</label>
+          <input type="range" id="v3-shift" min="5" max="40" step="1" value="15" oninput="$('v3-sv').textContent=this.value" style="width:100%">
+        </div>
+        <button class="btn btn-primary" onclick="genVideoTo3D()">Convert to 3D</button>
+        <div class="progress" id="v3-prog"></div>
+      </div>
+      <div class="gen-out" id="v3-out"><div class="gen-empty">3D video will appear here</div></div>
+    </div></div>
+
+    <!-- Video from 3D model (turntable) -->
+    <div class="panel" id="panel-vid-from3d"><div class="gen-wrap">
+      <div class="gen-ctrl">
+        <div class="cap-card" id="cap-vid-from3d"></div>
+        <div class="frow"><label class="fl">3D model file (GLB/OBJ)</label><input type="file" id="vf3-src" accept=".glb,.obj,.gltf" class="fi"></div>
+        <div class="frow"><label class="fl">Format</label>
+          <select id="vf3-fmt" class="fselect">
+            <option value="glb">GLB</option>
+            <option value="obj">OBJ</option>
+          </select>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Frames</label><input type="number" id="vf3-frames" class="fi" value="36"></div>
+          <div class="frow"><label class="fl">FPS</label><input type="number" id="vf3-fps" class="fi" value="12"></div>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Elevation°</label><input type="number" id="vf3-elev" class="fi" value="20" step="5"></div>
+          <div class="frow"><label class="fl">Distance</label><input type="number" id="vf3-dist" class="fi" value="2.5" step="0.5"></div>
+        </div>
+        <div class="g2">
+          <div class="frow"><label class="fl">Width</label><input type="number" id="vf3-w" class="fi" value="512" step="64"></div>
+          <div class="frow"><label class="fl">Height</label><input type="number" id="vf3-h" class="fi" value="512" step="64"></div>
+        </div>
+        <button class="btn btn-primary" onclick="genVideoFrom3D()">Render Turntable</button>
+        <div class="progress" id="vf3-prog"></div>
+      </div>
+      <div class="gen-out" id="vf3-out"><div class="gen-empty">Turntable video will appear here</div></div>
+    </div></div>
+
+    <!-- ═══════════════ AUDIO ═══════════════ -->
+
+    <!-- Music/SFX generation -->
+    <div class="panel" id="panel-aud-gen">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-gen"></div>
+          <div class="frow"><label class="fl">Prompt</label><textarea id="ag-prompt" class="fs" rows="4" placeholder="e.g. upbeat electronic dance music with synth bass…"></textarea></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Duration (sec)</label><input type="number" id="ag-dur" class="fi" value="10" min="1" max="300"></div>
+            <div class="frow"><label class="fl">Temperature</label><input type="number" id="ag-temp" class="fi" value="1.0" step="0.1" min="0.1"></div>
+          </div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Top-k</label><input type="number" id="ag-topk" class="fi" value="250" min="1"></div>
+            <div class="frow"><label class="fl">CFG coef</label><input type="number" id="ag-cfg" class="fi" value="3.0" step="0.5" min="0"></div>
+          </div>
+          <div class="frow"><label class="fl">Melody reference (optional)</label><input type="file" id="ag-melody" accept="audio/*" class="fi"></div>
+          <div class="frow"><label class="fl">Seed</label><input type="number" id="ag-seed" class="fi" placeholder="random"></div>
+          <div class="req-preview" id="ag-preview"></div>
+          <button class="btn btn-primary" onclick="genAudio()">Generate</button>
+          <div class="progress" id="ag-prog"></div>
+          <div class="gen-progress-wrap" id="ag-pbar-wrap">
+            <div class="gen-progress-bar-bg"><div class="gen-progress-bar-fill" id="ag-pbar-fill"></div></div>
+            <div class="gen-progress-label" id="ag-pbar-label"></div>
+          </div>
+        </div>
+        <div class="gen-out" id="ag-out"><div class="gen-empty">Generated audio will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- TTS -->
+    <div class="panel" id="panel-aud-tts">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-tts"></div>
+          <div class="frow"><label class="fl">Text to speak</label><textarea id="at-text" class="fs" rows="6" placeholder="Enter text…"></textarea></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Voice ID</label><input id="at-voice" class="fi" placeholder="af_sky, en-US-Jenny…"></div>
+            <div class="frow"><label class="fl">Speed</label><input type="number" id="at-speed" class="fi" value="1.0" step="0.1"></div>
+          </div>
+          <div class="frow"><label class="fl">Voice profile <span class="small muted">(overrides Voice ID, uses cloning)</span></label>
+            <select id="tts-voice-profile" class="fi" data-placeholder="— None (use Voice ID above) —">
+              <option value="">— None (use Voice ID above) —</option>
+            </select>
+          </div>
+          <button class="btn btn-primary" onclick="genTTS()">Synthesize</button>
+          <div class="progress" id="at-prog"></div>
+          <div class="req-preview" id="at-preview"></div>
+        </div>
+        <div class="gen-out" id="at-out"><div class="gen-empty">Audio will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Voice Clone -->
+    <div class="panel" id="panel-aud-clone">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-clone"></div>
+          <div class="frow"><label class="fl">Text to synthesize</label><textarea id="vc-text" class="fs" rows="4" placeholder="Enter text to speak in the cloned voice…"></textarea></div>
+          <div class="frow"><label class="fl">Voice profile (saved)</label>
+            <select id="vc-voice" class="fselect">
+              <option value="">— Or upload reference audio below —</option>
+            </select>
+          </div>
+          <div class="frow"><label class="fl">Reference audio (upload or record)</label>
+            <div class="media-input-group">
+              <input type="file" id="vc-ref" accept="audio/*" class="fi">
+              <button class="btn btn-ghost btn-sm" onclick="openWebcam('vc-ref-cam','vc-ref',null,'audio')">🎤 Record</button>
+            </div>
+          </div>
+          <div id="vc-ref-cam" class="webcam-box" style="display:none"></div>
+          <div class="frow"><label class="fl">Transcript of reference audio</label><input id="vc-reftxt" class="fi" placeholder="What the reference audio says…"></div>          <div class="g2">
+            <div class="frow"><label class="fl">Speed</label><input type="number" id="vc-speed" class="fi" value="1.0" step="0.1" min="0.5"></div>
+            <div class="frow"><label class="fl">Seed</label><input type="number" id="vc-seed" class="fi" placeholder="random"></div>
+          </div>
+          <button class="btn btn-primary" onclick="genVoiceClone()">Clone & Synthesize</button>
+          <div class="progress" id="vc-prog"></div>
+          <details style="margin-top:.75rem">
+            <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Save voice profile</summary>
+            <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+              <div class="frow"><label class="fl">Profile name</label><input id="vc-savename" class="fi" placeholder="my-voice"></div>
+              <div class="frow"><label class="fl">Description</label><input id="vc-savedesc" class="fi" placeholder="Optional description"></div>
+              <div class="frow"><label class="fl">Reference audio (upload or record)</label>
+                <div class="media-input-group">
+                  <input type="file" id="vc-saveref" accept="audio/*" class="fi">
+                  <button class="btn btn-ghost btn-sm" onclick="openWebcam('vc-saveref-cam','vc-saveref',null,'audio')">🎤 Record</button>
+                </div>
+              </div>
+              <div id="vc-saveref-cam" class="webcam-box" style="display:none"></div>              <div class="frow"><label class="fl">Transcript</label><input id="vc-savetxt" class="fi" placeholder="What the audio says"></div>
+              <button class="btn btn-ghost btn-sm" onclick="saveVoiceProfile()">Save Profile</button>
+              <div class="progress" id="vc-saveprog"></div>
+            </div>
+          </details>
+        </div>
+        <div class="gen-out" id="vc-out"><div class="gen-empty">Cloned voice audio will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- Voice Convert (SVC) -->
+    <div class="panel" id="panel-aud-convert">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-convert"></div>
+          <p style="font-size:12px;color:var(--text-3);margin:0 0 .5rem">
+            Converts only the <strong>timbre</strong> of the source audio to match the target voice,
+            preserving pitch, melody, rhythm and expression.
+            Use <strong>Singing mode</strong> for music and songs.
+          </p>
+          <div class="frow"><label class="fl">Source audio (to convert)</label>
+            <div class="media-input-group">
+              <input type="file" id="cv-src" accept="audio/*" class="fi">
+              <button class="btn btn-ghost btn-sm" onclick="openWebcam('cv-src-cam','cv-src',null,'audio')">🎤 Record</button>
+            </div>
+          </div>
+          <div id="cv-src-cam" class="webcam-box" style="display:none"></div>
+          <div class="frow"><label class="fl">Target voice profile</label>
+            <select id="cv-voice" class="fselect">
+              <option value="">— Or upload reference audio below —</option>
+            </select>
+          </div>
+          <div class="frow"><label class="fl">Target voice (upload)</label>
+            <div class="media-input-group">
+              <input type="file" id="cv-ref" accept="audio/*" class="fi">
+              <button class="btn btn-ghost btn-sm" onclick="openWebcam('cv-ref-cam','cv-ref',null,'audio')">🎤 Record</button>
+            </div>
+          </div>
+          <div id="cv-ref-cam" class="webcam-box" style="display:none"></div>
+          <div class="frow"><label class="fl">Mode</label>
+            <select id="cv-mode" class="fselect">
+              <option value="speech">Speech (fast)</option>
+              <option value="singing">Singing / Music (pitch-accurate)</option>
+            </select>
+          </div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Pitch shift (semitones)</label><input type="number" id="cv-pitch" class="fi" value="0" min="-12" max="12"></div>
+            <div class="frow"><label class="fl">Diffusion steps</label><input type="number" id="cv-steps" class="fi" value="10" min="1" max="50"></div>
+          </div>
+          <button class="btn btn-primary" onclick="genVoiceConvert()">Convert Voice</button>
+          <div class="progress" id="cv-prog"></div>
+        </div>
+        <div class="gen-out" id="cv-out"><div class="gen-empty">Converted audio will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- STT -->
+    <div class="panel" id="panel-aud-stt">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-stt"></div>
+          <div class="frow"><label class="fl">Audio / video file</label><input type="file" id="as-file" accept="audio/*,video/*" class="fi"></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Language</label><input id="as-lang" class="fi" placeholder="en, fr…"></div>
+            <div class="frow"><label class="fl">Hint</label><input id="as-prompt" class="fi" placeholder="context hint…"></div>
+          </div>
+          <button class="btn btn-primary" onclick="genSTT()">Transcribe</button>
+          <div class="progress" id="as-prog"></div>
+          <div class="req-preview" id="as-preview"></div>
+        </div>
+        <div class="gen-out" id="as-out">
+          <div class="gen-out-inner"><div class="gen-empty">Transcript will appear here</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Music dubbing -->
+    <div class="panel" id="panel-aud-music-dub">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-music-dub"></div>
+          <div class="frow"><label class="fl">Source song / vocal mix</label><input type="file" id="amd-file" accept="audio/*,video/*" class="fi"></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Source language</label><input id="amd-slang" class="fi" placeholder="auto, en, ja…"></div>
+            <div class="frow"><label class="fl">Target language</label><input id="amd-tlang" class="fi" placeholder="en, es, fr…"></div>
+          </div>
+          <div class="frow"><label class="fl">Notes</label><textarea id="amd-notes" class="fs" rows="3" placeholder="Explain whether the priority is lyric translation, singability, or preserving the original arrangement."></textarea></div>
+          <div class="cap-preserve-note">
+            <strong>Current studio behavior:</strong> this panel can now run transcript-first intake through existing speech-to-text primitives, then return a truthful partial workflow plan for lyric localization.
+          </div>
+          <div class="cap-note"><strong>Fallback path:</strong> transcribe lyrics, translate/adapt them, then resynthesize guide vocals or use Voice Convert on isolated vocals before recombining outside this panel. Rhythm-safe lyric adaptation and automatic mix replacement are still not exposed here.</div>
+          <button class="btn btn-primary" onclick="genMusicDubPlan()">Analyze Music Dub Path</button>
+          <div class="progress" id="amd-prog"></div>
+          <div class="req-preview" id="amd-preview"></div>
+        </div>
+        <div class="gen-out" id="amd-out">
+          <div class="gen-out-inner"><div class="gen-empty">Transcript, limitations, and next-step guidance will appear here.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio understanding -->
+    <div class="panel" id="panel-aud-understand">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-understand"></div>
+          <div class="frow"><label class="fl">Source audio / video</label><input type="file" id="au-file" accept="audio/*,video/*" class="fi"></div>
+          <div class="frow"><label class="fl">Analysis goal</label><textarea id="au-goal" class="fs" rows="4" placeholder="Examples: summarize the meeting, extract speakers and topics, describe the soundscape, identify notable events."></textarea></div>
+          <div class="cap-preserve-note">
+            <strong>Current studio behavior:</strong> understanding runs as a transcript-first composed request. If a text/chat model is also selected, Studio can ask it to summarize or reason over the transcript.
+          </div>
+          <div class="cap-note"><strong>Fallback path:</strong> if no text/chat model is selected, this panel still returns the transcript so you can continue reasoning manually in Chat.</div>
+          <div class="frow"><label class="fl">Reasoning / summary model <span style="font-weight:400">(optional)</span></label><input id="au-text-model" class="fi" placeholder="model id for chat summarization"></div>
+          <button class="btn btn-primary" onclick="genAudioUnderstand()">Analyze Audio</button>
+          <div class="progress" id="au-prog"></div>
+          <div class="req-preview" id="au-preview"></div>
+        </div>
+        <div class="gen-out" id="au-out">
+          <div class="gen-out-inner"><div class="gen-empty">Transcript-backed understanding will appear here.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Stem separation -->
+    <div class="panel" id="panel-aud-stems">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-stems"></div>
+          <div class="frow"><label class="fl">Source mix</label><input type="file" id="ast-file" accept="audio/*,video/*" class="fi"></div>
+          <div class="frow"><label class="fl">Requested split</label>
+            <select id="ast-mode" class="fselect">
+              <option value="vocals-instrumental">Vocals / instrumental</option>
+              <option value="4-stem">4-stem band split</option>
+              <option value="drums-bass-other">Drums / bass / other</option>
+            </select>
+          </div>
+          <div class="cap-preserve-note">
+            <strong>Native backend:</strong> Studio now sends a real <code>/v1/audio/stems</code> request. The current backend uses ffmpeg-only heuristics, so outputs are best-effort estimates rather than production-grade ML demixing.
+          </div>
+          <div class="cap-note"><strong>Quality note:</strong> vocals/instrumental works best when vocals are center-panned. The 4-stem and drums/bass/other modes are broad frequency-group splits, not clean source-isolated stems.</div>
+          <button class="btn btn-primary" onclick="genStems()">Split Stems</button>
+          <div class="progress" id="ast-prog"></div>
+          <div class="req-preview" id="ast-preview"></div>
+        </div>
+        <div class="gen-out" id="ast-out">
+          <div class="gen-out-inner"><div class="gen-empty">Separated stem artifacts will appear here.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Audio cleanup -->
+    <div class="panel" id="panel-aud-clean">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-aud-clean"></div>
+          <div class="frow"><label class="fl">Source recording</label><input type="file" id="ac-file" accept="audio/*,video/*" class="fi"></div>
+          <div class="g2">
+            <label class="cap-toggle"><input type="checkbox" id="ac-noise" checked> Reduce background noise</label>
+            <label class="cap-toggle"><input type="checkbox" id="ac-level"> Normalize levels</label>
+          </div>
+          <div class="g2">
+            <label class="cap-toggle"><input type="checkbox" id="ac-hum"> Remove hum</label>
+            <label class="cap-toggle"><input type="checkbox" id="ac-click"> Repair clicks</label>
+          </div>
+          <div class="cap-preserve-note">
+            <strong>Native backend:</strong> Studio now sends a real <code>/v1/audio/cleanup</code> request. The current backend chains standard ffmpeg filters, so it can improve many recordings but is not a substitute for deep restoration models.
+          </div>
+          <div class="cap-note"><strong>Fallback path:</strong> if the result is still not intelligible, use Transcribe to assess what survived and switch to dedicated external restoration before dubbing or conversion.</div>
+          <button class="btn btn-primary" onclick="genAudioCleanup()">Clean Audio</button>
+          <div class="progress" id="ac-prog"></div>
+          <div class="req-preview" id="ac-preview"></div>
+        </div>
+        <div class="gen-out" id="ac-out">
+          <div class="gen-out-inner"><div class="gen-empty">Cleaned audio and backend limitations will appear here.</div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PIPELINES ═══════════════ -->
+    <div class="panel" id="panel-pipe">
+      <div class="pipe-panel">
+        <div class="diag-card" id="studio-diagnostics">
+          <div class="diag-title">Diagnostics</div>
+          <div class="diag-sub">Evaluated from the current model type, declared capabilities, and existing Studio fallback rules.</div>
+          <div class="diag-groups" id="diag-groups"></div>
+        </div>
+        <div class="hist-card" id="studio-history">
+          <div class="hist-title">Session artifact history</div>
+          <div class="hist-list" id="artifact-history-list"></div>
+        </div>
+
+        <details class="pipe-card" data-requires='["image_generation","image_to_video"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Image → Video Pipeline</div>
+              <div class="pipe-summary">Turn a text prompt into a generated still, animate it into motion, and optionally add soundtrack cues.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Generate image</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Animate</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Audio (opt)</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">image</span><span class="pipe-tag">video</span><span class="pipe-tag">soundtrack</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <div class="frow"><label class="fl">Text prompt</label><textarea id="pp1-prompt" class="fs" rows="3" placeholder="Describe the scene…"></textarea></div>
+            <div class="frow"><label class="fl">Negative prompt</label><textarea id="pp1-neg" class="fs" rows="2" placeholder="Things to avoid…"></textarea></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Image model</label><input id="pp1-imodel" class="fi" placeholder="model id"></div>
+              <div class="frow"><label class="fl">Video model</label><input id="pp1-vmodel" class="fi" placeholder="model id"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Image size</label><input id="pp1-isize" class="fi" value="1024x1024"></div>
+              <div class="frow"><label class="fl">Image steps</label><input type="number" id="pp1-isteps" class="fi" placeholder="default"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Image CFG</label><input type="number" id="pp1-icfg" class="fi" placeholder="default" step="0.5"></div>
+              <div class="frow"><label class="fl">Image seed</label><input type="number" id="pp1-iseed" class="fi" placeholder="random"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Frames</label><input type="number" id="pp1-frames" class="fi" value="16"></div>
+              <div class="frow"><label class="fl">FPS</label><input type="number" id="pp1-fps" class="fi" value="8"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Video steps</label><input type="number" id="pp1-vsteps" class="fi" value="25"></div>
+              <div class="frow"><label class="fl">Video CFG</label><input type="number" id="pp1-vcfg" class="fi" value="7.5" step="0.5"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Camera motion</label>
+                <select id="pp1-cam" class="fselect">
+                  <option value="">None</option>
+                  <option value="zoom-in">Zoom in</option><option value="zoom-out">Zoom out</option>
+                  <option value="pan-left">Pan left</option><option value="pan-right">Pan right</option>
+                  <option value="tilt-up">Tilt up</option><option value="tilt-down">Tilt down</option>
+                  <option value="rotate">Rotate</option>
+                </select>
+              </div>
+              <div class="frow"><label class="fl">Video seed</label><input type="number" id="pp1-vseed" class="fi" placeholder="random"></div>
+            </div>
+            <details style="margin-top:.25rem">
+              <summary style="font-size:12px;font-weight:600;cursor:pointer;color:var(--text-2)">Add audio to video</summary>
+              <div style="margin-top:.5rem;display:flex;flex-direction:column;gap:.4rem">
+                <div class="frow"><label class="fl">Audio type</label>
+                  <select id="pp1-atype" class="fselect">
+                    <option value="">None</option>
+                    <option value="music">Music</option><option value="sfx">SFX</option>
+                    <option value="ambient">Ambient</option>
+                  </select>
+                </div>
+                <div class="frow"><label class="fl">Audio prompt</label><input id="pp1-aprompt" class="fi" placeholder="e.g. epic orchestral soundtrack"></div>
+              </div>
+            </details>
+            <button class="btn btn-primary" onclick="runPipeline1()">Run Pipeline</button>
+            <div class="progress" id="pp1-prog"></div>
+            <div id="pp1-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["speech_to_text","text_to_speech"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Video → Dub + Subtitle</div>
+              <div class="pipe-summary">Transcribe spoken dialogue, translate it, synthesize replacement speech, and optionally burn subtitles into the localized video.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Transcribe</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Translate</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">TTS dub</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Burn subs</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">video</span><span class="pipe-tag">localization</span><span class="pipe-tag">subtitles</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <div class="frow"><label class="fl">Source video</label><input type="file" id="pp2-src" accept="video/*" class="fi"></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Source language</label><input id="pp2-slang" class="fi" placeholder="en"></div>
+              <div class="frow"><label class="fl">Target language</label><input id="pp2-tlang" class="fi" placeholder="es, fr, de…"></div>
+            </div>
+            <div class="frow"><label class="fl">Model (audio/video)</label><input id="pp2-model" class="fi" placeholder="model id"></div>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="pp2-clone"> Clone original voice</label>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="pp2-burn" checked> Burn subtitles into video</label>
+            <button class="btn btn-primary" onclick="runPipeline2()">Run Pipeline</button>
+            <div class="progress" id="pp2-prog"></div>
+            <div id="pp2-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["text_generation","image_generation","video_generation"]' data-optional='["text_to_speech"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Full Story</div>
+              <div class="pipe-summary">Draft a narrated multi-scene story, generate matching visuals, animate them, and add spoken narration in one pass.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">LLM script</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Images</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Video</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">TTS</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">storytelling</span><span class="pipe-tag">image</span><span class="pipe-tag">video</span><span class="pipe-tag">tts</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <div class="frow"><label class="fl">Story idea</label><textarea id="pp3-story" class="fs" rows="3" placeholder="A knight fights a dragon at sunset…"></textarea></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Scenes</label><input type="number" id="pp3-scenes" class="fi" value="3" min="1" max="6"></div>
+              <div class="frow"><label class="fl">Frames/scene</label><input type="number" id="pp3-frames" class="fi" value="16"></div>
+            </div>
+            <div class="g3">
+              <div class="frow"><label class="fl">Text model</label><input id="pp3-tmodel" class="fi" placeholder="llm id"></div>
+              <div class="frow"><label class="fl">Image model</label><input id="pp3-imodel" class="fi" placeholder="sd id"></div>
+              <div class="frow"><label class="fl">Video model</label><input id="pp3-vmodel" class="fi" placeholder="video id"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">TTS model (optional)</label><input id="pp3-amodel" class="fi" placeholder="tts id"></div>
+              <div class="frow"><label class="fl">TTS voice</label><input id="pp3-voice" class="fi" placeholder="af_sarah"></div>
+            </div>
+            <button class="btn btn-primary" onclick="runPipeline3()">Run Full Pipeline</button>
+            <div class="progress" id="pp3-prog"></div>
+            <div id="pp3-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["speech_to_text","text_to_speech"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Audio/Video Dub with Voice Clone</div>
+              <div class="pipe-summary">Create a dubbed replacement track while trying to preserve the original speaker identity through reference-based voice cloning.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Transcribe</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Clone voice</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Replace audio</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">voice clone</span><span class="pipe-tag">dub</span><span class="pipe-tag">video</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <div class="frow"><label class="fl">Source video or audio</label><input type="file" id="pp4-src" accept="audio/*,video/*" class="fi"></div>
+            <div class="frow"><label class="fl">Voice profile (saved)</label>
+              <select id="pp4-voice" class="fselect">
+                <option value="">— Or upload reference audio below —</option>
+              </select>
+            </div>
+            <div class="frow"><label class="fl">Reference audio (upload or record)</label>
+              <div class="media-input-group">
+                <input type="file" id="pp4-ref" accept="audio/*" class="fi">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('pp4-ref-cam','pp4-ref',null,'audio')">🎤 Record</button>
+              </div>
+            </div>
+            <div id="pp4-ref-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Transcript of reference audio</label><input id="pp4-reftxt" class="fi" placeholder="What the reference audio says…"></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Source language</label><input id="pp4-slang" class="fi" placeholder="en (auto-detect)"></div>
+              <div class="frow"><label class="fl">Translate to</label><input id="pp4-tlang" class="fi" placeholder="es, fr… (optional)"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Speed</label><input type="number" id="pp4-speed" class="fi" value="1.0" step="0.1"></div>
+              <div class="frow"><label class="fl">Whisper model</label><input id="pp4-whisper" class="fi" placeholder="base"></div>
+            </div>
+            <label style="font-size:12px;display:flex;align-items:center;gap:.4rem;cursor:pointer"><input type="checkbox" id="pp4-burn"> Burn subtitles into video</label>
+            <button class="btn btn-primary" onclick="runPipeline4()">Run Pipeline</button>
+            <div class="progress" id="pp4-prog"></div>
+            <div id="pp4-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["image_to_image"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Face Swap</div>
+              <div class="pipe-summary">Transfer a source face into a target image or video result while keeping the rest of the scene intact.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Source face</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Target</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Result</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">image</span><span class="pipe-tag">video</span><span class="pipe-tag">identity</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <div class="frow"><label class="fl">Source face (upload or webcam)</label>
+              <div class="media-input-group">
+                <input type="file" id="pp5-src" accept="image/*" class="fi" onchange="previewMediaInput('pp5-src','pp5-src-preview')">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('pp5-src-cam','pp5-src','pp5-src-preview','photo')">📷 Webcam</button>
+              </div>
+            </div>
+            <div id="pp5-src-preview" class="media-preview"></div>
+            <div id="pp5-src-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Target (upload or webcam)</label>
+              <div class="media-input-group">
+                <input type="file" id="pp5-tgt" accept="image/*,video/*" class="fi" onchange="previewMediaInput('pp5-tgt','pp5-tgt-preview')">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('pp5-tgt-cam','pp5-tgt','pp5-tgt-preview','photo')">📷 Webcam</button>
+              </div>
+            </div>
+            <div id="pp5-tgt-preview" class="media-preview"></div>
+            <div id="pp5-tgt-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Target type</label>
+              <select id="pp5-type" class="fselect"><option value="image">Image</option><option value="video">Video</option></select>
+            </div>
+            <button class="btn btn-primary" onclick="runPipeline5()">Run Face Swap</button>
+            <div class="progress" id="pp5-prog"></div>
+            <div id="pp5-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["text_to_speech"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Voice Clone (TTS)</div>
+              <div class="pipe-summary">Synthesize fresh speech from text using a saved or uploaded voice reference as the target speaker style.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Reference audio</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Text</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Cloned speech</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">tts</span><span class="pipe-tag">voice clone</span><span class="pipe-tag">speech</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <p style="font-size:12px;color:var(--text-2);margin:0 0 .4rem">Synthesize new speech in a cloned voice. Good for dubbing scripts.</p>
+            <div class="frow"><label class="fl">Text to synthesize</label><textarea id="pvc-text" class="fs" rows="3" placeholder="Enter text…"></textarea></div>
+            <div class="frow"><label class="fl">Voice profile</label>
+              <select id="pvc-voice" class="fselect"><option value="">— Or upload reference below —</option></select>
+            </div>
+            <div class="frow"><label class="fl">Reference audio (upload or record)</label>
+              <div class="media-input-group">
+                <input type="file" id="pvc-ref" accept="audio/*" class="fi">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('pvc-ref-cam','pvc-ref',null,'audio')">🎤 Record</button>
+              </div>
+            </div>
+            <div id="pvc-ref-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Transcript of reference</label><input id="pvc-reftxt" class="fi" placeholder="What the reference audio says…"></div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Speed</label><input type="number" id="pvc-speed" class="fi" value="1.0" step="0.1"></div>
+              <div class="frow"><label class="fl">Seed</label><input type="number" id="pvc-seed" class="fi" placeholder="random"></div>
+            </div>
+            <button class="btn btn-primary" onclick="runPipelineVC()">Clone & Synthesize</button>
+            <div class="progress" id="pvc-prog"></div>
+            <div id="pvc-out"></div>
+          </div>
+        </details>
+
+        <details class="pipe-card" data-requires='["audio_to_audio"]' data-optional='["text_to_speech"]'>
+          <summary>
+            <div class="pipe-head">
+              <div class="pipe-title">Voice Convert (SVC)</div>
+              <div class="pipe-summary">Convert the source timbre to a new speaker while preserving pitch, rhythm, and musical phrasing for speech or singing.</div>
+              <div class="pipe-steps">
+                <span class="pipe-step">Source audio</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Target timbre</span><span class="pipe-arrow">→</span>
+                <span class="pipe-step">Converted audio</span>
+              </div>
+              <div class="pipe-tags"><span class="pipe-tag">audio</span><span class="pipe-tag">conversion</span><span class="pipe-tag">singing</span></div>
+            </div>
+          </summary>
+          <div class="pipe-card-body">
+            <p style="font-size:12px;color:var(--text-2);margin:0 0 .4rem">Convert timbre while preserving pitch, melody and expression. Use <strong>Singing mode</strong> for music.</p>
+            <div class="frow"><label class="fl">Source audio (to convert)</label>
+              <div class="media-input-group">
+                <input type="file" id="psvc-src" accept="audio/*" class="fi">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('psvc-src-cam','psvc-src',null,'audio')">🎤 Record</button>
+              </div>
+            </div>
+            <div id="psvc-src-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Target voice profile</label>
+              <select id="psvc-voice" class="fselect"><option value="">— Or upload reference below —</option></select>
+            </div>
+            <div class="frow"><label class="fl">Target voice (upload or record)</label>
+              <div class="media-input-group">
+                <input type="file" id="psvc-ref" accept="audio/*" class="fi">
+                <button class="btn btn-ghost btn-sm" onclick="openWebcam('psvc-ref-cam','psvc-ref',null,'audio')">🎤 Record</button>
+              </div>
+            </div>
+            <div id="psvc-ref-cam" class="webcam-box" style="display:none"></div>
+            <div class="frow"><label class="fl">Mode</label>
+              <select id="psvc-mode" class="fselect">
+                <option value="speech">Speech (fast)</option>
+                <option value="singing">Singing / Music (pitch-accurate)</option>
+              </select>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Pitch shift (semitones)</label><input type="number" id="psvc-pitch" class="fi" value="0" min="-12" max="12"></div>
+              <div class="frow"><label class="fl">Diffusion steps</label><input type="number" id="psvc-steps" class="fi" value="10" min="1" max="50"></div>
+            </div>
+            <button class="btn btn-primary" onclick="runPipelineSVC()">Convert Voice</button>
+            <div class="progress" id="psvc-prog"></div>
+            <div id="psvc-out"></div>
+          </div>
+        </details>
+
+    <details class="pipe-card" id="pipe-builder-card" open>
+      <summary>＋ Build New Pipeline
+        <span class="pipe-steps" style="margin:0;font-size:11px"><span class="pipe-step">Add steps</span><span class="pipe-arrow">→</span><span class="pipe-step">Configure</span><span class="pipe-arrow">→</span><span class="pipe-step">Save &amp; Run</span></span>
+      </summary>
+      <div class="pipe-card-body">
+        <div class="g2">
+          <div class="frow"><label class="fl">Pipeline name</label><input id="pb-name" class="fi" placeholder="My Pipeline"></div>
+          <div class="frow"><label class="fl">Description</label><input id="pb-desc" class="fi" placeholder="Optional"></div>
+        </div>
+        <div id="pb-steps" style="display:flex;flex-direction:column;gap:.4rem;margin:.25rem 0"></div>
+        <div style="display:flex;gap:.4rem;flex-wrap:wrap;margin-top:.25rem">
+          <select id="pb-add-type" class="fselect" style="flex:1"></select>
+          <button class="btn btn-ghost btn-sm" onclick="pbAddStep()">＋ Add Step</button>
+        </div>
+        <div style="display:flex;gap:.4rem;margin-top:.5rem;flex-wrap:wrap">
+          <div class="frow" style="flex:1"><label class="fl">Pipeline input</label><input id="pb-input" class="fi" placeholder="Initial text/prompt passed as {{ '{{' }}input{{ '}}' }}"></div>
+        </div>
+        <div style="display:flex;gap:.4rem;margin-top:.5rem">
+          <button class="btn btn-primary" onclick="pbSaveAndRun()">Save &amp; Run</button>
+          <button class="btn btn-ghost btn-sm" onclick="pbSave()">Save only</button>
+          <button class="btn btn-ghost btn-sm" onclick="pbRun()">Run without saving</button>
+        </div>
+        <div class="progress" id="pb-prog"></div>
+        <div id="pb-out"></div>
+      </div>
+    </details>
+    <div id="custom-pipe-cards"></div>
+
+    </div><!-- pipe-panel -->
+    </div><!-- panel-pipe -->
+
+    <div class="panel" id="panel-embed">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-embed"></div>
+          <div class="frow"><label class="fl">Text(s) — one per line</label><textarea id="em-text" class="fs" rows="6" placeholder="Enter text to embed…"></textarea></div>
+          <div class="frow"><label class="fl">Encoding</label>
+            <select id="em-enc" class="fselect"><option value="float">Float array</option><option value="base64">Base64</option></select>
+          </div>
+          <div class="frow"><label class="fl">Dimensions (truncate, optional)</label><input type="number" id="em-dims" class="fi" placeholder="all"></div>
+          <button class="btn btn-primary" onclick="genEmbeddings()">Embed</button>
+          <div class="progress" id="em-prog"></div>
+          <div class="req-preview" id="em-preview"></div>
+        </div>
+        <div class="gen-out" id="em-out"><div class="gen-empty">Embedding vectors will appear here</div></div>
+      </div>
+    </div>
+
+    <div class="panel" id="panel-archive">
+      <div class="archive-panel">
+        <div class="archive-toolbar">
+          <div class="archive-filters">
+            <button class="arch-filter active" data-type="all" onclick="archiveSetFilter('all')">All</button>
+            <button class="arch-filter" data-type="image" onclick="archiveSetFilter('image')">Images</button>
+            <button class="arch-filter" data-type="video" onclick="archiveSetFilter('video')">Videos</button>
+            <button class="arch-filter" data-type="audio" onclick="archiveSetFilter('audio')">Audio</button>
+          </div>
+          <button class="btn btn-ghost btn-sm" onclick="loadArchive()">Refresh</button>
+        </div>
+        <div class="archive-grid" id="archive-grid">
+          <div class="arch-empty">Switch to this tab to load generated files.</div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PROFILES — CHARACTER ═══════════════ -->
+    <div class="panel" id="panel-prof-char">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="gen-hd">New Character</div>
+          <input type="hidden" id="pc-edit-name">
+          <div class="frow"><label class="fl">Name*</label><input class="fi" id="pc-name" placeholder="alice"></div>
+          <div class="frow"><label class="fl">Description</label><input class="fi" id="pc-desc" placeholder="optional"></div>
+
+          <div class="frow" style="align-items:center;gap:1rem;margin-bottom:.2rem">
+            <label class="fl">Mode</label>
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;font-size:12px">
+              <input type="radio" name="pc-mode" value="extract" checked onchange="pcModeChange()"> Extract
+            </label>
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;font-size:12px">
+              <input type="radio" name="pc-mode" value="generate" onchange="pcModeChange()"> Generate
+            </label>
+          </div>
+
+          <div id="pc-extract-fields">
+            <div class="frow"><label class="fl">Source images</label>
+              <div style="flex:1">
+                <input type="file" id="pc-img-files" multiple accept="image/*" onchange="pcImgFilesChanged()" style="width:100%">
+                <div id="pc-img-previews" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem"></div>
+              </div>
+            </div>
+            <div class="frow"><label class="fl">Source videos</label>
+              <input type="file" id="pc-vid-files" multiple accept="video/*" style="flex:1">
+            </div>
+            <div class="frow"><label class="fl">Max ref images</label>
+              <input type="number" class="fi" id="pc-max" value="5" min="1" max="20" style="width:100px">
+            </div>
+          </div>
+
+          <div id="pc-generate-fields" style="display:none">
+            <div class="frow" style="align-items:flex-start"><label class="fl" style="padding-top:.3rem">Prompt*</label>
+              <textarea class="fi" id="pc-gen-prompt" rows="3" placeholder="e.g. a tall woman with red hair and blue eyes, realistic, studio lighting" style="flex:1;resize:vertical"></textarea>
+            </div>
+            <div class="frow"><label class="fl">Image model</label>
+              <select class="fi" id="pc-gen-model" style="flex:1"><option value="">Default image model</option></select>
+            </div>
+            <div class="frow"><label class="fl">Ref images (n)</label>
+              <input type="number" class="fi" id="pc-gen-n" value="3" min="1" max="8" style="width:100px">
+            </div>
+            <details style="margin-top:.3rem">
+              <summary style="font-size:12px;cursor:pointer;color:var(--text-2)">Advanced</summary>
+              <div style="padding:.4rem 0">
+                <div class="frow"><label class="fl">Steps</label>
+                  <input type="number" class="fi" id="pc-gen-steps" placeholder="model default" min="1" max="150" style="width:120px">
+                </div>
+                <div class="frow"><label class="fl">Width</label>
+                  <input type="number" class="fi" id="pc-gen-w" value="512" min="64" max="2048" step="64" style="width:120px">
+                </div>
+                <div class="frow"><label class="fl">Height</label>
+                  <input type="number" class="fi" id="pc-gen-h" value="512" min="64" max="2048" step="64" style="width:120px">
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div style="display:flex;gap:.5rem;margin-top:.7rem">
+            <button class="btn btn-primary btn-sm" id="pc-submit-btn" onclick="profCharSubmit()">Extract &amp; Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="profCharShowCreate()">Reset</button>
+          </div>
+          <div id="pc-form-status" class="small muted" style="margin-top:.4rem"></div>
+        </div>
+
+        <div class="gen-out prof-gen-out">
+          <div class="prof-out-hd">
+            <span class="prof-out-hd-title">Character Profiles</span>
+            <button class="btn btn-ghost btn-sm" onclick="profCharLoad()">Refresh</button>
+          </div>
+          <div class="prof-out-body">
+            <div id="prof-char-list" class="archive-grid">
+              <div class="arch-empty">Loading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PROFILES — ENVIRONMENT ═══════════════ -->
+    <div class="panel" id="panel-prof-env">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="gen-hd">New Environment</div>
+          <div class="frow"><label class="fl">Name*</label><input class="fi" id="pe-name" placeholder="living-room"></div>
+          <div class="frow"><label class="fl">Description</label><input class="fi" id="pe-desc" placeholder="optional"></div>
+
+          <div class="frow" style="align-items:center;gap:1rem;margin-bottom:.2rem">
+            <label class="fl">Mode</label>
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;font-size:12px">
+              <input type="radio" name="pe-mode" value="extract" checked onchange="peModeChange()"> Extract
+            </label>
+            <label style="display:flex;align-items:center;gap:.3rem;cursor:pointer;font-size:12px">
+              <input type="radio" name="pe-mode" value="generate" onchange="peModeChange()"> Generate
+            </label>
+          </div>
+
+          <div id="pe-extract-fields">
+            <div class="frow"><label class="fl">Source images</label>
+              <div style="flex:1">
+                <input type="file" id="pe-img-files" multiple accept="image/*" onchange="peImgFilesChanged()" style="width:100%">
+                <div id="pe-img-previews" style="display:flex;flex-wrap:wrap;gap:.4rem;margin-top:.4rem"></div>
+              </div>
+            </div>
+            <div class="frow"><label class="fl">Source videos</label>
+              <input type="file" id="pe-vid-files" multiple accept="video/*" style="flex:1">
+            </div>
+            <div class="frow"><label class="fl">Max ref images</label>
+              <input type="number" class="fi" id="pe-max" value="5" min="1" max="20" style="width:100px">
+            </div>
+          </div>
+
+          <div id="pe-generate-fields" style="display:none">
+            <div class="frow" style="align-items:flex-start"><label class="fl" style="padding-top:.3rem">Prompt*</label>
+              <textarea class="fi" id="pe-gen-prompt" rows="3" placeholder="e.g. a cozy living room with wooden floors, warm lighting, bookshelves" style="flex:1;resize:vertical"></textarea>
+            </div>
+            <div class="frow"><label class="fl">Image model</label>
+              <select class="fi" id="pe-gen-model" style="flex:1"><option value="">Default image model</option></select>
+            </div>
+            <div class="frow"><label class="fl">Ref images (n)</label>
+              <input type="number" class="fi" id="pe-gen-n" value="3" min="1" max="8" style="width:100px">
+            </div>
+            <details style="margin-top:.3rem">
+              <summary style="font-size:12px;cursor:pointer;color:var(--text-2)">Advanced</summary>
+              <div style="padding:.4rem 0">
+                <div class="frow"><label class="fl">Steps</label>
+                  <input type="number" class="fi" id="pe-gen-steps" placeholder="model default" min="1" max="150" style="width:120px">
+                </div>
+                <div class="frow"><label class="fl">Width</label>
+                  <input type="number" class="fi" id="pe-gen-w" value="512" min="64" max="2048" step="64" style="width:120px">
+                </div>
+                <div class="frow"><label class="fl">Height</label>
+                  <input type="number" class="fi" id="pe-gen-h" value="512" min="64" max="2048" step="64" style="width:120px">
+                </div>
+              </div>
+            </details>
+          </div>
+
+          <div style="display:flex;gap:.5rem;margin-top:.7rem">
+            <button class="btn btn-primary btn-sm" id="pe-submit-btn" onclick="profEnvSubmit()">Extract &amp; Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="profEnvShowCreate()">Reset</button>
+          </div>
+          <div id="pe-form-status" class="small muted" style="margin-top:.4rem"></div>
+        </div>
+
+        <div class="gen-out prof-gen-out">
+          <div class="prof-out-hd">
+            <span class="prof-out-hd-title">Environment Profiles</span>
+            <button class="btn btn-ghost btn-sm" onclick="profEnvLoad()">Refresh</button>
+          </div>
+          <div class="prof-out-body">
+            <div id="prof-env-list" class="archive-grid">
+              <div class="arch-empty">Loading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ PROFILES — VOICE ═══════════════ -->
+    <div class="panel" id="panel-prof-voice">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="gen-hd">Extract Voice</div>
+          <div class="frow"><label class="fl">Name*</label><input class="fi" id="pv-name" placeholder="john-doe"></div>
+          <div class="frow"><label class="fl">Description</label><input class="fi" id="pv-desc" placeholder="optional"></div>
+          <div class="frow"><label class="fl">Audio or Video*</label>
+            <input type="file" id="pv-file" accept="audio/*,video/*" style="flex:1">
+          </div>
+          <div class="frow" style="align-items:flex-start"><label class="fl" style="padding-top:.3rem">Transcript</label>
+            <textarea class="fi fs" id="pv-transcript" rows="3" placeholder="Leave empty to auto-transcribe with Whisper" style="resize:vertical"></textarea>
+          </div>
+          <div style="display:flex;gap:.5rem;margin-top:.7rem">
+            <button class="btn btn-primary btn-sm" onclick="profVoiceSave()">Extract &amp; Save</button>
+            <button class="btn btn-ghost btn-sm" onclick="profVoiceShowCreate()">Reset</button>
+          </div>
+          <div id="pv-form-status" class="small muted" style="margin-top:.4rem"></div>
+        </div>
+
+        <div class="gen-out prof-gen-out">
+          <div class="prof-out-hd">
+            <span class="prof-out-hd-title">Voice Profiles</span>
+            <button class="btn btn-ghost btn-sm" onclick="profVoiceLoad()">Refresh</button>
+          </div>
+          <div class="prof-out-body">
+            <div id="prof-voice-list" class="prof-voice-list">
+              <div class="arch-empty">Loading…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ═══════════════ 3D ═══════════════ -->
+
+    <!-- 3D: Generate model from text / image -->
+    <div class="panel" id="panel-3d-generate">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-3d-generate"></div>
+          <div class="frow"><label class="fl">Prompt (text-to-3D)</label>
+            <textarea id="g3-prompt" class="fs" rows="3" placeholder="A wooden chair, a sci-fi helmet, a cute dog…"></textarea>
+          </div>
+          <div class="frow"><label class="fl">Reference image (image-to-3D, optional)</label>
+            <input type="file" id="g3-img" accept="image/*" class="fi" onchange="previewMediaInput('g3-img','g3-img-preview')">
+          </div>
+          <div id="g3-img-preview" class="media-preview"></div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Steps</label><input type="number" id="g3-steps" class="fi" value="64" min="8"></div>
+            <div class="frow"><label class="fl">Seed</label><input type="number" id="g3-seed" class="fi" placeholder="random"></div>
+          </div>
+          <div style="font-size:11px;color:var(--text-3);margin-top:.2rem">
+            Requires <strong>TripoSR</strong> (image) or <strong>Shap-E</strong> (text/image). Falls back to a depth-based mesh when neither is installed.
+          </div>
+          <button class="btn btn-primary" onclick="gen3DModel()">Generate 3D Model</button>
+          <div class="progress" id="g3-prog"></div>
+          <div id="g3-dl" style="display:none;margin-top:.5rem"></div>
+        </div>
+        <div class="gen-out" id="g3-out"><div class="gen-empty">GLB model will be ready for download</div></div>
+      </div>
+    </div>
+
+    <!-- 3D: Image → 3D (alias panel, same as img-to3d but in 3D category) -->
+    <div class="panel" id="panel-3d-img-to3d">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-3d-img-to3d"></div>
+          <div class="frow"><label class="fl">Source image</label>
+            <input type="file" id="t3i-src" accept="image/*" class="fi" onchange="previewMediaInput('t3i-src','t3i-src-preview')">
+          </div>
+          <div id="t3i-src-preview" class="media-preview"></div>
+          <div class="frow"><label class="fl">Output method</label>
+            <select id="t3i-method" class="fselect">
+              <option value="stereo">Stereo (side-by-side)</option>
+              <option value="anaglyph">Anaglyph (red-cyan)</option>
+              <option value="depth">Depth map</option>
+              <option value="mesh">3D mesh (GLB)</option>
+            </select>
+          </div>
+          <div class="frow"><label class="fl">Parallax shift <span id="t3i-sv">20</span>px</label>
+            <input type="range" id="t3i-shift" min="5" max="50" step="1" value="20" oninput="$('t3i-sv').textContent=this.value" style="width:100%">
+          </div>
+          <button class="btn btn-primary" onclick="gen3DImgTo3D()">Convert to 3D</button>
+          <div class="progress" id="t3i-prog"></div>
+        </div>
+        <div class="gen-out" id="t3i-out"><div class="gen-empty">3D output will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- 3D: Video → 3D (alias panel) -->
+    <div class="panel" id="panel-3d-vid-to3d">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-3d-vid-to3d"></div>
+          <div class="frow"><label class="fl">Source video</label>
+            <input type="file" id="t3v-src" accept="video/*" class="fi">
+          </div>
+          <div class="frow"><label class="fl">Output method</label>
+            <select id="t3v-method" class="fselect">
+              <option value="anaglyph">Anaglyph (red-cyan)</option>
+              <option value="stereo">Stereo (side-by-side)</option>
+              <option value="depth">Depth video</option>
+            </select>
+          </div>
+          <div class="frow"><label class="fl">Parallax shift <span id="t3v-sv">15</span>px</label>
+            <input type="range" id="t3v-shift" min="5" max="40" step="1" value="15" oninput="$('t3v-sv').textContent=this.value" style="width:100%">
+          </div>
+          <button class="btn btn-primary" onclick="gen3DVidTo3D()">Convert to 3D</button>
+          <div class="progress" id="t3v-prog"></div>
+        </div>
+        <div class="gen-out" id="t3v-out"><div class="gen-empty">3D video will appear here</div></div>
+      </div>
+    </div>
+
+    <!-- 3D: 3D model → rendered image/video -->
+    <div class="panel" id="panel-3d-from3d">
+      <div class="gen-wrap">
+        <div class="gen-ctrl">
+          <div class="cap-card" id="cap-3d-from3d"></div>
+          <div class="frow"><label class="fl">3D model file (GLB/OBJ)</label>
+            <input type="file" id="r3-src" accept=".glb,.obj,.gltf" class="fi">
+          </div>
+          <div class="frow"><label class="fl">Format</label>
+            <select id="r3-fmt" class="fselect">
+              <option value="glb">GLB</option>
+              <option value="obj">OBJ</option>
+            </select>
+          </div>
+          <div class="frow"><label class="fl">Output type</label>
+            <select id="r3-type" class="fselect" onchange="r3TypeChange()">
+              <option value="image">Single image</option>
+              <option value="video">Turntable video</option>
+            </select>
+          </div>
+          <div id="r3-img-opts">
+            <div class="g3">
+              <div class="frow"><label class="fl">Distance</label><input type="number" id="r3-dist" class="fi" value="2.0" step="0.5"></div>
+              <div class="frow"><label class="fl">Elevation°</label><input type="number" id="r3-elev" class="fi" value="30" step="5"></div>
+              <div class="frow"><label class="fl">Azimuth°</label><input type="number" id="r3-azim" class="fi" value="45" step="5"></div>
+            </div>
+          </div>
+          <div id="r3-vid-opts" style="display:none">
+            <div class="g2">
+              <div class="frow"><label class="fl">Frames</label><input type="number" id="r3-frames" class="fi" value="36"></div>
+              <div class="frow"><label class="fl">FPS</label><input type="number" id="r3-fps" class="fi" value="12"></div>
+            </div>
+            <div class="g2">
+              <div class="frow"><label class="fl">Elevation°</label><input type="number" id="r3-velev" class="fi" value="20" step="5"></div>
+              <div class="frow"><label class="fl">Distance</label><input type="number" id="r3-vdist" class="fi" value="2.5" step="0.5"></div>
+            </div>
+          </div>
+          <div class="g2">
+            <div class="frow"><label class="fl">Width</label><input type="number" id="r3-w" class="fi" value="512" step="64"></div>
+            <div class="frow"><label class="fl">Height</label><input type="number" id="r3-h" class="fi" value="512" step="64"></div>
+          </div>
+          <button class="btn btn-primary" onclick="gen3DRender()">Render</button>
+          <div class="progress" id="r3-prog"></div>
+        </div>
+        <div class="gen-out" id="r3-out"><div class="gen-empty">Render will appear here</div></div>
+      </div>
+    </div>
+
+  </div><!-- studio-main -->
+</div><!-- studio -->
+
 {% endblock %}
 
 {% block extra_js %}
+<script>
+window.__studioApiBase = {{ studio_root_path_json|safe }};
+window.__studioUsername = {{ studio_username_json|safe }};
+window.__studioIsGlobalAdmin = {{ studio_is_global_admin_json|safe }};
+window.__studioSystemPrompt = {{ studio_system_prompt_json|safe }};
+</script>
 <script src="{{ url_for(request, '/dashboard/static/dashboard/studio.js') }}"></script>
 {% endblock %}

@@ -12,6 +12,7 @@ from aisbf.app.startup import (_reload_global_config, _apply_condense_defaults_p
     _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path,
     _autoselect_json_path, get_aisbf_config_path)
 from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_api_admin, require_admin
+from aisbf.studio_services import studio_service
 import httpx
 
 router = APIRouter()
@@ -19,6 +20,121 @@ _config = None
 _templates = None
 
 logger = logging.getLogger(__name__)
+
+
+@router.get("/admin/api/cached-models")
+async def admin_cached_models(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse(studio_service.get_cached_models())
+
+
+@router.get("/admin/api/tokens")
+async def admin_tokens(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse([])
+    db = DatabaseRegistry.get_config_database()
+    return JSONResponse(db.get_user_api_tokens(user_id))
+
+
+@router.get("/admin/api/characters")
+async def admin_characters(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse(studio_service.list_characters("admin", None))
+
+
+@router.get("/admin/api/characters/{name}")
+async def admin_character_detail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    item = studio_service.get_character("admin", None, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return JSONResponse(item)
+
+
+@router.delete("/admin/api/characters/{name}")
+async def admin_character_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_character("admin", None, name)
+    return JSONResponse({"success": True})
+
+
+@router.get("/admin/api/characters/{name}/thumbnail")
+async def admin_character_thumbnail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    payload = studio_service.get_character_thumbnail_bytes("admin", None, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/admin/api/environments")
+async def admin_environments(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse(studio_service.list_environments("admin", None))
+
+
+@router.get("/admin/api/environments/{name}")
+async def admin_environment_detail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    item = studio_service.get_environment("admin", None, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    return JSONResponse(item)
+
+
+@router.delete("/admin/api/environments/{name}")
+async def admin_environment_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_environment("admin", None, name)
+    return JSONResponse({"success": True})
+
+
+@router.get("/admin/api/environments/{name}/thumbnail")
+async def admin_environment_thumbnail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    payload = studio_service.get_environment_thumbnail_bytes("admin", None, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/admin/api/voices")
+async def admin_voices(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse(studio_service.list_voices("admin", None))
+
+
+@router.delete("/admin/api/voices/{name}")
+async def admin_voice_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_voice("admin", None, name)
+    return JSONResponse({"success": True})
 
 def init(config, templates):
     global _config, _templates

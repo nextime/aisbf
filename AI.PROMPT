@@ -149,6 +149,28 @@ Shared Studio integration helpers:
 - Normalizes dashboard-visible provider, rotation, and autoselect resources into a unified Studio catalog
 - Infers and merges Studio capability metadata for autodetected and manually configured models
 - Supports admin/global and user-owned dashboard catalog scopes
+- Carries effective Studio adapter metadata for provider models so Studio workflow proxying can choose provider-aware payload shaping
+
+### aisbf/studio_adapters.py
+Studio adapter inference helpers:
+- Defines manual/automatic Studio adapter choices for provider models
+- Defines provider-specific Studio adapter profile choices layered above adapter family inference
+- Infers the best adapter from provider type and model capabilities when no manual override is set
+- Infers the best adapter profile from the configured provider identity, endpoint, and model metadata when no manual override is set
+- Supplies the effective adapter used by Studio workflow payload normalization
+- Contains provider-family-aware Studio payload transformation helpers used by the generic proxy path before requests are forwarded upstream
+- Contains explicit profile-specific request shaping for OpenAI-style, OpenRouter-style, Gemini-style, Anthropic-style, and Ollama-style Studio media workflows
+- Includes provider-id/endpoint specific profiles such as Kilo/OpenRouter-style, GitHub Models-style, and Azure OpenAI-style request shaping
+
+### aisbf/studio_services.py
+Studio persistence and runtime helpers for dashboard Studio:
+- Stores characters, environments, voices, archive items, and custom pipelines per Studio scope
+- Uses file-backed storage for the config admin scope under `~/.aisbf/studio/`
+- Uses database-backed storage for user-owned Studio assets and pipelines
+- Stores admin custom pipelines in `~/.aisbf/pipelines.json` as a plain JSON array
+- Stores persistent Studio functionality-to-model bindings in `~/.aisbf/studio_bindings.json` for config admin scope and in the user prompt override key `studio_function_bindings` for user scope
+- Loads Studio chat system prompt from `STUDIO_SYSTEM.md`, using file-backed admin defaults and database-backed user overrides
+- Normalizes Studio profile payloads and pipeline definitions for both admin and user scopes
 
 ### main.py
 FastAPI application:
@@ -958,6 +980,17 @@ This AI.PROMPT file is automatically updated when significant changes are made t
 - Added `/dashboard/studio` and `/dashboard/studio/catalog` for role-aware Studio access inside the dashboard shell
 - Provider model save and autodetect flows now persist normalized Studio capability metadata for manual and inferred models
 - Studio catalog entries can expose partial aggregate capabilities so incomplete metadata stays visible instead of disappearing
+
+**2026-05-11 - Dashboard Studio Runtime and Persistence Expansion**
+- Replaced the partial dashboard Studio shell with the original full Studio UI adapted to dashboard templates, CSS, and proxy-aware routing
+- Added scope-aware Studio API bases so the config admin uses `/api/v1` while user-scoped sessions use `/api/u/{username}`
+- Restricted global Studio scope to the config admin defined by `aisbf.json`; database-backed admins remain user-scoped
+- Added `aisbf/studio_services.py` for Studio asset and pipeline persistence across admin/file and user/database scopes
+- Added `studio_assets` and `studio_pipelines` database tables for user-owned Studio storage, created through normal startup migrations
+- Kept global config admin characters, environments, voices, archive items, and pipelines file-backed under `~/.aisbf/studio/`
+- Saved admin custom pipelines in `~/.aisbf/pipelines.json` and user custom pipelines in the database
+- Added `/api/v1/...` and `/api/u/{username}/...` Studio aliases for profile, archive, pipeline, and proxied advanced media routes
+- Dashboard Studio advanced media tools must proxy to provider-facing `v1/...` endpoints; no local ffmpeg/OpenCV/InsightFace/Real-ESRGAN processing is assumed
 
 **2026-03-22 - Configuration Refactoring**
 - Centralized API key storage in providers.json

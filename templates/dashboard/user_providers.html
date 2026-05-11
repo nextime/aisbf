@@ -277,6 +277,9 @@ async function apiCall(method, url, body) {
 }
 
 let providersData = {};
+const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices_json | safe }};
+const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices_json | safe }};
+const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices_json | safe }};
 let expandedProviders = new Set();
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
@@ -1367,6 +1370,22 @@ function renderModels(providerKey) {
     
     container.innerHTML = '';
     provider.models.forEach((model, index) => {
+        const selectedStudioCaps = Array.isArray(model.studio_capabilities) ? model.studio_capabilities : [];
+        const inferredCaps = Array.isArray(model.studio_capabilities) ? model.studio_capabilities : [];
+        const studioCapabilityOptions = STUDIO_CAPABILITY_CHOICES.map(cap => {
+            const selected = selectedStudioCaps.includes(cap) ? 'selected' : '';
+            return `<option value="${escHtmlAttr(cap)}" ${selected}>${escHtmlAttr(cap)}</option>`;
+        }).join('');
+        const capabilitySource = model.studio_capability_source || 'heuristic';
+        const selectedAdapter = model.studio_adapter_override || 'auto';
+        const effectiveAdapter = model.studio_adapter || 'auto';
+        const adapterOptions = STUDIO_ADAPTER_CHOICES.map(adapter => `<option value="${escHtmlAttr(adapter)}" ${selectedAdapter === adapter ? 'selected' : ''}>${escHtmlAttr(adapter)}</option>`).join('');
+        const selectedAdapterProfile = model.studio_adapter_profile_override || 'auto';
+        const effectiveAdapterProfile = model.studio_adapter_profile || 'auto';
+        const adapterProfileOptions = STUDIO_ADAPTER_PROFILE_CHOICES.map(profile => `<option value="${escHtmlAttr(profile)}" ${selectedAdapterProfile === profile ? 'selected' : ''}>${escHtmlAttr(profile)}</option>`).join('');
+        const capabilityNotes = Array.isArray(model.studio_capability_notes) && model.studio_capability_notes.length
+            ? `<div style="margin-top:6px;color:var(--color-muted);font-size:12px;">${model.studio_capability_notes.map(note => escHtmlAttr(note)).join(' | ')}</div>`
+            : '';
         const modelDiv = document.createElement('div');
         modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
         
@@ -1444,6 +1463,35 @@ function renderModels(providerKey) {
                     <strong>Model-level cache override:</strong> Disabling this prevents prompt caching for this specific model.
                     Overrides both provider-level cache setting and global cache setting.
                 </small>
+            </div>
+
+            <div class="form-group">
+                <label>Studio capabilities</label>
+                <select multiple size="8" onchange="updateModelStudioCapabilities('${providerKey}', ${index}, this)" style="width:100%;padding:8px;border:1px solid var(--bg-accent);border-radius:3px;background:var(--bg-page);color:var(--color-text);font-size:14px;">
+                    ${studioCapabilityOptions}
+                </select>
+                <small style="color: var(--color-muted); display:block; margin-top:5px;">Used by Studio to decide which model can power chat, vision, image, audio, video, embeddings, and advanced tools.</small>
+                <div style="margin-top:6px;font-size:12px;color:var(--color-muted);">Source: ${escHtmlAttr(capabilitySource)}${model.studio_capability_unknown ? ' · low confidence' : ''}</div>
+                <div style="margin-top:6px;font-size:12px;color:var(--color-text);">Current: ${inferredCaps.length ? inferredCaps.map(cap => `<span style=&quot;display:inline-block;margin:2px 4px 0 0;padding:2px 6px;border-radius:999px;background:var(--bg-accent);&quot;>${escHtmlAttr(cap)}</span>`).join('') : '<span style="color:var(--color-muted);">none</span>'}</div>
+                ${capabilityNotes}
+            </div>
+
+            <div class="form-group">
+                <label>Studio adapter override</label>
+                <select onchange="updateModelStudioAdapter('${providerKey}', ${index}, this.value)">
+                    ${adapterOptions}
+                </select>
+                <small style="color: var(--color-muted); display:block; margin-top:5px;">Optional manual override for how AISBF adapts Studio workflow payloads for this model. Leave on auto to infer the best adapter from provider type and capabilities.</small>
+                <div style="margin-top:6px;font-size:12px;color:var(--color-muted);">Effective adapter: ${escHtmlAttr(effectiveAdapter)}</div>
+            </div>
+
+            <div class="form-group">
+                <label>Studio adapter profile override</label>
+                <select onchange="updateModelStudioAdapterProfile('${providerKey}', ${index}, this.value)">
+                    ${adapterProfileOptions}
+                </select>
+                <small style="color: var(--color-muted); display:block; margin-top:5px;">Optional provider-specific profile layered above adapter family inference. Use this when a specific configured provider behaves differently from the default family mapping.</small>
+                <div style="margin-top:6px;font-size:12px;color:var(--color-muted);">Effective profile: ${escHtmlAttr(effectiveAdapterProfile)}</div>
             </div>
         `;
         
@@ -2363,6 +2411,23 @@ async function getModelsFromProvider(key) {
 
 function updateModel(providerKey, index, field, value) {
     providersData[providerKey].models[index][field] = value;
+}
+
+function updateModelStudioCapabilities(providerKey, index, selectEl) {
+    const values = Array.from(selectEl.selectedOptions).map(option => option.value).filter(Boolean);
+    providersData[providerKey].models[index].studio_capabilities = values;
+    providersData[providerKey].models[index].studio_capability_source = values.length ? 'manual' : 'heuristic';
+    providersData[providerKey].models[index].studio_capability_unknown = values.length === 0;
+}
+
+function updateModelStudioAdapter(providerKey, index, value) {
+    providersData[providerKey].models[index].studio_adapter_override = value === 'auto' ? null : value;
+    providersData[providerKey].models[index].studio_adapter = value || 'auto';
+}
+
+function updateModelStudioAdapterProfile(providerKey, index, value) {
+    providersData[providerKey].models[index].studio_adapter_profile_override = value === 'auto' ? null : value;
+    providersData[providerKey].models[index].studio_adapter_profile = value || 'auto';
 }
 
 function updateModelCondenseMethod(providerKey, index, value) {

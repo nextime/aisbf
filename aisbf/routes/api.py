@@ -6,6 +6,7 @@ from pathlib import Path
 from aisbf.models import ChatCompletionRequest
 from aisbf.database import DatabaseRegistry
 from aisbf.app.model_cache import get_provider_models, _refresh_provider_usage_if_stale, _background_tasks
+from aisbf.studio_services import studio_service
 
 router = APIRouter()
 _config = None
@@ -27,6 +28,36 @@ def parse_provider_from_model(model: str) -> tuple[str, str]:
         parts = model.split('/', 1)
         return parts[0], parts[1]
     return None, model
+
+
+def _api_v1_path(path: str) -> str:
+    return f"/api/v1{path}"
+
+
+def _normalize_studio_proxy_body(endpoint_path: str, body: dict) -> dict:
+    normalized = dict(body or {})
+
+    def prefer_model(*keys):
+        for key in keys:
+            value = normalized.get(key)
+            if isinstance(value, str) and value.strip():
+                normalized['model'] = value.strip()
+                return
+
+    if endpoint_path == "v1/video/dub":
+        prefer_model('video_model', 'stt_model', 'tts_model', 'model')
+    elif endpoint_path == "v1/audio/clone":
+        prefer_model('model', 'tts_model')
+    elif endpoint_path == "v1/audio/convert":
+        prefer_model('model', 'audio_model', 'tts_model', 'stt_model')
+    elif endpoint_path in {"v1/audio/split", "v1/audio/denoise"}:
+        prefer_model('model', 'audio_model')
+    elif endpoint_path in {"v1/images/faceswap", "v1/images/outfit"}:
+        prefer_model('model', 'image_model', 'video_model')
+    elif endpoint_path in {"v1/images/to3d", "v1/images/from3d", "v1/video/to3d", "v1/video/from3d", "v1/3d/generate"}:
+        prefer_model('model', 'render_model', 'image_model', 'video_model')
+
+    return normalized
 
 @router.get("/")
 async def root():
@@ -424,6 +455,7 @@ async def _generic_proxy(request: Request, body: dict, endpoint_path: str, metho
     """Resolve provider from body['model'] and forward to provider endpoint."""
     user_id = getattr(request.state, 'user_id', None)
     handler = _get_user_handler('request', user_id)
+    body = _normalize_studio_proxy_body(endpoint_path, body)
     provider_id, actual_model = _resolve_provider(body.get('model', ''), user_id=user_id, handler=handler)
     body['model'] = actual_model
     return await handler.handle_generic_proxy(request, provider_id, endpoint_path, body, method=method)
@@ -463,6 +495,10 @@ async def v1_image_detect(request: Request, body: dict):
 async def v1_image_segment(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/images/segment")
 
+@router.post("/api/v1/images/depth")
+async def v1_image_depth(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/depth")
+
 @router.post("/api/v1/images/restore")
 async def v1_image_restore(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/images/restore")
@@ -478,6 +514,30 @@ async def v1_image_style_transfer(request: Request, body: dict):
 @router.post("/api/v1/images/remove-bg")
 async def v1_image_remove_bg(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/images/remove-bg")
+
+@router.post("/api/v1/images/faceswap")
+async def v1_image_faceswap(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/faceswap")
+
+@router.post("/api/v1/images/deblur")
+async def v1_image_deblur(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/deblur")
+
+@router.post("/api/v1/images/unpixelate")
+async def v1_image_unpixelate(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/unpixelate")
+
+@router.post("/api/v1/images/outfit")
+async def v1_image_outfit(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/outfit")
+
+@router.post("/api/v1/images/to3d")
+async def v1_image_to3d(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/to3d")
+
+@router.post("/api/v1/images/from3d")
+async def v1_image_from3d(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/images/from3d")
 
 
 # ── Video ─────────────────────────────────────────────────────────────────────
@@ -506,11 +566,35 @@ async def v1_video_transcriptions(request: Request, body: dict):
 async def v1_video_upscale(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/video/upscale")
 
+@router.post("/api/v1/video/interpolate")
+async def v1_video_interpolate(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/video/interpolate")
+
+@router.post("/api/v1/video/subtitle")
+async def v1_video_subtitle(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/video/subtitle")
+
+@router.post("/api/v1/video/dub")
+async def v1_video_dub(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/video/dub")
+
+@router.post("/api/v1/video/to3d")
+async def v1_video_to3d(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/video/to3d")
+
+@router.post("/api/v1/video/from3d")
+async def v1_video_from3d(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/video/from3d")
+
 
 # ── Audio ─────────────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/audio/generations")
 async def v1_audio_generations(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/audio/generations")
+
+@router.post("/api/v1/audio/generate")
+async def v1_audio_generate_alias(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/audio/generations")
 
 @router.post("/api/v1/audio/translations")
@@ -540,6 +624,266 @@ async def v1_audio_diarize(request: Request, body: dict):
 @router.post("/api/v1/audio/translate")
 async def v1_audio_translate(request: Request, body: dict):
     return await _generic_proxy(request, body, "v1/audio/translate")
+
+@router.post("/api/v1/audio/stems")
+async def v1_audio_stems(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/audio/split")
+
+@router.post("/api/v1/audio/cleanup")
+async def v1_audio_cleanup(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/audio/denoise")
+
+@router.post("/api/v1/audio/clone")
+async def v1_audio_clone(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/audio/clone")
+
+@router.post("/api/v1/audio/convert")
+async def v1_audio_convert(request: Request, body: dict):
+    return await _generic_proxy(request, body, "v1/audio/convert")
+
+
+def _studio_scope(request: Request) -> tuple[str, Optional[int]]:
+    user_id = getattr(request.state, 'user_id', None)
+    return ("user", user_id) if user_id else ("admin", None)
+
+
+@router.get("/v1/audio/progress")
+@router.get("/api/v1/audio/progress")
+async def studio_audio_progress():
+    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+
+
+@router.get("/v1/video/progress")
+@router.get("/api/v1/video/progress")
+async def studio_video_progress():
+    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+
+
+@router.get("/v1/images/progress")
+@router.get("/api/v1/images/progress")
+async def studio_images_progress():
+    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+
+
+@router.get("/v1/archive")
+@router.get("/api/v1/archive")
+async def studio_archive(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {"files": studio_service.list_archive(scope, owner_id)}
+
+
+@router.delete("/v1/archive/{filename}")
+@router.delete("/api/v1/archive/{filename}")
+async def studio_archive_delete(request: Request, filename: str):
+    scope, owner_id = _studio_scope(request)
+    archive_dir = studio_service._scope_dir(studio_service.archive_dir, scope, owner_id)
+    target = archive_dir / filename
+    if target.exists():
+        target.unlink()
+    return {"success": True}
+
+
+@router.get("/v1/characters")
+@router.get("/api/v1/characters")
+async def studio_characters(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {"characters": studio_service.list_characters(scope, owner_id)}
+
+
+@router.get("/v1/characters/{name}")
+@router.get("/api/v1/characters/{name}")
+async def studio_character_detail(request: Request, name: str):
+    scope, owner_id = _studio_scope(request)
+    item = studio_service.get_character(scope, owner_id, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return item
+
+
+@router.post("/v1/characters/extract")
+@router.post("/api/v1/characters/extract")
+async def studio_character_extract(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    return studio_service.save_character(scope, owner_id, body)
+
+
+@router.post("/v1/characters/generate")
+@router.post("/api/v1/characters/generate")
+async def studio_character_generate(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    payload = dict(body)
+    payload.setdefault("images", [])
+    return studio_service.save_character(scope, owner_id, payload)
+
+
+@router.get("/v1/characters/{name}/thumbnail")
+@router.get("/api/v1/characters/{name}/thumbnail")
+async def studio_character_thumbnail(request: Request, name: str):
+    scope, owner_id = _studio_scope(request)
+    payload = studio_service.get_character_thumbnail_bytes(scope, owner_id, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/v1/environments")
+@router.get("/api/v1/environments")
+async def studio_environments(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {"environments": studio_service.list_environments(scope, owner_id)}
+
+
+@router.post("/v1/environments/extract")
+@router.post("/api/v1/environments/extract")
+async def studio_environment_extract(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    return studio_service.save_environment(scope, owner_id, body)
+
+
+@router.post("/v1/environments/generate")
+@router.post("/api/v1/environments/generate")
+async def studio_environment_generate(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    payload = dict(body)
+    payload.setdefault("images", [])
+    return studio_service.save_environment(scope, owner_id, payload)
+
+
+@router.get("/v1/environments/{name}")
+@router.get("/api/v1/environments/{name}")
+async def studio_environment_detail(request: Request, name: str):
+    scope, owner_id = _studio_scope(request)
+    item = studio_service.get_environment(scope, owner_id, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    return item
+
+
+@router.get("/v1/environments/{name}/thumbnail")
+@router.get("/api/v1/environments/{name}/thumbnail")
+async def studio_environment_thumbnail(request: Request, name: str):
+    scope, owner_id = _studio_scope(request)
+    payload = studio_service.get_environment_thumbnail_bytes(scope, owner_id, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/v1/audio/voices")
+@router.get("/api/v1/audio/voices")
+async def studio_audio_voices(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {"voices": studio_service.list_voices(scope, owner_id)}
+
+
+@router.post("/v1/audio/voices")
+@router.post("/api/v1/audio/voices")
+async def studio_audio_voice_create(request: Request):
+    form = await request.form()
+    scope, owner_id = _studio_scope(request)
+    payload = {
+        "name": str(form.get("name") or f"voice-{int(time.time())}"),
+        "description": str(form.get("description") or ""),
+        "samples": [],
+    }
+    return studio_service.save_voice(scope, owner_id, payload)
+
+
+@router.post("/v1/audio/voices/extract")
+@router.post("/api/v1/audio/voices/extract")
+async def studio_audio_voice_extract(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    payload = {
+        "name": body.get("name") or f"voice-{int(time.time())}",
+        "description": body.get("description", ""),
+        "quote": body.get("transcript", ""),
+        "samples": body.get("samples", []),
+    }
+    return studio_service.save_voice(scope, owner_id, payload)
+
+
+@router.get("/v1/pipelines/step-types")
+@router.get("/api/v1/pipelines/step-types")
+async def studio_pipeline_step_types():
+    return {"step_types": studio_service.pipeline_step_types()}
+
+
+@router.get("/v1/studio/function-bindings")
+@router.get("/api/v1/studio/function-bindings")
+async def studio_function_bindings(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {
+        "bindings": studio_service.list_function_bindings(scope, owner_id),
+        "definitions": studio_service.function_binding_definitions(),
+    }
+
+
+@router.put("/v1/studio/function-bindings/{binding_id}")
+@router.put("/api/v1/studio/function-bindings/{binding_id}")
+async def studio_function_binding_save(request: Request, binding_id: str, body: dict):
+    scope, owner_id = _studio_scope(request)
+    bindings = studio_service.save_function_binding(scope, owner_id, binding_id, body.get("roles") or {})
+    return {"bindings": bindings, "binding_id": binding_id}
+
+
+@router.delete("/v1/studio/function-bindings/{binding_id}")
+@router.delete("/api/v1/studio/function-bindings/{binding_id}")
+async def studio_function_binding_delete(request: Request, binding_id: str):
+    scope, owner_id = _studio_scope(request)
+    bindings = studio_service.delete_function_binding(scope, owner_id, binding_id)
+    return {"bindings": bindings, "binding_id": binding_id}
+
+
+@router.get("/v1/pipelines/custom")
+@router.get("/api/v1/pipelines/custom")
+async def studio_pipeline_custom_list(request: Request):
+    scope, owner_id = _studio_scope(request)
+    return {"pipelines": studio_service.list_pipelines(scope, owner_id)}
+
+
+@router.post("/v1/pipelines/custom")
+@router.post("/api/v1/pipelines/custom")
+async def studio_pipeline_custom_create(request: Request, body: dict):
+    scope, owner_id = _studio_scope(request)
+    return {"pipeline": studio_service.save_pipeline(scope, owner_id, body)}
+
+
+@router.put("/v1/pipelines/custom/{pipeline_id}")
+@router.put("/api/v1/pipelines/custom/{pipeline_id}")
+async def studio_pipeline_custom_update(request: Request, pipeline_id: str, body: dict):
+    scope, owner_id = _studio_scope(request)
+    payload = dict(body)
+    payload["id"] = pipeline_id
+    return {"pipeline": studio_service.save_pipeline(scope, owner_id, payload)}
+
+
+@router.delete("/v1/pipelines/custom/{pipeline_id}")
+@router.delete("/api/v1/pipelines/custom/{pipeline_id}")
+async def studio_pipeline_custom_delete(request: Request, pipeline_id: str):
+    scope, owner_id = _studio_scope(request)
+    studio_service.delete_pipeline(scope, owner_id, pipeline_id)
+    return {"success": True}
+
+
+@router.post("/v1/pipelines/custom/{pipeline_id}/run")
+@router.post("/api/v1/pipelines/custom/{pipeline_id}/run")
+async def studio_pipeline_custom_run(request: Request, pipeline_id: str, body: dict):
+    scope, owner_id = _studio_scope(request)
+    pipeline = studio_service.get_pipeline(scope, owner_id, pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    payload = dict(pipeline)
+    payload.update(body or {})
+    payload["_api_base"] = "/api/v1"
+    return studio_service.run_pipeline(payload)
+
+
+@router.post("/v1/pipelines/run")
+@router.post("/api/v1/pipelines/run")
+async def studio_pipeline_run(body: dict):
+    payload = dict(body or {})
+    payload["_api_base"] = "/api/v1"
+    return studio_service.run_pipeline(payload)
 
 
 # ── Text / NLP ────────────────────────────────────────────────────────────────

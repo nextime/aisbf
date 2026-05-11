@@ -338,6 +338,14 @@ function renderRotationDetails(rotationKey) {
     const container = document.getElementById(`rotation-details-${rotationKey}`);
     const rotation = rotationsConfig.rotations[rotationKey];
     const safeRKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    const inheritedCaps = Array.isArray(rotation.capabilities) ? rotation.capabilities : [];
+    const partialCaps = Array.isArray(rotation.partial_capabilities) ? rotation.partial_capabilities : [];
+    const inheritedCapsHtml = inheritedCaps.length
+        ? inheritedCaps.map(cap => `<span style="display:inline-block;margin:2px 6px 0 0;padding:3px 8px;border-radius:999px;background:var(--bg-accent);font-size:12px;">${escHtmlAttr(cap)}</span>`).join('')
+        : '<span style="color: var(--color-muted);">No capability is currently shared by every model in this rotation.</span>';
+    const partialCapsHtml = partialCaps.length
+        ? `<div style="margin-top:8px;font-size:12px;color:var(--color-muted);">Partial across only some models: ${partialCaps.map(cap => escHtmlAttr(cap)).join(', ')}</div>`
+        : '';
     
     container.innerHTML = `
         <div class="form-group">
@@ -359,6 +367,9 @@ function renderRotationDetails(rotationKey) {
         <div class="form-group">
             <label>${window.i18n.t('rotations.capabilities')}</label>
             <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="${window.i18n.t('rotations.capabilities_placeholder')}">
+            <small style="color: var(--color-muted); display:block; margin-top:5px;">This field is auto-inherited from the capabilities shared by all models in the rotation when you save.</small>
+            <div style="margin-top:8px;">${inheritedCapsHtml}</div>
+            ${partialCapsHtml}
         </div>
         
         <div class="form-group">

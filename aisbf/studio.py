@@ -24,6 +24,8 @@ from pathlib import Path
 import json
 from typing import Any, Dict, Iterable, List, Optional
 
+from aisbf.studio_adapters import effective_studio_adapter, infer_studio_adapter_profile
+
 
 STUDIO_CAPABILITY_MAP = {
     "t2t": "chat",
@@ -62,6 +64,41 @@ STUDIO_CAPABILITY_MAP = {
     "3d_generation": "3d_generation",
     "animation": "animation",
 }
+
+STUDIO_CAPABILITY_CHOICES = [
+    "chat",
+    "vision",
+    "image_generation",
+    "image_edit",
+    "video_generation",
+    "video_understanding",
+    "audio_input",
+    "transcription",
+    "speech_generation",
+    "audio_generation",
+    "audio_to_audio",
+    "embeddings",
+    "tool_use",
+    "reasoning",
+    "code_generation",
+    "code_completion",
+    "translation",
+    "summarization",
+    "classification",
+    "sentiment_analysis",
+    "ner",
+    "question_answering",
+    "search",
+    "moderation",
+    "fine_tuning",
+    "multimodal",
+    "ocr",
+    "image_captioning",
+    "object_detection",
+    "segmentation",
+    "3d_generation",
+    "animation",
+]
 
 DEFAULT_CHAT_PROVIDER_TYPES = {"openai", "anthropic", "google", "kilo", "claude", "qwen", "codex"}
 NON_CHAT_MEDIA_TOKENS = {
@@ -112,6 +149,10 @@ def normalize_capabilities(values: Optional[Iterable[str]]) -> List[str]:
     return _dedupe(normalized)
 
 
+def serialize_studio_capability_choices() -> List[str]:
+    return list(STUDIO_CAPABILITY_CHOICES)
+
+
 def stamp_inferred_capabilities(model: Dict[str, Any], provider_type: str) -> Dict[str, Any]:
     stamped = dict(model)
     capability_result = infer_model_capabilities(
@@ -154,6 +195,7 @@ def infer_model_capabilities(
     output_modalities = architecture.get("output_modalities") or []
 
     if not capabilities:
+        metadata_text = json.dumps(provider_metadata, sort_keys=True).lower() if provider_metadata else ""
         if not any(token in name for token in ["embedding", "embed", "whisper", "tts", *NON_CHAT_MEDIA_TOKENS]):
             capabilities.append("chat")
         if any(token in name for token in ["vision", "gpt-4-turbo", "gpt-4o", "claude-3", "gemini-1.5", "gemini-2.0", "gemini-pro-vision", "llava", "blip"]):
@@ -172,6 +214,8 @@ def infer_model_capabilities(
             capabilities.append("speech_generation")
         if any(token in name for token in ["musicgen", "audiogen", "riffusion", "a2a"]):
             capabilities.append("audio_generation")
+        if any(token in name for token in ["voice", "audio-to-audio", "voice conversion", "rvc", "a2a"]):
+            capabilities.append("audio_to_audio")
         if any(token in name for token in ["embedding", "embed", "ada-002", "bge", "e5", "instructor"]):
             capabilities.append("embeddings")
         if any(token in name for token in ["gpt-4", "gpt-3.5-turbo", "claude-3", "gemini", "function", "tool"]):
@@ -180,6 +224,36 @@ def infer_model_capabilities(
             capabilities.extend(["code_generation", "code_completion"])
         if any(token in name for token in ["reasoning", "cot", "o1", "o3"]):
             capabilities.append("reasoning")
+        if any(token in name for token in ["ocr"]):
+            capabilities.extend(["ocr", "image_captioning"])
+        if any(token in name for token in ["detect", "detection", "yolo"]):
+            capabilities.append("object_detection")
+        if any(token in name for token in ["segment", "segmentation", "sam"]):
+            capabilities.append("segmentation")
+        if any(token in name for token in ["3d", "mesh", "gaussian splat", "nerf"]):
+            capabilities.append("3d_generation")
+        if any(token in name for token in ["animate", "animation"]):
+            capabilities.append("animation")
+
+        if metadata_text:
+            if 'image' in metadata_text and 'input_modalit' in metadata_text:
+                capabilities.append("vision")
+            if 'audio' in metadata_text and 'input_modalit' in metadata_text:
+                capabilities.append("audio_input")
+            if 'transcrib' in metadata_text or 'speech_to_text' in metadata_text:
+                capabilities.extend(["audio_input", "transcription"])
+            if 'text_to_speech' in metadata_text or 'speech_generation' in metadata_text:
+                capabilities.append("speech_generation")
+            if 'audio_generation' in metadata_text or 'text-to-audio' in metadata_text:
+                capabilities.append("audio_generation")
+            if 'audio_to_audio' in metadata_text or 'voice conversion' in metadata_text:
+                capabilities.append("audio_to_audio")
+            if 'embedding' in metadata_text:
+                capabilities.append("embeddings")
+            if 'tool' in metadata_text or 'function_call' in metadata_text:
+                capabilities.append("tool_use")
+            if 'moderat' in metadata_text:
+                capabilities.append("moderation")
 
     if "image" in input_modalities:
         capabilities.append("vision")
@@ -397,6 +471,7 @@ def _build_provider_entries(scope: str, owner_id: Optional[int], providers: Dict
                 )
             metadata = {
                 "provider_type": provider_type,
+                "provider_endpoint": model.get("endpoint") or provider_config.get("endpoint") if isinstance(provider_config, dict) else getattr(provider_config, "endpoint", None),
             }
             if model.get("context_length") is not None:
                 metadata["context_length"] = model.get("context_length")
@@ -414,6 +489,12 @@ def _build_provider_entries(scope: str, owner_id: Optional[int], providers: Dict
                 metadata["capability_source"] = capability_result.source
             if capability_result.notes:
                 metadata["capability_notes"] = capability_result.notes
+            metadata["studio_adapter"] = effective_studio_adapter(provider_type, model)
+            metadata["studio_adapter_profile"] = infer_studio_adapter_profile(provider_id, provider_type, {**model, **metadata})
+            if model.get("studio_adapter_override") is not None:
+                metadata["studio_adapter_override"] = model.get("studio_adapter_override")
+            if model.get("studio_adapter_profile_override") is not None:
+                metadata["studio_adapter_profile_override"] = model.get("studio_adapter_profile_override")
 
             entries.append(
                 build_catalog_entry(

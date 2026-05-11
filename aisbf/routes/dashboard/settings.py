@@ -150,6 +150,7 @@ async def dashboard_prompts(request: Request):
         {'key': 'condensation_conversational', 'name': 'Condensation - Conversational', 'filename': 'condensation_conversational.md'},
         {'key': 'condensation_semantic', 'name': 'Condensation - Semantic', 'filename': 'condensation_semantic.md'},
         {'key': 'autoselect', 'name': 'Autoselect - Model Selection', 'filename': 'autoselect.md'},
+        {'key': 'studio_system', 'name': 'Studio - System Prompt', 'filename': 'STUDIO_SYSTEM.md'},
     ]
     
     prompts_data = []
@@ -239,6 +240,7 @@ async def dashboard_prompts_save(request: Request, prompt_key: str = Form(...), 
         'condensation_conversational': 'condensation_conversational.md',
         'condensation_semantic': 'condensation_semantic.md',
         'autoselect': 'autoselect.md',
+        'studio_system': 'STUDIO_SYSTEM.md',
     }
     
     if prompt_key not in prompt_map:

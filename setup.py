@@ -163,6 +163,8 @@ setup(
         ('share/aisbf/aisbf', [
             'aisbf/__init__.py',
             'aisbf/studio.py',
+            'aisbf/studio_adapters.py',
+            'aisbf/studio_services.py',
             'aisbf/config.py',
             'aisbf/models.py',
             'aisbf/handlers.py',
