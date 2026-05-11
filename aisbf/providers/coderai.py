@@ -68,6 +68,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
         self._broker_enabled = bool(self._coderai_config.get("broker_enabled", True))
         self._broker_mode = bool(self._coderai_config.get("broker_mode", False))
         self._broker_preferred = bool(self._coderai_config.get("broker_preferred", False))
+        if self._broker_mode:
+            self._transport = "broker"
         self._base_endpoint = self._normalize_http_base(self._raw_endpoint)
         self._ws_endpoint = self._normalize_ws_endpoint(self._raw_endpoint)
         self._apply_provider_defaults()
@@ -184,6 +186,12 @@ class CoderAIProviderHandler(BaseProviderHandler):
             headers["Authorization"] = f"Bearer {token}"
         return headers
 
+    def _is_direct_http_mode(self) -> bool:
+        return self._transport == "http" and not self._broker_mode
+
+    def _is_direct_websocket_mode(self) -> bool:
+        return self._transport == "websocket" and not self._broker_mode
+
     async def _use_broker(self) -> bool:
         if not self._broker_enabled:
             return False
@@ -264,6 +272,9 @@ class CoderAIProviderHandler(BaseProviderHandler):
             message = await coderai_broker.wait_for_stream_event(next_request_id, timeout=timeout)
 
     def validate_credentials(self) -> bool:
+        if self._broker_mode:
+            logger.info(f"[{self.provider_id}] CoderAI broker mode enabled; waiting for inbound broker session")
+            return True
         if self._transport == "websocket" and not self._websocket_enabled:
             logger.error(f"[{self.provider_id}] WebSocket transport selected but disabled")
             return False
@@ -444,7 +455,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                     raise Exception(message.get("error") or "CoderAI broker request failed")
                 self.record_success()
                 return message.get("payload") or {}
-            if self._transport == "websocket":
+            if self._is_direct_websocket_mode():
                 if stream:
                     return self._ws_stream("chat.completions", payload, timeout=self._request_timeout)
                 message = await self._ws_roundtrip("chat.completions", payload, timeout=self._request_timeout)
@@ -468,7 +479,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI broker model discovery failed")
                 return self._extract_models(message.get("payload") or {})
-            if self._transport == "websocket":
+            if self._is_direct_websocket_mode():
                 message = await self._ws_roundtrip("models.list", {}, timeout=self._model_timeout)
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI model discovery failed")
@@ -488,11 +499,13 @@ class CoderAIProviderHandler(BaseProviderHandler):
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker capability discovery failed")
             return message.get("payload") or {}
-        if self._transport == "websocket":
+        if self._is_direct_websocket_mode():
             message = await self._ws_roundtrip("capabilities", {}, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI capability discovery failed")
             return message.get("payload") or {}
+        if self._broker_mode:
+            raise Exception("CoderAI broker mode requires an active broker session")
         return await self._http_json("GET", "/coderai/capabilities", timeout=self._model_timeout)
 
     async def register_client(self) -> Dict[str, Any]:
@@ -507,11 +520,13 @@ class CoderAIProviderHandler(BaseProviderHandler):
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker registration failed")
             return message.get("payload") or {}
-        if self._transport == "websocket":
+        if self._is_direct_websocket_mode():
             message = await self._ws_roundtrip("register", payload, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI registration failed")
             return message.get("payload") or {}
+        if self._broker_mode:
+            raise Exception("CoderAI broker mode does not support outbound registration")
         return await self._http_json("POST", self._registration_path, payload, timeout=self._model_timeout)
 
     async def proxy_native_request(
@@ -549,11 +564,13 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 raise Exception(message.get("error") or "CoderAI broker proxy request failed")
             envelope = message.get("payload") or {}
             return int(envelope.get("status_code") or 200), envelope
-        if self._transport == "websocket":
+        if self._is_direct_websocket_mode():
             message = await self._ws_roundtrip("proxy", payload, timeout=self._request_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI proxy request failed")
             envelope = message.get("payload") or {}
             return int(envelope.get("status_code") or 200), envelope
+        if self._broker_mode:
+            raise Exception("CoderAI broker mode requires an active broker session")
         response = await self._http_json(method.upper(), endpoint_path, body or {}, timeout=self._request_timeout)
         return 200, response

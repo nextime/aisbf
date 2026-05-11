@@ -54,6 +54,15 @@ def test_broker_registers_websocket_session_and_reports_status():
                     "endpoint": "ws://local-tunnel",
                     "transport": "websocket",
                     "registration_token": "global-token",
+                    "hardware": {
+                        "gpus": [
+                            {
+                                "name": "RTX 4090",
+                                "total_vram_mb": 24576,
+                                "available_vram_mb": 20480
+                            }
+                        ]
+                    },
                     "capabilities": {"studio": {"enabled": True}},
                 },
             })
@@ -65,6 +74,9 @@ def test_broker_registers_websocket_session_and_reports_status():
             payload = response.json()
             assert payload["connected"] is True
             assert payload["client_id"] == "nat-client"
+            assert payload["metadata"]["gpu_count"] == 1
+            assert payload["metadata"]["total_vram_mb"] == 24576
+            assert payload["metadata"]["available_vram_mb"] == 20480
 
 
 def test_broker_rejects_missing_registration_token():
@@ -83,7 +95,7 @@ def test_broker_routes_request_to_registered_session():
             async def send_text(self, payload: str):
                 self.sent.append(payload)
                 message = json.loads(payload)
-                await broker.resolve_response({
+                await broker.publish_response({
                     "request_id": message["request_id"],
                     "status": "ok",
                     "payload": {"data": [{"id": "llama3.1:8b"}]},
@@ -97,6 +109,9 @@ def test_broker_routes_request_to_registered_session():
             assert sent_message["op"] == "models.list"
             assert response["status"] == "ok"
             assert response["payload"]["data"][0]["id"] == "llama3.1:8b"
+            snapshot = await broker.get_session_snapshot("coderai", "bridge-client")
+            assert snapshot["performance"]["sample_count"] == 1
+            assert snapshot["performance"]["avg_latency_ms"] >= 0
             queued = await broker.consume_request(session.session_id, timeout=0)
             assert queued is None
         finally:
@@ -163,6 +178,8 @@ def test_broker_stream_events_are_delivered_to_waiter():
         try:
             response = await broker.send_request("coderai", "proxy", {"stream": True}, client_id="stream-client", owner_user_id=None, timeout=3.0)
             assert response["event"] == "done"
+            snapshot = await broker.get_session_snapshot("coderai", "stream-client")
+            assert snapshot["performance"]["sample_count"] == 1
         finally:
             await broker.unregister(session.session_id)
 

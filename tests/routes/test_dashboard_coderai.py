@@ -149,6 +149,27 @@ def test_api_provider_save_rejects_coderai_broker_without_registration_token(mon
         assert "requires a registration token" in str(exc)
 
 
+def test_api_provider_save_allows_non_broker_coderai_without_registration_token():
+    provider_config = dashboard_providers._ensure_coderai_token(
+        {
+            "id": "coderai-http",
+            "name": "CoderAI HTTP",
+            "endpoint": "http://127.0.0.1:11437",
+            "api_key_required": False,
+            "api_key": "local-token",
+            "type": "coderai",
+            "coderai_config": {
+                "broker_enabled": False,
+                "broker_mode": False,
+                "registration_token": "",
+            },
+        }
+    )
+
+    dashboard_providers._validate_coderai_provider_config("coderai-http", provider_config)
+    assert provider_config["coderai_config"]["registration_token"] == ""
+
+
 def test_api_provider_save_persists_coderai_token_for_user(monkeypatch):
     db = DbStub()
 

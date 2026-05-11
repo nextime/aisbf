@@ -5,6 +5,7 @@ CoderAI broker and session registry for NAT-friendly outbound connections.
 from __future__ import annotations
 
 import asyncio
+from collections import deque
 import json
 import logging
 import time
@@ -24,6 +25,7 @@ SESSION_TTL_SECONDS = 120
 REQUEST_TTL_SECONDS = 300
 REPLY_TTL_SECONDS = 300
 HEARTBEAT_POLL_SECONDS = 1
+PERFORMANCE_WINDOW_SIZE = 100
 
 
 class BrokerPlaceholderWebSocket:
@@ -37,6 +39,7 @@ class PendingCoderAIRequest:
     created_at: float
     stream_queue: asyncio.Queue | None = None
     event_log: list[Dict[str, Any]] = field(default_factory=list)
+    request_snapshot: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -50,6 +53,7 @@ class CoderAISession:
     capabilities: Dict[str, Any] = field(default_factory=dict)
     last_seen: float = field(default_factory=time.time)
     closed: bool = False
+    recent_requests: deque[Dict[str, Any]] = field(default_factory=lambda: deque(maxlen=PERFORMANCE_WINDOW_SIZE))
 
 
 class CoderAIBroker:
@@ -94,7 +98,134 @@ class CoderAIBroker:
             "closed": session.closed,
             "metadata": dict(session.metadata),
             "capabilities": dict(session.capabilities),
+            "performance": self._build_performance_snapshot(session),
         }
+
+    @staticmethod
+    def _normalize_hardware_metadata(metadata: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        result = dict(metadata or {})
+        gpus = result.get("gpus") or result.get("gpu") or []
+        if isinstance(gpus, dict):
+            gpus = [gpus]
+        normalized_gpus = []
+        total_vram_mb = 0.0
+        available_vram_mb = 0.0
+        for gpu in gpus if isinstance(gpus, list) else []:
+            if not isinstance(gpu, dict):
+                continue
+            normalized_gpu = dict(gpu)
+            total_mb = normalized_gpu.get("total_vram_mb")
+            available_mb = normalized_gpu.get("available_vram_mb")
+            used_mb = normalized_gpu.get("used_vram_mb")
+            if total_mb is None and normalized_gpu.get("total_vram_gb") is not None:
+                total_mb = float(normalized_gpu.get("total_vram_gb")) * 1024.0
+            if available_mb is None and normalized_gpu.get("available_vram_gb") is not None:
+                available_mb = float(normalized_gpu.get("available_vram_gb")) * 1024.0
+            if used_mb is None and normalized_gpu.get("used_vram_gb") is not None:
+                used_mb = float(normalized_gpu.get("used_vram_gb")) * 1024.0
+            if total_mb is None and available_mb is not None and used_mb is not None:
+                total_mb = float(available_mb) + float(used_mb)
+            if available_mb is None and total_mb is not None and used_mb is not None:
+                available_mb = max(float(total_mb) - float(used_mb), 0.0)
+            if used_mb is None and total_mb is not None and available_mb is not None:
+                used_mb = max(float(total_mb) - float(available_mb), 0.0)
+            if total_mb is not None:
+                normalized_gpu["total_vram_mb"] = float(total_mb)
+                total_vram_mb += float(total_mb)
+            if available_mb is not None:
+                normalized_gpu["available_vram_mb"] = float(available_mb)
+                available_vram_mb += float(available_mb)
+            if used_mb is not None:
+                normalized_gpu["used_vram_mb"] = float(used_mb)
+            normalized_gpus.append(normalized_gpu)
+        if normalized_gpus:
+            result["gpus"] = normalized_gpus
+            result["gpu_count"] = len(normalized_gpus)
+            result["total_vram_mb"] = total_vram_mb
+            result["available_vram_mb"] = available_vram_mb
+            result["used_vram_mb"] = max(total_vram_mb - available_vram_mb, 0.0)
+        return result
+
+    @staticmethod
+    def _estimate_performance_sample(message: Dict[str, Any], started_at: float) -> Dict[str, Any]:
+        payload = message.get("payload") or {}
+        latency_ms = payload.get("latency_ms")
+        if latency_ms is None:
+            latency_ms = max((time.time() - started_at) * 1000.0, 0.0)
+        usage = payload.get("usage") or {}
+        prompt_tokens = payload.get("prompt_tokens")
+        completion_tokens = payload.get("completion_tokens")
+        total_tokens = payload.get("total_tokens")
+        if prompt_tokens is None:
+            prompt_tokens = usage.get("prompt_tokens")
+        if completion_tokens is None:
+            completion_tokens = usage.get("completion_tokens")
+        if total_tokens is None:
+            total_tokens = usage.get("total_tokens")
+        if total_tokens is None:
+            values = [value for value in (prompt_tokens, completion_tokens) if isinstance(value, (int, float))]
+            total_tokens = sum(values) if values else None
+        tokens_per_second = payload.get("tokens_per_second") or payload.get("tok_per_s") or payload.get("throughput_tps")
+        if tokens_per_second is None and isinstance(total_tokens, (int, float)) and latency_ms:
+            seconds = float(latency_ms) / 1000.0
+            if seconds > 0:
+                tokens_per_second = float(total_tokens) / seconds
+        return {
+            "latency_ms": float(latency_ms),
+            "prompt_tokens": int(prompt_tokens) if isinstance(prompt_tokens, (int, float)) else None,
+            "completion_tokens": int(completion_tokens) if isinstance(completion_tokens, (int, float)) else None,
+            "total_tokens": int(total_tokens) if isinstance(total_tokens, (int, float)) else None,
+            "tokens_per_second": float(tokens_per_second) if isinstance(tokens_per_second, (int, float)) else None,
+            "success": (message.get("status") or "ok") != "error",
+            "recorded_at": time.time(),
+        }
+
+    @staticmethod
+    def _build_performance_snapshot(session: CoderAISession) -> Dict[str, Any]:
+        samples = list(session.recent_requests)
+        if not samples:
+            return {
+                "window_size": PERFORMANCE_WINDOW_SIZE,
+                "sample_count": 0,
+                "estimated": True,
+                "avg_latency_ms": 0.0,
+                "avg_tokens_per_second": 0.0,
+                "avg_total_tokens": 0.0,
+                "success_rate": 0.0,
+                "last_latency_ms": None,
+                "last_tokens_per_second": None,
+                "last_total_tokens": None,
+            }
+        latencies = [sample["latency_ms"] for sample in samples if isinstance(sample.get("latency_ms"), (int, float))]
+        tps_values = [sample["tokens_per_second"] for sample in samples if isinstance(sample.get("tokens_per_second"), (int, float))]
+        total_tokens = [sample["total_tokens"] for sample in samples if isinstance(sample.get("total_tokens"), (int, float))]
+        success_count = sum(1 for sample in samples if sample.get("success"))
+        last = samples[-1]
+        return {
+            "window_size": PERFORMANCE_WINDOW_SIZE,
+            "sample_count": len(samples),
+            "estimated": True,
+            "avg_latency_ms": (sum(latencies) / len(latencies)) if latencies else 0.0,
+            "avg_tokens_per_second": (sum(tps_values) / len(tps_values)) if tps_values else 0.0,
+            "avg_total_tokens": (sum(total_tokens) / len(total_tokens)) if total_tokens else 0.0,
+            "success_rate": success_count / len(samples),
+            "last_latency_ms": last.get("latency_ms"),
+            "last_tokens_per_second": last.get("tokens_per_second"),
+            "last_total_tokens": last.get("total_tokens"),
+        }
+
+    async def _record_request_metric(self, request_id: str, message: Dict[str, Any]) -> None:
+        async with self._lock:
+            pending = self._pending.get(request_id)
+            if not pending:
+                return
+            session_id = (pending.request_snapshot or {}).get("session_id")
+            session = self._sessions_by_id.get(session_id) if session_id else None
+            if not session:
+                return
+            session.recent_requests.append(self._estimate_performance_sample(message, pending.created_at))
+            self._store_session_cache(session)
+            self._persist_sessions_locked()
 
     def _persist_sessions_locked(self) -> None:
         payload = {
@@ -136,6 +267,17 @@ class CoderAIBroker:
                 last_seen=float(raw_session.get("last_seen") or time.time()),
                 closed=bool(raw_session.get("closed", True)),
             )
+            perf = raw_session.get("performance") or {}
+            if isinstance(perf, dict) and int(perf.get("sample_count") or 0) > 0:
+                sample_count = min(int(perf.get("sample_count") or 0), PERFORMANCE_WINDOW_SIZE)
+                for _ in range(sample_count):
+                    session.recent_requests.append({
+                        "latency_ms": float(perf.get("avg_latency_ms") or 0.0),
+                        "tokens_per_second": float(perf.get("avg_tokens_per_second")) if isinstance(perf.get("avg_tokens_per_second"), (int, float)) else None,
+                        "total_tokens": float(perf.get("avg_total_tokens")) if isinstance(perf.get("avg_total_tokens"), (int, float)) else None,
+                        "success": True,
+                        "recorded_at": session.last_seen,
+                    })
             session.metadata.setdefault("persisted", True)
             session.metadata.setdefault("connection_state", "disconnected")
             key = self._session_key(provider_id, client_id)
@@ -178,7 +320,7 @@ class CoderAIBroker:
                 provider_id=provider_id,
                 client_id=client_id,
                 websocket=websocket,
-                metadata=dict(metadata or {}),
+                metadata=self._normalize_hardware_metadata(metadata),
                 capabilities=dict(capabilities or {}),
             )
             session.closed = False
@@ -213,7 +355,7 @@ class CoderAIBroker:
                 return None
             session.last_seen = time.time()
             if metadata:
-                session.metadata.update(metadata)
+                session.metadata.update(self._normalize_hardware_metadata(metadata))
             if capabilities:
                 session.capabilities = dict(capabilities)
             self._store_session_cache(session)
@@ -336,6 +478,12 @@ class CoderAIBroker:
                 future=future,
                 created_at=time.time(),
                 stream_queue=stream_queue,
+                request_snapshot={
+                    "session_id": snapshot.get("session_id"),
+                    "provider_id": provider_id,
+                    "client_id": snapshot.get("client_id") or client_id,
+                    "op": op,
+                },
             )
 
         local_session = None
@@ -395,6 +543,7 @@ class CoderAIBroker:
         if event in {"chunk", "progress", "output", "log", "data", "done", "completed"}:
             await self._publish_stream_response(message)
             return
+        await self._record_request_metric(request_id, message)
         self._cache.broker_set(self._reply_key(request_id), message, ttl=REPLY_TTL_SECONDS)
         await self.resolve_response(message)
 
@@ -406,6 +555,7 @@ class CoderAIBroker:
         if queue is not None:
             pending.event_log.append(message)
             if message.get("event") in {"done", "completed"} and not pending.future.done():
+                await self._record_request_metric(request_id, message)
                 pending.future.set_result(message)
             else:
                 await queue.put(message)

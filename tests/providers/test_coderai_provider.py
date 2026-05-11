@@ -1,12 +1,14 @@
 import json
 import base64
 from unittest.mock import Mock
+from types import SimpleNamespace
 
 import pytest
 
 from aisbf.providers.coderai import CoderAIProviderHandler
 from aisbf.config import config
 from aisbf.config import ProviderConfig
+from aisbf.app.model_cache import _is_broker_only_coderai
 
 
 @pytest.fixture(autouse=True)
@@ -190,3 +192,56 @@ async def test_coderai_broker_stream_supports_progress_and_binary_chunks(monkeyp
     assert status_code == 200
     assert payload["stream_encoding"] == "base64"
     assert base64.b64decode(payload["stream_chunks"][0]).startswith(b"event: progress")
+
+
+def test_coderai_broker_mode_forces_broker_transport_and_skips_outbound_validation():
+    provider_config = {
+        "id": "coderai_nat",
+        "name": "CoderAI NAT",
+        "endpoint": "http://127.0.0.1:11437",
+        "type": "coderai",
+        "api_key_required": False,
+        "coderai_config": {"broker_mode": True, "registration_token": "nat-token"},
+    }
+
+    handler = CoderAIProviderHandler("coderai_nat", provider_config=provider_config)
+
+    assert handler._transport == "broker"
+    assert handler.validate_credentials() is True
+
+
+@pytest.mark.asyncio
+async def test_coderai_non_broker_mode_uses_openai_compatible_http_api():
+    provider_config = {
+        "id": "coderai_local",
+        "name": "CoderAI",
+        "endpoint": "http://127.0.0.1:11437",
+        "type": "coderai",
+        "api_key_required": False,
+        "api_key": "local-api-token",
+        "coderai_config": {"broker_mode": False, "broker_enabled": False, "transport": "http"},
+    }
+
+    handler = CoderAIProviderHandler("coderai_local", provider_config=provider_config)
+
+    assert handler._transport == "http"
+    assert handler._effective_api_key() == "local-api-token"
+    assert handler.validate_credentials() is True
+
+
+def test_model_cache_detects_broker_only_coderai_provider():
+    provider_config = SimpleNamespace(
+        type="coderai",
+        coderai_config={"broker_mode": True},
+    )
+
+    assert _is_broker_only_coderai(provider_config) is True
+
+
+def test_model_cache_allows_direct_http_coderai_provider():
+    provider_config = SimpleNamespace(
+        type="coderai",
+        coderai_config={"broker_mode": False, "broker_enabled": False, "transport": "http"},
+    )
+
+    assert _is_broker_only_coderai(provider_config) is False

@@ -16,6 +16,16 @@ _endpoint_model_cache: dict = {}
 _background_tasks: set = set()
 
 
+def _is_broker_only_coderai(provider_config) -> bool:
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type != 'coderai':
+        return False
+    coderai_config = getattr(provider_config, 'coderai_config', None) or {}
+    if not isinstance(coderai_config, dict):
+        return False
+    return bool(coderai_config.get('broker_mode', False))
+
+
 async def fetch_provider_models(provider_id: str, config, user_id: Optional[int] = None) -> list:
     global _model_cache, _model_cache_timestamps, _endpoint_model_cache
 
@@ -171,6 +181,9 @@ async def prefetch_global_provider_models(config):
     for provider_id, provider_config in config.providers.items():
         total += 1
         if hasattr(provider_config, 'models') and provider_config.models:
+            continue
+        if _is_broker_only_coderai(provider_config):
+            logger.info(f"Skipping model prefetch for broker-only CoderAI provider '{provider_id}' until a broker session connects")
             continue
 
         provider_type = getattr(provider_config, 'type', '')

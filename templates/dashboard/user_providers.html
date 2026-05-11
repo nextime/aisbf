@@ -784,9 +784,9 @@ function renderProviderDetails(key) {
     }
     if (isCoderAIProvider && !provider.coderai_config) {
         provider.coderai_config = {
-            transport: 'http',
+            transport: 'broker',
             broker_enabled: true,
-            broker_mode: false,
+            broker_mode: true,
             broker_preferred: true,
             discovery_enabled: true,
             client_id: key,
@@ -1025,9 +1025,28 @@ function renderProviderDetails(key) {
     } else if (isCoderAIProvider) {
         authFieldsHtml = `
             <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin-bottom: 15px; border-left: 3px solid #4a9eff;">
-                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">CoderAI Broker Registration</h4>
+                <h4 style="margin: 0 0 15px 0; color: var(--color-link);">CoderAI Connection Mode</h4>
                 <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
-                    This token belongs to your provider configuration. Share it only with the matching CoderAI instance for this provider.
+                    In broker mode, CoderAI connects inbound to AISBF and all traffic stays on that registered broker WebSocket. In direct mode, AISBF uses the configured endpoint as a normal OpenAI-compatible API.
+                </small>
+
+                <div class="form-group">
+                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
+                        <input type="checkbox" ${coderaiConfig.broker_mode !== false ? 'checked' : ''} onchange="updateCoderAIBrokerMode('${key}', this.checked)">
+                        <span>Use broker mode</span>
+                    </label>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Recommended for NATed CoderAI instances. Disable this only for directly reachable OpenAI-compatible HTTP endpoints.</small>
+                </div>
+
+                <div class="form-group" style="display:${coderaiConfig.broker_mode === false ? 'block' : 'none'};" id="coderai-api-key-group-${key}">
+                    <label>API Token</label>
+                    <input type="password" value="${provider.api_key || ''}" onchange="updateProvider('${key}', 'api_key', this.value)" placeholder="Enter CoderAI API token for direct HTTP mode">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Used only when broker mode is disabled, so AISBF can call the endpoint as a normal OpenAI-compatible API.</small>
+                </div>
+
+                <div id="coderai-broker-group-${key}" style="display:${coderaiConfig.broker_mode === false ? 'none' : 'block'};">
+                <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
+                    Generate or rotate this registration token here, then copy it into the matching CoderAI configuration so it can authenticate when connecting to AISBF.
                 </small>
 
                 <div class="form-group">
@@ -1040,32 +1059,11 @@ function renderProviderDetails(key) {
                     <label>Registration Token</label>
                     <div style="display:flex; gap:10px; align-items:center; flex-wrap:wrap;">
                         <input type="password" value="${coderaiConfig.registration_token || ''}" onchange="updateCoderAIConfig('${key}', 'registration_token', this.value)" placeholder="Provider-scoped token" style="flex:1; min-width:320px;">
+                        <button type="button" class="btn btn-secondary" onclick="copyCoderAIToken('${safeKey}')">Copy Token</button>
                         <button type="button" class="btn btn-secondary" onclick="rotateCoderAIToken('${safeKey}')">Rotate Token</button>
                     </div>
-                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Stored directly in this provider configuration for your account. Rotating immediately invalidates the old token for future broker registrations.</small>
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">Stored directly in this provider configuration for your account. Rotating invalidates the old token for future CoderAI broker registrations.</small>
                     <div id="coderai-token-status-${key}" style="margin-top:10px; font-size:13px; color: var(--color-muted);"></div>
-                </div>
-
-                <div class="form-group">
-                    <label>Transport</label>
-                    <select onchange="updateCoderAIConfig('${key}', 'transport', this.value)">
-                        <option value="http" ${coderaiConfig.transport === 'http' || !coderaiConfig.transport ? 'selected' : ''}>HTTP</option>
-                        <option value="websocket" ${coderaiConfig.transport === 'websocket' ? 'selected' : ''}>WebSocket</option>
-                    </select>
-                </div>
-
-                <div class="form-group">
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                        <input type="checkbox" ${coderaiConfig.broker_enabled !== false ? 'checked' : ''} onchange="updateCoderAIConfig('${key}', 'broker_enabled', this.checked)">
-                        <span>Enable AISBF broker sessions</span>
-                    </label>
-                </div>
-
-                <div class="form-group">
-                    <label style="display:flex; align-items:center; gap:10px; cursor:pointer;">
-                        <input type="checkbox" ${coderaiConfig.broker_preferred !== false ? 'checked' : ''} onchange="updateCoderAIConfig('${key}', 'broker_preferred', this.checked)">
-                        <span>Prefer outbound broker session when available</span>
-                    </label>
                 </div>
 
                 <div class="form-group" style="margin-top:20px; padding:14px; border-radius:6px; background:${brokerConnected ? 'rgba(34,197,94,0.08)' : 'rgba(248,113,113,0.08)'}; border:1px solid ${brokerConnected ? 'rgba(34,197,94,0.35)' : 'rgba(248,113,113,0.35)'};">
@@ -1078,8 +1076,20 @@ function renderProviderDetails(key) {
                         <div><strong>Last Seen:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.last_seen))}</div>
                         <div><strong>Connected At:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.connected_at))}</div>
                         <div><strong>Remote Endpoint:</strong> ${escHtmlAttr(brokerSession.endpoint || 'Unknown')}</div>
-                        <div><strong>Transport:</strong> ${escHtmlAttr(brokerSession.transport || coderaiConfig.transport || 'http')}</div>
+                        <div><strong>Transport:</strong> ${escHtmlAttr(brokerSession.transport || 'broker')}</div>
                         <div><strong>Studio Endpoints:</strong> ${escHtmlAttr((brokerSession.studio_endpoints || []).join(', ') || 'None advertised')}</div>
+                    </div>
+                </div>
+                </div>
+
+                <div id="coderai-direct-group-${key}" style="display:${coderaiConfig.broker_mode === false ? 'block' : 'none'}; margin-top:20px;">
+                    <div class="form-group">
+                        <label>Direct Transport</label>
+                        <select onchange="updateCoderAITransportMode('${key}', this.value)">
+                            <option value="http" ${coderaiConfig.transport === 'http' || coderaiConfig.broker_mode !== false ? 'selected' : ''}>HTTP</option>
+                            <option value="websocket" ${coderaiConfig.transport === 'websocket' ? 'selected' : ''}>WebSocket</option>
+                        </select>
+                        <small style="color: var(--color-muted); display: block; margin-top: 5px;">Use direct mode only when AISBF can reach the CoderAI endpoint itself.</small>
                     </div>
                 </div>
             </div>
@@ -1617,7 +1627,7 @@ function updateNewProviderDefaults() {
         'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
         'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1',
-        'coderai': 'CoderAI provider. Uses local OpenAI-compatible HTTP or AISBF broker/WebSocket registration with a provider-scoped token. Endpoint: http://127.0.0.1:11437'
+        'coderai': 'CoderAI provider. In broker mode, CoderAI connects inbound to AISBF using a provider-scoped registration token. In direct mode, AISBF calls it as an OpenAI-compatible endpoint. Default endpoint: http://127.0.0.1:11437'
     };
 
     descriptionEl.textContent = descriptions[providerType] || window.i18n.t('providers.standard_config');
@@ -2339,6 +2349,49 @@ function updateCoderAIConfig(key, field, value) {
     providersData[key].coderai_config[field] = value;
 }
 
+function updateCoderAIBrokerMode(key, enabled) {
+    if (!providersData[key].coderai_config) {
+        providersData[key].coderai_config = {};
+    }
+    providersData[key].coderai_config.broker_mode = enabled;
+    providersData[key].coderai_config.broker_enabled = enabled;
+    providersData[key].coderai_config.broker_preferred = enabled;
+    providersData[key].coderai_config.transport = enabled ? 'broker' : ((providersData[key].coderai_config.transport === 'websocket') ? 'websocket' : 'http');
+    renderProviderDetails(key);
+}
+
+function updateCoderAITransportMode(key, value) {
+    if (!providersData[key].coderai_config) {
+        providersData[key].coderai_config = {};
+    }
+    providersData[key].coderai_config.transport = value;
+    renderProviderDetails(key);
+}
+
+async function copyCoderAIToken(key) {
+    const statusEl = document.getElementById(`coderai-token-status-${key}`);
+    const token = (((providersData[key] || {}).coderai_config || {}).registration_token || '').trim();
+    if (!token) {
+        if (statusEl) {
+            statusEl.textContent = 'No token to copy';
+            statusEl.style.color = '#f87171';
+        }
+        return;
+    }
+    try {
+        await navigator.clipboard.writeText(token);
+        if (statusEl) {
+            statusEl.textContent = 'Token copied to clipboard';
+            statusEl.style.color = '#4ade80';
+        }
+    } catch (e) {
+        if (statusEl) {
+            statusEl.textContent = 'Copy failed: ' + e.message;
+            statusEl.style.color = '#f87171';
+        }
+    }
+}
+
 async function rotateCoderAIToken(key) {
     const statusEl = document.getElementById(`coderai-token-status-${key}`);
     if (statusEl) {
@@ -2461,9 +2514,9 @@ async function confirmAddProvider() {
         };
     } else if (type === 'coderai') {
         providersData[key].coderai_config = {
-            transport: 'http',
+            transport: 'broker',
             broker_enabled: true,
-            broker_mode: false,
+            broker_mode: true,
             broker_preferred: true,
             discovery_enabled: true,
             client_id: key,

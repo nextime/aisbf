@@ -25,12 +25,13 @@ The broker client should:
 
 1. Dial AISBF over `ws://` or `wss://`
 2. Authenticate using the provider-scoped `registration_token`
-3. Register metadata and capabilities after connect
+3. Register metadata, hardware inventory, and capabilities after connect
 4. Stay connected with heartbeat support
 5. Receive queued or direct broker requests from AISBF
 6. Execute supported operations locally
 7. Send back success, error, binary, and streaming envelopes with the same `request_id`
-8. Automatically reconnect if the connection drops
+8. Include performance metrics for completed requests whenever available
+9. Automatically reconnect if the connection drops
 
 ## AISBF Concepts You Must Match
 
@@ -137,7 +138,7 @@ Store:
 
 ### 3. Send explicit `register` operation
 
-After the `registered` event, CoderAI must send a `register` message describing its capabilities and advertised endpoints.
+After the `registered` event, CoderAI must send a `register` message describing its capabilities, hardware inventory, and advertised endpoints.
 
 ### 4. Enter long-lived receive loop
 
@@ -164,6 +165,23 @@ CoderAI should send this after receiving the initial AISBF `registered` event.
     "endpoint": "ws://local-coderai-or-descriptive-endpoint",
     "transport": "websocket",
     "registration_token": "<same_registration_token>",
+    "hardware": {
+      "hostname": "workstation-01",
+      "platform": "linux",
+      "gpus": [
+        {
+          "index": 0,
+          "name": "NVIDIA RTX 4090",
+          "vendor": "nvidia",
+          "total_vram_mb": 24576,
+          "available_vram_mb": 20480,
+          "used_vram_mb": 4096
+        }
+      ],
+      "gpu_count": 1,
+      "total_vram_mb": 24576,
+      "available_vram_mb": 20480
+    },
     "studio_endpoints": [
       "v1/images/generate",
       "v1/audio/tts",
@@ -215,6 +233,31 @@ CoderAI should send this after receiving the initial AISBF `registered` event.
 
 AISBF replies with a success envelope.
 
+### Hardware Reporting Requirements
+
+The `register` payload should include the best hardware view available to the running CoderAI process.
+
+Required if detectable:
+
+- `hardware.gpus`: array of GPU objects visible to the process
+- `hardware.gpu_count`: integer count
+- `hardware.total_vram_mb`: total usable VRAM across advertised GPUs
+- `hardware.available_vram_mb`: currently free or available VRAM across advertised GPUs
+
+Recommended per GPU fields:
+
+- `index`
+- `name`
+- `vendor`
+- `total_vram_mb`
+- `available_vram_mb`
+- `used_vram_mb`
+- backend-specific extras if trivial to expose
+
+If exact values are unavailable, estimate conservatively and include any supporting marker such as `estimated: true`.
+
+AISBF stores this in broker session metadata so dashboards and future routing logic can reason about available hardware.
+
 ## Required Heartbeat Support
 
 AISBF may send heartbeat requests, and CoderAI may also proactively keep the socket alive.
@@ -260,6 +303,30 @@ CoderAI may also periodically send:
   }
 }
 ```
+
+Heartbeat payloads may also refresh dynamic hardware state such as changing free VRAM:
+
+```json
+{
+  "v": 1,
+  "op": "heartbeat",
+  "request_id": "hb-self-2",
+  "payload": {
+    "hardware": {
+      "available_vram_mb": 18432,
+      "gpus": [
+        {
+          "index": 0,
+          "available_vram_mb": 18432,
+          "used_vram_mb": 6144
+        }
+      ]
+    }
+  }
+}
+```
+
+AISBF merges those updates into the broker session metadata.
 
 ## Local HTTP Endpoints CoderAI Should Expose
 
@@ -427,6 +494,16 @@ Response payload should match `GET /v1/models`.
 
 Request payload matches OpenAI `POST /v1/chat/completions` body.
 
+Completed responses should include performance metrics whenever practical:
+
+- `latency_ms`
+- `prompt_tokens`
+- `completion_tokens`
+- `total_tokens`
+- `tokens_per_second`
+
+If exact values are unavailable, AISBF estimates latency from broker timing and may estimate throughput from tokens plus latency.
+
 ### `op = "capabilities"`
 
 Response payload should match `GET /coderai/capabilities`.
@@ -505,6 +582,8 @@ Semantics:
         "finish_reason": "stop"
       }
     ],
+    "latency_ms": 842,
+    "tokens_per_second": 17.8,
     "usage": {
       "prompt_tokens": 10,
       "completion_tokens": 5,
@@ -513,6 +592,20 @@ Semantics:
   }
 }
 ```
+
+AISBF keeps a rolling performance window for the latest 100 completed broker requests per connected session.
+
+When exact metrics are present, AISBF stores them directly. Otherwise it estimates:
+
+- latency from broker request start to final reply time
+- throughput from `total_tokens / latency_seconds` when token counts are present
+
+The resulting session snapshot tracks:
+
+- average latency
+- average throughput
+- average total tokens
+- success rate
 
 ### Error
 
