@@ -24,6 +24,7 @@ Request handlers for AISBF.
 """
 import asyncio
 import base64
+import json
 import re
 import uuid
 import hashlib
@@ -58,6 +59,7 @@ from .streaming_optimization import (
     OptimizedTextAccumulator,
     optimize_sse_chunk
 )
+from .database import DatabaseRegistry
 
 _autoselect_result_cache: dict = {}
 _autoselect_result_cache_ttl: int = 3600  # seconds
@@ -182,6 +184,83 @@ class RequestHandler:
         payload.pop('_studio_provider_id', None)
         payload.pop('_studio_provider_endpoint', None)
         return payload
+
+    def _get_market_source_details(self, provider_id: str):
+        provider_config = None
+        if self.user_id and provider_id in getattr(self, 'user_providers', {}):
+            provider_config = self.user_providers.get(provider_id)
+        elif provider_id in getattr(self.config, 'providers', {}):
+            cfg = self.config.get_provider(provider_id)
+            provider_config = cfg.model_dump() if hasattr(cfg, 'model_dump') else cfg
+        if isinstance(provider_config, dict):
+            return provider_config.get('market_source')
+        return None
+
+    @staticmethod
+    def _market_request_id(request_data: Optional[Dict], fallback_provider_id: str) -> str:
+        payload = {
+            'provider_id': fallback_provider_id,
+            'model': (request_data or {}).get('model'),
+            'messages': (request_data or {}).get('messages'),
+            'input': (request_data or {}).get('input'),
+            'prompt': (request_data or {}).get('prompt'),
+            'voice': (request_data or {}).get('voice'),
+            'endpoint_path': (request_data or {}).get('_market_endpoint_path'),
+        }
+        serialized = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def _settle_market_result(self, provider_id: str, usage: Optional[Dict], requests_count: int = 1, metadata: Optional[Dict] = None, request_data: Optional[Dict] = None):
+        market_source = self._get_market_source_details(provider_id)
+        if not self.user_id or not market_source:
+            return None
+        listing_id = market_source.get('listing_id')
+        if not listing_id:
+            return None
+        db = DatabaseRegistry.get_config_database()
+        settlement_metadata = {
+            'provider_id': provider_id,
+            'market_imported': True,
+            'market_request_id': self._market_request_id(request_data, provider_id),
+        }
+        if metadata:
+            settlement_metadata.update(metadata)
+        return db.settle_market_usage(
+            consumer_user_id=self.user_id,
+            listing_id=int(listing_id),
+            prompt_tokens=(usage or {}).get('prompt_tokens', 0),
+            completion_tokens=(usage or {}).get('completion_tokens', 0),
+            requests_count=requests_count,
+            metadata=settlement_metadata,
+        )
+
+    def _extract_usage_from_sse_chunk(self, chunk_payload) -> Optional[Dict[str, int]]:
+        try:
+            if isinstance(chunk_payload, bytes):
+                chunk_payload = chunk_payload.decode('utf-8', errors='ignore')
+            if isinstance(chunk_payload, str):
+                for line in chunk_payload.splitlines():
+                    line = line.strip()
+                    if not line.startswith('data: '):
+                        continue
+                    raw = line[6:].strip()
+                    if not raw or raw == '[DONE]':
+                        continue
+                    try:
+                        parsed = json.loads(raw)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict) and isinstance(parsed.get('usage'), dict):
+                        usage = parsed.get('usage') or {}
+                        if usage.get('total_tokens') is not None or usage.get('prompt_tokens') is not None or usage.get('completion_tokens') is not None:
+                            return usage
+            elif isinstance(chunk_payload, dict):
+                usage = chunk_payload.get('usage')
+                if isinstance(usage, dict):
+                    return usage
+        except Exception:
+            return None
+        return None
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
@@ -639,6 +718,12 @@ class RequestHandler:
                     logger.warning(f"Response cache set failed: {cache_error}")
             
             handler.record_success()
+
+            if isinstance(response, dict):
+                try:
+                    self._settle_market_result(provider_id, response.get('usage', {}), 1, {'kind': 'chat_completion'}, request_data=request_data)
+                except Exception as market_error:
+                    logger.warning(f"Market settlement failed for {provider_id}: {market_error}")
             
             # Record analytics for token usage
             try:
@@ -1847,6 +1932,11 @@ class RequestHandler:
                     content = resp.json()
                 except Exception:
                     content = {"detail": resp.text}
+                try:
+                    usage = content.get('usage', {}) if isinstance(content, dict) else {}
+                    self._settle_market_result(provider_id, usage, 1, {'kind': 'generic_proxy', 'endpoint_path': endpoint_path}, request_data=request_data)
+                except Exception as market_error:
+                    logger.warning(f"Market settlement failed for generic proxy {provider_id}: {market_error}")
                 return JSONResponse(status_code=resp.status_code, content=content)
         except Exception as e:
             logger.error(f"Generic proxy error: {e}", exc_info=True)
@@ -1876,6 +1966,11 @@ class RequestHandler:
             await handler.apply_rate_limit()
             result = await handler.handle_audio_transcription(form_data)
             handler.record_success()
+            try:
+                usage = result.get('usage', {}) if isinstance(result, dict) else {}
+                self._settle_market_result(provider_id, usage, 1, {'kind': 'audio_transcription'}, request_data=request_data)
+            except Exception as market_error:
+                logger.warning(f"Market settlement failed for audio transcription {provider_id}: {market_error}")
             return result
         except Exception as e:
             handler.record_failure()
@@ -1905,6 +2000,11 @@ class RequestHandler:
             await handler.apply_rate_limit()
             result = await handler.handle_text_to_speech(request_data)
             handler.record_success()
+            try:
+                usage = result.get('usage', {}) if isinstance(result, dict) else {}
+                self._settle_market_result(provider_id, usage, 1, {'kind': 'text_to_speech'}, request_data=request_data)
+            except Exception as market_error:
+                logger.warning(f"Market settlement failed for text to speech {provider_id}: {market_error}")
             return result
         except Exception as e:
             handler.record_failure()
@@ -1938,6 +2038,11 @@ class RequestHandler:
             result = self._rewrite_content_urls(result, request)
             
             handler.record_success()
+            try:
+                usage = result.get('usage', {}) if isinstance(result, dict) else {}
+                self._settle_market_result(provider_id, usage, 1, {'kind': 'image_generation'}, request_data=request_data)
+            except Exception as market_error:
+                logger.warning(f"Market settlement failed for image generation {provider_id}: {market_error}")
             return result
         except Exception as e:
             handler.record_failure()
@@ -1967,6 +2072,11 @@ class RequestHandler:
             await handler.apply_rate_limit()
             result = await handler.handle_embeddings(request_data)
             handler.record_success()
+            try:
+                usage = result.get('usage', {}) if isinstance(result, dict) else {}
+                self._settle_market_result(provider_id, usage, 1, {'kind': 'embeddings'}, request_data=request_data)
+            except Exception as market_error:
+                logger.warning(f"Market settlement failed for embeddings {provider_id}: {market_error}")
             return result
         except Exception as e:
             handler.record_failure()
@@ -3070,6 +3180,11 @@ class RotationHandler:
                         logger.warning(f"Response cache set failed: {cache_error}")
                     
                     logger.info("Returning non-streaming response")
+
+                    try:
+                        self._settle_market_result(provider_id, response.get('usage', {}) if isinstance(response, dict) else {}, 1, {'kind': 'rotation', 'rotation_id': rotation_id}, request_data=request_data)
+                    except Exception as market_error:
+                        logger.warning(f"Market settlement failed for rotation provider {provider_id}: {market_error}")
                     
                     # Record analytics for token usage
                     try:
@@ -3445,6 +3560,7 @@ class RotationHandler:
         async def stream_generator(effective_context):
             import json
             accumulated_response_text = ""
+            final_usage = None
             try:
                 if is_google_provider:
                     # Handle Google's streaming response
@@ -3735,6 +3851,9 @@ class RotationHandler:
                                             if data_str and data_str != '[DONE]':
                                                 try:
                                                     chunk_data = json.loads(data_str)
+                                                    usage_data = chunk_data.get('usage') if isinstance(chunk_data, dict) else None
+                                                    if isinstance(usage_data, dict):
+                                                        final_usage = usage_data
                                                     choices = chunk_data.get('choices', [])
                                                     if choices:
                                                         delta = choices[0].get('delta', {})
@@ -3778,10 +3897,13 @@ class RotationHandler:
                                         logger.debug(f"Yielding raw bytes chunk: {len(chunk)} bytes")
                                         yield chunk
                                     elif isinstance(chunk, str):
+                                        final_usage = self._extract_usage_from_sse_chunk(chunk) or final_usage
                                         yield chunk.encode('utf-8')
                                     else:
                                         # Fallback: treat as dict and serialize
                                         chunk_dict = chunk.model_dump() if hasattr(chunk, 'model_dump') else chunk
+                                        if isinstance(chunk_dict, dict) and isinstance(chunk_dict.get('usage'), dict):
+                                            final_usage = chunk_dict.get('usage')
                                         yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                                 except Exception as chunk_error:
                                     error_msg = str(chunk_error)
@@ -3838,6 +3960,7 @@ class RotationHandler:
                                             chunk_dict['usage']['prompt_tokens'] = effective_context
                                             chunk_dict['usage']['completion_tokens'] = completion_tokens
                                             chunk_dict['usage']['total_tokens'] = total_tokens
+                                        final_usage = chunk_dict.get('usage')
 
                                 yield f"data: {json.dumps(chunk_dict)}\n\n".encode('utf-8')
                             except Exception as chunk_error:
@@ -3852,9 +3975,15 @@ class RotationHandler:
                 # Record analytics after stream completes
                 try:
                     analytics = get_analytics()
-                    prompt_tokens = effective_context
-                    completion_tokens_count = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name) if accumulated_response_text else 0
-                    total_tokens = prompt_tokens + completion_tokens_count
+                    prompt_tokens = (final_usage or {}).get('prompt_tokens')
+                    completion_tokens_count = (final_usage or {}).get('completion_tokens')
+                    total_tokens = (final_usage or {}).get('total_tokens')
+                    if prompt_tokens is None:
+                        prompt_tokens = effective_context
+                    if completion_tokens_count is None:
+                        completion_tokens_count = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name) if accumulated_response_text else 0
+                    if total_tokens is None:
+                        total_tokens = prompt_tokens + completion_tokens_count
                     latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                     analytics.record_request(
                         provider_id=provider_id,
@@ -3870,6 +3999,14 @@ class RotationHandler:
                         actual_cost=None,
                         analytics_kind='execution'
                     )
+                    try:
+                        self._settle_market_result(provider_id, {
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens_count,
+                            'total_tokens': total_tokens,
+                        }, 1, {'kind': 'streaming_chat_completion', 'rotation_id': rotation_id}, request_data=request_data)
+                    except Exception as market_error:
+                        logger.warning(f"Market settlement failed for streaming {provider_id}: {market_error}")
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for streaming rotation failed: {analytics_error}")
 
@@ -4992,6 +5129,15 @@ class AutoselectHandler:
             logger.warning(f"Analytics recording for autoselect failed: {analytics_error}")
 
         logger.info(f"=== AUTOSELECT REQUEST END ===")
+        if isinstance(response, dict):
+            selected_provider = None
+            if isinstance(selected_model_id, str) and '/' in selected_model_id:
+                selected_provider = selected_model_id.split('/', 1)[0]
+            try:
+                if selected_provider:
+                    self._settle_market_result(selected_provider, response.get('usage', {}), 1, {'kind': 'autoselect', 'autoselect_id': autoselect_id}, request_data=request_data)
+            except Exception as market_error:
+                logger.warning(f"Market settlement failed for autoselect {autoselect_id}: {market_error}")
         return response
 
     async def handle_autoselect_streaming_request(self, autoselect_id: str, request_data: Dict):

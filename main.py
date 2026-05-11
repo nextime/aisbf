@@ -196,6 +196,7 @@ import aisbf.routes.dashboard.settings as _dash_settings
 import aisbf.routes.dashboard.admin as _dash_admin
 import aisbf.routes.dashboard.payments as _dash_payments
 import aisbf.routes.dashboard.provider_auth as _dash_provider_auth
+import aisbf.routes.dashboard.market as _dash_market
 
 app.include_router(_auth_routes.router)
 app.include_router(_api_routes.router)
@@ -207,6 +208,7 @@ app.include_router(_dash_settings.router)
 app.include_router(_dash_admin.router)
 app.include_router(_dash_payments.router)
 app.include_router(_dash_provider_auth.router)
+app.include_router(_dash_market.router)
 
 # Wallet routes
 try:
@@ -230,6 +232,7 @@ def _init_all_routers():
     _dash_admin.init(config, templates)
     _dash_payments.init(config, templates)
     _dash_provider_auth.init(config, templates)
+    _dash_market.init(config, templates)
 
 
 # ---------------------------------------------------------------------------

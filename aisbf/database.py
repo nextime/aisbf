@@ -25,12 +25,14 @@ import sqlite3
 import json
 import hashlib
 import time
+import copy
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
 import logging
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
+from decimal import Decimal, ROUND_HALF_UP
 
 try:
     import bcrypt as _bcrypt_lib
@@ -170,6 +172,78 @@ class DatabaseManager:
     @property
     def placeholder(self) -> str:
         return '?' if self.db_type == 'sqlite' else '%s'
+
+    @staticmethod
+    def _quantize_money(value: Any) -> Decimal:
+        return Decimal(str(value or 0)).quantize(Decimal('0.01'), rounding=ROUND_HALF_UP)
+
+    @staticmethod
+    def _market_cache_key(consumer_user_id: int, listing_id: int, metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(metadata, dict):
+            return None
+        request_id = metadata.get('market_request_id') or metadata.get('request_id')
+        if not request_id:
+            return None
+        return f"market:settlement:{consumer_user_id}:{listing_id}:{request_id}"
+
+    @staticmethod
+    def _extract_market_settlement_key(metadata: Optional[Dict[str, Any]]) -> Optional[str]:
+        if not isinstance(metadata, dict):
+            return None
+        key = metadata.get('market_settlement_key')
+        return str(key).strip() if key not in (None, '') else None
+
+    @staticmethod
+    def _sanitize_market_config(config: Dict[str, Any]) -> Dict[str, Any]:
+        secret_keys = {
+            'api_key', 'password', 'secret', 'token', 'access_token', 'refresh_token',
+            'client_secret', 'authorization', 'credentials', 'session_token'
+        }
+
+        def _sanitize(value):
+            if isinstance(value, dict):
+                sanitized = {}
+                for key, item in value.items():
+                    lowered = str(key).lower()
+                    if lowered in secret_keys or lowered.endswith('_token') or lowered.endswith('_secret'):
+                        continue
+                    if lowered in {'auth_files', 'credentials_file', 'cookie_file', 'oauth_file'}:
+                        continue
+                    sanitized[key] = _sanitize(item)
+                return sanitized
+            if isinstance(value, list):
+                return [_sanitize(item) for item in value]
+            return value
+
+        return _sanitize(copy.deepcopy(config or {}))
+
+    def _load_market_listing_row(self, row) -> Dict[str, Any]:
+        metadata = json.loads(row[14]) if row[14] else {}
+        config_snapshot = json.loads(row[15]) if row[15] else {}
+        return {
+            'id': row[0],
+            'owner_user_id': row[1],
+            'owner_username': row[2],
+            'source_scope': row[3],
+            'source_type': row[4],
+            'source_id': row[5],
+            'listing_key': row[6],
+            'title': row[7],
+            'description': row[8],
+            'provider_id': row[9],
+            'model_id': row[10],
+            'endpoint': row[11],
+            'currency_code': row[12],
+            'price_per_million_tokens': float(row[13] or 0),
+            'price_per_1000_requests': float(row[16] or 0),
+            'provider_price_per_million_tokens': float(row[17]) if row[17] is not None else None,
+            'provider_price_per_1000_requests': float(row[18]) if row[18] is not None else None,
+            'metadata': metadata,
+            'config_snapshot': config_snapshot,
+            'is_active': bool(row[19]),
+            'created_at': row[20],
+            'updated_at': row[21],
+        }
 
     async def _run_in_executor(self, func, *args):
         """Run a blocking database operation in a thread pool executor."""
@@ -2971,7 +3045,7 @@ class DatabaseManager:
                 SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
                        max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                        max_autoselections, max_rotation_models, max_autoselection_models,
-                       created_at, updated_at, is_visible
+                       created_at, updated_at, is_visible, market_fee_percentage
                 FROM account_tiers
                 ORDER BY price_monthly ASC
             ''')
@@ -2995,7 +3069,8 @@ class DatabaseManager:
                     'max_autoselection_models': row[13],
                     'created_at': row[14],
                     'updated_at': row[15],
-                    'is_visible': bool(row[16]) if len(row) > 16 else True
+                    'is_visible': bool(row[16]) if len(row) > 16 else True,
+                    'market_fee_percentage': float(row[17] or 10.0) if len(row) > 17 else 10.0,
                 })
             return tiers
     
@@ -3016,7 +3091,7 @@ class DatabaseManager:
                 SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
                        max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                        max_autoselections, max_rotation_models, max_autoselection_models,
-                       created_at, updated_at, is_visible
+                       created_at, updated_at, is_visible, market_fee_percentage
                 FROM account_tiers
                 WHERE id = {placeholder}
             ''', (tier_id,))
@@ -3040,7 +3115,8 @@ class DatabaseManager:
                     'max_autoselection_models': row[13],
                     'created_at': row[14],
                     'updated_at': row[15],
-                    'is_visible': bool(row[16]) if len(row) > 16 else True
+                    'is_visible': bool(row[16]) if len(row) > 16 else True,
+                    'market_fee_percentage': float(row[17] or 10.0) if len(row) > 17 else 10.0,
                 }
             return None
     
@@ -3048,7 +3124,8 @@ class DatabaseManager:
                     max_requests_per_day: int = -1, max_requests_per_month: int = -1,
                     max_providers: int = -1, max_rotations: int = -1,
                     max_autoselections: int = -1, max_rotation_models: int = -1,
-                    max_autoselection_models: int = -1, is_active: bool = True, is_visible: bool = True) -> int:
+                    max_autoselection_models: int = -1, market_fee_percentage: float = 10.0,
+                    is_active: bool = True, is_visible: bool = True) -> int:
         """
         Create a new account tier.
         
@@ -3076,14 +3153,14 @@ class DatabaseManager:
             cursor.execute(f'''
                 INSERT INTO account_tiers
                 (name, description, price_monthly, price_yearly, is_active, is_visible,
-                 max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
-                 max_autoselections, max_rotation_models, max_autoselection_models)
+                  max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
+                  max_autoselections, max_rotation_models, max_autoselection_models, market_fee_percentage)
                 VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
                         {placeholder}, {placeholder}, {placeholder}, {placeholder},
-                        {placeholder}, {placeholder}, {placeholder})
+                        {placeholder}, {placeholder}, {placeholder}, {placeholder})
             ''', (name, description, price_monthly, price_yearly, 1 if is_active else 0, 1 if is_visible else 0,
                   max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
-                  max_autoselections, max_rotation_models, max_autoselection_models))
+                  max_autoselections, max_rotation_models, max_autoselection_models, market_fee_percentage))
             conn.commit()
             return cursor.lastrowid
     
@@ -3108,7 +3185,7 @@ class DatabaseManager:
             allowed_fields = ['name', 'description', 'price_monthly', 'price_yearly', 'is_active', 'is_visible',
                               'max_requests_per_day', 'max_requests_per_month', 'max_providers',
                               'max_rotations', 'max_autoselections', 'max_rotation_models',
-                              'max_autoselection_models']
+                              'max_autoselection_models', 'market_fee_percentage']
             
             for field in allowed_fields:
                 if field in kwargs:
@@ -3145,6 +3222,566 @@ class DatabaseManager:
             ''', (tier_id,))
             conn.commit()
             return cursor.rowcount > 0
+
+    def get_market_fee_percentage_for_user(self, user_id: int) -> float:
+        tier = self.get_user_tier(user_id)
+        if not tier:
+            tiers = self.get_all_tiers()
+            default_tier = next((t for t in tiers if t.get('is_default')), None)
+            if default_tier:
+                return float(default_tier.get('market_fee_percentage', 10.0) or 10.0)
+            return 10.0
+        return float(tier.get('market_fee_percentage', 10.0) or 10.0)
+
+    def upsert_market_listing(self, owner_user_id: int, owner_username: str, payload: Dict[str, Any]) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            metadata_json = json.dumps(payload.get('metadata') or {})
+            snapshot_json = json.dumps(self._sanitize_market_config(payload.get('config_snapshot') or {}))
+            listing_key = payload['listing_key']
+            existing = None
+            cursor.execute(
+                f'''SELECT id FROM market_listings WHERE owner_user_id = {placeholder} AND listing_key = {placeholder}''',
+                (owner_user_id, listing_key)
+            )
+            existing = cursor.fetchone()
+
+            values = (
+                owner_user_id,
+                owner_username,
+                payload.get('source_scope', 'user'),
+                payload['source_type'],
+                payload['source_id'],
+                listing_key,
+                payload['title'],
+                payload.get('description'),
+                payload.get('provider_id'),
+                payload.get('model_id'),
+                payload.get('endpoint'),
+                payload.get('currency_code', 'USD'),
+                float(payload.get('price_per_million_tokens', 0) or 0),
+                metadata_json,
+                snapshot_json,
+                float(payload.get('price_per_1000_requests', 0) or 0),
+                payload.get('provider_price_per_million_tokens'),
+                payload.get('provider_price_per_1000_requests'),
+                1 if payload.get('is_active', True) else 0,
+            )
+
+            if existing:
+                cursor.execute(
+                    f'''
+                    UPDATE market_listings
+                    SET owner_username = {placeholder},
+                        source_scope = {placeholder},
+                        source_type = {placeholder},
+                        source_id = {placeholder},
+                        title = {placeholder},
+                        description = {placeholder},
+                        provider_id = {placeholder},
+                        model_id = {placeholder},
+                        endpoint = {placeholder},
+                        currency_code = {placeholder},
+                        price_per_million_tokens = {placeholder},
+                        metadata = {placeholder},
+                        config_snapshot = {placeholder},
+                        price_per_1000_requests = {placeholder},
+                        provider_price_per_million_tokens = {placeholder},
+                        provider_price_per_1000_requests = {placeholder},
+                        is_active = {placeholder},
+                        updated_at = CURRENT_TIMESTAMP
+                    WHERE id = {placeholder}
+                    ''',
+                    values[1:] + (existing[0],)
+                )
+                conn.commit()
+                return existing[0]
+
+            cursor.execute(
+                f'''
+                INSERT INTO market_listings (
+                    owner_user_id, owner_username, source_scope, source_type, source_id, listing_key,
+                    title, description, provider_id, model_id, endpoint, currency_code,
+                    price_per_million_tokens, metadata, config_snapshot, price_per_1000_requests,
+                    provider_price_per_million_tokens, provider_price_per_1000_requests, is_active,
+                    created_at, updated_at
+                ) VALUES (
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                )
+                ''',
+                values
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def list_market_listings(self, active_only: bool = True) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            query = '''
+                SELECT id, owner_user_id, owner_username, source_scope, source_type, source_id, listing_key,
+                       title, description, provider_id, model_id, endpoint, currency_code,
+                       price_per_million_tokens, metadata, config_snapshot, price_per_1000_requests,
+                       provider_price_per_million_tokens, provider_price_per_1000_requests, is_active,
+                       created_at, updated_at
+                FROM market_listings
+            '''
+            if active_only:
+                query += ' WHERE is_active = 1'
+            query += ' ORDER BY created_at DESC'
+            cursor.execute(query)
+            return [self._load_market_listing_row(row) for row in cursor.fetchall()]
+
+    def get_market_listing(self, listing_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT id, owner_user_id, owner_username, source_scope, source_type, source_id, listing_key,
+                       title, description, provider_id, model_id, endpoint, currency_code,
+                       price_per_million_tokens, metadata, config_snapshot, price_per_1000_requests,
+                       provider_price_per_million_tokens, provider_price_per_1000_requests, is_active,
+                       created_at, updated_at
+                FROM market_listings
+                WHERE id = {placeholder}
+                ''',
+                (listing_id,)
+            )
+            row = cursor.fetchone()
+            return self._load_market_listing_row(row) if row else None
+
+    def set_market_listing_active(self, listing_id: int, owner_user_id: int, is_active: bool) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''UPDATE market_listings SET is_active = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder} AND owner_user_id = {placeholder}''',
+                (1 if is_active else 0, listing_id, owner_user_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def admin_set_market_listing_active(self, listing_id: int, is_active: bool) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''UPDATE market_listings SET is_active = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}''',
+                (1 if is_active else 0, listing_id)
+            )
+            conn.commit()
+            return cursor.rowcount > 0
+
+    def upsert_market_vote(self, listing_id: int, voter_user_id: int, target_type: str, target_key: str, vote: int) -> bool:
+        vote = 1 if int(vote) > 0 else -1
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''SELECT id FROM market_votes WHERE listing_id = {placeholder} AND voter_user_id = {placeholder} AND target_type = {placeholder} AND target_key = {placeholder}''',
+                (listing_id, voter_user_id, target_type, target_key)
+            )
+            row = cursor.fetchone()
+            if row:
+                cursor.execute(
+                    f'''UPDATE market_votes SET vote = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}''',
+                    (vote, row[0])
+                )
+            else:
+                cursor.execute(
+                    f'''
+                    INSERT INTO market_votes (listing_id, voter_user_id, target_type, target_key, vote, created_at, updated_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                    ''',
+                    (listing_id, voter_user_id, target_type, target_key, vote)
+                )
+            conn.commit()
+            return True
+
+    def get_market_vote_summary(self, listing_id: int) -> Dict[str, Dict[str, int]]:
+        summary = {
+            'listing': {'upvotes': 0, 'downvotes': 0, 'score': 0},
+            'provider': {'upvotes': 0, 'downvotes': 0, 'score': 0},
+            'model': {'upvotes': 0, 'downvotes': 0, 'score': 0},
+            'user': {'upvotes': 0, 'downvotes': 0, 'score': 0},
+        }
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT target_type,
+                       SUM(CASE WHEN vote > 0 THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN vote < 0 THEN 1 ELSE 0 END),
+                       COALESCE(SUM(vote), 0)
+                FROM market_votes
+                WHERE listing_id = {placeholder}
+                GROUP BY target_type
+                ''',
+                (listing_id,)
+            )
+            for row in cursor.fetchall():
+                target_type = row[0]
+                if target_type in summary:
+                    summary[target_type] = {
+                        'upvotes': int(row[1] or 0),
+                        'downvotes': int(row[2] or 0),
+                        'score': int(row[3] or 0),
+                    }
+        return summary
+
+    def list_market_imports(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT i.id, i.listing_id, i.imported_config_type, i.imported_config_id, i.created_at,
+                       l.title, l.owner_username
+                FROM market_imports i
+                JOIN market_listings l ON l.id = i.listing_id
+                WHERE i.user_id = {placeholder}
+                ORDER BY i.created_at DESC
+                ''',
+                (user_id,)
+            )
+            return [
+                {
+                    'id': row[0],
+                    'listing_id': row[1],
+                    'imported_config_type': row[2],
+                    'imported_config_id': row[3],
+                    'created_at': row[4],
+                    'title': row[5],
+                    'owner_username': row[6],
+                }
+                for row in cursor.fetchall()
+            ]
+
+    def record_market_import(self, user_id: int, listing_id: int, imported_config_type: str, imported_config_id: str) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                INSERT INTO market_imports (user_id, listing_id, imported_config_type, imported_config_id, created_at)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''',
+                (user_id, listing_id, imported_config_type, imported_config_id)
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_market_listing_for_share(self, owner_username: str, resource_type: str, resource_id: str) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT id, owner_user_id, owner_username, source_scope, source_type, source_id, listing_key,
+                       title, description, provider_id, model_id, endpoint, currency_code,
+                       price_per_million_tokens, metadata, config_snapshot, price_per_1000_requests,
+                       provider_price_per_million_tokens, provider_price_per_1000_requests, is_active,
+                       created_at, updated_at
+                FROM market_listings
+                WHERE owner_username = {placeholder} AND source_type = {placeholder} AND source_id = {placeholder} AND is_active = 1
+                ''',
+                (owner_username, resource_type, resource_id)
+            )
+            row = cursor.fetchone()
+            return self._load_market_listing_row(row) if row else None
+
+    def get_market_listing_stats(self, listing_id: int) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT COUNT(*),
+                       COALESCE(SUM(total_tokens), 0),
+                       COALESCE(SUM(requests_count), 0),
+                       COALESCE(SUM(gross_amount), 0),
+                       COALESCE(SUM(platform_fee), 0),
+                       COALESCE(SUM(provider_amount), 0),
+                       COALESCE(AVG(total_tokens), 0),
+                       COUNT(settlement_key)
+                FROM market_usage_transactions
+                WHERE listing_id = {placeholder}
+                ''',
+                (listing_id,)
+            )
+            row = cursor.fetchone() or (0, 0, 0, 0, 0, 0, 0, 0)
+            return {
+                'usage_events': int(row[0] or 0),
+                'total_tokens': int(row[1] or 0),
+                'total_requests': int(row[2] or 0),
+                'gross_revenue': float(row[3] or 0),
+                'platform_fees': float(row[4] or 0),
+                'provider_revenue': float(row[5] or 0),
+                'avg_tokens_per_request': float(row[6] or 0),
+                'settled_requests': int(row[7] or 0),
+            }
+
+    def _get_market_usage_transaction_by_settlement_key(self, settlement_key: Optional[str]) -> Optional[Dict[str, Any]]:
+        if not settlement_key:
+            return None
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT gross_amount, platform_fee, provider_amount, currency_code, metadata
+                FROM market_usage_transactions
+                WHERE settlement_key = {placeholder}
+                ''',
+                (settlement_key,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            metadata = {}
+            try:
+                metadata = json.loads(row[4]) if row[4] else {}
+            except Exception:
+                metadata = {}
+            return {
+                'gross_amount': Decimal(str(row[0] or 0)),
+                'platform_fee': Decimal(str(row[1] or 0)),
+                'provider_amount': Decimal(str(row[2] or 0)),
+                'currency_code': row[3],
+                'metadata': metadata,
+            }
+
+    def settle_market_usage(
+        self,
+        consumer_user_id: int,
+        listing_id: int,
+        prompt_tokens: int = 0,
+        completion_tokens: int = 0,
+        requests_count: int = 1,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        metadata = metadata or {}
+        listing = self.get_market_listing(listing_id)
+        if not listing or not listing.get('is_active'):
+            raise ValueError('Market listing not available')
+        settlement_cache_key = self._market_cache_key(consumer_user_id, listing_id, metadata)
+        if settlement_cache_key:
+            metadata = {**metadata, 'market_settlement_key': settlement_cache_key}
+        if listing['owner_user_id'] == consumer_user_id:
+            return {
+                'charged_amount': Decimal('0.00'),
+                'seller_amount': Decimal('0.00'),
+                'platform_fee': Decimal('0.00'),
+                'platform_revenue': Decimal('0.00'),
+                'balance_after': None,
+                'listing': listing,
+                'self_use': True,
+                'charged': False,
+            }
+
+        total_tokens = max(int(prompt_tokens or 0) + int(completion_tokens or 0), 0)
+        request_units = Decimal(str(max(int(requests_count or 0), 0))) / Decimal('1000')
+        token_units = Decimal(str(total_tokens)) / Decimal('1000000')
+        token_price = Decimal(str(listing.get('price_per_million_tokens') or 0))
+        request_price = Decimal(str(listing.get('price_per_1000_requests') or 0))
+        gross_amount = self._quantize_money((token_units * token_price) + (request_units * request_price))
+        if gross_amount <= Decimal('0.00'):
+            return {
+                'charged_amount': Decimal('0.00'),
+                'seller_amount': Decimal('0.00'),
+                'platform_fee': Decimal('0.00'),
+                'platform_revenue': Decimal('0.00'),
+                'balance_after': None,
+                'listing': listing,
+                'self_use': False,
+                'charged': False,
+            }
+
+        owner_user_id = int(listing.get('owner_user_id') or 0)
+        is_platform_owned_listing = owner_user_id <= 0
+        fee_percentage = Decimal(str(self.get_market_fee_percentage_for_user(owner_user_id))) if owner_user_id > 0 else Decimal('0')
+        platform_fee = self._quantize_money((gross_amount * fee_percentage) / Decimal('100')) if owner_user_id > 0 else Decimal('0.00')
+        seller_amount = self._quantize_money(gross_amount - platform_fee) if owner_user_id > 0 else Decimal('0.00')
+        platform_revenue = self._quantize_money(gross_amount if is_platform_owned_listing else platform_fee)
+
+        def _build_deduplicated_result(existing_txn: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+            balance_after = self.get_wallet_summary(consumer_user_id)
+            gross = Decimal(str((existing_txn or {}).get('gross_amount', 0) or 0))
+            fee = Decimal(str((existing_txn or {}).get('platform_fee', 0) or 0))
+            seller = Decimal(str((existing_txn or {}).get('provider_amount', 0) or 0))
+            return {
+                'charged_amount': gross,
+                'seller_amount': seller,
+                'platform_fee': fee,
+                'platform_revenue': gross if is_platform_owned_listing else fee,
+                'balance_after': self._quantize_money((balance_after or {}).get('balance', 0)) if balance_after else None,
+                'listing': listing,
+                'self_use': False,
+                'charged': False,
+                'deduplicated': True,
+            }
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+
+            if settlement_cache_key:
+                existing_txn = self._get_market_usage_transaction_by_settlement_key(settlement_cache_key)
+                if existing_txn:
+                    return _build_deduplicated_result(existing_txn)
+
+            if self.db_type == 'mysql':
+                cursor.execute(f'''SELECT id, balance FROM user_wallets WHERE user_id = {placeholder} FOR UPDATE''', (consumer_user_id,))
+            else:
+                cursor.execute(f'''SELECT id, balance FROM user_wallets WHERE user_id = {placeholder}''', (consumer_user_id,))
+            consumer_wallet = cursor.fetchone()
+            if not consumer_wallet:
+                cursor.execute(
+                    f'''INSERT INTO user_wallets (user_id, balance, currency_code, created_at, updated_at) VALUES ({placeholder}, 0.00, {placeholder}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)''',
+                    (consumer_user_id, listing.get('currency_code', 'USD'))
+                )
+                consumer_wallet_id = cursor.lastrowid
+                consumer_balance = Decimal('0.00')
+            else:
+                consumer_wallet_id = consumer_wallet[0]
+                consumer_balance = Decimal(str(consumer_wallet[1] or 0))
+
+            if consumer_balance < gross_amount:
+                raise ValueError('Insufficient wallet balance')
+
+            consumer_currency = None if not consumer_wallet else (self.get_wallet_summary(consumer_user_id) or {}).get('currency_code')
+            if consumer_currency and consumer_currency != listing.get('currency_code', 'USD'):
+                raise ValueError('Consumer wallet currency does not match listing currency')
+
+            owner_wallet_id = None
+            owner_balance = Decimal('0.00')
+            if owner_user_id > 0:
+                if self.db_type == 'mysql':
+                    cursor.execute(f'''SELECT id, balance FROM user_wallets WHERE user_id = {placeholder} FOR UPDATE''', (owner_user_id,))
+                else:
+                    cursor.execute(f'''SELECT id, balance FROM user_wallets WHERE user_id = {placeholder}''', (owner_user_id,))
+                owner_wallet = cursor.fetchone()
+                if not owner_wallet:
+                    cursor.execute(
+                        f'''INSERT INTO user_wallets (user_id, balance, currency_code, created_at, updated_at) VALUES ({placeholder}, 0.00, {placeholder}, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)''',
+                        (owner_user_id, listing.get('currency_code', 'USD'))
+                    )
+                    owner_wallet_id = cursor.lastrowid
+                else:
+                    owner_wallet_id = owner_wallet[0]
+                    owner_balance = Decimal(str(owner_wallet[1] or 0))
+
+            new_consumer_balance = self._quantize_money(consumer_balance - gross_amount)
+            new_owner_balance = self._quantize_money(owner_balance + seller_amount)
+
+            cursor.execute(
+                f'''UPDATE user_wallets SET balance = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}''',
+                (float(new_consumer_balance), consumer_wallet_id)
+            )
+            if owner_wallet_id is not None:
+                cursor.execute(
+                    f'''UPDATE user_wallets SET balance = {placeholder}, updated_at = CURRENT_TIMESTAMP WHERE id = {placeholder}''',
+                    (float(new_owner_balance), owner_wallet_id)
+                )
+
+            listing_meta = {
+                'listing_id': listing_id,
+                'provider_id': listing.get('provider_id'),
+                'model_id': listing.get('model_id'),
+                'market': True,
+                **metadata,
+            }
+
+            cursor.execute(
+                f'''
+                INSERT INTO wallet_transactions
+                (user_id, wallet_id, amount, type, status, description, metadata, created_at)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, 'debit', 'completed', {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''',
+                (
+                    consumer_user_id,
+                    consumer_wallet_id,
+                    float(gross_amount),
+                    f"Market usage: {listing['title']}",
+                    json.dumps(listing_meta),
+                )
+            )
+            if owner_wallet_id is not None:
+                cursor.execute(
+                    f'''
+                    INSERT INTO wallet_transactions
+                    (user_id, wallet_id, amount, type, status, description, metadata, created_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, 'credit', 'completed', {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ''',
+                    (
+                        owner_user_id,
+                        owner_wallet_id,
+                        float(seller_amount),
+                        f"Market sale: {listing['title']}",
+                        json.dumps({**listing_meta, 'platform_fee': float(platform_fee), 'platform_revenue': float(platform_revenue)}),
+                    )
+                )
+            try:
+                cursor.execute(
+                    f'''
+                    INSERT INTO market_usage_transactions
+                    (listing_id, consumer_user_id, provider_user_id, prompt_tokens, completion_tokens, total_tokens,
+                     requests_count, gross_amount, platform_fee, provider_amount, currency_code, settlement_key, metadata, created_at)
+                    VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                            {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                    ''',
+                    (
+                        listing_id,
+                        consumer_user_id,
+                        owner_user_id,
+                        int(prompt_tokens or 0),
+                        int(completion_tokens or 0),
+                        total_tokens,
+                        int(requests_count or 0),
+                        float(gross_amount),
+                        float(platform_fee),
+                        float(seller_amount),
+                        listing.get('currency_code', 'USD'),
+                        settlement_cache_key,
+                        json.dumps({**listing_meta, 'platform_fee': float(platform_fee), 'platform_revenue': float(platform_revenue), 'platform_owned_listing': is_platform_owned_listing}),
+                    )
+                )
+            except Exception as exc:
+                if settlement_cache_key:
+                    duplicate_error = 'unique' in str(exc).lower() or 'duplicate' in str(exc).lower() or 'constraint' in str(exc).lower()
+                    if duplicate_error:
+                        conn.rollback()
+                        existing_txn = self._get_market_usage_transaction_by_settlement_key(settlement_cache_key)
+                        if existing_txn:
+                            return _build_deduplicated_result(existing_txn)
+                raise
+            conn.commit()
+
+        return {
+            'charged_amount': gross_amount,
+            'seller_amount': seller_amount if owner_wallet_id is not None else Decimal('0.00'),
+            'platform_fee': platform_fee,
+            'platform_revenue': platform_revenue,
+            'balance_after': new_consumer_balance,
+            'listing': listing,
+            'self_use': False,
+            'charged': True,
+        }
+
+    def get_wallet_summary(self, user_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(f'''SELECT id, balance, currency_code FROM user_wallets WHERE user_id = {placeholder}''', (user_id,))
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {'id': row[0], 'balance': float(row[1] or 0), 'currency_code': row[2]}
     
     def get_user_tier(self, user_id: int) -> Optional[Dict]:
         """
@@ -3163,7 +3800,7 @@ class DatabaseManager:
                 SELECT t.id, t.name, t.description, t.price_monthly, t.price_yearly,
                        t.max_requests_per_day, t.max_requests_per_month, t.max_providers,
                        t.max_rotations, t.max_autoselections, t.max_rotation_models,
-                       t.max_autoselection_models, t.is_default, t.is_active
+                       t.max_autoselection_models, t.market_fee_percentage, t.is_default, t.is_active
                 FROM users u
                 JOIN account_tiers t ON u.tier_id = t.id
                 WHERE u.id = {placeholder}
@@ -3184,8 +3821,9 @@ class DatabaseManager:
                     'max_autoselections': row[9],
                     'max_rotation_models': row[10],
                     'max_autoselection_models': row[11],
-                    'is_default': bool(row[12]),
-                    'is_active': bool(row[13]),
+                    'market_fee_percentage': float(row[12] or 10.0),
+                    'is_default': bool(row[13]),
+                    'is_active': bool(row[14]),
                 }
             return None
     
@@ -3224,7 +3862,7 @@ class DatabaseManager:
                 SELECT id, name, description, price_monthly, price_yearly, is_default, is_active,
                        max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
                        max_autoselections, max_rotation_models, max_autoselection_models,
-                       created_at, updated_at, is_visible
+                       created_at, updated_at, is_visible, market_fee_percentage
                 FROM account_tiers
                 WHERE is_visible = 1 AND is_active = 1
                 ORDER BY price_monthly ASC
@@ -3249,7 +3887,8 @@ class DatabaseManager:
                     'max_autoselection_models': row[13],
                     'created_at': row[14],
                     'updated_at': row[15],
-                    'is_visible': bool(row[16]) if len(row) > 16 else True
+                    'is_visible': bool(row[16]) if len(row) > 16 else True,
+                    'market_fee_percentage': float(row[17] or 10.0) if len(row) > 17 else 10.0,
                 })
             return tiers
 
@@ -3720,6 +4359,48 @@ class DatabaseManager:
                 logger.warning(f"Error loading currency settings: {e}")
             
             return default_currency
+
+    def get_market_settings(self) -> Dict:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            default_settings = {
+                'enabled': False,
+                'allow_user_publish': True,
+                'allow_admin_publish': True,
+                'allow_import': True,
+            }
+            try:
+                cursor.execute(f'''
+                    SELECT setting_value
+                    FROM admin_settings
+                    WHERE setting_key = {placeholder}
+                ''', ('market',))
+                row = cursor.fetchone()
+                if row and row[0]:
+                    loaded = json.loads(row[0])
+                    if isinstance(loaded, dict):
+                        default_settings.update(loaded)
+            except Exception as e:
+                logger.warning(f"Error loading market settings: {e}")
+            return default_settings
+
+    def save_market_settings(self, settings: Dict) -> bool:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            settings_json = json.dumps(settings or {})
+            try:
+                insert_syntax = 'INSERT OR REPLACE' if self.db_type == 'sqlite' else 'REPLACE'
+                cursor.execute(f'''
+                    {insert_syntax} INTO admin_settings (setting_key, setting_value, updated_at)
+                    VALUES ({placeholder}, {placeholder}, CURRENT_TIMESTAMP)
+                ''', ('market', settings_json))
+                conn.commit()
+                return True
+            except Exception as e:
+                logger.error(f"Error saving market settings: {e}")
+                return False
 
     def save_currency_settings(self, settings: Dict) -> bool:
         """Save currency settings to admin_settings table."""
@@ -4328,6 +5009,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
             ('max_autoselections', 'INTEGER DEFAULT -1'),
             ('max_rotation_models', 'INTEGER DEFAULT -1'),
             ('max_autoselection_models', 'INTEGER DEFAULT -1'),
+            ('market_fee_percentage', 'DECIMAL(5,2) DEFAULT 10.0'),
             ('is_default', f'{boolean_type} DEFAULT 0'),
             ('is_active', f'{boolean_type} DEFAULT 1'),
             ('is_visible', f'{boolean_type} DEFAULT 1')
@@ -4367,10 +5049,10 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 INSERT INTO account_tiers
                 (name, description, price_monthly, price_yearly, is_default, is_active,
                  max_requests_per_day, max_requests_per_month, max_providers, max_rotations,
-                 max_autoselections, max_rotation_models, max_autoselection_models)
+                 max_autoselections, max_rotation_models, max_autoselection_models, market_fee_percentage)
                 VALUES
                 ('Free Tier', 'Default free account tier with unlimited access', 0.00, 0.00, 1, 1,
-                 -1, -1, -1, -1, -1, -1, -1)
+                 -1, -1, -1, -1, -1, -1, -1, 10.0)
             ''')
             logger.info("✅ Migration: Inserted default free tier")
     except Exception as e:
@@ -4495,6 +5177,84 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 updated_at TIMESTAMP DEFAULT {timestamp_default},
                 FOREIGN KEY (user_id) REFERENCES users(id),
                 UNIQUE(user_id, provider_id, model_name)
+            )
+        '''),
+        ('market_listings', f'''
+            CREATE TABLE market_listings (
+                id INTEGER PRIMARY KEY {auto_increment},
+                owner_user_id INTEGER NOT NULL,
+                owner_username VARCHAR(255) NOT NULL,
+                source_scope VARCHAR(32) NOT NULL,
+                source_type VARCHAR(32) NOT NULL,
+                source_id VARCHAR(255) NOT NULL,
+                listing_key VARCHAR(255) NOT NULL,
+                title VARCHAR(255) NOT NULL,
+                description TEXT,
+                provider_id VARCHAR(255),
+                model_id VARCHAR(255),
+                endpoint TEXT,
+                currency_code VARCHAR(10) NOT NULL DEFAULT 'USD',
+                price_per_million_tokens DECIMAL(10,4) NOT NULL DEFAULT 0.0,
+                metadata TEXT,
+                config_snapshot TEXT,
+                price_per_1000_requests DECIMAL(10,4) NOT NULL DEFAULT 0.0,
+                provider_price_per_million_tokens DECIMAL(10,4),
+                provider_price_per_1000_requests DECIMAL(10,4),
+                is_active {boolean_type} DEFAULT 1,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (owner_user_id) REFERENCES users(id),
+                UNIQUE(owner_user_id, listing_key)
+            )
+        '''),
+        ('market_votes', f'''
+            CREATE TABLE market_votes (
+                id INTEGER PRIMARY KEY {auto_increment},
+                listing_id INTEGER NOT NULL,
+                voter_user_id INTEGER NOT NULL,
+                target_type VARCHAR(32) NOT NULL,
+                target_key VARCHAR(255) NOT NULL,
+                vote INTEGER NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (listing_id) REFERENCES market_listings(id),
+                FOREIGN KEY (voter_user_id) REFERENCES users(id),
+                UNIQUE(listing_id, voter_user_id, target_type, target_key)
+            )
+        '''),
+        ('market_imports', f'''
+            CREATE TABLE market_imports (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                listing_id INTEGER NOT NULL,
+                imported_config_type VARCHAR(32) NOT NULL,
+                imported_config_id VARCHAR(255) NOT NULL,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (listing_id) REFERENCES market_listings(id)
+            )
+        '''),
+        ('market_usage_transactions', f'''
+            CREATE TABLE market_usage_transactions (
+                id INTEGER PRIMARY KEY {auto_increment},
+                listing_id INTEGER NOT NULL,
+                consumer_user_id INTEGER NOT NULL,
+                provider_user_id INTEGER NOT NULL,
+                prompt_tokens INTEGER DEFAULT 0,
+                completion_tokens INTEGER DEFAULT 0,
+                total_tokens INTEGER DEFAULT 0,
+                requests_count INTEGER DEFAULT 0,
+                gross_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                platform_fee DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                provider_amount DECIMAL(10,2) NOT NULL DEFAULT 0.00,
+                currency_code VARCHAR(10) NOT NULL DEFAULT 'USD',
+                settlement_key VARCHAR(255),
+                metadata TEXT,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (listing_id) REFERENCES market_listings(id),
+                FOREIGN KEY (consumer_user_id) REFERENCES users(id),
+                FOREIGN KEY (provider_user_id) REFERENCES users(id),
+                UNIQUE(settlement_key)
             )
         ''')
     ]:
@@ -4698,6 +5458,33 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created user_notifications table")
     except Exception as e:
         logger.warning(f"Migration check for user_notifications table: {e}")
+
+    # Migration: add settlement_key to market_usage_transactions and index it for deduplication
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(market_usage_transactions)")
+            columns = [row[1] for row in cursor.fetchall()]
+            if columns and 'settlement_key' not in columns:
+                cursor.execute("ALTER TABLE market_usage_transactions ADD COLUMN settlement_key VARCHAR(255)")
+                logger.info("✅ Migration: Added settlement_key column to market_usage_transactions")
+            cursor.execute("CREATE UNIQUE INDEX IF NOT EXISTS idx_market_usage_transactions_settlement_key ON market_usage_transactions(settlement_key)")
+        else:
+            cursor.execute("""
+                SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'market_usage_transactions' AND COLUMN_NAME = 'settlement_key'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("ALTER TABLE market_usage_transactions ADD COLUMN settlement_key VARCHAR(255) NULL")
+                logger.info("✅ Migration: Added settlement_key column to market_usage_transactions")
+            cursor.execute("""
+                SELECT INDEX_NAME FROM INFORMATION_SCHEMA.STATISTICS
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'market_usage_transactions' AND INDEX_NAME = 'idx_market_usage_transactions_settlement_key'
+            """)
+            if not cursor.fetchone():
+                cursor.execute("CREATE UNIQUE INDEX idx_market_usage_transactions_settlement_key ON market_usage_transactions(settlement_key)")
+                logger.info("✅ Migration: Added settlement_key unique index to market_usage_transactions")
+    except Exception as e:
+        logger.warning(f"Migration check for market_usage_transactions.settlement_key: {e}")
 
     # Migration: Create context_dimensions table if missing
     try:

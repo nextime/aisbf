@@ -79,6 +79,10 @@
                             <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 12px;">Max Models per Autoselection</label>
                             <input type="number" name="max_autoselection_models" style="width: 100%; padding: 12px; border: 1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" min="-1" value="{{ tier.max_autoselection_models if tier else '-1' }}">
                         </div>
+                        <div>
+                            <label style="display: block; margin-bottom: 5px; color: var(--color-muted); font-size: 12px;">Market Fee %</label>
+                            <input type="number" name="market_fee_percentage" style="width: 100%; padding: 12px; border: 1px solid var(--color-border); border-radius: 5px; background: var(--bg-panel); color: var(--color-text); font-size: 14px;" min="0" max="100" step="0.01" value="{{ tier.market_fee_percentage if tier else '10.0' }}">
+                        </div>
                     </div>
                 </div>
             </div>

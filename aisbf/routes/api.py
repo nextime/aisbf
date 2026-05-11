@@ -23,6 +23,31 @@ def init(config, get_user_handler_fn, rotation_handler):
 
 logger = logging.getLogger(__name__)
 
+
+def _ensure_market_enabled():
+    settings = DatabaseRegistry.get_config_database().get_market_settings()
+    if not settings.get('enabled'):
+        raise HTTPException(status_code=403, detail='Market is disabled')
+    return settings
+
+
+def _resolve_market_resource(model: str):
+    parts = (model or '').split('/')
+    if len(parts) < 3:
+        return None
+    username = parts[0].strip()
+    resource_type = parts[1].strip()
+    resource_id = parts[2].strip()
+    remainder = '/'.join(parts[3:]) if len(parts) > 3 else ''
+    if not username or resource_type not in {'rotation', 'rotations', 'autoselect', 'autoselections'} and not resource_id:
+        return None
+    return {
+        'username': username,
+        'resource_type': resource_type,
+        'resource_id': resource_id,
+        'model_name': remainder,
+    }
+
 def parse_provider_from_model(model: str) -> tuple[str, str]:
     if '/' in model:
         parts = model.split('/', 1)
@@ -425,6 +450,33 @@ async def embeddings(request: Request, body: dict):
 
 def _resolve_provider(model: str, user_id=None, handler=None) -> tuple[str, str]:
     """Resolve provider_id and actual_model. Checks user providers when handler is given."""
+    market_resource = _resolve_market_resource(model)
+    if market_resource:
+        _ensure_market_enabled()
+        db = DatabaseRegistry.get_config_database()
+        owner = db.get_user_by_username(market_resource['username'])
+        if not owner:
+            raise HTTPException(status_code=404, detail=f"User '{market_resource['username']}' not found")
+        owner_user_id = owner['id']
+        if market_resource['resource_type'] in ('rotation', 'rotations'):
+            owner_rotation_handler = _get_user_handler('rotation', owner_user_id)
+            if market_resource['resource_id'] not in getattr(owner_rotation_handler, 'rotations', {}):
+                raise HTTPException(status_code=404, detail=f"Rotation '{market_resource['resource_id']}' not found")
+            provider_id, actual_model = owner_rotation_handler._select_provider_and_model(market_resource['resource_id'])
+            return provider_id, actual_model
+        if market_resource['resource_type'] in ('autoselect', 'autoselections'):
+            owner_autoselect_handler = _get_user_handler('autoselect', owner_user_id)
+            autoselect_cfg = getattr(owner_autoselect_handler, 'user_autoselects', {}).get(market_resource['resource_id'])
+            if not autoselect_cfg:
+                raise HTTPException(status_code=404, detail=f"Autoselect '{market_resource['resource_id']}' not found")
+            fallback = autoselect_cfg.get('fallback', '') if isinstance(autoselect_cfg, dict) else getattr(autoselect_cfg, 'fallback', '')
+            if '/' in fallback:
+                return tuple(fallback.split('/', 1))
+            if fallback:
+                owner_rotation_handler = _get_user_handler('rotation', owner_user_id)
+                provider_id, actual_model = owner_rotation_handler._select_provider_and_model(fallback)
+                return provider_id, actual_model
+
     provider_id, actual_model = parse_provider_from_model(model)
     if not provider_id:
         raise HTTPException(status_code=400, detail="Model must be in format 'provider/model'")

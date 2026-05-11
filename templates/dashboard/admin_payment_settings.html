@@ -19,6 +19,31 @@
             </div>
         </div>
 
+        <div style="background: var(--bg-panel); border: 2px solid #2ecc71; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: #2ecc71;">
+                <i class="fas fa-store me-2"></i>Market Settings
+            </h3>
+            <form id="marketSettingsForm">
+                <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 15px; margin-bottom: 16px;">
+                    <label style="display:flex; align-items:center; gap:8px; color: var(--color-text);">
+                        <input type="checkbox" id="marketEnabled" {% if market_settings.enabled %}checked{% endif %}> Enable market
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; color: var(--color-text);">
+                        <input type="checkbox" id="marketAllowUserPublish" {% if market_settings.allow_user_publish %}checked{% endif %}> Allow user publish
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; color: var(--color-text);">
+                        <input type="checkbox" id="marketAllowAdminPublish" {% if market_settings.allow_admin_publish %}checked{% endif %}> Allow admin publish
+                    </label>
+                    <label style="display:flex; align-items:center; gap:8px; color: var(--color-text);">
+                        <input type="checkbox" id="marketAllowImport" {% if market_settings.allow_import %}checked{% endif %}> Allow import
+                    </label>
+                </div>
+                <button type="submit" class="btn" style="background:#2ecc71; color:white;">
+                    <i class="fas fa-save me-2"></i>Save Market Settings
+                </button>
+            </form>
+        </div>
+
         <!-- Global Currency Settings -->
         <div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
@@ -1335,6 +1360,26 @@ document.getElementById('currencySettingsForm').addEventListener('submit', funct
     .catch(error => {
         showToast('Error saving currency settings', 'danger');
     });
+});
+
+document.getElementById('marketSettingsForm').addEventListener('submit', function(e) {
+    e.preventDefault();
+    fetch('{{ url_for(request, "/api/admin/settings/market") }}', {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({
+            enabled: document.getElementById('marketEnabled').checked,
+            allow_user_publish: document.getElementById('marketAllowUserPublish').checked,
+            allow_admin_publish: document.getElementById('marketAllowAdminPublish').checked,
+            allow_import: document.getElementById('marketAllowImport').checked,
+        })
+    }).then(r => r.json()).then(data => {
+        if (data.success) {
+            showToast('Market settings saved', 'success');
+        } else {
+            showToast(data.error || 'Failed to save market settings', 'danger');
+        }
+    }).catch(error => showToast('Error saving market settings: ' + error, 'danger'));
 });
 
 // Refresh crypto prices manually

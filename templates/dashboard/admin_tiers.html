@@ -32,6 +32,7 @@
                     <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_autoselections">Max Autoselections</th>
                     <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_models_rotation">Max Models / Rotation</th>
                     <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_max_models_autoselect">Max Models / Autoselect</th>
+                    <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;">Market Fee %</th>
                     <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_status">Status</th>
                     <th style="padding: 12px; text-align: center; border-bottom:1px solid var(--color-border); font-weight: 600;" data-i18n="tiers_page.col_actions">Actions</th>
                 </tr>
@@ -50,6 +51,7 @@
                     <td>{% if tier.max_autoselections == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_autoselections == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_autoselections }}{% endif %}</td>
                     <td>{% if tier.max_rotation_models == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_rotation_models == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_rotation_models }}{% endif %}</td>
                     <td>{% if tier.max_autoselection_models == -1 %}<span data-i18n="tiers_page.unlimited">Unlimited</span>{% elif tier.max_autoselection_models == 0 %}<span data-i18n="tiers_page.blocked">Blocked</span>{% else %}{{ tier.max_autoselection_models }}{% endif %}</td>
+                    <td>{{ '%.2f'|format(tier.market_fee_percentage or 10.0) }}</td>
                     <td>{% if tier.is_active %}<span class="badge bg-success" data-i18n="tiers_page.active">Active</span>{% else %}<span class="badge bg-secondary" data-i18n="tiers_page.inactive">Inactive</span>{% endif %}</td>
                     <td style="white-space: nowrap;">
                         <a href="{{ url_for(request, '/dashboard/admin/tiers/edit') }}/{{ tier.id }}" class="btn btn-sm btn-outline-primary me-1" title="Edit this tier">

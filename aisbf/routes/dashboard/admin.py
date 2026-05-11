@@ -457,6 +457,7 @@ async def api_create_tier(request: Request):
             max_autoselections=body.get('max_autoselections', -1),
             max_rotation_models=body.get('max_rotation_models', -1),
             max_autoselection_models=body.get('max_autoselection_models', -1),
+            market_fee_percentage=body.get('market_fee_percentage', 10.0),
             is_active=body.get('is_active', True),
             is_visible=body.get('is_visible', True)
         )
@@ -502,6 +503,8 @@ async def api_update_tier(request: Request, tier_id: int):
             update_kwargs['max_rotation_models'] = body['max_rotation_models']
         if 'max_autoselection_models' in body:
             update_kwargs['max_autoselection_models'] = body['max_autoselection_models']
+        if 'market_fee_percentage' in body:
+            update_kwargs['market_fee_percentage'] = body['market_fee_percentage']
         if 'is_active' in body:
             update_kwargs['is_active'] = body['is_active']
         if 'is_visible' in body:
@@ -603,6 +606,7 @@ async def dashboard_admin_tier_save(request: Request):
             'max_autoselections': int(form.get('max_autoselections', -1)),
             'max_rotation_models': int(form.get('max_rotation_models', -1)),
             'max_autoselection_models': int(form.get('max_autoselection_models', -1)),
+            'market_fee_percentage': float(form.get('market_fee_percentage', 10.0)),
             'is_active': form.get('is_active') == '1',
             'is_visible': form.get('is_visible') == '1'
         }
@@ -1504,9 +1508,37 @@ async def dashboard_admin_payment_settings(request: Request):
         context={
             "request": request,
             "session": request.session,
-            "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$')
+            "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$'),
+            "market_settings": DatabaseRegistry.get_config_database().get_market_settings(),
         }
     )
+
+@router.get("/api/admin/settings/market")
+async def api_get_market_settings(request: Request):
+    auth_check = require_api_admin(request)
+    if auth_check:
+        return auth_check
+    db = DatabaseRegistry.get_config_database()
+    return JSONResponse(db.get_market_settings())
+
+@router.post("/api/admin/settings/market")
+async def api_save_market_settings(request: Request):
+    auth_check = require_api_admin(request)
+    if auth_check:
+        return auth_check
+    db = DatabaseRegistry.get_config_database()
+    try:
+        body = await request.json()
+        db.save_market_settings({
+            'enabled': bool(body.get('enabled', False)),
+            'allow_user_publish': bool(body.get('allow_user_publish', True)),
+            'allow_admin_publish': bool(body.get('allow_admin_publish', True)),
+            'allow_import': bool(body.get('allow_import', True)),
+        })
+        return JSONResponse({'success': True, 'message': 'Market settings saved'})
+    except Exception as e:
+        logger.error(f"Error saving market settings: {e}")
+        return JSONResponse({'error': str(e)}, status_code=500)
 
 @router.get("/dashboard/pricing")
 async def dashboard_pricing(request: Request):

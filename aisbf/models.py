@@ -119,6 +119,7 @@ class AccountTier(BaseModel):
     max_autoselections: int = -1
     max_rotation_models: int = -1
     max_autoselection_models: int = -1
+    market_fee_percentage: float = 10.0
     
     created_at: Optional[int] = None
     updated_at: Optional[int] = None
@@ -165,3 +166,50 @@ class PaymentTransaction(BaseModel):
     metadata: Optional[Dict] = None
     created_at: Optional[int] = None
     completed_at: Optional[int] = None
+
+
+class MarketListing(BaseModel):
+    id: Optional[int] = None
+    owner_user_id: int
+    owner_username: str
+    source_scope: str
+    source_type: str
+    source_id: str
+    listing_key: str
+    title: str
+    description: Optional[str] = None
+    provider_id: Optional[str] = None
+    model_id: Optional[str] = None
+    endpoint: Optional[str] = None
+    currency_code: str = "USD"
+    price_per_million_tokens: float = 0.0
+    price_per_1000_requests: float = 0.0
+    provider_price_per_million_tokens: Optional[float] = None
+    provider_price_per_1000_requests: Optional[float] = None
+    metadata: Optional[Dict] = None
+    config_snapshot: Optional[Dict] = None
+    is_active: bool = True
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class MarketVote(BaseModel):
+    id: Optional[int] = None
+    listing_id: int
+    voter_user_id: int
+    target_type: str
+    target_key: str
+    vote: int
+    created_at: Optional[int] = None
+    updated_at: Optional[int] = None
+
+
+class MarketUsageSettlementResult(BaseModel):
+    charged_amount: float = 0.0
+    seller_amount: float = 0.0
+    platform_fee: float = 0.0
+    platform_revenue: float = 0.0
+    balance_after: Optional[float] = None
+    listing_id: int
+    self_use: bool = False
+    charged: bool = False

@@ -13,6 +13,7 @@ import asyncio
 from decimal import Decimal
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, AsyncMock
+from pathlib import Path
 
 
 @pytest.fixture
@@ -38,6 +39,85 @@ def db_manager():
         conn.commit()
     
     return db
+
+
+@pytest.fixture
+def market_db_manager(tmp_path):
+    """Create file-backed database for concurrent market settlement tests."""
+    from aisbf.database import DatabaseManager
+    from aisbf.payments.migrations import PaymentMigrations
+
+    db_path = Path(tmp_path) / "market_settlement_test.db"
+    db = DatabaseManager({
+        'type': 'sqlite',
+        'sqlite_path': str(db_path),
+    })
+
+    migrations = PaymentMigrations(db)
+    migrations.run_migrations()
+
+    with db._get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO users (username, email, password_hash, role, email_verified)
+            VALUES ('buyer', 'buyer@example.com', 'hash', 'user', 1)
+            """
+        )
+        buyer_id = cursor.lastrowid
+        cursor.execute(
+            """
+            INSERT INTO users (username, email, password_hash, role, email_verified)
+            VALUES ('seller', 'seller@example.com', 'hash', 'user', 1)
+            """
+        )
+        seller_id = cursor.lastrowid
+        cursor.execute(
+            """
+            INSERT INTO user_wallets (user_id, balance, currency_code, created_at, updated_at)
+            VALUES (?, 100.00, 'USD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (buyer_id,)
+        )
+        cursor.execute(
+            """
+            INSERT INTO user_wallets (user_id, balance, currency_code, created_at, updated_at)
+            VALUES (?, 0.00, 'USD', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+            """,
+            (seller_id,)
+        )
+        conn.commit()
+
+    listing_id = db.upsert_market_listing(
+        seller_id,
+        'seller',
+        {
+            'source_scope': 'user',
+            'source_type': 'provider',
+            'source_id': 'shared-provider',
+            'listing_key': 'provider:shared-provider',
+            'title': 'Shared Provider',
+            'description': 'Concurrent settlement test listing',
+            'provider_id': 'shared-provider',
+            'model_id': None,
+            'endpoint': 'https://example.test',
+            'currency_code': 'USD',
+            'price_per_million_tokens': 5.0,
+            'price_per_1000_requests': 0.0,
+            'provider_price_per_million_tokens': 5.0,
+            'provider_price_per_1000_requests': 0.0,
+            'metadata': {'provider_type': 'openai'},
+            'config_snapshot': {'provider': {'type': 'openai'}},
+            'is_active': True,
+        },
+    )
+
+    return {
+        'db': db,
+        'buyer_id': buyer_id,
+        'seller_id': seller_id,
+        'listing_id': listing_id,
+    }
 
 
 @pytest.fixture
@@ -421,6 +501,129 @@ class TestEndToEndFlow:
             status = cursor.fetchone()[0]
         
         assert status == 'active'
+
+
+class TestMarketSettlementIdempotency:
+    def test_duplicate_market_settlement_is_idempotent(self, market_db_manager):
+        db = market_db_manager['db']
+        buyer_id = market_db_manager['buyer_id']
+        seller_id = market_db_manager['seller_id']
+        listing_id = market_db_manager['listing_id']
+
+        async def run_duplicate_settlements():
+            metadata = {'market_request_id': 'shared-request-1', 'kind': 'chat_completion'}
+            return await asyncio.gather(
+                asyncio.to_thread(
+                    db.settle_market_usage,
+                    buyer_id,
+                    listing_id,
+                    500000,
+                    500000,
+                    1,
+                    dict(metadata),
+                ),
+                asyncio.to_thread(
+                    db.settle_market_usage,
+                    buyer_id,
+                    listing_id,
+                    500000,
+                    500000,
+                    1,
+                    dict(metadata),
+                ),
+            )
+
+        first, second = asyncio.run(run_duplicate_settlements())
+
+        assert sorted([first['charged'], second['charged']]) == [False, True]
+        deduplicated = first if not first['charged'] else second
+        charged = first if first['charged'] else second
+
+        assert deduplicated['deduplicated'] is True
+        assert charged['charged_amount'] == Decimal('5.00')
+        assert charged['seller_amount'] == Decimal('4.50')
+        assert charged['platform_fee'] == Decimal('0.50')
+
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT COUNT(*) FROM market_usage_transactions WHERE listing_id = ?", (listing_id,))
+            usage_count = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT COUNT(*) FROM wallet_transactions WHERE user_id = ? AND type = 'debit' AND description = ?",
+                (buyer_id, 'Market usage: Shared Provider')
+            )
+            debit_count = cursor.fetchone()[0]
+            cursor.execute("SELECT balance FROM user_wallets WHERE user_id = ?", (buyer_id,))
+            buyer_balance = Decimal(str(cursor.fetchone()[0]))
+            cursor.execute("SELECT balance FROM user_wallets WHERE user_id = ?", (seller_id,))
+            seller_balance = Decimal(str(cursor.fetchone()[0]))
+
+        assert usage_count == 1
+        assert debit_count == 1
+        assert buyer_balance == Decimal('95.00')
+        assert seller_balance == Decimal('4.50')
+
+    def test_global_admin_listing_books_platform_revenue_without_seller_credit(self, market_db_manager):
+        db = market_db_manager['db']
+        buyer_id = market_db_manager['buyer_id']
+
+        admin_listing_id = db.upsert_market_listing(
+            0,
+            'admin',
+            {
+                'source_scope': 'global',
+                'source_type': 'provider',
+                'source_id': 'global-provider',
+                'listing_key': 'provider:global-provider',
+                'title': 'Global Provider',
+                'description': 'Global admin market listing',
+                'provider_id': 'global-provider',
+                'model_id': None,
+                'endpoint': 'https://example.test/global',
+                'currency_code': 'USD',
+                'price_per_million_tokens': 6.0,
+                'price_per_1000_requests': 0.0,
+                'provider_price_per_million_tokens': 6.0,
+                'provider_price_per_1000_requests': 0.0,
+                'metadata': {'provider_type': 'openai'},
+                'config_snapshot': {'provider': {'type': 'openai'}},
+                'is_active': True,
+            },
+        )
+
+        result = db.settle_market_usage(
+            consumer_user_id=buyer_id,
+            listing_id=admin_listing_id,
+            prompt_tokens=500000,
+            completion_tokens=500000,
+            requests_count=1,
+            metadata={'market_request_id': 'global-admin-request-1', 'kind': 'chat_completion'},
+        )
+
+        assert result['charged'] is True
+        assert result['charged_amount'] == Decimal('6.00')
+        assert result['seller_amount'] == Decimal('0.00')
+        assert result['platform_fee'] == Decimal('0.00')
+        assert result['platform_revenue'] == Decimal('6.00')
+
+        with db._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT balance FROM user_wallets WHERE user_id = ?", (buyer_id,))
+            buyer_balance = Decimal(str(cursor.fetchone()[0]))
+            cursor.execute("SELECT COUNT(*) FROM wallet_transactions WHERE description = ?", ('Market sale: Global Provider',))
+            seller_credit_count = cursor.fetchone()[0]
+            cursor.execute(
+                "SELECT gross_amount, platform_fee, provider_amount, metadata FROM market_usage_transactions WHERE listing_id = ?",
+                (admin_listing_id,)
+            )
+            txn = cursor.fetchone()
+
+        assert buyer_balance == Decimal('94.00')
+        assert seller_credit_count == 0
+        assert Decimal(str(txn[0])) == Decimal('6.00')
+        assert Decimal(str(txn[1])) == Decimal('0.00')
+        assert Decimal(str(txn[2])) == Decimal('0.00')
+        assert 'platform_owned_listing' in str(txn[3])
 
 
 if __name__ == '__main__':

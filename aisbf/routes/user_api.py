@@ -18,6 +18,31 @@ def init(config, get_user_handler_fn):
 
 logger = logging.getLogger(__name__)
 
+
+def _resolve_market_provider_alias(model: str):
+    parts = (model or '').split('/')
+    if len(parts) < 3:
+        return None
+    username = parts[0].strip()
+    provider_id = parts[1].strip()
+    model_id = '/'.join(parts[2:]).strip()
+    if not username or not provider_id or not model_id:
+        return None
+    return username, provider_id, model_id
+
+
+def _resolve_market_share_alias(model: str):
+    parts = (model or '').split('/')
+    if len(parts) < 3:
+        return None
+    username = parts[0].strip()
+    share_type = parts[1].strip()
+    share_id = parts[2].strip()
+    trailing = '/'.join(parts[3:]).strip() if len(parts) > 3 else ''
+    if share_type not in {'provider', 'rotation', 'autoselect'}:
+        return None
+    return {'username': username, 'share_type': share_type, 'share_id': share_id, 'trailing': trailing}
+
 def parse_provider_from_model(model: str) -> tuple[str, str]:
     if '/' in model:
         parts = model.split('/', 1)
@@ -257,6 +282,67 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
         authenticated_user = db.get_user_by_id(user_id)
         if authenticated_user and authenticated_user['username'] != username:
             raise HTTPException(status_code=403, detail="Access denied. Username in URL must match authenticated user.")
+    market_share = _resolve_market_share_alias(body.model)
+    if market_share and market_share['username'] != username:
+        db = DatabaseRegistry.get_config_database()
+        owner_username = market_share['username']
+        owner = db.get_user_by_username(owner_username)
+        if not owner:
+            raise HTTPException(status_code=404, detail=f"User '{owner_username}' not found")
+        listing = db.get_market_listing_for_share(owner_username, market_share['share_type'], market_share['share_id'])
+        if not listing:
+            raise HTTPException(status_code=404, detail='Market listing not found for requested resource')
+
+        if not user_id:
+            raise HTTPException(status_code=401, detail='Authentication required for market usage')
+
+        body_dict = body.model_dump()
+        share_type = market_share['share_type']
+        actual_model = market_share['trailing']
+        if share_type == 'provider':
+            provider_id = market_share['share_id']
+            owner_provider = db.get_user_provider(owner['id'], provider_id)
+            if not owner_provider:
+                raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found for user '{owner_username}'")
+            owner_handler = _get_user_handler('request', owner['id'])
+            body_dict['model'] = actual_model
+            result = await owner_handler.handle_chat_completion(request, provider_id, body_dict) if not body.stream else await owner_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+        elif share_type == 'rotation':
+            owner_handler = _get_user_handler('rotation', owner['id'])
+            body_dict['model'] = market_share['share_id']
+            result = await owner_handler.handle_rotation_request(market_share['share_id'], body_dict, owner['id'], getattr(request.state, 'token_id', None))
+        elif share_type == 'autoselect':
+            owner_handler = _get_user_handler('autoselect', owner['id'])
+            body_dict['model'] = market_share['share_id']
+            result = await owner_handler.handle_autoselect_request(market_share['share_id'], body_dict, owner['id'], getattr(request.state, 'token_id', None)) if not body.stream else await owner_handler.handle_autoselect_streaming_request(market_share['share_id'], body_dict)
+        else:
+            raise HTTPException(status_code=400, detail='Unsupported market share type')
+
+        return result
+
+    market_alias = _resolve_market_provider_alias(body.model)
+    if market_alias and market_alias[0] != username:
+        owner_username, provider_id, actual_model = market_alias
+        db = DatabaseRegistry.get_config_database()
+        owner = db.get_user_by_username(owner_username)
+        if not owner:
+            raise HTTPException(status_code=404, detail=f"User '{owner_username}' not found")
+        owner_provider = db.get_user_provider(owner['id'], provider_id)
+        if not owner_provider:
+            raise HTTPException(status_code=404, detail=f"Provider '{provider_id}' not found for user '{owner_username}'")
+        listing = db.get_market_listing_for_share(owner_username, 'provider', provider_id)
+        if not listing:
+            raise HTTPException(status_code=404, detail='Market listing not found for requested provider')
+        if not user_id:
+            raise HTTPException(status_code=401, detail='Authentication required for market usage')
+
+        owner_handler = _get_user_handler('request', owner['id'])
+        body_dict = body.model_dump()
+        body_dict['model'] = actual_model
+        provider_config = owner_provider['config']
+        result = await owner_handler.handle_chat_completion(request, provider_id, body_dict) if not body.stream else await owner_handler.handle_streaming_chat_completion(request, provider_id, body_dict)
+        return result
+
     provider_id, actual_model = parse_provider_from_model(body.model)
     if not provider_id:
         raise HTTPException(status_code=400, detail="Model must be in format 'provider/model', 'rotation/name', 'autoselect/name', 'user-provider/model', 'user-rotation/name', or 'user-autoselect/name'")
