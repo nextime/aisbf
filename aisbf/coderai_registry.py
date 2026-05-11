@@ -47,23 +47,51 @@ def _load_user_provider_config(user_id: int, provider_id: str) -> Optional[Dict[
     return None
 
 
-def resolve_coderai_provider_owner(provider_id: str) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
-    global_config = _load_global_provider_config(provider_id)
-    if global_config and global_config.get('type') == 'coderai':
-        return None, global_config
-
+def _iter_user_coderai_matches(provider_id: str) -> list[Tuple[int, Dict[str, Any]]]:
     try:
         db = DatabaseRegistry.get_config_database()
         if not db:
-            return None, None
+            return []
+        matches: list[Tuple[int, Dict[str, Any]]] = []
         for row in db.get_all_user_providers():
             if row.get('provider_id') != provider_id:
                 continue
             provider_config = row.get('config')
             if isinstance(provider_config, dict) and provider_config.get('type') == 'coderai':
-                return row.get('user_id'), provider_config
+                user_id = row.get('user_id')
+                if user_id is not None:
+                    matches.append((user_id, provider_config))
+        return matches
     except Exception as e:
         logger.debug(f"Failed to resolve user owner for provider={provider_id}: {e}")
+    return []
+
+
+def resolve_coderai_provider_owner(provider_id: str, username: Optional[str] = None) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
+    user_matches = _iter_user_coderai_matches(provider_id)
+    if username and username != 'global':
+        try:
+            db = DatabaseRegistry.get_config_database()
+            user = db.get_user_by_username(username) if db else None
+            if user:
+                requested_user_id = user.get('id')
+                for user_id, provider_config in user_matches:
+                    if user_id == requested_user_id:
+                        return user_id, provider_config
+                return None, None
+        except Exception as e:
+            logger.debug(f"Failed to resolve user by username for provider={provider_id} username={username}: {e}")
+            return None, None
+
+    if user_matches:
+        if len(user_matches) == 1:
+            return user_matches[0]
+        logger.warning(f"Ambiguous user-scoped coderai provider owner for provider_id={provider_id}; refusing global fallback")
+        return None, None
+
+    global_config = _load_global_provider_config(provider_id)
+    if global_config and global_config.get('type') == 'coderai':
+        return None, global_config
     return None, None
 
 
@@ -80,8 +108,8 @@ def resolve_coderai_provider_for_user(user_id: Optional[int], provider_id: str) 
     return None
 
 
-def resolve_coderai_registration(provider_id: str) -> Tuple[Optional[int], Optional[Dict[str, Any]], Optional[str]]:
-    owner_user_id, provider_config = resolve_coderai_provider_owner(provider_id)
+def resolve_coderai_registration(provider_id: str, username: Optional[str] = None) -> Tuple[Optional[int], Optional[Dict[str, Any]], Optional[str]]:
+    owner_user_id, provider_config = resolve_coderai_provider_owner(provider_id, username=username)
     if not provider_config:
         return None, None, None
     coderai_config = provider_config.get('coderai_config') or {}
@@ -91,8 +119,8 @@ def resolve_coderai_registration(provider_id: str) -> Tuple[Optional[int], Optio
     return owner_user_id, provider_config, registration_token
 
 
-def validate_coderai_registration_token(provider_id: str, presented_token: Optional[str]) -> Tuple[bool, Optional[int], Optional[Dict[str, Any]], Optional[str]]:
-    owner_user_id, provider_config, expected_token = resolve_coderai_registration(provider_id)
+def validate_coderai_registration_token(provider_id: str, presented_token: Optional[str], username: Optional[str] = None) -> Tuple[bool, Optional[int], Optional[Dict[str, Any]], Optional[str]]:
+    owner_user_id, provider_config, expected_token = resolve_coderai_registration(provider_id, username=username)
     if not provider_config:
         return False, None, None, 'Provider not found or not a coderai provider'
     if expected_token and presented_token != expected_token:

@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import logging
 import time
+import asyncio
 from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
@@ -16,17 +17,18 @@ router = APIRouter()
 logger = logging.getLogger(__name__)
 
 
-@router.websocket("/api/coderai/broker/ws")
-async def coderai_broker_websocket(websocket: WebSocket):
+async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
     provider_id = websocket.query_params.get("provider_id") or websocket.headers.get("x-coderai-provider-id") or "coderai"
     client_id = websocket.query_params.get("client_id") or websocket.headers.get("x-coderai-client-id") or f"anon-{int(time.time())}"
+    username = websocket.query_params.get("username") or websocket.headers.get("x-coderai-username") or scope_name
     presented_token = websocket.query_params.get("registration_token") or websocket.headers.get("x-coderai-registration-token")
-    valid, owner_user_id, provider_config, error = validate_coderai_registration_token(provider_id, presented_token)
+    valid, owner_user_id, provider_config, error = validate_coderai_registration_token(provider_id, presented_token, username=username)
     if not valid:
         await websocket.close(code=1008, reason=error or "registration rejected")
         return
     await websocket.accept()
-    session = await broker.register(websocket, provider_id, client_id, metadata={"source": "websocket", "owner_user_id": owner_user_id})
+    expected_scope = scope_name
+    session = await broker.register(websocket, provider_id, client_id, metadata={"source": "websocket", "owner_user_id": owner_user_id, "username": username, "scope_name": expected_scope, "proxy_scheme": websocket.url.scheme})
 
     try:
         await websocket.send_text(json.dumps({
@@ -35,59 +37,71 @@ async def coderai_broker_websocket(websocket: WebSocket):
             "session_id": session.session_id,
             "provider_id": session.provider_id,
             "client_id": session.client_id,
+            "username": username,
+            "scope_name": expected_scope,
             "accepted": True,
         }))
         while True:
-            raw = await websocket.receive_text()
-            message = json.loads(raw)
-            op = message.get("op")
-            if op == "register":
-                payload = message.get("payload") or {}
-                payload_token = payload.get("registration_token") or message.get("registration_token")
-                if payload_token and payload_token != presented_token:
+            try:
+                raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
+                message = json.loads(raw)
+                op = message.get("op")
+                if op == "register":
+                    payload = message.get("payload") or {}
+                    payload_token = payload.get("registration_token") or message.get("registration_token")
+                    if payload_token and payload_token != presented_token:
+                        await websocket.send_text(json.dumps({
+                            "v": 1,
+                            "request_id": message.get("request_id"),
+                            "status": "error",
+                            "error": "Registration token mismatch",
+                        }))
+                        continue
+                    capabilities = payload.get("capabilities") or message.get("capabilities") or {}
+                    metadata = {
+                        "endpoint": payload.get("endpoint"),
+                        "transport": payload.get("transport"),
+                        "studio_endpoints": payload.get("studio_endpoints") or [],
+                        "owner_user_id": owner_user_id,
+                        "username": username,
+                        "scope_name": expected_scope,
+                        "proxy_scheme": websocket.url.scheme,
+                    }
+                    await broker.touch(session.session_id, metadata=metadata, capabilities=capabilities)
                     await websocket.send_text(json.dumps({
                         "v": 1,
                         "request_id": message.get("request_id"),
-                        "status": "error",
-                        "error": "Registration token mismatch",
+                        "status": "ok",
+                        "payload": {
+                            "accepted": True,
+                            "session_id": session.session_id,
+                            "provider_id": session.provider_id,
+                            "client_id": session.client_id,
+                            "owner_user_id": owner_user_id,
+                            "username": username,
+                            "scope_name": expected_scope,
+                            "expires_at": int(time.time()) + 86400,
+                        },
                     }))
                     continue
-                capabilities = payload.get("capabilities") or message.get("capabilities") or {}
-                metadata = {
-                    "endpoint": payload.get("endpoint"),
-                    "transport": payload.get("transport"),
-                    "studio_endpoints": payload.get("studio_endpoints") or [],
-                    "owner_user_id": owner_user_id,
-                }
-                await broker.touch(session.session_id, metadata=metadata, capabilities=capabilities)
-                await websocket.send_text(json.dumps({
-                    "v": 1,
-                    "request_id": message.get("request_id"),
-                    "status": "ok",
-                    "payload": {
-                        "accepted": True,
-                        "session_id": session.session_id,
-                        "provider_id": session.provider_id,
-                        "client_id": session.client_id,
-                        "owner_user_id": owner_user_id,
-                        "expires_at": int(time.time()) + 86400,
-                    },
-                }))
+                if op == "heartbeat":
+                    await broker.touch(session.session_id, metadata=message.get("payload") or {})
+                    await websocket.send_text(json.dumps({
+                        "v": 1,
+                        "request_id": message.get("request_id"),
+                        "status": "ok",
+                        "event": "heartbeat",
+                        "payload": {"ts": int(time.time())},
+                    }))
+                    continue
+                await broker.touch(session.session_id)
+                await broker.publish_response(message)
+            except asyncio.TimeoutError:
+                queued = await broker.consume_request(session.session_id, timeout=1)
+                if queued is not None:
+                    await websocket.send_text(json.dumps(queued))
+                await broker.touch(session.session_id, metadata={"proxy_scheme": websocket.url.scheme, "username": username, "scope_name": expected_scope})
                 continue
-            if op == "heartbeat":
-                await broker.touch(session.session_id, metadata=message.get("payload") or {})
-                await websocket.send_text(json.dumps({
-                    "v": 1,
-                    "request_id": message.get("request_id"),
-                    "status": "ok",
-                    "event": "heartbeat",
-                    "payload": {"ts": int(time.time())},
-                }))
-                continue
-            await broker.touch(session.session_id)
-            resolved = await broker.resolve_response(message)
-            if not resolved:
-                logger.debug(f"CoderAI broker received unmatched message from provider={provider_id} client={client_id}: {message.get('request_id')}")
     except WebSocketDisconnect:
         logger.info(f"CoderAI broker disconnected provider={provider_id} client={client_id}")
     except Exception as e:
@@ -95,6 +109,16 @@ async def coderai_broker_websocket(websocket: WebSocket):
     finally:
         await broker.unregister(session.session_id)
         await broker.fail_session_requests(session.session_id, f"CoderAI session '{session.session_id}' disconnected")
+
+
+@router.websocket("/api/coderai/wss")
+async def coderai_broker_websocket_global(websocket: WebSocket):
+    await _coderai_broker_websocket_impl(websocket, "global")
+
+
+@router.websocket("/api/u/{username}/coderai/wss")
+async def coderai_broker_websocket_user(websocket: WebSocket, username: str):
+    await _coderai_broker_websocket_impl(websocket, username)
 
 
 @router.get("/api/coderai/broker/sessions")

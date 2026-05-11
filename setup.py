@@ -48,8 +48,8 @@ class build_py(_build_py):
     in site-packages/aisbf/_share/ and can be extracted by cli.py on first run.
     """
 
-    _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh', 'DOCUMENTATION.md', 'README.md', 'LICENSE.txt']
-    _SHARE_DIRS  = ['templates', 'static', 'config', 'aisbf']
+    _SHARE_FILES = ['main.py', 'requirements.txt', 'aisbf.sh', 'DOCUMENTATION.md', 'README.md', 'LICENSE.txt', 'AI.PROMPT']
+    _SHARE_DIRS  = ['templates', 'static', 'config', 'aisbf', 'docs']
 
     def run(self):
         self._populate_share()
@@ -149,6 +149,7 @@ setup(
             'DOCUMENTATION.md',
             'README.md',
             'LICENSE.txt',
+            'AI.PROMPT',
             'config/providers.json',
             'config/rotations.json',
             'config/autoselect.json',
@@ -157,6 +158,9 @@ setup(
             'config/condensation_semantic.md',
             'config/STUDIO_SYSTEM.md',
             'config/aisbf.json',
+        ]),
+        ('share/aisbf/docs', [
+            'docs/coderai-integration.md',
         ]),
         # Install aisbf package to share directory for venv installation
         # Main aisbf module files

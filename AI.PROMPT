@@ -1370,16 +1370,18 @@ AISBF now includes an AISBF-side broker for NAT-friendly CoderAI integration.
 
 - `GET /api/coderai/broker/sessions` - list active broker sessions
 - `GET /api/coderai/broker/providers/{provider_id}/status` - inspect active session status for a provider/client
-- `WS /api/coderai/broker/ws` - persistent outbound WebSocket endpoint used by CoderAI behind NAT
+- `WS /api/coderai/wss` - persistent outbound WebSocket endpoint for global-scope CoderAI clients
+- `WS /api/u/{username}/coderai/wss` - persistent outbound WebSocket endpoint for user-owned CoderAI clients
 
 ### Broker Request Flow
 
 1. CoderAI opens outbound WebSocket to AISBF broker
-2. AISBF registers a live session keyed by `provider_id` and `client_id`
+2. AISBF registers a scoped live session keyed by `provider_id` and `client_id`, plus `username` / `global` scope
 3. CoderAI sends `register` metadata/capabilities over that socket
 4. `CoderAIProviderHandler` prefers the live broker session when `coderai_config.broker_preferred=true`
-5. AISBF forwards `models.list`, `chat.completions`, `capabilities`, `register`, and `proxy` operations through the active session
-6. Response envelopes are correlated by `request_id` and returned to the original AISBF request
+5. In multi-node deployments, AISBF forwards `models.list`, `chat.completions`, `capabilities`, `register`, and `proxy` operations through cache-backed broker queues keyed by the active session id
+6. The AISBF node holding the actual WebSocket consumes queued requests, sends them to CoderAI, and publishes replies back through cache-backed reply keys
+7. Response envelopes are correlated by `request_id` and returned to the original AISBF request from any AISBF node
 
 ### Configuration Notes
 
@@ -1408,7 +1410,7 @@ Token rotation is performed inline from the provider editor and updates the owni
 
 ### Important Limitation
 
-Active broker routing still requires a live WebSocket, but AISBF now persists broker session metadata snapshots in `~/.aisbf/coderai_broker_sessions.json` so the dashboard can show last-known broker status after restart. Remote CoderAI must still reconnect before requests can be routed again.
+Active broker routing still requires a live WebSocket, but AISBF now persists broker session metadata snapshots in `~/.aisbf/coderai_broker_sessions.json` and mirrors live broker state into the configured cache backend so clustered AISBF nodes can route through one connected broker client. Remote CoderAI must still reconnect before requests can be routed again after a total disconnect.
 
 ### Security Considerations
 

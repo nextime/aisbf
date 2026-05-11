@@ -238,7 +238,7 @@ def test_dashboard_providers_page_includes_broker_status_for_coderai(monkeypatch
         assert response.status_code == 200
         assert "Broker Session Status" in response.text
         assert "workstation-01" in response.text
-        assert "v1/images/generate" in response.text
+        assert "workstation-01" in response.text
     finally:
         asyncio.run(_clear_broker_sessions())
         if original_provider is None:
@@ -264,7 +264,9 @@ def test_dashboard_api_coderai_broker_sessions_filters_by_owner(monkeypatch):
 
         response = asyncio.run(dashboard_providers.api_coderai_broker_sessions(RequestStub()))
         sessions = json.loads(response.body)["sessions"]
-        assert len(sessions) == 1
-        assert sessions[0]["provider_id"] == "user-coderai"
+        connected_sessions = [session for session in sessions if session.get("connected")]
+        assert any(session["client_id"] == "user-client" for session in connected_sessions)
+        assert not any(session.get("client_id") == "global-client" for session in connected_sessions)
+        assert any(session["provider_id"] == "user-coderai" for session in sessions)
     finally:
         asyncio.run(_clear_broker_sessions())

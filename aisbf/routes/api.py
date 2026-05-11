@@ -461,6 +461,18 @@ async def _generic_proxy(request: Request, body: dict, endpoint_path: str, metho
     return await handler.handle_generic_proxy(request, provider_id, endpoint_path, body, method=method)
 
 
+async def _generic_progress_proxy(request: Request, endpoint_path: str) -> JSONResponse:
+    user_id = getattr(request.state, 'user_id', None)
+    handler = _get_user_handler('request', user_id)
+    provider = request.query_params.get('provider', '').strip()
+    model = request.query_params.get('model', '').strip()
+    if not provider and model:
+        provider, _ = _resolve_provider(model, user_id=user_id, handler=handler)
+    if provider:
+        return await handler.handle_generic_proxy(request, provider, endpoint_path, {}, method="GET")
+    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+
+
 # ── Images ────────────────────────────────────────────────────────────────────
 
 @router.post("/api/v1/images/edits")
@@ -649,20 +661,20 @@ def _studio_scope(request: Request) -> tuple[str, Optional[int]]:
 
 @router.get("/v1/audio/progress")
 @router.get("/api/v1/audio/progress")
-async def studio_audio_progress():
-    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+async def studio_audio_progress(request: Request):
+    return await _generic_progress_proxy(request, "v1/audio/progress")
 
 
 @router.get("/v1/video/progress")
 @router.get("/api/v1/video/progress")
-async def studio_video_progress():
-    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+async def studio_video_progress(request: Request):
+    return await _generic_progress_proxy(request, "v1/video/progress")
 
 
 @router.get("/v1/images/progress")
 @router.get("/api/v1/images/progress")
-async def studio_images_progress():
-    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+async def studio_images_progress(request: Request):
+    return await _generic_progress_proxy(request, "v1/images/progress")
 
 
 @router.get("/v1/archive")

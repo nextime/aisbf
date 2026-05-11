@@ -1,11 +1,13 @@
 include README.md
 include LICENSE.txt
 include DOCUMENTATION.md
+include AI.PROMPT
 include requirements.txt
 include main.py
 include pyproject.toml
 include aisbf.sh
 include cli.py
+recursive-include docs *.md
 recursive-include config *.json
 recursive-include config *.md
 recursive-include aisbf *.py

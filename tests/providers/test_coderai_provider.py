@@ -1,4 +1,5 @@
 import json
+import base64
 from unittest.mock import Mock
 
 import pytest
@@ -150,3 +151,42 @@ async def test_coderai_websocket_stream_emits_sse_bytes(monkeypatch):
 
     assert chunks[0].startswith(b"data: ")
     assert chunks[-1] == b"data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_coderai_broker_stream_supports_progress_and_binary_chunks(monkeypatch):
+    provider_config = {
+        "id": "coderai_nat",
+        "name": "CoderAI NAT",
+        "endpoint": "wss://broker.example.test/coderai/ws",
+        "type": "coderai",
+        "api_key_required": False,
+        "coderai_config": {"transport": "websocket", "bridge_path": "/coderai/ws"},
+    }
+    handler = CoderAIProviderHandler("coderai_nat", provider_config=provider_config)
+
+    async def fake_broker_request(op, payload, timeout=None):
+        assert op == "proxy"
+        return {
+            "status": "ok",
+            "event": "progress",
+            "request_id": "req-1",
+            "payload": {"chunk": {"data_base64": base64.b64encode(b"event: progress\\ndata: {\"pct\":25}\\n\\n").decode("ascii")}},
+        }
+
+    async def fake_wait_for_stream_event(request_id, timeout=300.0):
+        assert request_id == "req-1"
+        return {"status": "ok", "event": "done", "request_id": "req-1", "payload": {}}
+
+    async def fake_use_broker():
+        return True
+
+    monkeypatch.setattr(handler, "_broker_request", fake_broker_request)
+    monkeypatch.setattr(handler, "_use_broker", fake_use_broker)
+    monkeypatch.setattr("aisbf.providers.coderai.coderai_broker.wait_for_stream_event", fake_wait_for_stream_event)
+
+    status_code, payload = await handler.proxy_native_request("v1/video/progress", method="GET", stream=True)
+
+    assert status_code == 200
+    assert payload["stream_encoding"] == "base64"
+    assert base64.b64decode(payload["stream_chunks"][0]).startswith(b"event: progress")

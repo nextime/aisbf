@@ -23,6 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Request handlers for AISBF.
 """
 import asyncio
+import base64
 import re
 import uuid
 import hashlib
@@ -33,7 +34,7 @@ from concurrent.futures import ThreadPoolExecutor
 from typing import Dict, List, Optional, Union
 from pathlib import Path
 from fastapi import HTTPException, Request
-from fastapi.responses import JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse, Response
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
 from .config import config
@@ -1744,6 +1745,31 @@ class RequestHandler:
         import logging
         logger = logging.getLogger(__name__)
         body = self._adapt_studio_workflow_payload(provider_id, endpoint_path, body)
+        incoming_headers = {
+            key: value for key, value in request.headers.items()
+            if key.lower() not in {"host", "content-length", "connection"}
+        }
+        query_params = dict(request.query_params)
+        content_type = request.headers.get('content-type', '')
+        multipart_payload = None
+
+        if 'multipart/form-data' in content_type.lower():
+            form = await request.form()
+            fields = []
+            files = []
+            for key, value in form.multi_items():
+                filename = getattr(value, 'filename', None)
+                if filename is not None:
+                    content = await value.read()
+                    files.append({
+                        'name': key,
+                        'filename': filename,
+                        'content_type': getattr(value, 'content_type', None),
+                        'data_base64': base64.b64encode(content).decode('ascii'),
+                    })
+                else:
+                    fields.append({'name': key, 'value': str(value)})
+            multipart_payload = {'fields': fields, 'files': files}
 
         # Support user-defined providers (dict format) and global providers (object format)
         if self.user_id and provider_id in self.user_providers:
@@ -1773,13 +1799,50 @@ class RequestHandler:
 
         logger.info(f"Generic proxy [{method}]: {provider_id} -> {url}")
         try:
+            provider_type = provider_config.get('type') if isinstance(provider_config, dict) else getattr(provider_config, 'type', None)
+            if provider_type == 'coderai':
+                provider_handler = get_provider_handler(provider_id, config_api_key, user_id=self.user_id)
+                wants_stream = 'text/event-stream' in request.headers.get('accept', '').lower() or endpoint_path in {"v1/audio/progress", "v1/video/progress", "v1/images/progress"}
+                status_code, payload = await provider_handler.proxy_native_request(
+                    endpoint_path,
+                    body,
+                    method=method,
+                    headers=incoming_headers,
+                    query_params=query_params,
+                    content_type=content_type,
+                    multipart=multipart_payload,
+                    stream=wants_stream,
+                )
+                response_headers = payload.get('headers') or {}
+                if payload.get('stream_chunks'):
+                    media_type = payload.get('content_type') or 'text/event-stream'
+
+                    async def iter_stream():
+                        for chunk in payload.get('stream_chunks', []):
+                            yield base64.b64decode(chunk)
+
+                    return StreamingResponse(iter_stream(), status_code=status_code, media_type=media_type, headers=response_headers)
+                if payload.get('body_base64'):
+                    media_type = payload.get('content_type') or 'application/octet-stream'
+                    return Response(content=base64.b64decode(payload['body_base64']), status_code=status_code, media_type=media_type, headers=response_headers)
+                return JSONResponse(status_code=status_code, content=payload.get('body', payload), headers=response_headers)
+
             async with httpx.AsyncClient(timeout=300) as client:
                 if method == "GET":
-                    resp = await client.get(url, headers=headers)
+                    resp = await client.get(url, headers=headers, params=query_params)
                 elif method == "DELETE":
-                    resp = await client.delete(url, headers=headers)
+                    resp = await client.delete(url, headers=headers, params=query_params)
                 else:
-                    resp = await client.post(url, json=body, headers=headers)
+                    if multipart_payload is not None:
+                        files = []
+                        data = []
+                        for field in multipart_payload['fields']:
+                            data.append((field['name'], field['value']))
+                        for file_entry in multipart_payload['files']:
+                            files.append((file_entry['name'], (file_entry['filename'], base64.b64decode(file_entry['data_base64']), file_entry.get('content_type') or 'application/octet-stream')))
+                        resp = await client.post(url, data=data, files=files, headers={k: v for k, v in headers.items() if k.lower() != 'content-type'}, params=query_params)
+                    else:
+                        resp = await client.post(url, json=body, headers=headers, params=query_params)
                 try:
                     content = resp.json()
                 except Exception:

@@ -52,6 +52,7 @@ def _cache_decode(data: bytes) -> any:
 from typing import Any, Optional, Dict, List
 from pathlib import Path
 import time
+import uuid
 
 logger = logging.getLogger(__name__)
 
@@ -849,6 +850,94 @@ class CacheManager:
     def clear(self) -> None:
         """Clear all cache entries"""
         self.backend.clear()
+
+    def broker_backend_type(self) -> str:
+        return self.cache_type.lower()
+
+    def broker_supports_distributed(self) -> bool:
+        return self.broker_backend_type() in {'redis', 'sqlite', 'mysql'}
+
+    def broker_key(self, suffix: str) -> str:
+        prefix = self.config.get('redis_key_prefix', 'aisbf:') if isinstance(self.config, dict) else 'aisbf:'
+        return f"{prefix}broker:{suffix}"
+
+    def broker_set(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        self.set(self.broker_key(key), value, ttl=ttl)
+
+    def broker_get(self, key: str) -> Optional[Any]:
+        return self.get(self.broker_key(key))
+
+    def broker_delete(self, key: str) -> None:
+        self.delete(self.broker_key(key))
+
+    def broker_blocking_pop(self, key: str, timeout: int = 1) -> Optional[Any]:
+        backend_type = self.broker_backend_type()
+        if backend_type == 'redis' and hasattr(self.backend, 'redis'):
+            item = self.backend.redis.blpop(self.broker_key(key), timeout=timeout)
+            if not item:
+                return None
+            return _cache_decode(item[1])
+        deadline = time.time() + max(timeout, 0)
+        while True:
+            item = self.broker_pop_nowait(key)
+            if item is not None:
+                return item
+            if time.time() >= deadline:
+                return None
+            time.sleep(0.1)
+
+    def broker_push(self, key: str, value: Any, ttl: Optional[int] = None) -> None:
+        backend_type = self.broker_backend_type()
+        if backend_type == 'redis' and hasattr(self.backend, 'redis'):
+            redis_key = self.broker_key(key)
+            self.backend.redis.rpush(redis_key, _cache_encode(value))
+            if ttl:
+                self.backend.redis.expire(redis_key, ttl)
+            return
+        queue = self.broker_get(key) or []
+        if not isinstance(queue, list):
+            queue = []
+        queue.append(value)
+        self.broker_set(key, queue, ttl=ttl)
+
+    def broker_pop_nowait(self, key: str) -> Optional[Any]:
+        backend_type = self.broker_backend_type()
+        if backend_type == 'redis' and hasattr(self.backend, 'redis'):
+            item = self.backend.redis.lpop(self.broker_key(key))
+            if item is None:
+                return None
+            return _cache_decode(item)
+        queue = self.broker_get(key)
+        if not isinstance(queue, list) or not queue:
+            return None
+        item = queue.pop(0)
+        if queue:
+            self.broker_set(key, queue)
+        else:
+            self.broker_delete(key)
+        return item
+
+    def broker_list_keys(self, pattern: str) -> list[str]:
+        backend_type = self.broker_backend_type()
+        full_pattern = self.broker_key(pattern)
+        if backend_type == 'redis' and hasattr(self.backend, 'redis'):
+            keys = self.backend.redis.keys(full_pattern)
+            decoded = []
+            for key in keys:
+                if isinstance(key, bytes):
+                    key = key.decode('utf-8')
+                decoded.append(str(key))
+            return decoded
+        return []
+
+    def broker_node_id(self) -> str:
+        key = '__broker_node_id__'
+        existing = self.broker_get(key)
+        if existing:
+            return str(existing)
+        node_id = str(uuid.uuid4())
+        self.broker_set(key, node_id)
+        return node_id
 
     # Numpy-specific methods
     def save_numpy_array(self, key: str, array: Any, metadata: Optional[Dict] = None) -> None:

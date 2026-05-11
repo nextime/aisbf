@@ -469,6 +469,18 @@ async def _user_delete_proxy(request: Request, username: str, provider: str, end
     return await handler.handle_generic_proxy(request, provider, endpoint_path, {}, method="DELETE")
 
 
+async def _user_progress_proxy(request: Request, username: str, endpoint_path: str) -> JSONResponse:
+    user_id = _check_user_access(request, username)
+    handler = _get_user_handler('request', user_id)
+    provider = request.query_params.get('provider', '').strip()
+    model = request.query_params.get('model', '').strip()
+    if not provider and model:
+        provider, _ = parse_provider_from_model(model)
+    if provider:
+        return await handler.handle_generic_proxy(request, provider, endpoint_path, {}, method="GET")
+    return {"active": False, "current": 0, "total": 0, "pct": 0, "elapsed": 0}
+
+
 # ── Audio ─────────────────────────────────────────────────────────────────────
 
 @router.post("/api/u/{username}/audio/transcriptions")
@@ -510,6 +522,11 @@ async def user_audio_clone(request: Request, username: str, body: dict):
 @router.post("/api/u/{username}/audio/convert")
 async def user_audio_convert(request: Request, username: str, body: dict):
     return await _user_generic_proxy(request, username, body, "v1/audio/convert")
+
+
+@router.get("/api/u/{username}/audio/progress")
+async def user_audio_progress(request: Request, username: str):
+    return await _user_progress_proxy(request, username, "v1/audio/progress")
 
 @router.post("/api/u/{username}/audio/identify")
 async def user_audio_identify(request: Request, username: str, body: dict):
@@ -615,6 +632,11 @@ async def user_image_from3d(request: Request, username: str, body: dict):
     return await _user_generic_proxy(request, username, body, "v1/images/from3d")
 
 
+@router.get("/api/u/{username}/images/progress")
+async def user_images_progress(request: Request, username: str):
+    return await _user_progress_proxy(request, username, "v1/images/progress")
+
+
 # ── Video ─────────────────────────────────────────────────────────────────────
 
 @router.post("/api/u/{username}/video/generations")
@@ -660,6 +682,11 @@ async def user_video_to3d(request: Request, username: str, body: dict):
 @router.post("/api/u/{username}/video/from3d")
 async def user_video_from3d(request: Request, username: str, body: dict):
     return await _user_generic_proxy(request, username, body, "v1/video/from3d")
+
+
+@router.get("/api/u/{username}/video/progress")
+async def user_video_progress(request: Request, username: str):
+    return await _user_progress_proxy(request, username, "v1/video/progress")
 
 
 # ── Embeddings ────────────────────────────────────────────────────────────────

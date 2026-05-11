@@ -28,6 +28,7 @@ import json
 import logging
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
+import base64
 from urllib.parse import urlparse
 
 import httpx
@@ -36,6 +37,7 @@ from openai import OpenAI
 from ..coderai_broker import broker as coderai_broker
 from ..config import config
 from ..models import Model
+from ..app.templates import get_base_url
 from .base import AISBF_DEBUG, BaseProviderHandler
 
 
@@ -52,8 +54,10 @@ class CoderAIProviderHandler(BaseProviderHandler):
         self._coderai_config = self._resolve_coderai_config()
         self._transport = str(self._coderai_config.get("transport") or self._infer_transport(self._raw_endpoint)).lower()
         self._client_id = self._coderai_config.get("client_id") or provider_id
+        self._username = self._coderai_config.get("username") or ("global" if user_id is None else None)
         self._bridge_path = str(self._coderai_config.get("bridge_path") or "/coderai/ws").strip() or "/coderai/ws"
         self._registration_path = str(self._coderai_config.get("registration_path") or "/coderai/register").strip() or "/coderai/register"
+        self._broker_ws_path = str(self._coderai_config.get("broker_ws_path") or "/api/coderai/wss").strip() or "/api/coderai/wss"
         self._request_timeout = float(self._coderai_config.get("request_timeout") or 300.0)
         self._model_timeout = float(self._coderai_config.get("model_timeout") or 30.0)
         self._websocket_enabled = bool(self._coderai_config.get("websocket_enabled", True))
@@ -159,6 +163,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
             "x-coderai-client-id": self._client_id,
             "x-coderai-provider-id": self.provider_id,
         }
+        if self._username:
+            headers["x-coderai-username"] = self._username
         token = self._bridge_token or self._registration_token or self.api_key
         if token:
             headers["authorization"] = f"Bearer {token}"
@@ -171,6 +177,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
             "X-CoderAI-Client-Id": self._client_id,
             "X-CoderAI-Provider-Id": self.provider_id,
         }
+        if self._username:
+            headers["X-CoderAI-Username"] = self._username
         token = self._bridge_token or self._registration_token or self.api_key
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -211,21 +219,49 @@ class CoderAIProviderHandler(BaseProviderHandler):
         status = message.get("status") or "ok"
         if status == "error":
             raise Exception(message.get("error") or "CoderAI broker bridge error")
-        payload_data = message.get("payload") or {}
-        chunk = payload_data.get("chunk")
-        if message.get("event") == "chunk" and chunk is not None:
-            if isinstance(chunk, str):
-                yield chunk.encode("utf-8")
-            elif isinstance(chunk, bytes):
-                yield chunk
-            elif isinstance(chunk, dict):
-                yield f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
-            return
-        for item in payload_data.get("chunks", []):
-            if isinstance(item, str):
-                yield item.encode("utf-8")
-            elif isinstance(item, dict):
-                yield f"data: {json.dumps(item)}\n\n".encode("utf-8")
+        async for chunk in self._iter_broker_stream_chunks(message, timeout):
+            yield chunk
+
+    @staticmethod
+    def _decode_broker_chunk(chunk: Any) -> bytes:
+        if isinstance(chunk, bytes):
+            return chunk
+        if isinstance(chunk, str):
+            return chunk.encode("utf-8")
+        if isinstance(chunk, dict):
+            if isinstance(chunk.get("data_base64"), str):
+                return base64.b64decode(chunk["data_base64"])
+            if chunk.get("encoding") == "base64" and isinstance(chunk.get("data"), str):
+                return base64.b64decode(chunk["data"])
+            if "chunk" in chunk:
+                return CoderAIProviderHandler._decode_broker_chunk(chunk.get("chunk"))
+            return f"data: {json.dumps(chunk)}\n\n".encode("utf-8")
+        return str(chunk).encode("utf-8")
+
+    async def _iter_broker_stream_chunks(self, initial_message: Dict[str, Any], timeout: float) -> AsyncIterator[bytes]:
+        message = initial_message
+        while True:
+            status = message.get("status") or "ok"
+            if status == "error":
+                raise Exception(message.get("error") or "CoderAI broker bridge error")
+
+            event = message.get("event")
+            payload_data = message.get("payload") or {}
+
+            if event in {"chunk", "progress", "output", "log", "data"}:
+                chunk = payload_data.get("chunk", payload_data)
+                yield self._decode_broker_chunk(chunk)
+            elif isinstance(payload_data.get("chunks"), list):
+                for item in payload_data.get("chunks", []):
+                    yield self._decode_broker_chunk(item)
+
+            if event in {None, "done", "completed"}:
+                return
+
+            next_request_id = message.get("request_id")
+            if not next_request_id:
+                return
+            message = await coderai_broker.wait_for_stream_event(next_request_id, timeout=timeout)
 
     def validate_credentials(self) -> bool:
         if self._transport == "websocket" and not self._websocket_enabled:
@@ -478,23 +514,46 @@ class CoderAIProviderHandler(BaseProviderHandler):
             return message.get("payload") or {}
         return await self._http_json("POST", self._registration_path, payload, timeout=self._model_timeout)
 
-    async def proxy_native_request(self, endpoint_path: str, body: Optional[Dict[str, Any]] = None, method: str = "POST") -> Tuple[int, Dict[str, Any]]:
+    async def proxy_native_request(
+        self,
+        endpoint_path: str,
+        body: Optional[Dict[str, Any]] = None,
+        method: str = "POST",
+        headers: Optional[Dict[str, str]] = None,
+        query_params: Optional[Dict[str, Any]] = None,
+        content_type: Optional[str] = None,
+        multipart: Optional[Dict[str, Any]] = None,
+        stream: bool = False,
+    ) -> Tuple[int, Dict[str, Any]]:
         payload = {
             "endpoint_path": endpoint_path,
             "method": method.upper(),
             "body": body or {},
+            "headers": headers or {},
+            "query_params": query_params or {},
         }
+        if content_type:
+            payload["content_type"] = content_type
+        if multipart is not None:
+            payload["multipart"] = multipart
+        if stream:
+            payload["stream"] = True
         if await self._use_broker():
+            if stream:
+                chunks = []
+                async for chunk in self._broker_stream("proxy", payload, timeout=self._request_timeout):
+                    chunks.append(chunk)
+                return 200, {"stream_chunks": [base64.b64encode(chunk).decode("ascii") for chunk in chunks], "stream_encoding": "base64"}
             message = await self._broker_request("proxy", payload, timeout=self._request_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker proxy request failed")
             envelope = message.get("payload") or {}
-            return int(envelope.get("status_code") or 200), envelope.get("body") or {}
+            return int(envelope.get("status_code") or 200), envelope
         if self._transport == "websocket":
             message = await self._ws_roundtrip("proxy", payload, timeout=self._request_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI proxy request failed")
             envelope = message.get("payload") or {}
-            return int(envelope.get("status_code") or 200), envelope.get("body") or {}
+            return int(envelope.get("status_code") or 200), envelope
         response = await self._http_json(method.upper(), endpoint_path, body or {}, timeout=self._request_timeout)
         return 200, response

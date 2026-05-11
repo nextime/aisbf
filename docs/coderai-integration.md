@@ -1,19 +1,21 @@
-# CoderAI <-> AISBF Integration Contract
+# CoderAI Broker Implementation Reference
 
-## Goal
+## Purpose
 
-Enable `coderai` to appear in AISBF as a first-class provider with two modes:
+This document is the single source of truth for implementing the CoderAI side of the AISBF broker and bridge integration.
 
-1. **Direct local HTTP mode**: AISBF talks to a local OpenAI-compatible CoderAI server.
-2. **NAT-friendly WebSocket bridge mode**: CoderAI connects outward and exchanges OpenAI-compatible requests/responses through framed WebSocket messages.
+The target audience is another LLM or engineer implementing CoderAI, not AISBF.
 
-CoderAI is the upstream implementation source for Studio-native endpoints, so capability and endpoint discovery should be explicit and machine-readable.
+This document is mirrored in `docs/coderai-broker-implementation-reference.md` and should be kept identical in purpose and protocol coverage.
 
 ## AISBF broker mode
 
 AISBF now includes a public broker-side WebSocket endpoint for outbound-only NAT traversal.
 
 - Broker WebSocket endpoint: `/api/coderai/broker/ws`
+- Broker WebSocket endpoints:
+  - global scope: `/api/coderai/wss`
+  - user scope: `/api/u/{username}/coderai/wss`
 - Broker session status endpoint: `/api/coderai/broker/providers/{provider_id}/status`
 - Broker session listing endpoint: `/api/coderai/broker/sessions`
 
@@ -27,6 +29,13 @@ Registration tokens are resolved from the owning provider configuration. This me
 - the global admin configures the token for globally configured `coderai` providers
 - each user configures the token for their own user-scoped `coderai` providers
 - a broker session is only usable by requests belonging to the same owner principal
+
+Broker registration is now scope-aware:
+
+- global providers register with `username=global`
+- user-owned providers register with `username=<aisbf_username>`
+- the same scoped path must be used by the CoderAI client when connecting over WebSocket
+- deployments behind TLS termination or reverse proxies must connect with the externally visible `wss://...` URL and preserve proxy headers so AISBF can remain scheme-aware
 
 The AISBF dashboard now exposes this token directly inside each `coderai` provider configuration:
 
@@ -83,6 +92,7 @@ Use provider type:
 - For `transport=http`, AISBF uses the OpenAI Python client against `endpoint + /v1`.
 - For `transport=websocket`, AISBF uses a WebSocket bridge and sends framed JSON envelopes.
 - AISBF uses `models.list`, `chat.completions`, `capabilities`, `register`, and `proxy` bridge operations.
+- `proxy` now supports arbitrary forwarded request headers, query params, multipart form payloads, binary/base64 bodies, progress polling endpoints, and non-chat streaming event envelopes for long-running jobs.
 - AISBF treats `coderai` like an OpenAI-style Studio adapter family.
 - AISBF can also forward arbitrary Studio-native endpoints through `proxy` when the provider transport is WebSocket.
 - AISBF validates that broker-enabled `coderai` providers have a non-empty `registration_token`.
@@ -189,11 +199,18 @@ When CoderAI dials AISBF broker directly, it should connect using:
 
 - `provider_id=<provider_id>`
 - `client_id=<client_id>`
+- `username=<username-or-global>`
 
 Example:
 
 ```text
-wss://your-aisbf.example/api/coderai/broker/ws?provider_id=coderai&client_id=workstation-01&registration_token=<owner-configured-token>
+wss://your-aisbf.example/api/coderai/wss?provider_id=coderai&client_id=workstation-01&username=global&registration_token=<owner-configured-token>
+```
+
+User-scoped example:
+
+```text
+wss://your-aisbf.example/api/u/alice/coderai/wss?provider_id=my-coderai&client_id=workstation-01&username=alice&registration_token=<owner-configured-token>
 ```
 
 ### Envelope format
@@ -297,7 +314,7 @@ Important:
 - This keeps AISBF transport-simple and lets CoderAI own protocol correctness.
 - Include `data: [DONE]\n\n` as one of the streamed chunks when the upstream semantics require it.
 
-## Broker session visibility and persistence
+## Broker session visibility, persistence, and multi-node routing
 
 AISBF now tracks two broker states:
 
@@ -305,6 +322,15 @@ AISBF now tracks two broker states:
 - persisted session metadata snapshots stored in `~/.aisbf/coderai_broker_sessions.json`
 
 Persisted metadata is dashboard-facing only. It is used to show the last known session details after restart, but it is not treated as an active transport path until CoderAI reconnects.
+
+For multi-node AISBF deployments behind a reverse proxy / load balancer:
+
+- session status and ownership metadata are stored in the configured AISBF cache backend
+- requests are enqueued into cache-backed broker queues keyed by broker session id
+- the AISBF node holding the live WebSocket consumes queued requests and forwards them to CoderAI
+- replies are written back through cache-backed reply keys so the AISBF node that originated the request can receive the result
+
+Redis is the preferred backend for this distributed mode. SQLite/MySQL can operate as polling-based fallbacks. Memory/file cache backends are not suitable for cross-node broker routing.
 
 Expected behavior:
 
@@ -393,10 +419,22 @@ Request payload:
 {
   "endpoint_path": "v1/video/dub",
   "method": "POST",
+  "headers": {
+    "x-request-id": "studio-job-123",
+    "accept": "text/event-stream"
+  },
+  "query_params": {
+    "job_id": "dub_123"
+  },
   "body": {
     "model": "local-video-model",
     "input": "Dub this clip to Italian"
-  }
+  },
+  "multipart": {
+    "fields": [{"name": "model", "value": "whisper-large"}],
+    "files": [{"name": "file", "filename": "sample.wav", "content_type": "audio/wav", "data_base64": "<base64>"}]
+  },
+  "stream": true
 }
 ```
 
@@ -405,12 +443,46 @@ Response payload:
 ```json
 {
   "status_code": 200,
+  "headers": {
+    "content-type": "application/json"
+  },
   "body": {
     "job_id": "dub_123",
     "status": "queued"
   }
 }
 ```
+
+Binary response payloads may instead use:
+
+```json
+{
+  "status_code": 200,
+  "content_type": "audio/mpeg",
+  "body_base64": "<base64>",
+  "headers": {
+    "content-disposition": "attachment; filename=preview.mp3"
+  }
+}
+```
+
+Streaming and progress responses may emit multiple envelopes with `event` values like `progress`, `output`, `log`, `data`, `chunk`, and finally `done` or `completed`.
+
+Recommended progress chunk payload:
+
+```json
+{
+  "v": 1,
+  "request_id": "coderai-1746960000000",
+  "status": "ok",
+  "event": "progress",
+  "payload": {
+    "chunk": "event: progress\ndata: {\"active\":true,\"current\":5,\"total\":20,\"pct\":25,\"elapsed\":12}\n\n"
+  }
+}
+```
+
+Capability advertisements should include endpoint metadata for custom pipelines, including supported methods, streaming mode, expected input/output modalities, and whether multipart or binary transport is required.
 
 ## Recommended CoderAI architecture
 
