@@ -1510,7 +1510,6 @@ async def dashboard_admin_payment_settings(request: Request):
             "session": request.session,
             "currency_symbol": DatabaseRegistry.get_config_database().get_currency_settings().get('currency_symbol', '$'),
             "market_settings": DatabaseRegistry.get_config_database().get_market_settings(),
-            "market_listings": DatabaseRegistry.get_config_database().list_market_listings(active_only=False),
         }
     )
 

@@ -719,17 +719,50 @@ async def api_toggle_market_listing(request: Request, listing_id: int):
 
 
 @router.get('/dashboard/admin/market', response_class=HTMLResponse)
-async def dashboard_admin_market(request: Request):
+async def dashboard_admin_market(
+    request: Request,
+    q: str = '',
+    source_type: str = '',
+    active_filter: str = '',
+    online_filter: str = '',
+    owner_username: str = '',
+    page: int = 1,
+    limit: int = 25,
+):
     auth_check = require_admin(request)
     if auth_check:
         return auth_check
     db = DatabaseRegistry.get_config_database()
-    listings = db.list_market_listings(active_only=False)
+    page = max(page, 1)
+    limit = max(1, min(limit, 100))
+    result = db.list_market_listings_paginated(
+        page=page,
+        limit=limit,
+        search=q or None,
+        source_type=source_type or None,
+        active_filter=active_filter or None,
+        online_filter=online_filter or None,
+        owner_username=owner_username or None,
+    )
+    listings = result['items']
     enriched_listings = []
     for listing in listings:
         listing_copy = dict(listing)
         _apply_listing_derived_fields(listing_copy, db)
         enriched_listings.append(listing_copy)
+    total = int(result.get('total') or 0)
+    total_pages = max((total + limit - 1) // limit, 1)
+    if page > total_pages:
+        page = total_pages
+    filters = {
+        'q': q,
+        'source_type': source_type,
+        'active_filter': active_filter,
+        'online_filter': online_filter,
+        'owner_username': owner_username,
+        'page': page,
+        'limit': limit,
+    }
     return _templates.TemplateResponse(
         request=request,
         name='dashboard/admin_market.html',
@@ -737,5 +770,16 @@ async def dashboard_admin_market(request: Request):
             'request': request,
             'session': request.session,
             'market_listings': enriched_listings,
+            'filters': filters,
+            'pagination': {
+                'page': page,
+                'limit': limit,
+                'total': total,
+                'total_pages': total_pages,
+                'has_prev': page > 1,
+                'has_next': page < total_pages,
+                'prev_page': page - 1,
+                'next_page': page + 1,
+            },
         },
     )

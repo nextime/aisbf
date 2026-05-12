@@ -4,6 +4,54 @@
 
 {% block content %}
 <h2 style="margin-bottom: 20px;"><i class="fas fa-store-alt" style="color: var(--color-link);"></i> Market Administration</h2>
+<div style="background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px; margin-bottom: 16px;">
+    <form method="get" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; align-items:end;">
+        <div>
+            <label for="market-search" style="display:block; margin-bottom: 6px; color: var(--color-text);">Search</label>
+            <input id="market-search" type="text" name="q" value="{{ filters.q }}" placeholder="Search listings, owner, provider, model" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+        </div>
+        <div>
+            <label for="source-type" style="display:block; margin-bottom: 6px; color: var(--color-text);">Source Type</label>
+            <select id="source-type" name="source_type" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+                <option value="">All sources</option>
+                <option value="provider" {% if filters.source_type == 'provider' %}selected{% endif %}>Provider</option>
+                <option value="model" {% if filters.source_type == 'model' %}selected{% endif %}>Model</option>
+                <option value="rotation" {% if filters.source_type == 'rotation' %}selected{% endif %}>Rotation</option>
+                <option value="autoselect" {% if filters.source_type == 'autoselect' %}selected{% endif %}>Autoselect</option>
+            </select>
+        </div>
+        <div>
+            <label for="active-filter" style="display:block; margin-bottom: 6px; color: var(--color-text);">Active State</label>
+            <select id="active-filter" name="active_filter" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+                <option value="">All states</option>
+                <option value="active" {% if filters.active_filter == 'active' %}selected{% endif %}>Active</option>
+                <option value="inactive" {% if filters.active_filter == 'inactive' %}selected{% endif %}>Inactive</option>
+            </select>
+        </div>
+        <div>
+            <label for="online-filter" style="display:block; margin-bottom: 6px; color: var(--color-text);">Availability</label>
+            <select id="online-filter" name="online_filter" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+                <option value="">All</option>
+                <option value="online" {% if filters.online_filter == 'online' %}selected{% endif %}>Online</option>
+                <option value="offline" {% if filters.online_filter == 'offline' %}selected{% endif %}>Offline</option>
+            </select>
+        </div>
+        <div>
+            <label for="owner-username" style="display:block; margin-bottom: 6px; color: var(--color-text);">Owner</label>
+            <input id="owner-username" type="text" name="owner_username" value="{{ filters.owner_username }}" placeholder="Filter by owner" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+        </div>
+        <div>
+            <label for="limit" style="display:block; margin-bottom: 6px; color: var(--color-text);">Per Page</label>
+            <select id="limit" name="limit" style="width:100%; padding: 10px; border:1px solid var(--color-border); border-radius: 8px; background: var(--bg-page); color: var(--color-text);">
+                {% for option in [10, 25, 50, 100] %}
+                <option value="{{ option }}" {% if filters.limit == option %}selected{% endif %}>{{ option }}</option>
+                {% endfor %}
+            </select>
+        </div>
+        <input type="hidden" name="page" value="1">
+        <button type="submit" class="btn" style="background: var(--color-link); color: white;">Apply</button>
+    </form>
+</div>
 <div style="background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px; overflow:auto;">
     <table style="width:100%; border-collapse: collapse;">
         <thead>
@@ -34,8 +82,26 @@
                 <td style="padding:10px; text-align:right;">{{ (listing.stats or {}).total_requests or 0 }}</td>
                 <td style="padding:10px; text-align:center;">{{ 'Yes' if listing.is_active else 'No' }}</td>
             </tr>
+        {% else %}
+            <tr>
+                <td colspan="10" style="padding:16px; text-align:center; color: var(--color-muted);">No market listings match the current filters.</td>
+            </tr>
         {% endfor %}
         </tbody>
     </table>
+</div>
+<div style="display:flex; justify-content:space-between; align-items:center; gap: 12px; margin-top: 16px; flex-wrap: wrap;">
+    <div style="color: var(--color-text);">
+        Showing page {{ pagination.page }} of {{ pagination.total_pages }} ({{ pagination.total }} listings)
+    </div>
+    <div style="display:flex; gap: 8px; flex-wrap: wrap;">
+        {% if pagination.has_prev %}
+        <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.prev_page }}" style="background: var(--bg-accent); color: var(--color-text);">Previous</a>
+        {% endif %}
+        <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.page }}" style="background: var(--color-link); color: white;">Current Page</a>
+        {% if pagination.has_next %}
+        <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.next_page }}" style="background: var(--bg-accent); color: var(--color-text);">Next</a>
+        {% endif %}
+    </div>
 </div>
 {% endblock %}
