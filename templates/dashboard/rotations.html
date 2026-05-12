@@ -189,12 +189,12 @@ async function msOpenProvider(providerId, inputId, cb) {
     document.getElementById('ms-status').textContent = window.i18n.t('rotations.checking_models');
     document.getElementById('ms-results').innerHTML = '<p style="color:var(--color-muted);text-align:center;padding:20px;">' + window.i18n.t('rotations.loading') + '</p>';
     try {
-        let r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/configured-models');
+        let r = await fetch(`${BASE_PATH}/dashboard/providers/${encodeURIComponent(providerId)}/configured-models`);
         if (_msCancelled) return;
         let d = await r.json(); let m = d.models || [];
         if (!m.length) {
             document.getElementById('ms-status').textContent = window.i18n.t('rotations.fetching_from_api');
-            r = await fetch('/dashboard/providers/' + encodeURIComponent(providerId) + '/search-models?refresh=true');
+            r = await fetch(`${BASE_PATH}/dashboard/providers/${encodeURIComponent(providerId)}/search-models?refresh=true`);
             if (_msCancelled) return;
             d = await r.json(); m = d.models || [];
         }

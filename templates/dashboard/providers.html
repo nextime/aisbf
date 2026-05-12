@@ -165,6 +165,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block extra_js %}
 <script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>
 <script>
+const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
+
 function escHtmlAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
@@ -3005,7 +3007,7 @@ async function saveProviders() {
 
         if (response.ok) {
             sessionStorage.setItem('providers_page', currentProviderPage);
-            window.location.href = BASE_PATH + '/dashboard/providers?success=1';
+            window.location.href = `${BASE_PATH}/dashboard/providers?success=1`;
         } else {
             showAlert(window.i18n.t('providers.error_saving'), 'Error', '❌', 'danger');
         }

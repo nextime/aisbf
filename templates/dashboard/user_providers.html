@@ -2703,7 +2703,7 @@ async function saveProviders() {
         });
 
         if (response.ok) {
-            window.location.href = BASE_PATH + '/dashboard/providers?success=1';
+            window.location.href = `${BASE_PATH}/dashboard/providers?success=1`;
         } else {
             showAlert(window.i18n.t('providers.error_saving'), 'Error', '❌', 'danger');
         }

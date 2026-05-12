@@ -97,7 +97,7 @@ async function msOpenAll(inputId, cb) {
         document.getElementById('ms-status').textContent = window.i18n.t('autoselect.no_models_loaded');
         document.getElementById('ms-results').innerHTML = `<p style="color:var(--color-muted);text-align:center;padding:20px;">${window.i18n.t('autoselect.loading')}</p>`;
         try {
-            const r = await fetch('/dashboard/search-all-models?refresh=true');
+            const r = await fetch(`${BASE_PATH}/dashboard/search-all-models?refresh=true`);
             if (_msCancelled) return;
             const data = await r.json(); const fetched = data.models || [];
             _msAllItems = fetched;

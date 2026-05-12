@@ -56,6 +56,7 @@
 
 {% block extra_js %}
 <script>
+const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 const listings = {{ market_listings_json | safe }};
 const currencySymbol = {{ currency_symbol | tojson }};
 const marketSettings = {{ market_settings_json | safe }};
@@ -114,7 +115,7 @@ function renderMarket() {
 }
 
 async function importListing(id) {
-    const response = await fetch(`/api/market/listings/${id}/import`, {method:'POST', headers:{'Content-Type':'application/json'}});
+    const response = await fetch(`${BASE_PATH}/api/market/listings/${id}/import`, {method:'POST', headers:{'Content-Type':'application/json'}});
     const result = await response.json();
     if (!response.ok) {
         alert(result.error || 'Import failed');
@@ -124,7 +125,7 @@ async function importListing(id) {
 }
 
 async function voteListing(id, targetType, vote) {
-    const response = await fetch(`/api/market/listings/${id}/vote`, {
+    const response = await fetch(`${BASE_PATH}/api/market/listings/${id}/vote`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify({target_type: targetType, vote})
@@ -150,7 +151,7 @@ async function publishListing() {
         price_per_million_tokens: parseFloat(document.getElementById('publish-price-tokens').value || '0'),
         price_per_1000_requests: parseFloat(document.getElementById('publish-price-requests').value || '0')
     };
-    const response = await fetch('/api/market/listings', {
+    const response = await fetch(`${BASE_PATH}/api/market/listings`, {
         method:'POST',
         headers:{'Content-Type':'application/json'},
         body: JSON.stringify(body)
@@ -183,7 +184,7 @@ async function reloadMarket() {
     if (size) params.set('size', size);
     if (onlineOnly) params.set('online_only', '1');
     if (sortBy) params.set('sort_by', sortBy);
-    const response = await fetch(`/api/market/listings?${params.toString()}`);
+    const response = await fetch(`${BASE_PATH}/api/market/listings?${params.toString()}`);
     const result = await response.json();
     if (!response.ok) {
         alert(result.error || 'Failed to load market');
