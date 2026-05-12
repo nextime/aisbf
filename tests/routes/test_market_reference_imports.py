@@ -574,9 +574,9 @@ def test_market_references_do_not_render_local_edit_controls(monkeypatch):
 def test_dashboard_providers_bootstrap_handles_quote_heavy_market_reference_data(monkeypatch):
     db = MarketReferenceImportDbStub()
     _seed_dashboard_market_reference_mix(db)
-    db.reference_rows[0]["display_name"] = 'Alice\'s "Provider"'
-    db.reference_rows[0]["owner_username"] = "alice'broker"
-    db.reference_rows[0]["source_id"] = 'alice-provider\'x'
+    db.reference_rows[0]["display_name"] = 'Alice\'s "Provider" </script><script>alert(1)</script>'
+    db.reference_rows[0]["owner_username"] = "alice'broker</script>"
+    db.reference_rows[0]["source_id"] = 'alice-provider\'x</script>'
     capture = TemplateCapture()
     client = TestClient(app)
     _login_as_user(client)
@@ -590,15 +590,11 @@ def test_dashboard_providers_bootstrap_handles_quote_heavy_market_reference_data
 
     assert response.status_code == 200
     assert "let rawProviders = JSON.parse(" in response.text
-    parse_block = response.text.split("let rawProviders = JSON.parse(", 1)[1].split(");", 1)[0]
-
-    context = capture.calls[-1]["context"]
-    serialized = context["user_providers_json"]
-    assert "Alice's \\\"Provider\\\"" in serialized
-    assert "alice'broker" in serialized
-    assert "alice-provider'x" in serialized
-    assert "Provider" in parse_block
-    assert "alice" in parse_block
+    bootstrap_fragment = response.text.split("let rawProviders = JSON.parse(", 1)[1].split("\n", 1)[0]
+    assert '</script><script>alert(1)</script>' not in bootstrap_fragment
+    assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e' in bootstrap_fragment
+    assert 'alice' in bootstrap_fragment
+    assert 'Provider' in bootstrap_fragment
 
 
 def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
