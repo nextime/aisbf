@@ -463,30 +463,20 @@ async def dashboard_providers(request: Request):
     broker_status_map = await _load_coderai_broker_status_map()
 
     if is_config_admin:
-        # Config admin: prefer live in-memory config when available
-        live_config = _config
-        if live_config is None:
-            from aisbf.config import config as global_config
-            live_config = global_config
-        if live_config and getattr(live_config, 'providers', None):
-            providers_data = {
-                provider_id: (provider.model_dump() if hasattr(provider, 'model_dump') else dict(provider))
-                for provider_id, provider in live_config.providers.items()
-            }
+        # Config admin: read provider order from the saved JSON file
+        config_path = Path.home() / '.aisbf' / 'providers.json'
+        if not config_path.exists():
+            config_path = Path(__file__).parent / 'config' / 'providers.json'
+
+        with open(config_path) as f:
+            full_config = json.load(f)
+
+        # Extract just the providers object (handle both nested and flat structures)
+        if 'providers' in full_config and isinstance(full_config['providers'], dict):
+            providers_data = full_config['providers']
         else:
-            config_path = Path.home() / '.aisbf' / 'providers.json'
-            if not config_path.exists():
-                config_path = Path(__file__).parent / 'config' / 'providers.json'
-            
-            with open(config_path) as f:
-                full_config = json.load(f)
-            
-            # Extract just the providers object (handle both nested and flat structures)
-            if 'providers' in full_config and isinstance(full_config['providers'], dict):
-                providers_data = full_config['providers']
-            else:
-                # Fallback for flat structure (backward compatibility)
-                providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+            # Fallback for flat structure (backward compatibility)
+            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
         providers_data = {
             provider_id: _augment_provider_broker_status(provider_id, _ensure_coderai_token(provider_config), broker_status_map)
             for provider_id, provider_config in providers_data.items()
