@@ -880,8 +880,11 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "user_providers_data": providers_data,
-                    "user_providers_bootstrap_json": _json_parse_bootstrap(providers_data),
+                    "user_providers_data": list(providers_data.values()),
+                    "user_providers_bootstrap_json": _json_parse_bootstrap([
+                        {"provider_id": provider_id, "config": provider_config}
+                        for provider_id, provider_config in providers_data.items()
+                    ]),
                     "studio_capability_choices": serialize_studio_capability_choices(),
                     "studio_adapter_choices": serialize_studio_adapter_choices(),
                     "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
@@ -2293,6 +2296,21 @@ async def dashboard_analytics(
         today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
         from_datetime = today - timedelta(days=1)
         to_datetime = today - timedelta(microseconds=1)
+    elif time_range == '1h':
+        from_datetime = datetime.now() - timedelta(hours=1)
+        to_datetime = datetime.now()
+    elif time_range == '6h':
+        from_datetime = datetime.now() - timedelta(hours=6)
+        to_datetime = datetime.now()
+    elif time_range == '7d':
+        from_datetime = datetime.now() - timedelta(days=7)
+        to_datetime = datetime.now()
+    elif time_range == '30d':
+        from_datetime = datetime.now() - timedelta(days=30)
+        to_datetime = datetime.now()
+    elif time_range == '90d':
+        from_datetime = datetime.now() - timedelta(days=90)
+        to_datetime = datetime.now()
     elif time_range == 'custom':
         if not from_datetime or not to_datetime:
             time_range = '24h'

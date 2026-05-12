@@ -607,9 +607,9 @@ window.onclick = function(event) {
         <p style="font-size: 28px; font-weight: bold;" id="savings-amount">{{ currency_symbol }}{{ "%.2f"|format((optimization_savings.total_cost_saved if optimization_savings else 0) or 0) }}</p>
         <small style="color: rgba(255,255,255,0.8);">
             {% if optimization_savings and optimization_savings.provider_equivalents %}
-            Provider free-tier equivalents + optimization
+            Configured free-tier equivalents in selected period
             {% else %}
-            Cache hits & optimization
+            No configured free-tier savings in selected period
             {% endif %}
         </small>
     </div>
@@ -646,8 +646,8 @@ window.onclick = function(event) {
 <div style="background: var(--bg-page); padding: 16px; border-radius: 8px; margin-bottom: 20px;">
     <h4 style="margin: 0 0 10px 0;">Free-Tier Equivalent Savings</h4>
     <p style="margin: 0 0 10px 0; color: var(--color-muted);">
-        The table below estimates provider-side free-tier equivalents using known upstream free limits such as weekly or monthly request allowances.
-        When the filtered usage exceeds a provider's base free allowance, the overflow is counted as additional free-tier-equivalent capacity and translated into token and premium-value equivalents.
+        The table below only uses explicitly configured provider free-tier limits. Generic defaults are excluded to avoid overstated savings on subscription or bundled plans.
+        Extra free-tier equivalents are counted only for complete additional quota blocks beyond the first included tier within the selected period.
     </p>
     <table>
         <tr>

@@ -562,6 +562,34 @@ class Analytics:
             )
         return total_cost
 
+    def _normalize_time_window(
+        self,
+        time_range: Optional[str] = None,
+        from_datetime: Optional[datetime] = None,
+        to_datetime: Optional[datetime] = None
+    ) -> tuple[datetime, datetime, str]:
+        now = datetime.now()
+
+        if from_datetime and to_datetime:
+            normalized_range = 'custom' if time_range not in ['yesterday'] else time_range
+            return from_datetime, to_datetime, normalized_range
+
+        if time_range == '1h':
+            return now - timedelta(hours=1), now, '1h'
+        if time_range == '6h':
+            return now - timedelta(hours=6), now, '6h'
+        if time_range == 'yesterday':
+            today = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            return today - timedelta(days=1), today - timedelta(microseconds=1), 'yesterday'
+        if time_range == '7d':
+            return now - timedelta(days=7), now, '7d'
+        if time_range == '30d':
+            return now - timedelta(days=30), now, '30d'
+        if time_range == '90d':
+            return now - timedelta(days=90), now, '90d'
+
+        return now - timedelta(hours=24), now, '24h'
+
     def get_token_usage_by_date_range(
         self,
         provider_id: Optional[str] = None,
@@ -584,8 +612,7 @@ class Analytics:
         Returns:
             Dictionary with token counts and cost estimates
         """
-        start = from_datetime or (datetime.now() - timedelta(days=1))
-        end = to_datetime or datetime.now()
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
         
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
@@ -686,10 +713,7 @@ class Analytics:
         """
         Get statistics for all providers.
         """
-        # Use local time to match how MySQL CURRENT_TIMESTAMP stores data
-        now_local = datetime.now()
-        start = (from_datetime if from_datetime else (now_local - timedelta(days=1)))
-        end = (to_datetime if to_datetime else now_local)
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
@@ -824,10 +848,10 @@ class Analytics:
         Returns:
             List of time-series data points
         """
-        # Determine time range
-        if time_range == 'custom' and from_datetime and to_datetime:
-            cutoff = from_datetime
-            end_time = to_datetime
+        cutoff, end_time, normalized_time_range = self._normalize_time_window(time_range, from_datetime, to_datetime)
+
+        # Determine time range bucket size
+        if normalized_time_range == 'custom':
             # Calculate bucket size based on range
             total_minutes = (end_time - cutoff).total_seconds() / 60
             if total_minutes <= 60:
@@ -842,39 +866,21 @@ class Analytics:
                 bucket_minutes = 60 * 24  # daily
             else:  # > 30 days
                 bucket_minutes = 60 * 24 * 7  # weekly
-        elif time_range == '1h':
-            cutoff = datetime.now() - timedelta(hours=1)
-            end_time = datetime.now()
+        elif normalized_time_range == '1h':
             bucket_minutes = 5
-        elif time_range == '6h':
-            cutoff = datetime.now() - timedelta(hours=6)
-            end_time = datetime.now()
+        elif normalized_time_range == '6h':
             bucket_minutes = 15
-        elif time_range == '24h':
-            cutoff = datetime.now() - timedelta(hours=24)
-            end_time = datetime.now()
+        elif normalized_time_range == '24h':
             bucket_minutes = 30
-        elif time_range == 'yesterday':
-            # Yesterday: from 00:00:00 to 23:59:59 of previous day
-            today = datetime.now().replace(hour=0, minute=0, second=0, microsecond=0)
-            cutoff = today - timedelta(days=1)
-            end_time = today - timedelta(microseconds=1)
+        elif normalized_time_range == 'yesterday':
             bucket_minutes = 30
-        elif time_range == '7d':
-            cutoff = datetime.now() - timedelta(days=7)
-            end_time = datetime.now()
+        elif normalized_time_range == '7d':
             bucket_minutes = 60 * 24  # Daily
-        elif time_range == '30d':
-            cutoff = datetime.now() - timedelta(days=30)
-            end_time = datetime.now()
+        elif normalized_time_range == '30d':
             bucket_minutes = 60 * 24  # Daily
-        elif time_range == '90d':
-            cutoff = datetime.now() - timedelta(days=90)
-            end_time = datetime.now()
+        elif normalized_time_range == '90d':
             bucket_minutes = 60 * 24  # Daily
         else:  # Default 24h
-            cutoff = datetime.now() - timedelta(hours=24)
-            end_time = datetime.now()
             bucket_minutes = 30
         
         # Query database for token usage in time range
@@ -1228,8 +1234,7 @@ class Analytics:
         rotation_filter: Optional[str] = None,
         autoselect_filter: Optional[str] = None
     ) -> Dict[str, Any]:
-        start = from_datetime or (datetime.now() - timedelta(days=1))
-        end = to_datetime or datetime.now()
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
         provider_stats = self.get_all_providers_stats(
             from_datetime,
@@ -1266,6 +1271,9 @@ class Analytics:
             if not tier_info:
                 continue
 
+            if tier_info.get('source') == 'default':
+                continue
+
             cached_usage = None
             try:
                 cached_row = self.db.get_provider_usage(None if user_filter == -1 else user_filter, provider_id)
@@ -1275,19 +1283,22 @@ class Analytics:
                 cached_usage = None
 
             runtime_quota = self._derive_quota_from_usage(provider_id, cached_usage)
-            free_limit = max(int((runtime_quota or {}).get('limit') or tier_info.get('limit', 0) or 0), 1)
+            free_limit = int((runtime_quota or {}).get('limit') or tier_info.get('limit', 0) or 0)
             limit_type = (runtime_quota or {}).get('limit_type') or tier_info.get('limit_type') or 'requests'
             period = (runtime_quota or {}).get('period') or tier_info.get('period') or 'month'
+
+            if free_limit <= 0:
+                continue
 
             if limit_type == 'tokens':
                 usage_amount = usage.get('tokens_used', 0) or 0
             else:
-                usage_amount = (runtime_quota or {}).get('used') or usage.get('request_count', 0) or 0
+                usage_amount = usage.get('request_count', 0) or 0
 
             if usage_amount <= free_limit:
                 continue
 
-            extra_free_tiers = usage_amount // free_limit
+            extra_free_tiers = max((usage_amount - 1) // free_limit, 0)
             if extra_free_tiers <= 0:
                 continue
 
@@ -1352,9 +1363,7 @@ class Analytics:
         Returns:
             Dictionary with cost estimates
         """
-        # Use date range for token usage if specified
-        start = from_datetime or (datetime.now() - timedelta(days=1))
-        end = to_datetime or datetime.now()
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
         
         # Get providers that have data
         providers = self.get_all_providers_stats(from_datetime, to_datetime, user_filter,
@@ -1558,9 +1567,7 @@ class Analytics:
         Per-rotation breakdown: which provider/model received what share of hits and tokens.
         Returns list of {rotation_id, entries: [{provider_id, model_name, requests, tokens, hit_pct, token_pct, avg_latency_ms}]}
         """
-        now = datetime.now()
-        start = from_datetime or (now - timedelta(days=1))
-        end = to_datetime or now
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
@@ -1628,9 +1635,7 @@ class Analytics:
         Returns list of {autoselect_id, entries: [{model_name, requests, tokens, hit_pct, token_pct, avg_latency_ms}]}
         Selection latency is stored as latency_ms on the 'autoselect' provider_id rows.
         """
-        now = datetime.now()
-        start = from_datetime or (now - timedelta(days=1))
-        end = to_datetime or now
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
         with self.db._get_connection() as conn:
             cursor = conn.cursor()
