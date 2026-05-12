@@ -588,7 +588,7 @@ async def api_import_market_listing(request: Request, listing_id: int):
     owner_username = listing.get('owner_username')
     reference_type_map = {
         'provider': 'provider',
-        'model': 'provider',
+        'model': 'model',
         'rotation': 'rotation',
         'autoselect': 'autoselect',
     }
