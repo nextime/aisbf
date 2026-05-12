@@ -222,6 +222,7 @@ const analyticsData = {
 </script>
 
 <script>
+const BASE_PATH = {{ request.scope.get('root_path', '') | tojson }};
 document.getElementById('timeRangeSelect').addEventListener('change', function() {
     var customRange = document.getElementById('customDateRange');
     if (this.value === 'custom') {
@@ -287,7 +288,7 @@ function escHtml(s) {
     // Search users via API
     async function searchUsers(query) {
         try {
-            const response = await fetch(`/api/users/search?q=${encodeURIComponent(query)}`);
+            const response = await fetch(`${BASE_PATH}/api/users/search?q=${encodeURIComponent(query)}`);
             const data = await response.json();
             return data.users || [];
         } catch (error) {
@@ -1033,7 +1034,7 @@ function confirmDeleteAnalytics(scope) {
         : 'Delete ALL analytics including all user data? This cannot be undone.';
     if (!confirm(msg)) return;
     if (!confirm('Are you sure? This is irreversible.')) return;
-    fetch('/api/admin/analytics/delete-' + scope, {method: 'POST'})
+    fetch(`${BASE_PATH}/api/admin/analytics/delete-${scope}`, {method: 'POST'})
         .then(r => r.json())
         .then(d => {
             alert('Deleted ' + d.deleted + ' records.');
@@ -1045,7 +1046,7 @@ function confirmDeleteAnalytics(scope) {
 {% endif %}
 
 <div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">
-    <a href="/dashboard" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>
     <a href="{{ url_for(request, '/dashboard/analytics/provider-quotas') }}" class="btn btn-secondary">Provider Quota Debug</a>
     {% if is_admin %}
     <a href="{{ url_for(request, '/dashboard/rate-limits') }}" class="btn">Rate Limits</a>

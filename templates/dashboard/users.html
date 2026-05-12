@@ -301,6 +301,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 <script>
 // Utility functions
+const BASE_PATH = {{ request.scope.get('root_path', '') | tojson }};
 const baseUrl = document.getElementById('url-data').dataset.baseUrl;
 function getUrlParams() {
     const params = new URLSearchParams(window.location.search);
@@ -773,7 +774,7 @@ async function performBulkAction(action, description, destructive = false, extra
         requestData.extra_data = extraData;
     }
 
-    fetch('/dashboard/users/bulk', {
+    fetch(`${BASE_PATH}/dashboard/users/bulk`, {
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
@@ -1092,7 +1093,7 @@ async function submitNotification() {
         return;
     }
     try {
-        const res = await fetch('/dashboard/api/admin/notifications/send', {
+        const res = await fetch(`${BASE_PATH}/dashboard/api/admin/notifications/send`, {
             method: 'POST',
             headers: {'Content-Type': 'application/json'},
             body: JSON.stringify({user_ids: _notifyUserIds, title, message})

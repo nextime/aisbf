@@ -10,6 +10,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from aisbf.routes.dashboard import market as dashboard_market
 from aisbf.routes.dashboard import providers as dashboard_providers
+from aisbf.routes.dashboard import settings as dashboard_settings
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from main import app
@@ -149,6 +150,25 @@ class RegistryStub:
 
     def get_config_database(self):
         return self._db
+
+
+class DashboardUsersDbStub:
+    def __init__(self):
+        self.paginated_calls = []
+
+    def get_users_paginated(self, **kwargs):
+        self.paginated_calls.append(kwargs)
+        return {
+            "users": [{"id": 1, "username": "alice", "display_name": "alice", "email": "alice@example.test", "role": "user", "tier_id": 10, "created_by": "admin", "created_at": "2026-01-01", "last_login": None, "is_active": True}],
+            "total": 1,
+        }
+
+    def get_all_tiers(self):
+        return [{"id": 10, "name": "Pro", "is_visible": True}]
+
+
+class DashboardSettingsRegistryStub(RegistryStub):
+    pass
 
 
 def _find_session_secret() -> str:
@@ -303,3 +323,73 @@ def test_market_page_uses_proxy_aware_market_api_urls(monkeypatch):
     assert 'const BASE_PATH = "/proxy/app"' in response.text
     assert "fetch(`${BASE_PATH}/api/market/listings`" in response.text
     assert "fetch('/api/market/listings'" not in response.text
+
+
+def test_dashboard_users_page_uses_proxy_aware_bulk_and_notification_urls(monkeypatch):
+    db = DashboardUsersDbStub()
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    monkeypatch.setattr(dashboard_settings, "DatabaseRegistry", DashboardSettingsRegistryStub(db))
+    monkeypatch.setattr(dashboard_settings, "_templates", capture)
+
+    response = client.get("/dashboard/users", headers=_forwarded_prefix_headers())
+
+    assert response.status_code == 200
+    assert capture.calls[-1]["name"] == "dashboard/users.html"
+    assert 'const BASE_PATH = "/proxy/app"' in response.text
+    assert "fetch(`${BASE_PATH}/dashboard/users/bulk`" in response.text
+    assert "fetch(`${BASE_PATH}/dashboard/api/admin/notifications/send`" in response.text
+    assert "fetch('/dashboard/users/bulk'" not in response.text
+    assert "fetch('/dashboard/api/admin/notifications/send'" not in response.text
+
+
+def test_analytics_page_uses_proxy_aware_search_delete_and_back_urls(monkeypatch):
+    capture = TemplateCapture()
+    request = type("Req", (), {"scope": {"root_path": "/proxy/app"}, "session": {}})()
+    response = capture.TemplateResponse(
+        request=request,
+        name="dashboard/analytics.html",
+        context={
+            "request": request,
+            "selected_time_range": "24h",
+            "from_date": None,
+            "to_date": None,
+            "date_range_usage": None,
+            "currency_symbol": "$",
+            "available_providers": [],
+            "available_models": [],
+            "available_rotations": [],
+            "available_autoselects": [],
+            "available_users": [
+                {"id": idx, "username": f"user{idx}", "role": "user"}
+                for idx in range(1, 26)
+            ],
+            "selected_provider": None,
+            "selected_model": None,
+            "selected_rotation": None,
+            "selected_autoselect": None,
+            "selected_user": None,
+            "global_only": "",
+            "is_admin": True,
+            "is_config_admin": True,
+            "provider_stats": [],
+            "cost_overview": {"total_estimated_cost_today": 0, "date_range": None, "providers": []},
+            "optimization_savings": None,
+            "model_performance": [],
+            "token_over_time": "[]",
+            "rotation_breakdown": [],
+            "autoselect_breakdown": [],
+        },
+    )
+
+    response_text = response.body.decode()
+
+    assert 'const BASE_PATH = "/proxy/app"' in response_text
+    assert "fetch(`${BASE_PATH}/api/users/search?q=${encodeURIComponent(query)}`)" in response_text
+    assert "fetch(`${BASE_PATH}/api/admin/analytics/delete-${scope}`, {method: 'POST'})" in response_text
+    assert '<a href="/proxy/app/dashboard" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>' in response_text
+    assert "fetch(`/api/users/search?q=${encodeURIComponent(query)}`)" not in response_text
+    assert "fetch('/api/admin/analytics/delete-' + scope" not in response_text
+    assert '<a href="/dashboard" class="btn btn-secondary" data-i18n="analytics_page.back">Back to Dashboard</a>' not in response_text

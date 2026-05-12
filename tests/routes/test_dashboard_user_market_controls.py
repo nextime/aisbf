@@ -101,6 +101,10 @@ class RegistryStub:
         return self._db
 
 
+class DashboardSettingsRegistryStub(RegistryStub):
+    pass
+
+
 class AsyncJsonRequest:
     def __init__(self, session, body):
         self.session = session
@@ -349,3 +353,20 @@ def test_dashboard_context_middleware_hides_market_link_when_market_disabled(mon
     assert response.status_code == 200
     assert templates.calls[-1]["request"].state.market_enabled is False
     assert ">Market</a>" not in response.text
+
+
+def test_admin_payment_settings_uses_proxy_aware_market_admin_link(monkeypatch):
+    db = MarketSettingsDbStub()
+    templates = TemplateCapture()
+    templates._env.globals["url_for"] = lambda request, path, **kwargs: f"{request.scope.get('root_path', '')}{path}"
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    monkeypatch.setattr(dashboard_admin, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_admin, "_templates", templates)
+
+    response = client.get("/dashboard/admin/payment-settings", headers={"X-Forwarded-Prefix": "/proxy/app"})
+
+    assert response.status_code == 200
+    assert 'href="/proxy/app/dashboard/admin/market"' in response.text
+    assert 'href="/dashboard/admin/market"' not in response.text
