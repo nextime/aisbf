@@ -234,6 +234,27 @@ def _apply_listing_derived_fields(listing: dict, db):
     return _attach_analytics_snapshot(listing)
 
 
+async def resolve_market_reference(reference_id: int, user_id: int) -> dict:
+    db = DatabaseRegistry.get_config_database()
+    reference = db.get_market_import_reference(reference_id)
+    if not reference or reference.get('user_id') != user_id:
+        raise ValueError('market reference not found')
+
+    listing = db.get_market_listing(reference.get('listing_id'))
+    if not listing or not listing.get('is_active'):
+        raise ValueError('market reference unavailable')
+
+    return {
+        'reference': reference,
+        'listing': listing,
+        'listing_id': listing.get('id'),
+        'owner_user_id': listing.get('owner_user_id'),
+        'owner_username': listing.get('owner_username'),
+        'source_type': listing.get('source_type'),
+        'source_id': listing.get('source_id'),
+    }
+
+
 def _listing_scope_priority(listing: dict) -> int:
     return 1 if listing.get('source_scope') == 'global' else 0
 

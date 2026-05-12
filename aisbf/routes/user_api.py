@@ -6,6 +6,7 @@ from aisbf.models import ChatCompletionRequest
 from aisbf.database import DatabaseRegistry
 from aisbf.app.model_cache import get_provider_models
 from aisbf.studio_services import studio_service
+from aisbf.routes.dashboard.market import resolve_market_reference
 
 router = APIRouter()
 _config = None
@@ -48,6 +49,27 @@ def parse_provider_from_model(model: str) -> tuple[str, str]:
         parts = model.split('/', 1)
         return parts[0], parts[1]
     return None, model
+
+
+async def _resolve_runtime_market_reference(handler, resource_id: str, user_id: int, expected_type: str) -> dict | None:
+    if not user_id or not resource_id.startswith('market-ref:'):
+        return None
+    if resource_id not in getattr(handler, 'user_providers', {}) and resource_id not in getattr(handler, 'rotations', {}) and resource_id not in getattr(handler, 'autoselects', {}):
+        return None
+    try:
+        reference_id = int(resource_id.split(':', 1)[1])
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=400, detail='Invalid market reference id')
+    try:
+        resolved = await resolve_market_reference(reference_id, user_id)
+    except ValueError as exc:
+        message = str(exc)
+        if 'unavailable' in message:
+            raise HTTPException(status_code=400, detail='Market reference unavailable')
+        raise HTTPException(status_code=404, detail='Market reference not found')
+    if resolved.get('source_type') != expected_type:
+        raise HTTPException(status_code=400, detail='Market reference type mismatch')
+    return resolved
 
 
 def _normalize_studio_proxy_body(endpoint_path: str, body: dict) -> dict:
@@ -349,6 +371,12 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
     body_dict = body.model_dump()
     if provider_id == "user-autoselect":
         handler = _get_user_handler('autoselect', user_id)
+        market_reference = await _resolve_runtime_market_reference(handler, actual_model, user_id, 'autoselect')
+        if market_reference:
+            owner_handler = _get_user_handler('autoselect', market_reference['owner_user_id'])
+            body_dict['model'] = market_reference['source_id']
+            token_id = getattr(request.state, 'token_id', None)
+            return await owner_handler.handle_autoselect_request(market_reference['source_id'], body_dict, user_id, token_id)
         if actual_model not in handler.user_autoselects:
             raise HTTPException(status_code=400, detail=f"User autoselect '{actual_model}' not found. Available: {list(handler.user_autoselects.keys())}")
         body_dict['model'] = actual_model
@@ -359,6 +387,12 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
             return await handler.handle_autoselect_request(actual_model, body_dict, user_id, token_id)
     if provider_id == "user-rotation":
         handler = _get_user_handler('rotation', user_id)
+        market_reference = await _resolve_runtime_market_reference(handler, actual_model, user_id, 'rotation')
+        if market_reference:
+            owner_handler = _get_user_handler('rotation', market_reference['owner_user_id'])
+            body_dict['model'] = market_reference['source_id']
+            token_id = getattr(request.state, 'token_id', None)
+            return await owner_handler.handle_rotation_request(market_reference['source_id'], body_dict, user_id, token_id)
         if actual_model not in handler.rotations:
             raise HTTPException(status_code=400, detail=f"User rotation '{actual_model}' not found. Available: {list(handler.rotations.keys())}")
         body_dict['model'] = actual_model
@@ -366,6 +400,13 @@ async def user_chat_completions(request: Request, username: str, body: ChatCompl
         return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
     if provider_id == "user-provider":
         handler = _get_user_handler('request', user_id)
+        market_reference = await _resolve_runtime_market_reference(handler, actual_model, user_id, 'provider')
+        if market_reference:
+            owner_handler = _get_user_handler('request', market_reference['owner_user_id'])
+            body_dict['model'] = market_reference['source_id']
+            if body.stream:
+                return await owner_handler.handle_streaming_chat_completion(request, market_reference['source_id'], body_dict)
+            return await owner_handler.handle_chat_completion(request, market_reference['source_id'], body_dict)
         if actual_model not in handler.user_providers:
             raise HTTPException(status_code=400, detail=f"User provider '{actual_model}' not found. Available: {list(handler.user_providers.keys())}")
         body_dict['model'] = actual_model

@@ -234,7 +234,7 @@ def test_ensure_market_enabled_respects_market_settings_enabled_contract(monkeyp
     assert settings["enabled"] is False
 
 
-def test_admin_payment_settings_embeds_market_admin_controls_and_listings(monkeypatch):
+def test_admin_payment_settings_links_to_dedicated_market_admin_page(monkeypatch):
     db = MarketSettingsDbStub()
     templates = TemplateCapture()
     client = TestClient(app)
@@ -248,10 +248,10 @@ def test_admin_payment_settings_embeds_market_admin_controls_and_listings(monkey
     assert response.status_code == 200
     assert templates.calls[-1]["name"] == "dashboard/admin_payment_settings.html"
     assert templates.calls[-1]["context"]["market_settings"]["enabled"] is True
-    assert templates.calls[-1]["context"]["market_listings"][0]["title"] == "Flux Dev Pack"
+    assert "market_listings" not in templates.calls[-1]["context"]
     assert "Enable market" in response.text
     assert "Market Administration" in response.text
-    assert "Flux Dev Pack" in response.text
+    assert "Open Market Administration" in response.text
 
 
 def test_base_nav_hides_market_admin_link(monkeypatch):

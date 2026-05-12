@@ -2,11 +2,13 @@ import json
 import sys
 from base64 import b64encode
 from pathlib import Path
+import pytest
 
 from fastapi.responses import HTMLResponse
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 from jinja2 import Environment, FileSystemLoader, select_autoescape
+from aisbf.models import ChatCompletionRequest
 
 from aisbf.routes.dashboard import market as dashboard_market
 
@@ -165,6 +167,13 @@ class MarketReferenceImportDbStub:
     def get_market_settings(self):
         return dict(self.market_settings)
 
+    def get_user_by_id(self, user_id):
+        if user_id == 11:
+            return {"id": 11, "username": "buyer"}
+        if user_id == 7:
+            return {"id": 7, "username": "seller"}
+        return None
+
     def get_market_listing(self, listing_id):
         listings = {
             self.listing["id"]: self.listing,
@@ -243,6 +252,43 @@ class RegistryStub:
         return self._db
 
 
+class RuntimeUserHandlerStub:
+    def __init__(self):
+        self.calls = []
+        self.user_providers = {}
+        self.rotations = {}
+        self.autoselects = {}
+        self.user_autoselects = {}
+
+    async def handle_chat_completion(self, request, provider_id, body_dict):
+        self.calls.append(("provider", provider_id, body_dict))
+        return {"ok": True, "provider_id": provider_id, "model": body_dict.get("model")}
+
+    async def handle_rotation_request(self, rotation_id, body_dict, user_id, token_id):
+        self.calls.append(("rotation", rotation_id, body_dict, user_id, token_id))
+        return {"ok": True, "rotation_id": rotation_id}
+
+    async def handle_autoselect_request(self, autoselect_id, body_dict, user_id, token_id):
+        self.calls.append(("autoselect", autoselect_id, body_dict, user_id, token_id))
+        return {"ok": True, "autoselect_id": autoselect_id}
+
+
+class MarketReferenceRuntimeDbStub(MarketReferenceImportDbStub):
+    def admin_set_market_listing_active(self, listing_id, is_active):
+        listing = self.get_market_listing(listing_id)
+        if not listing:
+            return False
+        if listing_id == self.listing["id"]:
+            self.listing["is_active"] = bool(is_active)
+        elif listing_id == self.rotation_listing["id"]:
+            self.rotation_listing["is_active"] = bool(is_active)
+        elif listing_id == self.model_listing["id"]:
+            self.model_listing["is_active"] = bool(is_active)
+        elif listing_id == self.autoselect_listing["id"]:
+            self.autoselect_listing["is_active"] = bool(is_active)
+        return True
+
+
 def _find_session_secret() -> str:
     for middleware in app.user_middleware:
         kwargs = getattr(middleware, "kwargs", {})
@@ -270,6 +316,155 @@ def _login_as_user(client: TestClient, user_id: int = 11) -> None:
             "expires_at": 4102444800,
         },
     )
+
+
+def _login_user_api_request(client: TestClient, username: str = "buyer", user_id: int = 11) -> None:
+    _set_session_cookie(
+        client,
+        {
+            "logged_in": True,
+            "username": username,
+            "role": "user",
+            "user_id": user_id,
+            "expires_at": 4102444800,
+        },
+    )
+
+
+@pytest.fixture
+def runtime_fixture(monkeypatch):
+    db = MarketReferenceRuntimeDbStub()
+    reference_id = db.create_market_import_reference(
+        user_id=11,
+        listing_id=db.listing["id"],
+        reference_type="provider",
+        display_name=db.listing["title"],
+        owner_username=db.listing["owner_username"],
+        source_type=db.listing["source_type"],
+        source_id=db.listing["source_id"],
+    )
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    return {
+        "db": db,
+        "handler": dashboard_market,
+        "reference_id": reference_id,
+        "buyer_user_id": 11,
+        "listing_id": db.listing["id"],
+        "seller_user_id": db.listing["owner_user_id"],
+    }
+
+
+@pytest.mark.asyncio
+async def test_market_reference_resolves_to_source_listing_at_runtime(runtime_fixture):
+    handler = runtime_fixture["handler"]
+
+    resolved = await handler.resolve_market_reference(runtime_fixture["reference_id"], runtime_fixture["buyer_user_id"])
+
+    assert resolved["listing_id"] == runtime_fixture["listing_id"]
+    assert resolved["owner_user_id"] == runtime_fixture["seller_user_id"]
+    assert resolved["source_id"] == "seller-provider"
+
+
+@pytest.mark.asyncio
+async def test_market_reference_rejects_disabled_listing(runtime_fixture):
+    runtime_fixture["db"].admin_set_market_listing_active(runtime_fixture["listing_id"], False)
+    handler = runtime_fixture["handler"]
+
+    with pytest.raises(ValueError, match="unavailable"):
+        await handler.resolve_market_reference(runtime_fixture["reference_id"], runtime_fixture["buyer_user_id"])
+
+
+class DirectRequestStub:
+    def __init__(self, user_id: int):
+        self.state = type("State", (), {})()
+        self.state.user_id = user_id
+        self.state.is_admin = False
+        self.state.is_global_token = False
+        self.state.token_id = None
+
+
+@pytest.mark.asyncio
+async def test_user_provider_market_reference_executes_via_seller_handler(monkeypatch):
+    db = MarketReferenceRuntimeDbStub()
+    buyer_handler = RuntimeUserHandlerStub()
+    seller_handler = RuntimeUserHandlerStub()
+
+    reference_id = db.create_market_import_reference(
+        user_id=11,
+        listing_id=db.listing["id"],
+        reference_type="provider",
+        display_name=db.listing["title"],
+        owner_username=db.listing["owner_username"],
+        source_type=db.listing["source_type"],
+        source_id=db.listing["source_id"],
+    )
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes import user_api
+    monkeypatch.setattr(user_api, "DatabaseRegistry", RegistryStub(db))
+
+    def fake_get_user_handler(kind, user_id=None):
+        if kind == "request" and user_id in (None, 11):
+            buyer_handler.user_providers = {f"market-ref:{reference_id}": {"market_reference": True}}
+            return buyer_handler
+        if kind == "request" and user_id == 7:
+            return seller_handler
+        raise AssertionError((kind, user_id))
+
+    monkeypatch.setattr(user_api, "_get_user_handler", fake_get_user_handler)
+
+    result = await user_api.user_chat_completions(
+        DirectRequestStub(11),
+        "buyer",
+        ChatCompletionRequest(model=f"user-provider/market-ref:{reference_id}", messages=[{"role": "user", "content": "hi"}]),
+    )
+
+    assert result["provider_id"] == "seller-provider"
+    assert len(seller_handler.calls) == 1
+    call_kind, provider_id, payload = seller_handler.calls[0]
+    assert call_kind == "provider"
+    assert provider_id == "seller-provider"
+    assert payload["model"] == "seller-provider"
+    assert payload["messages"][0]["content"] == "hi"
+
+
+@pytest.mark.asyncio
+async def test_user_provider_market_reference_rejects_unavailable_listing_at_runtime(monkeypatch):
+    db = MarketReferenceRuntimeDbStub()
+    buyer_handler = RuntimeUserHandlerStub()
+
+    reference_id = db.create_market_import_reference(
+        user_id=11,
+        listing_id=db.listing["id"],
+        reference_type="provider",
+        display_name=db.listing["title"],
+        owner_username=db.listing["owner_username"],
+        source_type=db.listing["source_type"],
+        source_id=db.listing["source_id"],
+    )
+    db.admin_set_market_listing_active(db.listing["id"], False)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes import user_api
+    monkeypatch.setattr(user_api, "DatabaseRegistry", RegistryStub(db))
+
+    def fake_get_user_handler(kind, user_id=None):
+        if kind == "request" and user_id in (None, 11):
+            buyer_handler.user_providers = {f"market-ref:{reference_id}": {"market_reference": True}}
+            return buyer_handler
+        raise AssertionError((kind, user_id))
+
+    monkeypatch.setattr(user_api, "_get_user_handler", fake_get_user_handler)
+
+    with pytest.raises(Exception) as exc_info:
+        await user_api.user_chat_completions(
+            DirectRequestStub(11),
+            "buyer",
+            ChatCompletionRequest(model=f"user-provider/market-ref:{reference_id}", messages=[{"role": "user", "content": "hi"}]),
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "Market reference unavailable"
 
 
 def _seed_dashboard_market_reference_mix(db: MarketReferenceImportDbStub) -> None:
