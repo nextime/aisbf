@@ -331,6 +331,12 @@ def _login_user_api_request(client: TestClient, username: str = "buyer", user_id
     )
 
 
+def _load_json_parse_bootstrap(response_text: str, marker: str):
+    prefix = f"{marker} = JSON.parse("
+    js_string_literal = response_text.split(prefix, 1)[1].split(");", 1)[0]
+    return json.loads(json.loads(js_string_literal))
+
+
 @pytest.fixture
 def runtime_fixture(monkeypatch):
     db = MarketReferenceRuntimeDbStub()
@@ -591,35 +597,53 @@ def test_dashboard_providers_bootstrap_handles_quote_heavy_market_reference_data
     assert response.status_code == 200
     assert "let rawProviders = JSON.parse(" in response.text
     bootstrap_fragment = response.text.split("let rawProviders = JSON.parse(", 1)[1].split("\n", 1)[0]
+    raw_providers = _load_json_parse_bootstrap(response.text, "let rawProviders")
     assert '</script><script>alert(1)</script>' not in bootstrap_fragment
     assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e' in bootstrap_fragment
-    assert 'alice' in bootstrap_fragment
-    assert 'Provider' in bootstrap_fragment
+    assert raw_providers[1]["config"]["name"] == 'Alice\'s "Provider" </script><script>alert(1)</script>'
+    assert raw_providers[1]["config"]["owner_username"] == "alice'broker</script>"
+    assert raw_providers[1]["config"]["source_id"] == "alice-provider'x</script>"
 
 
 def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
-    db = MarketReferenceImportDbStub()
     capture = TemplateCapture()
-    client = TestClient(app)
-    _set_session_cookie(
-        client,
-        {
-            "logged_in": True,
-            "username": "config-admin",
-            "role": "admin",
-            "expires_at": 4102444800,
+
+    providers_payload = {
+        "danger-provider": {
+            "name": 'Admin "Provider" </script><script>alert(2)</script>',
+            "type": "openai",
+            "endpoint": "https://danger.example/v1</script>",
+            "models": [],
+        }
+    }
+    request = type("Req", (), {"scope": {"root_path": ""}, "session": {}})()
+    response = capture.TemplateResponse(
+        request=request,
+        name="dashboard/providers.html",
+        context={
+            "request": request,
+            "session": {},
+            "__version__": "test",
+            "providers_json": json.dumps(providers_payload),
+            "studio_capability_choices_json": "[]",
+            "studio_adapter_choices_json": "[]",
+            "studio_adapter_profile_choices_json": "[]",
+            "claude_cli_mode": False,
+            "is_local_client": True,
+            "success": None,
         },
     )
 
-    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
-    from aisbf.routes.dashboard import providers as dashboard_providers
-    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
-    monkeypatch.setattr(dashboard_providers, "_templates", capture)
-
-    response = client.get("/dashboard/providers")
+    response_text = response.body.decode()
 
     assert response.status_code == 200
-    assert "let providersData = JSON.parse(" in response.text
+    assert "let providersData = JSON.parse(" in response_text
+    providers_bootstrap = _load_json_parse_bootstrap(response_text, "let providersData")
+    bootstrap_fragment = response_text.split("let providersData = JSON.parse(", 1)[1].split("\n", 1)[0]
+    assert '</script><script>alert(2)</script>' not in bootstrap_fragment
+    assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(2)\\u003c/script\\u003e' in bootstrap_fragment
+    assert providers_bootstrap["danger-provider"]["name"] == 'Admin "Provider" </script><script>alert(2)</script>'
+    assert providers_bootstrap["danger-provider"]["endpoint"] == "https://danger.example/v1</script>"
 
 
 def test_dashboard_rotations_renders_market_reference_alongside_local_rotation(monkeypatch):
