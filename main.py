@@ -362,9 +362,11 @@ async def _run_startup() -> None:
 
     # Background tasks
     from aisbf.app.model_cache import prefetch_global_provider_models, refresh_model_cache
+    from aisbf.providers.runpod import runpod_idle_shutdown_loop
     asyncio.create_task(prefetch_global_provider_models(config))
     if _app_state['_cache_refresh_task'] is None:
         _app_state['_cache_refresh_task'] = asyncio.create_task(refresh_model_cache(config))
+    _background_tasks.add(asyncio.create_task(runpod_idle_shutdown_loop()))
 
     logger.info(f"=== AISBF {__version__} Started ===")
     logger.info(f"Providers: {list(config.providers.keys()) if config else []}")

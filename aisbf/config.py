@@ -80,6 +80,7 @@ class ProviderConfig(BaseModel):
     codex_config: Optional[Dict] = None  # Optional Codex-specific configuration - DEPRECATED
     qwen_config: Optional[Dict] = None  # Optional Qwen-specific configuration - DEPRECATED
     coderai_config: Optional[Dict] = None  # Optional CoderAI-specific configuration
+    runpod_config: Optional[Dict] = None  # Optional RunPod-specific configuration
     # Default settings for models in this provider
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None

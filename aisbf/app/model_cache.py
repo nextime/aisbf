@@ -26,6 +26,16 @@ def _is_broker_only_coderai(provider_config) -> bool:
     return bool(coderai_config.get('broker_mode', False))
 
 
+def _is_runpod_public_provider(provider_config) -> bool:
+    provider_type = getattr(provider_config, 'type', '')
+    if provider_type != 'runpod':
+        return False
+    runpod_config = getattr(provider_config, 'runpod_config', None) or {}
+    if not isinstance(runpod_config, dict):
+        return False
+    return str(runpod_config.get('mode') or '').lower() == 'public'
+
+
 def _cache_key_for_provider(provider_id: str, user_id: Optional[int] = None) -> str:
     return f"{provider_id}:{user_id}" if user_id is not None else provider_id
 
@@ -135,6 +145,39 @@ async def refresh_model_cache(config):
 
 async def get_provider_models(provider_id: str, provider_config, config, user_id: Optional[int] = None) -> list:
     current_time = int(time.time())
+
+    if _is_runpod_public_provider(provider_config):
+        from aisbf.database import DatabaseRegistry
+
+        db = DatabaseRegistry.get_config_database()
+        provider_scope = 'user' if user_id is not None else 'global'
+        state = db.get_runpod_provider_state(provider_scope, user_id, provider_id)
+        catalog = []
+        if state:
+            catalog = state.get('public_catalog_json') or []
+        if catalog:
+            models = []
+            for item in catalog:
+                model_id = item.get('id') or item.get('name') or ''
+                if not model_id:
+                    continue
+                models.append({
+                    'id': f"{provider_id}/{model_id}",
+                    'object': 'model',
+                    'created': current_time,
+                    'owned_by': provider_config.name,
+                    'provider': provider_id,
+                    'type': 'provider',
+                    'model_name': model_id,
+                    'capabilities': item.get('capabilities', []),
+                    'description': item.get('description'),
+                    'architecture': item.get('architecture'),
+                    'pricing': item.get('pricing'),
+                    'supported_parameters': item.get('supported_parameters'),
+                    'source': 'api_cache',
+                })
+            if models:
+                return models
 
     try:
         from aisbf.providers import get_provider_handler
