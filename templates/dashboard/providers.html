@@ -306,10 +306,10 @@ const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
 const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 // Marker used by the AISBF Chrome Extension to auto-detect this page and configure itself.
 window.AISBF_PROVIDERS_PAGE = { serverUrl: window.location.origin + BASE_PATH };
-let providersData = {{ providers_json | replace("</script>", "<\\/script>") | safe }};
-const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices_json | safe }};
-const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices_json | safe }};
-const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices_json | safe }};
+let providersData = JSON.parse({{ providers_json | tojson }});
+const STUDIO_CAPABILITY_CHOICES = JSON.parse({{ studio_capability_choices_json | tojson }});
+const STUDIO_ADAPTER_CHOICES = JSON.parse({{ studio_adapter_choices_json | tojson }});
+const STUDIO_ADAPTER_PROFILE_CHOICES = JSON.parse({{ studio_adapter_profile_choices_json | tojson }});
 let expandedProviders = new Set();
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;

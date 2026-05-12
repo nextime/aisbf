@@ -571,6 +571,36 @@ def test_market_references_do_not_render_local_edit_controls(monkeypatch):
     assert 'Edit Market Reference' not in response.text
 
 
+def test_dashboard_providers_bootstrap_handles_quote_heavy_market_reference_data(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    db.reference_rows[0]["display_name"] = 'Alice\'s "Provider"'
+    db.reference_rows[0]["owner_username"] = "alice'broker"
+    db.reference_rows[0]["source_id"] = 'alice-provider\'x'
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/providers")
+
+    assert response.status_code == 200
+    assert "let rawProviders = JSON.parse(" in response.text
+    parse_block = response.text.split("let rawProviders = JSON.parse(", 1)[1].split(");", 1)[0]
+
+    context = capture.calls[-1]["context"]
+    serialized = context["user_providers_json"]
+    assert "Alice's \\\"Provider\\\"" in serialized
+    assert "alice'broker" in serialized
+    assert "alice-provider'x" in serialized
+    assert "Provider" in parse_block
+    assert "alice" in parse_block
+
+
 def test_dashboard_rotations_renders_market_reference_alongside_local_rotation(monkeypatch):
     db = MarketReferenceImportDbStub()
     _seed_dashboard_market_reference_mix(db)

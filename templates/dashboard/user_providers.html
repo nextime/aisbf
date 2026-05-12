@@ -311,14 +311,14 @@ async function apiCall(method, url, body) {
 }
 
 let providersData = {};
-const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices_json | safe }};
-const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices_json | safe }};
-const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices_json | safe }};
+const STUDIO_CAPABILITY_CHOICES = JSON.parse({{ studio_capability_choices_json | tojson }});
+const STUDIO_ADAPTER_CHOICES = JSON.parse({{ studio_adapter_choices_json | tojson }});
+const STUDIO_ADAPTER_PROFILE_CHOICES = JSON.parse({{ studio_adapter_profile_choices_json | tojson }});
 let expandedProviders = new Set();
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
 let providerSearchFilter = '';
-let rawProviders = {{ user_providers_json | replace("</script>", "<\\/script>") | safe }};
+let rawProviders = JSON.parse({{ user_providers_json | tojson }});
 let providerMasterOrder = [];
 let _providerDS = null;
 
