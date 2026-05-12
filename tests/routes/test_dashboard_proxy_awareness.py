@@ -232,6 +232,10 @@ def test_admin_providers_template_uses_single_proxy_aware_base_path(monkeypatch)
     assert capture.calls[-1]["name"] == "dashboard/providers.html"
     assert response.text.count('const BASE_PATH = "/proxy/app";') == 1
     assert 'window.location.href = `${BASE_PATH}/dashboard/providers?success=1`;' in response.text
+    assert "`${BASE_PATH}/dashboard/api/provider`" in response.text
+    assert "apiCall('DELETE', `${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(key)}`)" in response.text
+    assert "apiCall('POST', '/dashboard/api/provider'" not in response.text
+    assert "apiCall('DELETE', '/dashboard/api/provider/" not in response.text
 
 
 def test_user_rotations_page_uses_proxy_aware_search_urls(monkeypatch):
@@ -249,7 +253,11 @@ def test_user_rotations_page_uses_proxy_aware_search_urls(monkeypatch):
     assert response.status_code == 200
     assert 'const BASE_PATH = "/proxy/app"' in response.text
     assert "fetch(`${BASE_PATH}/dashboard/providers/" in response.text
+    assert "`${BASE_PATH}/dashboard/api/rotation`" in response.text
+    assert "`${BASE_PATH}/dashboard/api/rotation/${encodeURIComponent(key)}`" in response.text
     assert "fetch('/dashboard/providers/" not in response.text
+    assert "apiCall('POST', '/dashboard/api/rotation'" not in response.text
+    assert "apiCall('DELETE', '/dashboard/api/rotation/" not in response.text
 
 
 def test_admin_autoselect_template_uses_proxy_aware_cancel_link():
@@ -274,6 +282,10 @@ def test_admin_autoselect_template_uses_proxy_aware_cancel_link():
 
     assert '<a href="/dashboard" class="btn btn-secondary">Cancel</a>' not in response_text
     assert '<a href="/proxy/app/dashboard" class="btn btn-secondary">Cancel</a>' in response_text
+    assert "`${BASE_PATH}/dashboard/api/autoselect`" in response_text
+    assert "`${BASE_PATH}/dashboard/api/autoselect/${encodeURIComponent(key)}`" in response_text
+    assert "apiCall('POST', '/dashboard/api/autoselect'" not in response_text
+    assert "apiCall('DELETE', '/dashboard/api/autoselect/" not in response_text
 
 
 def test_market_page_uses_proxy_aware_market_api_urls(monkeypatch):

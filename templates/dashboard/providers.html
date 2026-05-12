@@ -2530,7 +2530,7 @@ async function saveProvider(key) {
     const statusEl = document.getElementById(`save-status-${key}`);
     if (statusEl) statusEl.textContent = window.i18n.t('providers.saving');
     try {
-        const result = await apiCall('POST', '/dashboard/api/provider', {
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/provider`, {
             provider_id: key,
             config: providersData[key]
         });
@@ -2547,7 +2547,7 @@ async function saveProvider(key) {
 async function removeProvider(key) {
     if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('providers.remove_provider_confirm'), {key}), window.i18n.t('providers.remove_provider_title'))) {
         try {
-            const result = await apiCall('DELETE', '/dashboard/api/provider/' + encodeURIComponent(key));
+            const result = await apiCall('DELETE', `${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(key)}`);
             if (!result.success) {
                 showAlert('Error removing provider: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
                 return;
@@ -2714,7 +2714,7 @@ async function rotateCoderAIToken(key) {
         statusEl.style.color = 'var(--color-muted)';
     }
     try {
-        const result = await apiCall('POST', `/dashboard/api/provider/${encodeURIComponent(key)}/coderai-token`, {});
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(key)}/coderai-token`, {});
         if (!result.success) throw new Error(result.error || 'Unknown error');
         if (!providersData[key].coderai_config) providersData[key].coderai_config = {};
         providersData[key].coderai_config.registration_token = result.registration_token;
@@ -2883,7 +2883,7 @@ async function confirmAddProvider() {
 
     // Immediately persist the new provider
     try {
-        const result = await apiCall('POST', '/dashboard/api/provider', {
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/provider`, {
             provider_id: key,
             config: providersData[key]
         });

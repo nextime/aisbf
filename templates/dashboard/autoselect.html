@@ -602,7 +602,7 @@ async function saveAutoselectItem(key) {
     }
     if (statusEl) statusEl.textContent = window.i18n.t('autoselect.saving');
     try {
-        const result = await apiCall('POST', '/dashboard/api/autoselect', {
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/autoselect`, {
             autoselect_id: key,
             config: autoselectConfig[key]
         });
@@ -625,7 +625,7 @@ async function copyAutoselect(sourceKey) {
     cloned.model_name = newKey;
     autoselectConfig[newKey] = cloned;
     try {
-        const result = await apiCall('POST', '/dashboard/api/autoselect', { autoselect_id: newKey, config: cloned });
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/autoselect`, { autoselect_id: newKey, config: cloned });
         if (!result.success) {
             showAlert('Error copying autoselect: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
             delete autoselectConfig[newKey];
@@ -651,7 +651,7 @@ async function addAutoselect() {
     const newCfg = { model_name: key, description: '', selection_model: '', fallback: '', available_models: [] };
     autoselectConfig[key] = newCfg;
     try {
-        const result = await apiCall('POST', '/dashboard/api/autoselect', { autoselect_id: key, config: newCfg });
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/autoselect`, { autoselect_id: key, config: newCfg });
         if (!result.success) {
             showAlert('Error creating autoselect: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
             delete autoselectConfig[key];
@@ -670,7 +670,7 @@ async function addAutoselect() {
 async function removeAutoselect(key) {
     if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('autoselect.remove_confirm'), {key}), window.i18n.t('autoselect.remove_title'))) {
         try {
-            const result = await apiCall('DELETE', '/dashboard/api/autoselect/' + encodeURIComponent(key));
+            const result = await apiCall('DELETE', `${BASE_PATH}/dashboard/api/autoselect/${encodeURIComponent(key)}`);
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
         } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete autoselectConfig[key];

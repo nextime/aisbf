@@ -556,7 +556,7 @@ async function saveRotation(key) {
     const statusEl = document.getElementById(`rot-save-status-${key}`);
     if (statusEl) statusEl.textContent = window.i18n.t('rotations.saving');
     try {
-        const result = await apiCall('POST', '/dashboard/api/rotation', {
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/rotation`, {
             rotation_id: key,
             config: rotationsConfig.rotations[key]
         });
@@ -579,7 +579,7 @@ async function copyRotation(sourceKey) {
     cloned.model_name = newKey;
     rotationsConfig.rotations[newKey] = cloned;
     try {
-        const result = await apiCall('POST', '/dashboard/api/rotation', { rotation_id: newKey, config: cloned });
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/rotation`, { rotation_id: newKey, config: cloned });
         if (!result.success) {
             showAlert('Error copying rotation: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
             delete rotationsConfig.rotations[newKey];
@@ -606,7 +606,7 @@ async function addRotation() {
     const newCfg = { model_name: key, notifyerrors: false, capabilities: [], providers: [] };
     rotationsConfig.rotations[key] = newCfg;
     try {
-        const result = await apiCall('POST', '/dashboard/api/rotation', { rotation_id: key, config: newCfg });
+        const result = await apiCall('POST', `${BASE_PATH}/dashboard/api/rotation`, { rotation_id: key, config: newCfg });
         if (!result.success) {
             showAlert('Error creating rotation: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger');
             delete rotationsConfig.rotations[key];
@@ -625,7 +625,7 @@ async function addRotation() {
 async function removeRotation(key) {
     if (await showDangerConfirm(window.i18n.interpolate(window.i18n.t('rotations.remove_confirm'), {key}), window.i18n.t('rotations.remove_title'))) {
         try {
-            const result = await apiCall('DELETE', '/dashboard/api/rotation/' + encodeURIComponent(key));
+            const result = await apiCall('DELETE', `${BASE_PATH}/dashboard/api/rotation/${encodeURIComponent(key)}`);
             if (!result.success) { showAlert('Error: ' + (result.error || 'Unknown'), 'Error', '❌', 'danger'); return; }
         } catch (e) { showAlert('Error: ' + e.message, 'Error', '❌', 'danger'); return; }
         delete rotationsConfig.rotations[key];
