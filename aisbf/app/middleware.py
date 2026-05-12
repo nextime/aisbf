@@ -327,6 +327,12 @@ def make_dashboard_context_middleware():
                         request.url.hostname.endswith('.aisbf.cloud'))
             is_onion = request.url.hostname == 'aisbfity4ud6nsht53tsh2iauaur2e4dah2gplcprnikyjpkg72vfjad.onion'
             request.state.is_aisbf_cloud = is_cloud or is_onion
+            try:
+                from aisbf.database import DatabaseRegistry
+                market_settings = DatabaseRegistry.get_config_database().get_market_settings()
+                request.state.market_enabled = bool(market_settings.get('enabled'))
+            except Exception:
+                request.state.market_enabled = True
             if request.session.get('logged_in', False):
                 request.state.welcome_shown = request.session.get('welcome_shown', False)
             else:

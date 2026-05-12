@@ -14,6 +14,7 @@ from aisbf.routes.dashboard import market as dashboard_market
 from aisbf.routes.dashboard import admin as dashboard_admin
 from aisbf.routes.dashboard import settings as dashboard_settings
 from aisbf.routes.dashboard.admin import api_save_market_settings
+from aisbf.database import DatabaseRegistry
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from main import app
@@ -326,3 +327,25 @@ def test_base_nav_hides_market_link_when_market_disabled(monkeypatch):
     )
 
     assert ">Market</a>" not in html
+
+
+def test_dashboard_context_middleware_hides_market_link_when_market_disabled(monkeypatch):
+    original_instances = DatabaseRegistry._instances
+    db = MarketSettingsDbStub()
+    db.current["enabled"] = False
+    DatabaseRegistry._instances = {"config": db}
+
+    templates = TemplateCapture()
+    monkeypatch.setattr(dashboard_settings, "_templates", templates)
+
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    try:
+        response = client.get("/dashboard/settings")
+    finally:
+        DatabaseRegistry._instances = original_instances
+
+    assert response.status_code == 200
+    assert templates.calls[-1]["request"].state.market_enabled is False
+    assert ">Market</a>" not in response.text
