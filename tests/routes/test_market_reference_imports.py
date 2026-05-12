@@ -601,6 +601,31 @@ def test_dashboard_providers_bootstrap_handles_quote_heavy_market_reference_data
     assert "alice" in parse_block
 
 
+def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _set_session_cookie(
+        client,
+        {
+            "logged_in": True,
+            "username": "config-admin",
+            "role": "admin",
+            "expires_at": 4102444800,
+        },
+    )
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/providers")
+
+    assert response.status_code == 200
+    assert "let providersData = JSON.parse(" in response.text
+
+
 def test_dashboard_rotations_renders_market_reference_alongside_local_rotation(monkeypatch):
     db = MarketReferenceImportDbStub()
     _seed_dashboard_market_reference_mix(db)
