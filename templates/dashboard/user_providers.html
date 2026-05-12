@@ -340,6 +340,11 @@ function _providerSupportsUsage(key) {
     return p && p.type === 'codex';
 }
 
+function isMarketReferenceProvider(key) {
+    const provider = providersData[key];
+    return !!(provider && provider.market_reference);
+}
+
 function _fmtSeconds(s) {
     if (!s || s <= 0) return '0s';
     const h = Math.floor(s/3600), m = Math.floor((s%3600)/60), sec = s%60;
@@ -653,6 +658,7 @@ function renderProvidersList() {
     } else {
         pageKeys.forEach(key => {
             const provider = providersData[key];
+            const isMarketReference = isMarketReferenceProvider(key);
             const providerItem = document.createElement('div');
             providerItem.className = 'provider-item';
             providerItem.dataset.sortKey = key;
@@ -672,9 +678,10 @@ function renderProvidersList() {
                         <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                         <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
+                        ${isMarketReference ? '<span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span><span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>' : ''}
                         ${compactBadge}
                     </div>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>
+                    ${isMarketReference ? '' : `<button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>`}
                 </div>
                 <div id="provider-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
                 </div>
@@ -762,6 +769,19 @@ function toggleProvider(key) {
 function renderProviderDetails(key) {
     const container = document.getElementById(`provider-details-${key}`);
     const provider = providersData[key];
+    if (provider && provider.market_reference) {
+        container.innerHTML = `
+            <div data-market-reference="true" style="border: 1px solid var(--color-border); border-radius: 6px; padding: 16px; background: var(--bg-page);">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                    <span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span>
+                    <span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>
+                </div>
+                <p style="margin:0 0 8px 0;"><strong>Source:</strong> ${escHtmlAttr(provider.owner_username || 'Unknown')} / ${escHtmlAttr(provider.source_id || '')}</p>
+                <p style="margin:0;"><strong>Availability:</strong> ${escHtmlAttr(provider.availability || 'unavailable')}</p>
+            </div>
+        `;
+        return;
+    }
     const safeKey = key.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const isKiroProvider = provider.type === 'kiro';
     const isClaudeProvider = provider.type === 'claude';

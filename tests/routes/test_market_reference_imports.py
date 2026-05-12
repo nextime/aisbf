@@ -46,6 +46,9 @@ class MarketReferenceImportDbStub:
         self.recorded_imports = []
         self.created_references = []
         self.reference_rows = []
+        self.user_providers = []
+        self.user_rotations = []
+        self.user_autoselects = []
         self.listing = {
             "id": 55,
             "owner_user_id": 7,
@@ -196,6 +199,12 @@ class MarketReferenceImportDbStub:
                 return dict(row)
         return None
 
+    def list_market_import_references(self, user_id):
+        return [dict(row) for row in self.reference_rows if row["user_id"] == user_id]
+
+    def get_sort_order(self, user_id, resource_type):
+        return None
+
     def save_user_provider(self, user_id, provider_name, config):
         self.saved_user_providers.append((user_id, provider_name, config))
 
@@ -217,13 +226,13 @@ class MarketReferenceImportDbStub:
         return len(self.recorded_imports)
 
     def get_user_providers(self, user_id):
-        return []
+        return [dict(row) for row in self.user_providers]
 
     def get_user_rotations(self, user_id):
-        return []
+        return [dict(row) for row in self.user_rotations]
 
     def get_user_autoselects(self, user_id):
-        return []
+        return [dict(row) for row in self.user_autoselects]
 
 
 class RegistryStub:
@@ -261,6 +270,154 @@ def _login_as_user(client: TestClient, user_id: int = 11) -> None:
             "expires_at": 4102444800,
         },
     )
+
+
+def _seed_dashboard_market_reference_mix(db: MarketReferenceImportDbStub) -> None:
+    provider_reference = {
+        "id": 1,
+        "user_id": 11,
+        "listing_id": 55,
+        "reference_type": "provider",
+        "display_name": "Alice Provider",
+        "owner_username": "alice",
+        "source_type": "provider",
+        "source_id": "alice-provider",
+        "is_active": True,
+    }
+    rotation_reference = {
+        "id": 2,
+        "user_id": 11,
+        "listing_id": 56,
+        "reference_type": "rotation",
+        "display_name": "Alice Rotation",
+        "owner_username": "alice",
+        "source_type": "rotation",
+        "source_id": "alice-rotation",
+        "is_active": True,
+    }
+    autoselect_reference = {
+        "id": 3,
+        "user_id": 11,
+        "listing_id": 57,
+        "reference_type": "autoselect",
+        "display_name": "Alice Autoselect",
+        "owner_username": "alice",
+        "source_type": "autoselect",
+        "source_id": "alice-autoselect",
+        "is_active": True,
+    }
+    db.reference_rows = [provider_reference, rotation_reference, autoselect_reference]
+    db.user_providers = [
+        {
+            "provider_id": "local-provider",
+            "config": {"name": "Local Provider", "type": "openai", "models": []},
+            "created_at": None,
+            "updated_at": None,
+        }
+    ]
+    db.user_rotations = [
+        {
+            "rotation_id": "local-rotation",
+            "config": {"model_name": "Local Rotation", "providers": []},
+        }
+    ]
+    db.user_autoselects = [
+        {
+            "autoselect_id": "local-autoselect",
+            "config": {
+                "model_name": "Local Autoselect",
+                "description": "Local chooser",
+                "selection_model": "internal",
+                "fallback": "",
+                "available_models": [],
+            },
+        }
+    ]
+
+
+def test_dashboard_providers_renders_market_reference_alongside_local_provider(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/providers")
+
+    assert response.status_code == 200
+    assert "Local Provider" in response.text
+    assert "Alice Provider" in response.text
+    assert "Market-linked" in response.text
+    assert "Read-only" in response.text
+
+
+def test_market_references_do_not_render_local_edit_controls(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/providers")
+
+    assert response.status_code == 200
+    assert 'data-market-reference="true"' in response.text
+    assert 'removeProvider(\'market-ref:1\')' not in response.text
+    assert 'Edit Market Reference' not in response.text
+
+
+def test_dashboard_rotations_renders_market_reference_alongside_local_rotation(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/rotations")
+
+    assert response.status_code == 200
+    assert "Local Rotation" in response.text
+    assert "Alice Rotation" in response.text
+    assert "Market-linked" in response.text
+    assert "Read-only" in response.text
+    assert 'copyRotation(\'market-ref:2\')' not in response.text
+
+
+def test_dashboard_autoselect_renders_market_reference_alongside_local_entry(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/autoselect")
+
+    assert response.status_code == 200
+    assert "Local Autoselect" in response.text
+    assert "Alice Autoselect" in response.text
+    assert "Market-linked" in response.text
+    assert "Read-only" in response.text
+    assert 'copyAutoselect(\'market-ref:3\')' not in response.text
 
 
 def test_import_market_listing_creates_market_reference_for_provider(monkeypatch):

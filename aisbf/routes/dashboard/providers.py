@@ -27,6 +27,32 @@ _server_config = None
 logger = logging.getLogger(__name__)
 
 
+def _serialize_market_reference(reference: dict, listing: dict | None) -> dict:
+    listing = listing or {}
+    return {
+        'id': f"market-ref:{reference['id']}",
+        'name': reference.get('display_name') or reference.get('source_id') or reference.get('reference_type') or 'Market Reference',
+        'type': reference.get('reference_type'),
+        'market_reference': True,
+        'read_only': True,
+        'owner_username': reference.get('owner_username'),
+        'listing_id': reference.get('listing_id'),
+        'source_type': reference.get('source_type'),
+        'source_id': reference.get('source_id'),
+        'availability': 'active' if listing.get('is_active') else 'unavailable',
+    }
+
+
+def _list_dashboard_market_references(db, user_id: int, reference_type: str) -> list[dict]:
+    references = []
+    for reference in db.list_market_import_references(user_id) or []:
+        if reference.get('reference_type') != reference_type:
+            continue
+        listing = db.get_market_listing(reference.get('listing_id')) if reference.get('listing_id') else None
+        references.append(_serialize_market_reference(reference, listing))
+    return references
+
+
 def _serialize_provider_usage_snapshot(snapshot):
     if not snapshot:
         return None
@@ -432,6 +458,14 @@ async def dashboard_providers(request: Request):
                 _ensure_coderai_token(provider['config']),
                 broker_status_map,
             )
+        provider_references = _list_dashboard_market_references(db, current_user_id, 'provider')
+        for reference in provider_references:
+            user_providers.append({
+                'provider_id': reference['id'],
+                'config': reference,
+                'created_at': None,
+                'updated_at': None,
+            })
         providers_data = user_providers
     
     # Check for success parameter
@@ -1180,6 +1214,8 @@ async def dashboard_rotations(request: Request):
         rotations_data = {"rotations": {}, "notifyerrors": False}
         for rotation in user_rotations:
             rotations_data["rotations"][rotation['rotation_id']] = rotation['config']
+        for reference in _list_dashboard_market_references(db, current_user_id, 'rotation'):
+            rotations_data["rotations"][reference['id']] = reference
     
     # Get available providers - user-specific for database users
     if is_config_admin:
@@ -1404,6 +1440,8 @@ async def dashboard_autoselect(request: Request):
         autoselect_data = {}
         for autoselect in user_autoselects:
             autoselect_data[autoselect['autoselect_id']] = autoselect['config']
+        for reference in _list_dashboard_market_references(db, current_user_id, 'autoselect'):
+            autoselect_data[reference['id']] = reference
     
     # Check for success parameter
     success = request.query_params.get('success')

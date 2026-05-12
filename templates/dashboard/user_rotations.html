@@ -273,6 +273,7 @@ function renderRotationsList() {
 
     rotationMasterOrder.filter(k => k in (rotationsConfig.rotations || {})).forEach(key => {
         const rotation = rotationsConfig.rotations[key];
+        const isMarketReference = !!(rotation && rotation.market_reference);
         const rotationItem = document.createElement('div');
         rotationItem.className = 'rotation-item';
         rotationItem.dataset.sortKey = key;
@@ -289,10 +290,11 @@ function renderRotationsList() {
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                     <span style="color: var(--color-muted); font-size: 14px;">(${providerCount} ${window.i18n.t(providerCount !== 1 ? 'rotations.providers_plural' : 'rotations.providers_singular')})</span>
+                    ${isMarketReference ? '<span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span><span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>' : ''}
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyRotation('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('rotations.copy')}</button>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('rotations.remove')}</button>
+                    ${isMarketReference ? '' : `<button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyRotation('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('rotations.copy')}</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeRotation('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('rotations.remove')}</button>`}
                 </div>
             </div>
             <div id="rotation-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
@@ -337,6 +339,19 @@ function toggleRotation(key) {
 function renderRotationDetails(rotationKey) {
     const container = document.getElementById(`rotation-details-${rotationKey}`);
     const rotation = rotationsConfig.rotations[rotationKey];
+    if (rotation && rotation.market_reference) {
+        container.innerHTML = `
+            <div data-market-reference="true" style="border: 1px solid var(--color-border); border-radius: 6px; padding: 16px; background: var(--bg-page);">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                    <span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span>
+                    <span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>
+                </div>
+                <p style="margin:0 0 8px 0;"><strong>Source:</strong> ${escHtmlAttr(rotation.owner_username || 'Unknown')} / ${escHtmlAttr(rotation.source_id || '')}</p>
+                <p style="margin:0;"><strong>Availability:</strong> ${escHtmlAttr(rotation.availability || 'unavailable')}</p>
+            </div>
+        `;
+        return;
+    }
     const safeRKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const inheritedCaps = Array.isArray(rotation.capabilities) ? rotation.capabilities : [];
     const partialCaps = Array.isArray(rotation.partial_capabilities) ? rotation.partial_capabilities : [];

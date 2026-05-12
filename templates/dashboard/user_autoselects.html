@@ -292,6 +292,7 @@ function renderAutoselectList() {
 
     visibleKeys.forEach(key => {
         const autoselect = autoselectConfig[key];
+        const isMarketReference = !!(autoselect && autoselect.market_reference);
         const autoselectItem = document.createElement('div');
         autoselectItem.className = 'autoselect-item';
         autoselectItem.dataset.sortKey = key;
@@ -308,10 +309,11 @@ function renderAutoselectList() {
                     <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                     <strong style="font-size: 16px;">${escHtml(autoselect.model_name || key)}</strong>
                     <span style="color: var(--color-muted); font-size: 14px;">(${modelCount} ${modelCount !== 1 ? window.i18n.t('autoselect.models_plural') : window.i18n.t('autoselect.models_singular')})</span>
+                    ${isMarketReference ? '<span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span><span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>' : ''}
                 </div>
                 <div style="display: flex; gap: 8px;">
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyAutoselect('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('autoselect.copy')}</button>
-                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('autoselect.remove')}</button>
+                    ${isMarketReference ? '' : `<button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); copyAutoselect('${safeKey}')" style="padding: 5px 15px;">${window.i18n.t('autoselect.copy')}</button>
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeAutoselect('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('autoselect.remove')}</button>`}
                 </div>
             </div>
             <div id="autoselect-details-${escHtmlAttr(key)}" style="display: ${isExpanded ? 'block' : 'none'}; padding: 20px; border-top: 1px solid var(--color-border); background: var(--bg-panel);">
@@ -357,6 +359,19 @@ function toggleAutoselect(key) {
 function renderAutoselectDetails(autoselectKey) {
     const container = document.getElementById(`autoselect-details-${autoselectKey}`);
     const autoselect = autoselectConfig[autoselectKey];
+    if (autoselect && autoselect.market_reference) {
+        container.innerHTML = `
+            <div data-market-reference="true" style="border: 1px solid var(--color-border); border-radius: 6px; padding: 16px; background: var(--bg-page);">
+                <div style="display:flex; gap:8px; flex-wrap:wrap; margin-bottom:10px;">
+                    <span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span>
+                    <span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>
+                </div>
+                <p style="margin:0 0 8px 0;"><strong>Source:</strong> ${escHtml(autoselect.owner_username || 'Unknown')} / ${escHtml(autoselect.source_id || '')}</p>
+                <p style="margin:0;"><strong>Availability:</strong> ${escHtml(autoselect.availability || 'unavailable')}</p>
+            </div>
+        `;
+        return;
+    }
     const safeAKey = autoselectKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
     const inheritedCaps = Array.isArray(autoselect.capabilities) ? autoselect.capabilities : [];
     const partialCaps = Array.isArray(autoselect.partial_capabilities) ? autoselect.partial_capabilities : [];
