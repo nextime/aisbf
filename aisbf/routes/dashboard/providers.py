@@ -595,7 +595,7 @@ async def dashboard_studio(request: Request):
             "session": request.session,
             "__version__": __version__,
             "studio_bootstrap_json": json.dumps(catalog),
-            "studio_root_path_json": json.dumps("/api/v1") if is_config_admin else json.dumps(f"/api/u/{request.session.get('username', '')}"),
+            "studio_root_path_json": json.dumps("/dashboard/api/studio") if is_config_admin else json.dumps(f"/dashboard/api/studio/u/{request.session.get('username', '')}"),
             "studio_username_json": json.dumps(request.session.get("username", "")),
             "studio_is_global_admin_json": json.dumps(is_config_admin),
             "studio_system_prompt_json": json.dumps(studio_service.load_studio_system_prompt(scope, current_user_id)),

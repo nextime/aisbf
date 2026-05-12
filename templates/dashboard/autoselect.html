@@ -67,6 +67,10 @@ const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 function _providerIdFromModel(modelId) {
     // model IDs in autoselect are like "provider_id/model_name"
     if (!modelId) return null;
+    if (typeof modelId === 'object') {
+        modelId = modelId.model_id || modelId.id || modelId.name || '';
+    }
+    if (typeof modelId !== 'string') return null;
     const parts = modelId.split('/');
     return parts.length > 1 ? parts[0] : null;
 }
@@ -141,7 +145,7 @@ async function _refreshAutoselectUsage() {
     const pids = new Set();
     Object.values(autoselectConfig).forEach(as => {
         (as.available_models || []).forEach(m => {
-            const pid = _providerIdFromModel(m.id || m);
+            const pid = _providerIdFromModel(m.model_id || m.id || m);
             if (_providerSupportsUsage(pid)) pids.add(pid);
         });
     });
@@ -336,6 +340,8 @@ function renderAutoselectList() {
         _autoselectDS.attach();
     }
 }
+
+document.addEventListener('i18n:ready', renderAutoselectList);
 
 function toggleAutoselect(key) {
     if (expandedAutoselects.has(key)) {

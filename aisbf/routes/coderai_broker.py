@@ -6,7 +6,7 @@ import time
 import asyncio
 from typing import Optional
 
-from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, HTTPException, Query, WebSocket, WebSocketDisconnect, Body
 from fastapi.responses import JSONResponse
 
 from aisbf.coderai_broker import broker
@@ -15,6 +15,26 @@ from aisbf.coderai_registry import validate_coderai_registration_token
 
 router = APIRouter()
 logger = logging.getLogger(__name__)
+
+
+def _coderai_register_payload(
+    provider_id: str,
+    client_id: str,
+    username: str,
+    owner_user_id: Optional[int],
+    scope_name: str,
+) -> dict:
+    return {
+        "v": 1,
+        "event": "registered",
+        "provider_id": provider_id,
+        "client_id": client_id,
+        "username": username,
+        "scope_name": scope_name,
+        "accepted": True,
+        "owner_user_id": owner_user_id,
+        "expires_at": int(time.time()) + 86400,
+    }
 
 
 async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
@@ -26,21 +46,14 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
     if not valid:
         await websocket.close(code=1008, reason=error or "registration rejected")
         return
-    await websocket.accept()
-    expected_scope = scope_name
-    session = await broker.register(websocket, provider_id, client_id, metadata={"source": "websocket", "owner_user_id": owner_user_id, "username": username, "scope_name": expected_scope, "proxy_scheme": websocket.url.scheme})
+        await websocket.accept()
+        expected_scope = scope_name
+        session = await broker.register(websocket, provider_id, client_id, metadata={"source": "websocket", "owner_user_id": owner_user_id, "username": username, "scope_name": expected_scope, "proxy_scheme": websocket.url.scheme})
 
     try:
-        await websocket.send_text(json.dumps({
-            "v": 1,
-            "event": "registered",
-            "session_id": session.session_id,
-            "provider_id": session.provider_id,
-            "client_id": session.client_id,
-            "username": username,
-            "scope_name": expected_scope,
-            "accepted": True,
-        }))
+        payload = _coderai_register_payload(session.provider_id, session.client_id, username, owner_user_id, expected_scope)
+        payload["session_id"] = session.session_id
+        await websocket.send_text(json.dumps(payload))
         while True:
             try:
                 raw = await asyncio.wait_for(websocket.receive_text(), timeout=1.0)
@@ -78,14 +91,8 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
                         "request_id": message.get("request_id"),
                         "status": "ok",
                         "payload": {
-                            "accepted": True,
+                            **_coderai_register_payload(session.provider_id, session.client_id, username, owner_user_id, expected_scope),
                             "session_id": session.session_id,
-                            "provider_id": session.provider_id,
-                            "client_id": session.client_id,
-                            "owner_user_id": owner_user_id,
-                            "username": username,
-                            "scope_name": expected_scope,
-                            "expires_at": int(time.time()) + 86400,
                         },
                     }))
                     continue
@@ -124,6 +131,30 @@ async def coderai_broker_websocket_global(websocket: WebSocket):
 @router.websocket("/api/u/{username}/coderai/wss")
 async def coderai_broker_websocket_user(websocket: WebSocket, username: str):
     await _coderai_broker_websocket_impl(websocket, username)
+
+
+@router.post("/api/coderai/register")
+async def coderai_register_global(body: dict = Body(default={})):  # nosec B008
+    provider_id = body.get("provider_id") or "coderai"
+    client_id = body.get("client_id") or f"anon-{int(time.time())}"
+    username = body.get("username") or "global"
+    presented_token = body.get("registration_token")
+    valid, owner_user_id, _provider_config, error = validate_coderai_registration_token(provider_id, presented_token, username=username)
+    if not valid:
+        raise HTTPException(status_code=403, detail=error or "registration rejected")
+    return _coderai_register_payload(provider_id, client_id, username, owner_user_id, "global")
+
+
+@router.post("/api/u/{username}/coderai/register")
+async def coderai_register_user(username: str, body: dict = Body(default={})):  # nosec B008
+    provider_id = body.get("provider_id") or "coderai"
+    client_id = body.get("client_id") or f"anon-{int(time.time())}"
+    presented_token = body.get("registration_token")
+    effective_username = body.get("username") or username
+    valid, owner_user_id, _provider_config, error = validate_coderai_registration_token(provider_id, presented_token, username=effective_username)
+    if not valid:
+        raise HTTPException(status_code=403, detail=error or "registration rejected")
+    return _coderai_register_payload(provider_id, client_id, effective_username, owner_user_id, effective_username)
 
 
 @router.get("/api/coderai/broker/sessions")

@@ -99,7 +99,7 @@ try { studioBootstrap = studioBootstrapEl ? JSON.parse(studioBootstrapEl.textCon
 const studioScope = studioBootstrap.scope || 'admin';
 const studioOwnerId = studioBootstrap.owner_id || null;
 const studioEntries = Array.isArray(studioBootstrap.entries) ? studioBootstrap.entries : [];
-const STUDIO_API_BASE = window.__studioApiBase || '/api/v1';
+const STUDIO_API_BASE = window.__studioApiBase || '/dashboard/api/studio';
 const STUDIO_USERNAME = window.__studioUsername || '';
 const STUDIO_IS_GLOBAL_ADMIN = !!window.__studioIsGlobalAdmin;
 const STUDIO_SYSTEM_PROMPT = typeof window.__studioSystemPrompt === 'string' ? window.__studioSystemPrompt : '';
@@ -118,11 +118,18 @@ function buildStudioUrl(path) {
 }
 
 function buildBindingApiUrl(bindingId) {
-  return buildStudioUrl(`/studio/function-bindings/${encodeURIComponent(bindingId)}`);
+  return buildStudioUrl(`/function-bindings/${encodeURIComponent(bindingId)}`);
+}
+
+function scopeApiPath(path) {
+  if (!path) return path;
+  if (path.startsWith('/api/v1/')) return buildStudioUrl(path.slice('/api/v1'.length));
+  if (path.startsWith('/v1/')) return buildStudioUrl(path.slice('/v1'.length));
+  return buildStudioUrl(path);
 }
 
 function buildAdminApiUrl(path) {
-  return `/admin/api${path}`;
+  return `${STUDIO_API_BASE}${path}`;
 }
 
 function buildCharacterAdminUrl(name) {
@@ -146,15 +153,15 @@ function buildVoiceDeleteUrl(name) {
 }
 
 function buildVoiceListUrl() {
-  return STUDIO_IS_GLOBAL_ADMIN ? '/admin/api/voices' : buildStudioUrl('/audio/voices');
+  return STUDIO_IS_GLOBAL_ADMIN ? buildAdminApiUrl('/audio/voices') : buildStudioUrl('/audio/voices');
 }
 
 function buildCharacterListUrl() {
-  return STUDIO_IS_GLOBAL_ADMIN ? '/admin/api/characters' : buildStudioUrl('/characters');
+  return STUDIO_IS_GLOBAL_ADMIN ? buildAdminApiUrl('/characters') : buildStudioUrl('/characters');
 }
 
 function buildEnvironmentListUrl() {
-  return STUDIO_IS_GLOBAL_ADMIN ? '/admin/api/environments' : buildStudioUrl('/environments');
+  return STUDIO_IS_GLOBAL_ADMIN ? buildAdminApiUrl('/environments') : buildStudioUrl('/environments');
 }
 
 function studioFetch(input, init) {
@@ -235,7 +242,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/video/dub` or `/api/u/{username}/video/dub`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/video/dub` request and its multi-model payload.'
     ],
-    backendPath:'/api/v1/video/dub',
+    backendPath: scopeApiPath('/v1/video/dub'),
     io:'Input: source video. Output: dubbed video with optional subtitle burn-in.'
   },
   'aud-gen': {
@@ -248,7 +255,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/audio/generate` or `/api/u/{username}/audio/generate`.',
       'Actual support still depends on the selected provider/model accepting the forwarded `v1/audio/generations` request.'
     ],
-    backendPath:'/api/v1/audio/generate',
+    backendPath: scopeApiPath('/v1/audio/generate'),
     io:'Input: prompt and optional melody reference. Output: generated audio clip via proxied provider route.'
   },
   'aud-music-dub': {
@@ -261,7 +268,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF does not currently expose `/api/v1/pipelines/audio-music-dub` or a user-scoped equivalent.',
       'No local remix, stem isolation, or fallback pipeline should be implied.'
     ],
-    backendPath:'/api/v1/pipelines/audio-music-dub',
+    backendPath: scopeApiPath('/v1/pipelines/audio-music-dub'),
     io:'Input: source song plus language goals. Output: proxied music dubbing artifacts when supported.'
   },
   'aud-understand': {
@@ -274,7 +281,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF does not currently expose `/api/v1/pipelines/audio-understand` or a user-scoped equivalent.',
       'Transcript + chat remains a manual workflow, not an integrated Studio backend path.'
     ],
-    backendPath:'/api/v1/pipelines/audio-understand',
+    backendPath: scopeApiPath('/v1/pipelines/audio-understand'),
     io:'Input: source audio or video. Output: proxied audio reasoning response when supported.'
   },
   'aud-stems': {
@@ -313,7 +320,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/audio/clone` or `/api/u/{username}/audio/clone`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/audio/clone` request.'
     ],
-    backendPath:'/api/v1/audio/clone',
+    backendPath: scopeApiPath('/v1/audio/clone'),
     io:'Input: text plus either a saved voice profile or reference audio/text. Output: synthesized cloned voice audio.'
   },
   'aud-convert': {
@@ -326,7 +333,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/audio/convert` or `/api/u/{username}/audio/convert`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/audio/convert` request.'
     ],
-    backendPath:'/api/v1/audio/convert',
+    backendPath: scopeApiPath('/v1/audio/convert'),
     io:'Input: source audio plus a target voice or voice profile. Output: converted audio via proxied provider route.'
   },
   'embed': {
@@ -404,7 +411,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/images/outfit` or `/api/u/{username}/images/outfit`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/images/outfit` request.'
     ],
-    backendPath:'/api/v1/images/outfit',
+    backendPath: scopeApiPath('/v1/images/outfit'),
     io:'Input: source image or video plus outfit prompt. Output: transformed media via proxied provider route.'
   },
   'img-depth': {
@@ -417,7 +424,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/images/depth` or `/api/u/{username}/images/depth`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/images/depth` request.'
     ],
-    backendPath:'/api/v1/images/depth',
+    backendPath: scopeApiPath('/v1/images/depth'),
     io:'Input: image. Output: depth map.'
   },
   'vid-interp': {
@@ -430,7 +437,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/video/interpolate` or `/api/u/{username}/video/interpolate`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/video/interpolate` request.'
     ],
-    backendPath:'/api/v1/video/interpolate',
+    backendPath: scopeApiPath('/v1/video/interpolate'),
     io:'Input: video or keyframes. Output: interpolated video.'
   },
   'vid-sub': {
@@ -443,7 +450,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/video/subtitle` or `/api/u/{username}/video/subtitle`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/video/subtitle` request.'
     ],
-    backendPath:'/api/v1/video/subtitle',
+    backendPath: scopeApiPath('/v1/video/subtitle'),
     io:'Input: video. Output: subtitle text or burned video.'
   },
   '3d-img-to3d': {
@@ -456,7 +463,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/images/to3d` or `/api/u/{username}/images/to3d`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/images/to3d` request.'
     ],
-    backendPath:'/api/v1/images/to3d',
+    backendPath: scopeApiPath('/v1/images/to3d'),
     io:'Input: image. Output: stereo image or mesh artifact.'
   },
   '3d-vid-to3d': {
@@ -469,7 +476,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/video/to3d` or `/api/u/{username}/video/to3d`.',
       'Actual success depends on the selected provider/model accepting the forwarded `v1/video/to3d` request.'
     ],
-    backendPath:'/api/v1/video/to3d',
+    backendPath: scopeApiPath('/v1/video/to3d'),
     io:'Input: video. Output: stereoscopic video or 3D artifact.'
   },
   '3d-from3d': {
@@ -482,7 +489,7 @@ const STUDIO_CAPABILITIES = {
       'AISBF now proxies this Studio panel through `/api/v1/images/from3d`, `/api/v1/video/from3d`, and user-scoped equivalents.',
       'Actual success depends on the selected provider/model accepting the forwarded 3D render request.'
     ],
-    backendPath:'/api/v1/images/from3d',
+    backendPath: scopeApiPath('/v1/images/from3d'),
     io:'Input: 3D asset. Output: rendered image or turntable video.'
   }
 };
@@ -1560,7 +1567,7 @@ function ensureDefaultBindingSelections() {
 
 async function loadFunctionBindings() {
   try {
-    const res = await dashboardFetch(buildStudioUrl('/studio/function-bindings'));
+    const res = await dashboardFetch(buildStudioUrl('/function-bindings'));
     if (!res.ok) throw new Error(await res.text());
     const data = await res.json();
     functionBindingDefs = Array.isArray(data.definitions) ? data.definitions : [];
@@ -1582,7 +1589,7 @@ async function loadModels() {
 
 async function loadLocalCapabilities() {
   try {
-    const r = await dashboardFetch('/admin/api/cached-models');
+    const r = await dashboardFetch(buildAdminApiUrl('/cached-models'));
     if (!r.ok) return;
     const d = await r.json();
     _localCapSet.clear();
@@ -3633,7 +3640,7 @@ async function genSTT() {
   if (val('as-lang')) fd.append('language', val('as-lang'));
   if (val('as-prompt')) fd.append('prompt', val('as-prompt'));
   try {
-    const d = await postForm('/v1/audio/transcriptions', fd);
+    const d = await postForm('/audio/transcriptions', fd);
     $('as-out').innerHTML = `<div class="gen-out-inner" style="width:100%;text-align:left">
       <pre style="white-space:pre-wrap;font-size:13px;line-height:1.6;background:var(--surface-2);padding:.75rem;border-radius:6px;width:100%;box-sizing:border-box">${d.text || JSON.stringify(d,null,2)}</pre>
       <button class="btn btn-ghost btn-sm" onclick="navigator.clipboard.writeText(${JSON.stringify(d.text||'')})">Copy</button>
@@ -4380,7 +4387,7 @@ profEnvLoad();
 profVoiceLoad();
 initRequestPreviews();
 initPipelineBuilder();
-dashboardFetch('/admin/api/tokens').then(r => r.json()).then(tokens => {
+dashboardFetch(buildAdminApiUrl('/tokens')).then(r => r.json()).then(tokens => {
   if (Array.isArray(tokens) && tokens.length) apiToken = tokens[0].token;
 }).catch(() => {});
 
@@ -4555,7 +4562,7 @@ async function pbRun() {
   $('pb-prog').textContent = 'Running…';
   $('pb-out').innerHTML = '';
   try {
-    const d = await post('/v1/pipelines/run', {...def, input: val('pb-input')});
+    const d = await post('/pipelines/run', {...def, input: val('pb-input')});
     _renderPipelineResult('pb-out', 'pb-prog', d);
   } catch(e) { $('pb-prog').textContent = 'Error: '+e.message; }
 }
@@ -4568,7 +4575,7 @@ async function runCustomPipeline(id) {
   if (out) out.innerHTML = '';
   try {
     const input = val(`cpr-input-${id}`) || '';
-    const d = await post(`/v1/pipelines/custom/${id}/run`, {input});
+    const d = await post(`/pipelines/custom/${id}/run`, {input});
     _renderPipelineResult(`cpr-out-${id}`, `cpr-prog-${id}`, d);
   } catch(e) { if (prog) prog.textContent = 'Error: '+e.message; }
 }

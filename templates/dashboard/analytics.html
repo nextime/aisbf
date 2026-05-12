@@ -342,7 +342,7 @@ function escHtml(s) {
         
         if (query.length === 0) {
             // Show all users option
-            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username=window.i18n.t('analytics.all_users') style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
+            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username="" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
             resultsDiv.style.display = 'block';
             
             document.querySelector('.user-result-item').addEventListener('mouseenter', function() {
@@ -369,7 +369,7 @@ function escHtml(s) {
     // Handle focus
     searchInput.addEventListener('focus', function() {
         if (this.value.trim().length === 0) {
-            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username=window.i18n.t('analytics.all_users') style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
+            resultsDiv.innerHTML = '<div class="user-result-item" data-user-id="" data-username="" style="padding: 10px; cursor: pointer; border-bottom: 1px solid #2a4a7a;">All Users</div>';
             resultsDiv.style.display = 'block';
             
             document.querySelector('.user-result-item').addEventListener('mouseenter', function() {

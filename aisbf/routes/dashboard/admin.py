@@ -15,6 +15,18 @@ from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_
 from aisbf.studio_services import studio_service
 import httpx
 
+
+def _dashboard_studio_user_scope(request: Request, username: str) -> tuple[str, Optional[int]]:
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        raise HTTPException(status_code=401, detail="Not authenticated")
+    current_username = request.session.get('username')
+    user_id = request.session.get('user_id')
+    is_config_admin = request.session.get('role') == 'admin' and user_id is None
+    if current_username != username and not is_config_admin:
+        raise HTTPException(status_code=403, detail="Forbidden")
+    return "user", user_id
+
 router = APIRouter()
 _config = None
 _templates = None
@@ -24,6 +36,14 @@ logger = logging.getLogger(__name__)
 
 @router.get("/admin/api/cached-models")
 async def admin_cached_models(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse(studio_service.get_cached_models())
+
+
+@router.get("/dashboard/api/studio/cached-models")
+async def dashboard_studio_cached_models(request: Request):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -42,6 +62,18 @@ async def admin_tokens(request: Request):
     return JSONResponse(db.get_user_api_tokens(user_id))
 
 
+@router.get("/dashboard/api/studio/tokens")
+async def dashboard_studio_tokens(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    user_id = request.session.get('user_id')
+    if not user_id:
+        return JSONResponse([])
+    db = DatabaseRegistry.get_config_database()
+    return JSONResponse(db.get_user_api_tokens(user_id))
+
+
 @router.get("/admin/api/characters")
 async def admin_characters(request: Request):
     auth_check = require_dashboard_auth(request)
@@ -50,8 +82,27 @@ async def admin_characters(request: Request):
     return JSONResponse(studio_service.list_characters("admin", None))
 
 
+@router.get("/dashboard/api/studio/characters")
+async def dashboard_studio_characters(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"characters": studio_service.list_characters("admin", None)})
+
+
 @router.get("/admin/api/characters/{name}")
 async def admin_character_detail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    item = studio_service.get_character("admin", None, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return JSONResponse(item)
+
+
+@router.get("/dashboard/api/studio/characters/{name}")
+async def dashboard_studio_character_detail(request: Request, name: str):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -70,8 +121,28 @@ async def admin_character_delete(request: Request, name: str):
     return JSONResponse({"success": True})
 
 
+@router.delete("/dashboard/api/studio/characters/{name}")
+async def dashboard_studio_character_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_character("admin", None, name)
+    return JSONResponse({"success": True})
+
+
 @router.get("/admin/api/characters/{name}/thumbnail")
 async def admin_character_thumbnail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    payload = studio_service.get_character_thumbnail_bytes("admin", None, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/dashboard/api/studio/characters/{name}/thumbnail")
+async def dashboard_studio_character_thumbnail(request: Request, name: str):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -89,8 +160,27 @@ async def admin_environments(request: Request):
     return JSONResponse(studio_service.list_environments("admin", None))
 
 
+@router.get("/dashboard/api/studio/environments")
+async def dashboard_studio_environments(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"environments": studio_service.list_environments("admin", None)})
+
+
 @router.get("/admin/api/environments/{name}")
 async def admin_environment_detail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    item = studio_service.get_environment("admin", None, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    return JSONResponse(item)
+
+
+@router.get("/dashboard/api/studio/environments/{name}")
+async def dashboard_studio_environment_detail(request: Request, name: str):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -109,8 +199,28 @@ async def admin_environment_delete(request: Request, name: str):
     return JSONResponse({"success": True})
 
 
+@router.delete("/dashboard/api/studio/environments/{name}")
+async def dashboard_studio_environment_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_environment("admin", None, name)
+    return JSONResponse({"success": True})
+
+
 @router.get("/admin/api/environments/{name}/thumbnail")
 async def admin_environment_thumbnail(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    payload = studio_service.get_environment_thumbnail_bytes("admin", None, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/dashboard/api/studio/environments/{name}/thumbnail")
+async def dashboard_studio_environment_thumbnail(request: Request, name: str):
     auth_check = require_dashboard_auth(request)
     if auth_check:
         return auth_check
@@ -128,6 +238,14 @@ async def admin_voices(request: Request):
     return JSONResponse(studio_service.list_voices("admin", None))
 
 
+@router.get("/dashboard/api/studio/audio/voices")
+async def dashboard_studio_voices(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"voices": studio_service.list_voices("admin", None)})
+
+
 @router.delete("/admin/api/voices/{name}")
 async def admin_voice_delete(request: Request, name: str):
     auth_check = require_dashboard_auth(request)
@@ -135,6 +253,282 @@ async def admin_voice_delete(request: Request, name: str):
         return auth_check
     studio_service.delete_voice("admin", None, name)
     return JSONResponse({"success": True})
+
+
+@router.delete("/dashboard/api/studio/audio/voices/{name}")
+async def dashboard_studio_voice_delete(request: Request, name: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_voice("admin", None, name)
+    return JSONResponse({"success": True})
+
+
+@router.get("/dashboard/api/studio/pipelines/step-types")
+async def dashboard_studio_pipeline_step_types(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"step_types": studio_service.pipeline_step_types()})
+
+
+@router.get("/dashboard/api/studio/function-bindings")
+async def dashboard_studio_function_bindings(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({
+        "bindings": studio_service.list_function_bindings("admin", None),
+        "definitions": studio_service.function_binding_definitions(),
+    })
+
+
+@router.put("/dashboard/api/studio/function-bindings/{binding_id}")
+async def dashboard_studio_function_binding_save(request: Request, binding_id: str, body: dict):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    bindings = studio_service.save_function_binding("admin", None, binding_id, body.get("roles") or {})
+    return JSONResponse({"bindings": bindings, "binding_id": binding_id})
+
+
+@router.delete("/dashboard/api/studio/function-bindings/{binding_id}")
+async def dashboard_studio_function_binding_delete(request: Request, binding_id: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    bindings = studio_service.delete_function_binding("admin", None, binding_id)
+    return JSONResponse({"bindings": bindings, "binding_id": binding_id})
+
+
+@router.get("/dashboard/api/studio/pipelines/custom")
+async def dashboard_studio_pipeline_custom_list(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"pipelines": studio_service.list_pipelines("admin", None)})
+
+
+@router.post("/dashboard/api/studio/pipelines/custom")
+async def dashboard_studio_pipeline_custom_create(request: Request, body: dict):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return JSONResponse({"pipeline": studio_service.save_pipeline("admin", None, body)})
+
+
+@router.put("/dashboard/api/studio/pipelines/custom/{pipeline_id}")
+async def dashboard_studio_pipeline_custom_update(request: Request, pipeline_id: str, body: dict):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    payload = dict(body)
+    payload["id"] = pipeline_id
+    return JSONResponse({"pipeline": studio_service.save_pipeline("admin", None, payload)})
+
+
+@router.delete("/dashboard/api/studio/pipelines/custom/{pipeline_id}")
+async def dashboard_studio_pipeline_custom_delete(request: Request, pipeline_id: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    studio_service.delete_pipeline("admin", None, pipeline_id)
+    return JSONResponse({"success": True})
+
+
+@router.post("/dashboard/api/studio/pipelines/custom/{pipeline_id}/run")
+async def dashboard_studio_pipeline_custom_run(request: Request, pipeline_id: str, body: dict):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    pipeline = studio_service.get_pipeline("admin", None, pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    payload = dict(pipeline)
+    payload.setdefault("seed_input", body.get("input") or "")
+    payload.setdefault("seed_story", body.get("story") or "")
+    return JSONResponse(studio_service.run_pipeline("admin", None, payload))
+
+
+@router.get("/dashboard/api/studio/u/{username}/characters")
+async def dashboard_user_studio_characters(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"characters": studio_service.list_characters(scope, owner_id)})
+
+
+@router.get("/dashboard/api/studio/u/{username}/characters/{name}")
+async def dashboard_user_studio_character_detail(request: Request, username: str, name: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    item = studio_service.get_character(scope, owner_id, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Character not found")
+    return JSONResponse(item)
+
+
+@router.post("/dashboard/api/studio/u/{username}/characters/extract")
+async def dashboard_user_studio_character_extract(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse(studio_service.save_character(scope, owner_id, body))
+
+
+@router.post("/dashboard/api/studio/u/{username}/characters/generate")
+async def dashboard_user_studio_character_generate(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = dict(body)
+    payload.setdefault("images", [])
+    return JSONResponse(studio_service.save_character(scope, owner_id, payload))
+
+
+@router.get("/dashboard/api/studio/u/{username}/characters/{name}/thumbnail")
+async def dashboard_user_studio_character_thumbnail(request: Request, username: str, name: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = studio_service.get_character_thumbnail_bytes(scope, owner_id, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/dashboard/api/studio/u/{username}/environments")
+async def dashboard_user_studio_environments(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"environments": studio_service.list_environments(scope, owner_id)})
+
+
+@router.get("/dashboard/api/studio/u/{username}/environments/{name}")
+async def dashboard_user_studio_environment_detail(request: Request, username: str, name: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    item = studio_service.get_environment(scope, owner_id, name)
+    if not item:
+        raise HTTPException(status_code=404, detail="Environment not found")
+    return JSONResponse(item)
+
+
+@router.post("/dashboard/api/studio/u/{username}/environments/extract")
+async def dashboard_user_studio_environment_extract(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse(studio_service.save_environment(scope, owner_id, body))
+
+
+@router.post("/dashboard/api/studio/u/{username}/environments/generate")
+async def dashboard_user_studio_environment_generate(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = dict(body)
+    payload.setdefault("images", [])
+    return JSONResponse(studio_service.save_environment(scope, owner_id, payload))
+
+
+@router.get("/dashboard/api/studio/u/{username}/environments/{name}/thumbnail")
+async def dashboard_user_studio_environment_thumbnail(request: Request, username: str, name: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = studio_service.get_environment_thumbnail_bytes(scope, owner_id, name)
+    if not payload:
+        raise HTTPException(status_code=404, detail="Thumbnail not found")
+    return Response(content=payload, media_type="image/png")
+
+
+@router.get("/dashboard/api/studio/u/{username}/audio/voices")
+async def dashboard_user_studio_audio_voices(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"voices": studio_service.list_voices(scope, owner_id)})
+
+
+@router.post("/dashboard/api/studio/u/{username}/audio/voices")
+async def dashboard_user_studio_audio_voice_create(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    form = await request.form()
+    payload = {
+        "name": str(form.get("name") or f"voice-{int(time.time())}"),
+        "description": str(form.get("description") or ""),
+        "samples": [],
+    }
+    return JSONResponse(studio_service.save_voice(scope, owner_id, payload))
+
+
+@router.post("/dashboard/api/studio/u/{username}/audio/voices/extract")
+async def dashboard_user_studio_audio_voice_extract(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = {
+        "name": body.get("name") or f"voice-{int(time.time())}",
+        "description": body.get("description", ""),
+        "quote": body.get("transcript", ""),
+        "samples": body.get("samples", []),
+    }
+    return JSONResponse(studio_service.save_voice(scope, owner_id, payload))
+
+
+@router.delete("/dashboard/api/studio/u/{username}/audio/voices/{name}")
+async def dashboard_user_studio_audio_voice_delete(request: Request, username: str, name: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    studio_service.delete_voice(scope, owner_id, name)
+    return JSONResponse({"success": True})
+
+
+@router.get("/dashboard/api/studio/u/{username}/pipelines/step-types")
+async def dashboard_user_studio_pipeline_step_types(request: Request, username: str):
+    _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"step_types": studio_service.pipeline_step_types()})
+
+
+@router.get("/dashboard/api/studio/u/{username}/function-bindings")
+async def dashboard_user_studio_function_bindings(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({
+        "bindings": studio_service.list_function_bindings(scope, owner_id),
+        "definitions": studio_service.function_binding_definitions(),
+    })
+
+
+@router.put("/dashboard/api/studio/u/{username}/function-bindings/{binding_id}")
+async def dashboard_user_studio_function_binding_save(request: Request, username: str, binding_id: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    bindings = studio_service.save_function_binding(scope, owner_id, binding_id, body.get("roles") or {})
+    return JSONResponse({"bindings": bindings, "binding_id": binding_id})
+
+
+@router.delete("/dashboard/api/studio/u/{username}/function-bindings/{binding_id}")
+async def dashboard_user_studio_function_binding_delete(request: Request, username: str, binding_id: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    bindings = studio_service.delete_function_binding(scope, owner_id, binding_id)
+    return JSONResponse({"bindings": bindings, "binding_id": binding_id})
+
+
+@router.get("/dashboard/api/studio/u/{username}/pipelines/custom")
+async def dashboard_user_studio_pipeline_custom_list(request: Request, username: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"pipelines": studio_service.list_pipelines(scope, owner_id)})
+
+
+@router.post("/dashboard/api/studio/u/{username}/pipelines/custom")
+async def dashboard_user_studio_pipeline_custom_create(request: Request, username: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    return JSONResponse({"pipeline": studio_service.save_pipeline(scope, owner_id, body)})
+
+
+@router.put("/dashboard/api/studio/u/{username}/pipelines/custom/{pipeline_id}")
+async def dashboard_user_studio_pipeline_custom_update(request: Request, username: str, pipeline_id: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    payload = dict(body)
+    payload["id"] = pipeline_id
+    return JSONResponse({"pipeline": studio_service.save_pipeline(scope, owner_id, payload)})
+
+
+@router.delete("/dashboard/api/studio/u/{username}/pipelines/custom/{pipeline_id}")
+async def dashboard_user_studio_pipeline_custom_delete(request: Request, username: str, pipeline_id: str):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    studio_service.delete_pipeline(scope, owner_id, pipeline_id)
+    return JSONResponse({"success": True})
+
+
+@router.post("/dashboard/api/studio/u/{username}/pipelines/custom/{pipeline_id}/run")
+async def dashboard_user_studio_pipeline_custom_run(request: Request, username: str, pipeline_id: str, body: dict):
+    scope, owner_id = _dashboard_studio_user_scope(request, username)
+    pipeline = studio_service.get_pipeline(scope, owner_id, pipeline_id)
+    if not pipeline:
+        raise HTTPException(status_code=404, detail="Pipeline not found")
+    payload = dict(pipeline)
+    payload.setdefault("seed_input", body.get("input") or "")
+    payload.setdefault("seed_story", body.get("story") or "")
+    return JSONResponse(studio_service.run_pipeline(scope, owner_id, payload))
 
 def init(config, templates):
     global _config, _templates

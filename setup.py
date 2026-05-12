@@ -341,6 +341,10 @@ setup(
             'static/aisbf-oauth2-extension.zip',
             'static/i18n.js',
         ]),
+        ('share/aisbf/static/dashboard', [
+            'static/dashboard/studio.css',
+            'static/dashboard/studio.js',
+        ]),
         ('share/aisbf/static/i18n', [
             'static/i18n/af.json',
             'static/i18n/ar.json',

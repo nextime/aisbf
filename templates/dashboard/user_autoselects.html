@@ -192,6 +192,10 @@ const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 
 function _providerIdFromModel(modelId) {
     if (!modelId) return null;
+    if (typeof modelId === 'object') {
+        modelId = modelId.model_id || modelId.id || modelId.name || '';
+    }
+    if (typeof modelId !== 'string') return null;
     const parts = modelId.split('/');
     return parts.length > 1 ? parts[0] : null;
 }
@@ -346,6 +350,8 @@ function renderAutoselectList() {
         _autoselectDS.attach();
     }
 }
+
+document.addEventListener('i18n:ready', renderAutoselectList);
 
 function toggleAutoselect(key) {
     if (expandedAutoselects.has(key)) {

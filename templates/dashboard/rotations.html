@@ -335,6 +335,8 @@ function renderRotationsList() {
     }
 }
 
+document.addEventListener('i18n:ready', renderRotationsList);
+
 function toggleRotation(key) {
     if (expandedRotations.has(key)) {
         expandedRotations.delete(key);

@@ -47,7 +47,7 @@ class StudioService:
             "category": "chat",
             "endpoint": "/chat/completions",
             "roles": [
-                {"key": "model", "label": "Chat model", "capabilities": ["text_generation"]},
+                {"key": "model", "label": "Chat model", "capabilities": ["text_generation", "chat"]},
             ],
         },
         {
@@ -350,7 +350,7 @@ class StudioService:
             "endpoint": "/pipelines/audio-understand",
             "roles": [
                 {"key": "audio_model", "label": "Audio model", "capabilities": ["speech_to_text"]},
-                {"key": "text_model", "label": "Reasoning model", "capabilities": ["text_generation"], "optional": True},
+                {"key": "text_model", "label": "Reasoning model", "capabilities": ["text_generation", "chat"], "optional": True},
             ],
         },
         {
@@ -749,9 +749,22 @@ class StudioService:
         return record
 
     def list_pipelines(self, scope: str, owner_id: Optional[int]) -> List[Dict[str, Any]]:
+        admin_rows = self._read_pipelines_json(self._admin_pipelines_path())
         if self._uses_database(scope, owner_id):
-            return self._db().list_studio_pipelines(owner_id)
-        return self._read_pipelines_json(self._admin_pipelines_path())
+            user_rows = self._db().list_studio_pipelines(owner_id)
+            merged: List[Dict[str, Any]] = []
+            seen_ids = set()
+            for row in user_rows:
+                pipeline_id = row.get("id")
+                if pipeline_id:
+                    seen_ids.add(pipeline_id)
+                merged.append(row)
+            for row in admin_rows:
+                if row.get("id") in seen_ids:
+                    continue
+                merged.append(row)
+            return merged
+        return admin_rows
 
     def delete_pipeline(self, scope: str, owner_id: Optional[int], pipeline_id: str) -> bool:
         if self._uses_database(scope, owner_id):
@@ -766,7 +779,9 @@ class StudioService:
 
     def get_pipeline(self, scope: str, owner_id: Optional[int], pipeline_id: str) -> Optional[Dict[str, Any]]:
         if self._uses_database(scope, owner_id):
-            return self._db().get_studio_pipeline(owner_id, pipeline_id)
+            user_pipeline = self._db().get_studio_pipeline(owner_id, pipeline_id)
+            if user_pipeline:
+                return user_pipeline
         rows = self.list_pipelines(scope, owner_id)
         for row in rows:
             if row.get("id") == pipeline_id:
@@ -1142,7 +1157,7 @@ class StudioService:
             {"type": "img-edit", "label": "Image edit", "params": [["model", "text", "Model", ""], ["image", "ref", "Image ref", "{{input}}"], ["prompt", "textarea", "Prompt", "Enhance this image"]]},
             {"type": "img-faceswap", "label": "Face swap", "params": [["model", "text", "Model", ""], ["source_face", "ref", "Source face", "{{input}}"], ["target", "ref", "Target", "{{step0.url}}"], ["target_type", "select:image|video", "Target type", "image"]]},
             {"type": "vid-t2v", "label": "Text to video", "params": [["model", "text", "Model", ""], ["prompt", "textarea", "Prompt", "{{input}}"]]},
-            {"type": "vid-dub", "label": "Video dub", "params": [["video_model", "text", "Video model", ""], ["stt_model", "text", "STT model", ""], ["tts_model", "text", "TTS model", ""], ["video", "ref", "Video ref", "{{input}}"], ["source_lang", "text", "Source language", ""], ["target_lang", "text", "Target language", "en"], ["burn_subtitles", "checkbox", "Burn subtitles", false]]},
+            {"type": "vid-dub", "label": "Video dub", "params": [["video_model", "text", "Video model", ""], ["stt_model", "text", "STT model", ""], ["tts_model", "text", "TTS model", ""], ["video", "ref", "Video ref", "{{input}}"], ["source_lang", "text", "Source language", ""], ["target_lang", "text", "Target language", "en"], ["burn_subtitles", "checkbox", "Burn subtitles", False]]},
             {"type": "aud-gen", "label": "Audio generate", "params": [["model", "text", "Model", ""], ["prompt", "textarea", "Prompt", "{{input}}"]]},
             {"type": "aud-tts", "label": "Text to speech", "params": [["model", "text", "Model", ""], ["input", "textarea", "Input text", "{{input}}"], ["voice", "text", "Voice", "alloy"]]},
             {"type": "aud-stt", "label": "Transcribe", "params": [["model", "text", "Model", ""], ["file", "ref", "Audio ref", "{{input}}"]]},

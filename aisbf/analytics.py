@@ -962,6 +962,8 @@ class Analytics:
         Returns:
             List of model performance data
         """
+        start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
+
         # Always query token_usage for provider/model combinations within the time range
         # context_dimensions is used only for metadata (context_size, condense settings)
         with self.db._get_connection() as conn:
@@ -975,12 +977,10 @@ class Analytics:
             '''
             params = []
 
-            if from_datetime:
-                query += f' AND timestamp >= {placeholder}'
-                params.append(self._format_timestamp(from_datetime))
-            if to_datetime:
-                query += f' AND timestamp <= {placeholder}'
-                params.append(self._format_timestamp(to_datetime))
+            query += f' AND timestamp >= {placeholder}'
+            params.append(self._format_timestamp(start))
+            query += f' AND timestamp <= {placeholder}'
+            params.append(self._format_timestamp(end))
             if user_filter == -1:
                 query += ' AND user_id IS NULL'
             elif user_filter is not None:
@@ -1003,7 +1003,15 @@ class Analytics:
 
             query += ' ORDER BY provider_id, model_name'
             cursor.execute(query, params)
-            active_combos = {(row[0], row[1]): {'rotation_id': row[2], 'autoselect_id': row[3]} for row in cursor.fetchall()}
+            active_combos = [
+                {
+                    'provider_id': row[0],
+                    'model_name': row[1],
+                    'rotation_id': row[2],
+                    'autoselect_id': row[3],
+                }
+                for row in cursor.fetchall()
+            ]
 
         # Build context_dims lookup from context_dimensions table (for metadata only)
         raw_dims = self.db.get_all_context_dimensions(user_filter=user_filter)
@@ -1011,7 +1019,9 @@ class Analytics:
 
         # Build context_dims from active token_usage combinations, enriched with context metadata
         context_dims = []
-        for (pid, mname), extra in active_combos.items():
+        for extra in active_combos:
+            pid = extra['provider_id']
+            mname = extra['model_name']
             meta = dim_lookup.get((pid, mname), {})
             context_dims.append({
                 'provider_id': pid,
@@ -1053,8 +1063,8 @@ class Analytics:
                     continue
 
             combo_stats = next((item for item in self.get_all_providers_stats(
-                from_datetime,
-                to_datetime,
+                start,
+                end,
                 user_filter=user_filter,
                 provider_filter=provider_id,
                 model_filter=model_name,
@@ -1237,8 +1247,8 @@ class Analytics:
         start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
         provider_stats = self.get_all_providers_stats(
-            from_datetime,
-            to_datetime,
+            start,
+            end,
             user_filter=user_filter,
             provider_filter=provider_filter,
             model_filter=model_filter,
@@ -1271,9 +1281,6 @@ class Analytics:
             if not tier_info:
                 continue
 
-            if tier_info.get('source') == 'default':
-                continue
-
             cached_usage = None
             try:
                 cached_row = self.db.get_provider_usage(None if user_filter == -1 else user_filter, provider_id)
@@ -1290,6 +1297,10 @@ class Analytics:
             if free_limit <= 0:
                 continue
 
+            premium_price = float(tier_info.get('premium_monthly_cost', 0) or 0)
+            if premium_price <= 0:
+                continue
+
             if limit_type == 'tokens':
                 usage_amount = usage.get('tokens_used', 0) or 0
             else:
@@ -1302,9 +1313,11 @@ class Analytics:
             if extra_free_tiers <= 0:
                 continue
 
+            if tier_info.get('source') == 'default' and usage_amount > free_limit * 10:
+                continue
+
             saved_tokens = usage['tokens_used'] * extra_free_tiers
             equivalent_token_savings += saved_tokens
-            premium_price = float(tier_info.get('premium_monthly_cost', 0) or 0)
             premium_equivalent_cost = premium_price * extra_free_tiers
             provider_equivalents.append({
                 'provider_id': provider_id,

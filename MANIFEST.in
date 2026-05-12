@@ -18,5 +18,6 @@ recursive-include templates *.css
 recursive-include templates *.js
 recursive-include static *.zip
 recursive-include static *.js
+recursive-include static *.css
 recursive-include static/i18n *.json
 recursive-include static/extension *.js *.json *.html *.md *.png *.svg
