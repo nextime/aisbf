@@ -19,6 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}Providers - AISBF Dashboard{% endblock %}
 
 {% block content %}
+<script id="providers-bootstrap" type="application/json">{{ providers_data | tojson }}</script>
 <h2 style="margin-bottom: 30px;">Providers Configuration</h2>
 
 {% if success %}
@@ -306,10 +307,10 @@ const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
 const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 // Marker used by the AISBF Chrome Extension to auto-detect this page and configure itself.
 window.AISBF_PROVIDERS_PAGE = { serverUrl: window.location.origin + BASE_PATH };
-let providersData = JSON.parse({{ providers_json | tojson }});
-const STUDIO_CAPABILITY_CHOICES = JSON.parse({{ studio_capability_choices_json | tojson }});
-const STUDIO_ADAPTER_CHOICES = JSON.parse({{ studio_adapter_choices_json | tojson }});
-const STUDIO_ADAPTER_PROFILE_CHOICES = JSON.parse({{ studio_adapter_profile_choices_json | tojson }});
+let providersData = {{ providers_data | tojson }};
+const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices | tojson }};
+const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices | tojson }};
+const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices | tojson }};
 let expandedProviders = new Set();
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
@@ -1208,11 +1209,11 @@ function renderProviderDetails(key) {
                         <div><strong>Connected At:</strong> ${escHtmlAttr(formatBrokerTimestamp(brokerSession.connected_at))}</div>
                         <div><strong>Remote Endpoint:</strong> ${escHtmlAttr(brokerSession.endpoint || 'Unknown')}</div>
                         <div><strong>Transport:</strong> ${escHtmlAttr(brokerSession.transport || 'broker')}</div>
-                        <div><strong>GPU Count:</strong> ${escHtmlAttr(String(brokerMetadata.gpu_count ?? (Array.isArray(brokerMetadata.gpus) ? brokerMetadata.gpus.length : 0) || '0'))}</div>
+                        <div><strong>GPU Count:</strong> ${escHtmlAttr(String((brokerMetadata.gpu_count ?? (Array.isArray(brokerMetadata.gpus) ? brokerMetadata.gpus.length : 0)) || '0'))}</div>
                         <div><strong>VRAM:</strong> ${escHtmlAttr(formatVramMb(brokerMetadata.available_vram_mb))} free / ${escHtmlAttr(formatVramMb(brokerMetadata.total_vram_mb))} total</div>
                         <div><strong>GPUs:</strong> ${escHtmlAttr(renderGpuSummary(brokerMetadata))}</div>
                         <div><strong>Avg Latency:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_latency_ms, 1, ' ms'))}</div>
-                        <div><strong>Avg Throughput:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_tokens_per_second, 2, ' tok/s'))}</div>
+                        <div><strong>Avg Throughput:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_tokens_per_second, 1, ' tok/s'))}</div>
                         <div><strong>Avg Tokens:</strong> ${escHtmlAttr(formatPerfNumber(performance.avg_total_tokens, 1))}</div>
                         <div><strong>Success Rate:</strong> ${escHtmlAttr(formatPerfNumber((performance.success_rate ?? 0) * 100, 1, '%'))}</div>
                         <div><strong>Samples:</strong> ${escHtmlAttr(String(performance.sample_count ?? 0))} / ${escHtmlAttr(String(performance.window_size ?? 100))}</div>

@@ -98,7 +98,9 @@
         {% if pagination.has_prev %}
         <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.prev_page }}" style="background: var(--bg-accent); color: var(--color-text);">Previous</a>
         {% endif %}
-        <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.page }}" style="background: var(--color-link); color: white;">Current Page</a>
+        {% if pagination.total_pages > 1 %}
+        <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.page }}" style="background: var(--color-link); color: white;">{{ pagination.page }}</a>
+        {% endif %}
         {% if pagination.has_next %}
         <a class="btn" href="{{ url_for(request, '/dashboard/admin/market') }}?q={{ filters.q|urlencode }}&source_type={{ filters.source_type|urlencode }}&active_filter={{ filters.active_filter|urlencode }}&online_filter={{ filters.online_filter|urlencode }}&owner_username={{ filters.owner_username|urlencode }}&limit={{ filters.limit }}&page={{ pagination.next_page }}" style="background: var(--bg-accent); color: var(--color-text);">Next</a>
         {% endif %}

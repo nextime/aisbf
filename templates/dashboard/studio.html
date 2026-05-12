@@ -27,7 +27,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block content %}
 <script id="studio-bootstrap" type="application/json">{{ studio_bootstrap_json|safe }}</script>
 
-<div class="studio">
+<div class="studio" data-studio-shell="dashboard">
 
   <!-- Sidebar -->
   <aside class="sidebar">
@@ -1039,9 +1039,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <!-- ═══════════════ PIPELINES ═══════════════ -->
     <div class="panel" id="panel-pipe">
       <div class="pipe-panel">
-        <div class="diag-card" id="studio-diagnostics">
+        <div class="diag-card" id="studio-diagnostics" data-empty-message="No diagnostics yet.">
           <div class="diag-title">Diagnostics</div>
           <div class="diag-sub">Evaluated from the current model type, declared capabilities, and existing Studio fallback rules.</div>
+          <span data-i18n="studio.diagnostics_empty">No diagnostics yet.</span>
           <div class="diag-groups" id="diag-groups"></div>
         </div>
         <div class="hist-card" id="studio-history">

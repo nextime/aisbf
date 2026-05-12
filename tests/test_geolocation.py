@@ -2,14 +2,20 @@ import pytest
 import time
 import ipaddress
 from unittest.mock import patch, AsyncMock, Mock
-from aisbf.geolocation import get_ip_country, _subnet_cache, _find_in_cache, _fallback_prefix
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
+
+from aisbf.geolocation import get_ip_country, _subnet_cache, _failure_cache, _find_in_cache, _fallback_prefix
+from aisbf.app.middleware import GenocidalBlockingMiddleware
 
 
 @pytest.fixture(autouse=True)
 def clear_cache():
     _subnet_cache.clear()
+    _failure_cache.clear()
     yield
     _subnet_cache.clear()
+    _failure_cache.clear()
 
 
 def _mock_json_response(country: str, network: str, status: int = 200):
@@ -45,6 +51,47 @@ def test_find_in_cache_expired_entry_removed():
     addr = ipaddress.ip_address("10.1.2.3")
     assert _find_in_cache(addr) is None
     assert "10.0.0.0/8" not in _subnet_cache
+
+
+def _build_geo_test_client():
+    app = FastAPI()
+
+    @app.get("/")
+    async def root():
+        return {"ok": True}
+
+    app.add_middleware(GenocidalBlockingMiddleware, server_ip_blocked_ref=lambda: False)
+    return TestClient(app)
+
+
+def test_localhost_ip_skips_geolocation_lookup():
+    client = _build_geo_test_client()
+
+    with patch("aisbf.geolocation.get_ip_country", new_callable=AsyncMock) as mock_geo:
+        response = client.get("/", headers={"X-Forwarded-For": "127.0.0.1"})
+
+    assert response.status_code == 200
+    mock_geo.assert_not_called()
+
+
+def test_private_rfc1918_ip_skips_geolocation_lookup():
+    client = _build_geo_test_client()
+
+    with patch("aisbf.geolocation.get_ip_country", new_callable=AsyncMock) as mock_geo:
+        response = client.get("/", headers={"X-Forwarded-For": "192.168.1.25"})
+
+    assert response.status_code == 200
+    mock_geo.assert_not_called()
+
+
+def test_public_ip_still_checks_geolocation():
+    client = _build_geo_test_client()
+
+    with patch("aisbf.geolocation.get_ip_country", new_callable=AsyncMock, return_value=None) as mock_geo:
+        response = client.get("/", headers={"X-Forwarded-For": "8.8.8.8"})
+
+    assert response.status_code == 200
+    mock_geo.assert_awaited_once_with("8.8.8.8")
 
 
 # --- invalid IP ---
@@ -136,7 +183,7 @@ async def test_non_200_not_cached():
 
 
 @pytest.mark.asyncio
-async def test_failure_then_success_retries():
+async def test_failure_then_success_uses_failure_backoff():
     fail = Mock(status_code=500)
     ok   = _mock_json_response("IT", "1.2.0.0/16")
     with patch('httpx.AsyncClient.get', new_callable=AsyncMock) as mock_get:
@@ -146,8 +193,9 @@ async def test_failure_then_success_retries():
 
         mock_get.return_value = ok
         result = await get_ip_country("1.2.3.4")
-        assert result == "IT"
-        assert "1.2.0.0/16" in _subnet_cache
+        assert result is None
+        mock_get.assert_called_once()
+        assert "1.2.0.0/16" not in _subnet_cache
 
 
 # --- TTL expiry ---

@@ -5,6 +5,7 @@ import time
 import logging
 import threading
 import hmac as _hmac
+import ipaddress
 from typing import Optional
 from fastapi import Request
 from fastapi.responses import JSONResponse, RedirectResponse
@@ -83,6 +84,23 @@ def _is_local_client(request: Request) -> bool:
     return ip in _LOCAL_IPS if ip else False
 
 
+def _is_private_or_local_ip(ip: Optional[str]) -> bool:
+    if not ip:
+        return False
+    if ip in _LOCAL_IPS:
+        return True
+    try:
+        addr = ipaddress.ip_address(ip)
+    except ValueError:
+        return False
+    return any((
+        addr.is_private,
+        addr.is_loopback,
+        addr.is_link_local,
+        addr.is_reserved,
+    ))
+
+
 class GenocidalBlockingMiddleware(BaseHTTPMiddleware):
     """Block Israeli IPs/domains."""
 
@@ -105,7 +123,7 @@ class GenocidalBlockingMiddleware(BaseHTTPMiddleware):
             return True
         from aisbf import geolocation
         client_ip = _get_client_ip(request)
-        if client_ip:
+        if client_ip and not _is_private_or_local_ip(client_ip):
             country = await geolocation.get_ip_country(client_ip)
             if country == 'IL':
                 return True

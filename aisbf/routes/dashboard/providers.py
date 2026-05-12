@@ -153,6 +153,19 @@ def _stamp_provider_models(provider_config: dict) -> dict:
     return stamped
 
 
+def _json_parse_bootstrap(payload) -> str:
+    raw_json = json.dumps(payload)
+    escaped_json = (
+        raw_json
+        .replace("<", "\\u003c")
+        .replace(">", "\\u003e")
+        .replace("&", "\\u0026")
+    )
+    quoted = escaped_json.replace("\\", "\\\\").replace('"', '\\"')
+    quoted = quoted.replace("\\\\u003c", "\\u003c").replace("\\\\u003e", "\\u003e").replace("\\\\u0026", "\\u0026")
+    return f'"{quoted}"'
+
+
 def _ensure_coderai_token(provider_config: dict) -> dict:
     stamped = dict(provider_config or {})
     if stamped.get('type') != 'coderai':
@@ -249,18 +262,22 @@ def _augment_provider_broker_status(provider_id: str, provider_config: dict, bro
         return stamped
     status = broker_status_map.get(provider_id)
     coderai_config = dict(stamped.get('coderai_config') or {})
+    status_metadata = dict((status or {}).get('metadata') or {})
+    status_performance = dict((status or {}).get('performance') or {})
     coderai_config['broker_session'] = {
         'connected': bool(status),
         'client_id': status.get('client_id') if status else None,
         'session_id': status.get('session_id') if status else None,
         'connected_at': status.get('connected_at') if status else None,
         'last_seen': status.get('last_seen') if status else None,
-        'owner_user_id': ((status or {}).get('metadata') or {}).get('owner_user_id'),
-        'transport': ((status or {}).get('metadata') or {}).get('transport'),
-        'endpoint': ((status or {}).get('metadata') or {}).get('endpoint'),
-        'studio_endpoints': ((status or {}).get('metadata') or {}).get('studio_endpoints') or [],
+        'owner_user_id': status_metadata.get('owner_user_id'),
+        'transport': status_metadata.get('transport'),
+        'endpoint': status_metadata.get('endpoint'),
+        'studio_endpoints': status_metadata.get('studio_endpoints') or [],
         'capabilities': (status or {}).get('capabilities') or {},
-        'connection_state': ((status or {}).get('metadata') or {}).get('connection_state') or ('connected' if status else 'disconnected'),
+        'connection_state': status_metadata.get('connection_state') or ('connected' if status else 'disconnected'),
+        'metadata': status_metadata,
+        'performance': status_performance,
     }
     stamped['coderai_config'] = coderai_config
     return stamped
@@ -270,6 +287,14 @@ def init(config, templates, server_config=None):
     _config = config
     _templates = templates
     _server_config = server_config
+
+
+def _get_templates():
+    global _templates
+    if _templates is None:
+        from main import templates as main_templates
+        _templates = main_templates
+    return _templates
 
 
 def get_user_auth_files_dir(user_id) -> Path:
@@ -333,7 +358,7 @@ async def dashboard_index(request: Request):
         # Admin dashboard
         db = DatabaseRegistry.get_config_database()
         users_count = len(db.get_users())
-        return _templates.TemplateResponse(
+        return _get_templates().TemplateResponse(
             request=request,
             name="dashboard/index.html",
             context={
@@ -403,7 +428,7 @@ async def dashboard_index(request: Request):
         elif all_tiers:
             upgrade_tiers = [t for t in all_tiers if not t.get('is_default')]
 
-        return _templates.TemplateResponse(
+        return _get_templates().TemplateResponse(
         request=request,
         name="dashboard/user_index.html",
         context={
@@ -438,20 +463,30 @@ async def dashboard_providers(request: Request):
     broker_status_map = await _load_coderai_broker_status_map()
 
     if is_config_admin:
-        # Config admin: load from JSON files
-        config_path = Path.home() / '.aisbf' / 'providers.json'
-        if not config_path.exists():
-            config_path = Path(__file__).parent / 'config' / 'providers.json'
-        
-        with open(config_path) as f:
-            full_config = json.load(f)
-        
-        # Extract just the providers object (handle both nested and flat structures)
-        if 'providers' in full_config and isinstance(full_config['providers'], dict):
-            providers_data = full_config['providers']
+        # Config admin: prefer live in-memory config when available
+        live_config = _config
+        if live_config is None:
+            from aisbf.config import config as global_config
+            live_config = global_config
+        if live_config and getattr(live_config, 'providers', None):
+            providers_data = {
+                provider_id: (provider.model_dump() if hasattr(provider, 'model_dump') else dict(provider))
+                for provider_id, provider in live_config.providers.items()
+            }
         else:
-            # Fallback for flat structure (backward compatibility)
-            providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
+            config_path = Path.home() / '.aisbf' / 'providers.json'
+            if not config_path.exists():
+                config_path = Path(__file__).parent / 'config' / 'providers.json'
+            
+            with open(config_path) as f:
+                full_config = json.load(f)
+            
+            # Extract just the providers object (handle both nested and flat structures)
+            if 'providers' in full_config and isinstance(full_config['providers'], dict):
+                providers_data = full_config['providers']
+            else:
+                # Fallback for flat structure (backward compatibility)
+                providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
         providers_data = {
             provider_id: _augment_provider_broker_status(provider_id, _ensure_coderai_token(provider_config), broker_status_map)
             for provider_id, provider_config in providers_data.items()
@@ -503,10 +538,10 @@ async def dashboard_providers(request: Request):
             "request": request,
             "session": request.session,
             "__version__": __version__,
-            "providers_json": json.dumps(providers_data),
-            "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-            "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-            "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+            "providers_data": providers_data,
+            "studio_capability_choices": serialize_studio_capability_choices(),
+            "studio_adapter_choices": serialize_studio_adapter_choices(),
+            "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
             "claude_cli_mode": _claude_cli_mode,
             "is_local_client": _is_local_client(request),
             "success": "Configuration saved successfully!" if success else None
@@ -521,10 +556,11 @@ async def dashboard_providers(request: Request):
             "request": request,
             "session": request.session,
             "__version__": __version__,
-            "user_providers_json": json.dumps(providers_data),
-            "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-            "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-            "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+            "user_providers_data": providers_data,
+            "user_providers_bootstrap_json": _json_parse_bootstrap(providers_data),
+            "studio_capability_choices": serialize_studio_capability_choices(),
+            "studio_adapter_choices": serialize_studio_adapter_choices(),
+            "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
             "user_id": current_user_id,
             "claude_cli_mode": _claude_cli_mode,
             "is_local_client": _is_local_client(request),
@@ -551,7 +587,7 @@ async def dashboard_studio(request: Request):
         db=db,
     )
 
-    return _templates.TemplateResponse(
+    return _get_templates().TemplateResponse(
         request=request,
         name="dashboard/studio.html",
         context={
@@ -814,17 +850,19 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
         
         if is_config_admin:
             success_msg = "Configuration saved successfully!"
-            return _templates.TemplateResponse(
+            if _templates is None:
+                return JSONResponse({"success": True, "message": success_msg, "providers_data": providers_data})
+            return _get_templates().TemplateResponse(
                 request=request,
                 name="dashboard/providers.html",
                 context={
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "providers_json": json.dumps(providers_data),
-                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+                    "providers_data": providers_data,
+                    "studio_capability_choices": serialize_studio_capability_choices(),
+                    "studio_adapter_choices": serialize_studio_adapter_choices(),
+                    "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
                     "success": success_msg
@@ -832,18 +870,21 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             )
         else:
             success_msg = "Configuration saved successfully!"
+            if _templates is None:
+                return JSONResponse({"success": True, "message": success_msg, "providers_data": providers_data})
 
-            return _templates.TemplateResponse(
+            return _get_templates().TemplateResponse(
                 request=request,
                 name="dashboard/user_providers.html",
                 context={
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "user_providers_json": json.dumps(providers_data),
-                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+                    "user_providers_data": providers_data,
+                    "user_providers_bootstrap_json": _json_parse_bootstrap(providers_data),
+                    "studio_capability_choices": serialize_studio_capability_choices(),
+                    "studio_adapter_choices": serialize_studio_adapter_choices(),
+                    "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
@@ -868,17 +909,17 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             else:
                 providers_data = {k: v for k, v in full_config.items() if k != 'condensation'}
 
-            return _templates.TemplateResponse(
+            return _get_templates().TemplateResponse(
                 request=request,
                 name="dashboard/providers.html",
                 context={
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "providers_json": json.dumps(providers_data),
-                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+                    "providers_data": providers_data,
+                    "studio_capability_choices": serialize_studio_capability_choices(),
+                    "studio_adapter_choices": serialize_studio_adapter_choices(),
+                    "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
                     "error": f"Invalid JSON: {str(e)}"
@@ -888,17 +929,18 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             db = DatabaseRegistry.get_config_database()
             user_providers = db.get_user_providers(current_user_id)
 
-            return _templates.TemplateResponse(
+            return _get_templates().TemplateResponse(
                 request=request,
                 name="dashboard/user_providers.html",
                 context={
                     "request": request,
                     "session": request.session,
                     "__version__": __version__,
-                    "user_providers_json": json.dumps(user_providers),
-                    "studio_capability_choices_json": json.dumps(serialize_studio_capability_choices()),
-                    "studio_adapter_choices_json": json.dumps(serialize_studio_adapter_choices()),
-                    "studio_adapter_profile_choices_json": json.dumps(serialize_studio_adapter_profile_choices()),
+                    "user_providers_data": user_providers,
+                    "user_providers_bootstrap_json": _json_parse_bootstrap(user_providers),
+                    "studio_capability_choices": serialize_studio_capability_choices(),
+                    "studio_adapter_choices": serialize_studio_adapter_choices(),
+                    "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),

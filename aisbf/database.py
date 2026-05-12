@@ -3534,6 +3534,77 @@ class DatabaseManager:
             cursor.execute(query)
             return [self._load_market_listing_row(row) for row in cursor.fetchall()]
 
+    def list_market_listings_paginated(
+        self,
+        page: int = 1,
+        limit: int = 25,
+        search: Optional[str] = None,
+        source_type: Optional[str] = None,
+        active_filter: Optional[str] = None,
+        online_filter: Optional[str] = None,
+        owner_username: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        page = max(int(page or 1), 1)
+        limit = max(1, min(int(limit or 25), 100))
+        offset = (page - 1) * limit
+
+        where_clauses = []
+        params: List[Any] = []
+        placeholder = self.placeholder
+
+        if search:
+            like = f"%{search.strip()}%"
+            where_clauses.append(
+                f"(title LIKE {placeholder} OR description LIKE {placeholder} OR source_id LIKE {placeholder} OR provider_id LIKE {placeholder} OR model_id LIKE {placeholder} OR owner_username LIKE {placeholder})"
+            )
+            params.extend([like, like, like, like, like, like])
+
+        if source_type:
+            where_clauses.append(f"source_type = {placeholder}")
+            params.append(source_type)
+
+        if owner_username:
+            where_clauses.append(f"owner_username = {placeholder}")
+            params.append(owner_username)
+
+        if active_filter == 'active':
+            where_clauses.append("is_active = 1")
+        elif active_filter == 'inactive':
+            where_clauses.append("is_active = 0")
+
+        if online_filter == 'online':
+            where_clauses.append("provider_id IS NOT NULL")
+        elif online_filter == 'offline':
+            where_clauses.append("provider_id IS NULL")
+
+        where_sql = f" WHERE {' AND '.join(where_clauses)}" if where_clauses else ""
+
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute(f"SELECT COUNT(*) FROM market_listings{where_sql}", tuple(params))
+            total_row = cursor.fetchone()
+            total = int(total_row[0] if total_row else 0)
+
+            query = f'''
+                SELECT id, owner_user_id, owner_username, source_scope, source_type, source_id, listing_key,
+                       title, description, provider_id, model_id, endpoint, currency_code,
+                       price_per_million_tokens, metadata, config_snapshot, price_per_1000_requests,
+                       provider_price_per_million_tokens, provider_price_per_1000_requests, is_active,
+                       created_at, updated_at
+                FROM market_listings
+                {where_sql}
+                ORDER BY created_at DESC
+                LIMIT {placeholder} OFFSET {placeholder}
+            '''
+            cursor.execute(query, tuple(params + [limit, offset]))
+            items = [self._load_market_listing_row(row) for row in cursor.fetchall()]
+            return {
+                'items': items,
+                'total': total,
+                'page': page,
+                'limit': limit,
+            }
+
     def get_market_listing(self, listing_id: int) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:
             cursor = conn.cursor()

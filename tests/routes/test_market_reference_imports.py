@@ -337,6 +337,17 @@ def _load_json_parse_bootstrap(response_text: str, marker: str):
     return json.loads(json.loads(js_string_literal))
 
 
+def test_json_parse_bootstrap_escapes_inline_script_sequences():
+    from aisbf.routes.dashboard.providers import _json_parse_bootstrap
+
+    payload = [{"config": {"name": 'Alice\'s "Provider" </script><script>alert(1)</script>'}}]
+    bootstrap = _json_parse_bootstrap(payload)
+
+    assert '</script><script>alert(1)</script>' not in bootstrap
+    assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(1)\\u003c/script\\u003e' in bootstrap
+    assert json.loads(json.loads(bootstrap))[0]["config"]["name"] == 'Alice\'s "Provider" </script><script>alert(1)</script>'
+
+
 @pytest.fixture
 def runtime_fixture(monkeypatch):
     db = MarketReferenceRuntimeDbStub()
@@ -624,10 +635,10 @@ def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
             "request": request,
             "session": {},
             "__version__": "test",
-            "providers_json": json.dumps(providers_payload),
-            "studio_capability_choices_json": "[]",
-            "studio_adapter_choices_json": "[]",
-            "studio_adapter_profile_choices_json": "[]",
+            "providers_data": providers_payload,
+            "studio_capability_choices": [],
+            "studio_adapter_choices": [],
+            "studio_adapter_profile_choices": [],
             "claude_cli_mode": False,
             "is_local_client": True,
             "success": None,
@@ -637,9 +648,9 @@ def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
     response_text = response.body.decode()
 
     assert response.status_code == 200
-    assert "let providersData = JSON.parse(" in response_text
-    providers_bootstrap = _load_json_parse_bootstrap(response_text, "let providersData")
-    bootstrap_fragment = response_text.split("let providersData = JSON.parse(", 1)[1].split("\n", 1)[0]
+    assert "let providersData = {" in response_text
+    bootstrap_fragment = response_text.split("let providersData = ", 1)[1].split(";\n", 1)[0]
+    providers_bootstrap = json.loads(bootstrap_fragment)
     assert '</script><script>alert(2)</script>' not in bootstrap_fragment
     assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(2)\\u003c/script\\u003e' in bootstrap_fragment
     assert providers_bootstrap["danger-provider"]["name"] == 'Admin "Provider" </script><script>alert(2)</script>'
