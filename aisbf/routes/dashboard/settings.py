@@ -19,6 +19,16 @@ _templates = None
 
 logger = logging.getLogger(__name__)
 
+
+def _reorder_dict(d: dict, order: list) -> dict:
+    """Return a new dict with keys in the given order (unknown keys appended at end)."""
+    result = {k: d[k] for k in order if k in d}
+    for k, v in d.items():
+        if k not in result:
+            result[k] = v
+    return result
+
+
 def init(config, templates):
     global _config, _templates
     _config = config
