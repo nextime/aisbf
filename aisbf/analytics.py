@@ -541,7 +541,7 @@ class Analytics:
             conditions.append(f"autoselect_id = {placeholder}")
             params.append(autoselect_filter)
         if analytics_kind:
-            conditions.append(f"analytics_kind = {placeholder}")
+            conditions.append(f"(analytics_kind = {placeholder} OR analytics_kind IS NULL)")
             params.append(analytics_kind)
 
         return conditions, params
@@ -986,7 +986,7 @@ class Analytics:
             elif user_filter is not None:
                 query += f' AND user_id = {placeholder}'
                 params.append(user_filter)
-            query += f' AND analytics_kind = {placeholder}'
+            query += f' AND (analytics_kind = {placeholder} OR analytics_kind IS NULL)'
             params.append('execution')
             if provider_filter:
                 query += f' AND provider_id = {placeholder}'

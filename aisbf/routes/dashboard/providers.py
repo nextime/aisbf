@@ -818,7 +818,9 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             # Read existing config to preserve condensation settings
             with open(config_path) as f:
                 full_config = json.load(f)
-            
+
+            providers_data = _reorder_dict(providers_data, list(providers_data.keys()))
+
             # Update providers section while preserving other keys
             full_config['providers'] = providers_data
             
@@ -845,6 +847,11 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             # Save each provider to database
             for provider_key, provider_config in providers_data.items():
                 db.save_user_provider(current_user_id, provider_key, provider_config)
+
+            providers_data = _ordered_resource_map(
+                providers_data,
+                db.get_sort_order(current_user_id, 'provider')
+            )
             
             logger.info(f"Saved {len(providers_data)} provider(s) to database for user {current_user_id}")
         
@@ -1364,6 +1371,10 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'rotations.json'
             config_path.parent.mkdir(parents=True, exist_ok=True)
+            rotations_data['rotations'] = _reorder_dict(
+                rotations_data.get('rotations', {}),
+                list(rotations_data.get('rotations', {}).keys())
+            )
             with open(config_path, 'w') as f:
                 json.dump(rotations_data, f, indent=2)
             _reload_global_config()
@@ -1383,6 +1394,11 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             # Save each rotation to database
             for rotation_key, rotation_config in rotations.items():
                 db.save_user_rotation(current_user_id, rotation_key, rotation_config)
+
+            rotations_data['rotations'] = _ordered_resource_map(
+                rotations_data.get('rotations', {}),
+                db.get_sort_order(current_user_id, 'rotation')
+            )
 
             logger.info(f"Saved {len(rotations)} rotation(s) to database for user {current_user_id}")
         
@@ -1656,6 +1672,7 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'autoselect.json'
             config_path.parent.mkdir(parents=True, exist_ok=True)
+            autoselect_data = _reorder_dict(autoselect_data, list(autoselect_data.keys()))
             with open(config_path, 'w') as f:
                 json.dump(autoselect_data, f, indent=2)
             _reload_global_config()
@@ -1673,6 +1690,11 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             # Save each autoselect to database
             for autoselect_key, autoselect_config in autoselect_data.items():
                 db.save_user_autoselect(current_user_id, autoselect_key, autoselect_config)
+
+            autoselect_data = _ordered_resource_map(
+                autoselect_data,
+                db.get_sort_order(current_user_id, 'autoselect')
+            )
 
             logger.info(f"Saved {len(autoselect_data)} autoselect(s) to database for user {current_user_id}")
         
@@ -2251,6 +2273,13 @@ def _reorder_dict(d: dict, order: list) -> dict:
         if k not in result:
             result[k] = v
     return result
+
+
+def _ordered_resource_map(resource_map: dict, saved_order: list | None) -> dict:
+    """Apply a saved order to a resource map while keeping unknown keys appended."""
+    if not saved_order:
+        return resource_map
+    return _reorder_dict(resource_map, saved_order)
 
 
 @router.get("/dashboard/analytics", response_class=HTMLResponse)
