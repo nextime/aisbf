@@ -5433,6 +5433,23 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 FOREIGN KEY (listing_id) REFERENCES market_listings(id)
             )
         '''),
+        ('market_import_references', f'''
+            CREATE TABLE market_import_references (
+                id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
+                listing_id INTEGER NOT NULL,
+                reference_type VARCHAR(32) NOT NULL,
+                display_name VARCHAR(255) NOT NULL,
+                owner_username VARCHAR(255) NOT NULL,
+                source_type VARCHAR(32) NOT NULL,
+                source_id VARCHAR(255) NOT NULL,
+                is_active {boolean_type} DEFAULT 1,
+                created_at TIMESTAMP DEFAULT {timestamp_default},
+                updated_at TIMESTAMP DEFAULT {timestamp_default},
+                FOREIGN KEY (user_id) REFERENCES users(id),
+                FOREIGN KEY (listing_id) REFERENCES market_listings(id)
+            )
+        '''),
         ('market_usage_transactions', f'''
             CREATE TABLE market_usage_transactions (
                 id INTEGER PRIMARY KEY {auto_increment},

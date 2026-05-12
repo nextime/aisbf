@@ -583,70 +583,30 @@ async def api_import_market_listing(request: Request, listing_id: int):
     if not listing or not listing.get('is_active'):
         return JSONResponse({'error': 'Listing not found'}, status_code=404)
 
-    snapshot = listing.get('config_snapshot') or {}
     source_type = listing.get('source_type')
     source_id = listing.get('source_id')
     owner_username = listing.get('owner_username')
-    import_id = f'market/{owner_username}/{source_id}'
+    reference_type_map = {
+        'provider': 'provider',
+        'model': 'provider',
+        'rotation': 'rotation',
+        'autoselect': 'autoselect',
+    }
+    reference_type = reference_type_map.get(source_type)
+    if not reference_type:
+        return JSONResponse({'error': 'Unsupported listing type'}, status_code=400)
 
-    if source_type == 'provider':
-        imported_config = dict(snapshot)
-        imported_config['market_source'] = {
-            'listing_id': listing_id,
-            'owner_user_id': listing['owner_user_id'],
-            'owner_username': owner_username,
-            'provider_id': listing.get('provider_id'),
-            'model_id': listing.get('model_id'),
-            'source_type': source_type,
-        }
-        db.save_user_provider(user_id, import_id, imported_config)
-        db.record_market_import(user_id, listing_id, 'provider', import_id)
-        return JSONResponse({'success': True, 'imported_config_type': 'provider', 'imported_config_id': import_id})
-
-    if source_type == 'model':
-        provider_snapshot = dict((snapshot.get('provider') or {}))
-        model_snapshot = dict((snapshot.get('model') or {}))
-        provider_snapshot['models'] = [model_snapshot]
-        provider_snapshot['market_source'] = {
-            'listing_id': listing_id,
-            'owner_user_id': listing['owner_user_id'],
-            'owner_username': owner_username,
-            'provider_id': listing.get('provider_id'),
-            'model_id': listing.get('model_id'),
-            'source_type': source_type,
-        }
-        model_import_id = f"market/{owner_username}/{listing.get('provider_id')}/{listing.get('model_id')}"
-        db.save_user_provider(user_id, model_import_id, provider_snapshot)
-        db.record_market_import(user_id, listing_id, 'provider', model_import_id)
-        return JSONResponse({'success': True, 'imported_config_type': 'provider', 'imported_config_id': model_import_id})
-
-    if source_type == 'rotation':
-        imported_rotation_id = f'market/{owner_username}/{source_id}'
-        imported_rotation = dict(snapshot)
-        imported_rotation['market_source'] = {
-            'listing_id': listing_id,
-            'owner_user_id': listing['owner_user_id'],
-            'owner_username': owner_username,
-            'source_type': source_type,
-        }
-        db.save_user_rotation(user_id, imported_rotation_id, imported_rotation)
-        db.record_market_import(user_id, listing_id, 'rotation', imported_rotation_id)
-        return JSONResponse({'success': True, 'imported_config_type': 'rotation', 'imported_config_id': imported_rotation_id})
-
-    if source_type == 'autoselect':
-        imported_autoselect_id = f'market/{owner_username}/{source_id}'
-        imported_autoselect = dict(snapshot)
-        imported_autoselect['market_source'] = {
-            'listing_id': listing_id,
-            'owner_user_id': listing['owner_user_id'],
-            'owner_username': owner_username,
-            'source_type': source_type,
-        }
-        db.save_user_autoselect(user_id, imported_autoselect_id, imported_autoselect)
-        db.record_market_import(user_id, listing_id, 'autoselect', imported_autoselect_id)
-        return JSONResponse({'success': True, 'imported_config_type': 'autoselect', 'imported_config_id': imported_autoselect_id})
-
-    return JSONResponse({'error': 'Unsupported listing type'}, status_code=400)
+    reference_id = db.create_market_import_reference(
+        user_id=user_id,
+        listing_id=listing_id,
+        reference_type=reference_type,
+        display_name=listing.get('title') or source_id,
+        owner_username=owner_username,
+        source_type=source_type,
+        source_id=source_id,
+    )
+    db.record_market_import(user_id, listing_id, 'market_reference', str(reference_id))
+    return JSONResponse({'success': True, 'imported_config_type': 'market_reference', 'imported_config_id': reference_id})
 
 
 @router.post('/api/market/listings/{listing_id}/vote')
