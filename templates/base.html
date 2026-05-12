@@ -834,7 +834,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/rotations') }}" {% if '/rotations' in request.path %}class="active"{% endif %} data-i18n="nav.rotations">Rotations</a>
             <a href="{{ url_for(request, '/dashboard/autoselect') }}" {% if '/autoselect' in request.path %}class="active"{% endif %} data-i18n="nav.autoselect">Autoselect</a>
             <a href="{{ url_for(request, '/dashboard/studio') }}" {% if '/studio' in request.path %}class="active"{% endif %} data-i18n="nav.studio">Studio</a>
+            {% if request.state.market_enabled is not defined or request.state.market_enabled %}
             <a href="{{ url_for(request, '/dashboard/market') }}" {% if '/market' in request.path and '/admin/market' not in request.path %}class="active"{% endif %}>Market</a>
+            {% endif %}
             <a href="{{ url_for(request, '/dashboard/prompts') }}" {% if '/prompts' in request.path %}class="active"{% endif %} data-i18n="nav.prompts">Prompts</a>
             <a href="{{ url_for(request, '/dashboard/analytics') }}" {% if '/analytics' in request.path %}class="active"{% endif %} data-i18n="nav.analytics">Analytics</a>
             {% if request.session.user_id %}
@@ -846,7 +848,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <a href="{{ url_for(request, '/dashboard/users') }}" {% if '/users' in request.path %}class="active"{% endif %} data-i18n="nav.users">Users</a>
             <a href="{{ url_for(request, '/dashboard/settings') }}" {% if '/settings' in request.path %}class="active"{% endif %} data-i18n="nav.settings">Settings</a>
             <a href="{{ url_for(request, '/dashboard/admin/tiers') }}" {% if '/admin/tiers' in request.path %}class="active"{% endif %} data-i18n="nav.tiers">Tiers</a>
-            <a href="{{ url_for(request, '/dashboard/admin/market') }}" {% if '/admin/market' in request.path %}class="active"{% endif %}>Market Admin</a>
             <a href="{{ url_for(request, '/dashboard/admin/payment-settings') }}" {% if '/admin/payment-settings' in request.path %}class="active"{% endif %} data-i18n="nav.payment_settings">Payment Settings</a>
             {% endif %}
             {% if show_upgrade_button %}

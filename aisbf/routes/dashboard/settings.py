@@ -761,7 +761,9 @@ async def dashboard_users(
     order_by: str = Query('created_at', pattern='^(username|last_login|created_at|tier_name)$'),
     direction: str = Query('desc', pattern='^(asc|desc)$'),
     status_filter: str = Query(None, pattern='^(active|inactive)$'),
-    role_filter: str = Query(None, pattern='^(admin|user)$')
+    role_filter: str = Query(None, pattern='^(admin|user)$'),
+    tier_filter: str = Query(None),
+    market_export_filter: str = Query(None, pattern='^(exporting|not_exporting)$')
 ): 
     """Admin user management page"""
     auth_check = require_admin(request)
@@ -778,7 +780,9 @@ async def dashboard_users(
         order_by=order_by,
         direction=direction,
         status_filter=status_filter,
-        role_filter=role_filter
+        role_filter=role_filter,
+        tier_filter=tier_filter,
+        market_export_filter=market_export_filter,
     )
     
     users = result['users']
@@ -816,7 +820,9 @@ async def dashboard_users(
                 "order_by": order_by,
                 "direction": direction,
                 "status_filter": status_filter,
-                "role_filter": role_filter
+                "role_filter": role_filter,
+                "tier_filter": tier_filter,
+                "market_export_filter": market_export_filter,
             }
         }
     )

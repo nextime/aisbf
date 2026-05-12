@@ -82,6 +82,23 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                 <option value="user" {% if filters.role_filter == 'user' %}selected{% endif %}>User</option>
             </select>
 
+            <label for="tier-filter" style="color: var(--color-text); margin-left: 10px; margin-right: 5px;" data-i18n="users_page.col_tier">Tier:</label>
+            <select id="tier-filter" style="padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
+                <option value="">All</option>
+                {% for tier in tiers %}
+                <option value="{{ tier.id }}" {% if filters.tier_filter == tier.id|string %}selected{% endif %}>
+                    {{ tier.name }}{% if not tier.is_visible %} (Hidden){% endif %}
+                </option>
+                {% endfor %}
+            </select>
+
+            <label for="market-export-filter" style="color: var(--color-text); margin-left: 10px; margin-right: 5px;">Market:</label>
+            <select id="market-export-filter" style="padding: 8px; border-radius: 4px; border: 1px solid var(--bg-accent); background: var(--bg-page); color: var(--color-text);">
+                <option value="">All</option>
+                <option value="exporting" {% if filters.market_export_filter == 'exporting' %}selected{% endif %}>Exporting</option>
+                <option value="not_exporting" {% if filters.market_export_filter == 'not_exporting' %}selected{% endif %}>Not Exporting</option>
+            </select>
+
             <button id="search-btn" class="btn" style="padding: 8px 16px;" data-i18n="users_page.search_btn">Search</button>
             <button id="clear-btn" class="btn btn-secondary" style="padding: 8px 16px;" data-i18n="users_page.clear_btn">Clear</button>
         </div>
@@ -370,6 +387,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const searchInput = document.getElementById('search-input');
     const searchBtn = document.getElementById('search-btn');
     const clearBtn = document.getElementById('clear-btn');
+    const statusFilter = document.getElementById('status-filter');
+    const roleFilter = document.getElementById('role-filter');
+    const tierFilter = document.getElementById('tier-filter');
+    const marketExportFilter = document.getElementById('market-export-filter');
     const pageSize = document.getElementById('page-size');
     const prevBtn = document.getElementById('prev-btn');
     const nextBtn = document.getElementById('next-btn');
@@ -543,19 +564,54 @@ document.addEventListener('DOMContentLoaded', function() {
         clearBtn.addEventListener('click', function() {
             if (searchInput) {
                 searchInput.value = '';
-                updateUsers({ search: '', page: 1 });
             }
+            if (statusFilter) {
+                statusFilter.value = '';
+            }
+            if (roleFilter) {
+                roleFilter.value = '';
+            }
+            if (tierFilter) {
+                tierFilter.value = '';
+            }
+            if (marketExportFilter) {
+                marketExportFilter.value = '';
+            }
+            updateUsers({
+                search: '',
+                status_filter: null,
+                role_filter: null,
+                tier_filter: null,
+                market_export_filter: null,
+                page: 1,
+            });
         });
     }
 
     // Filter change handlers
-    document.getElementById('status-filter').addEventListener('change', function() {
-        updateUsers({ status_filter: this.value || null });
-    });
+    if (statusFilter) {
+        statusFilter.addEventListener('change', function() {
+            updateUsers({ status_filter: this.value || null });
+        });
+    }
 
-    document.getElementById('role-filter').addEventListener('change', function() {
-        updateUsers({ role_filter: this.value || null });
-    });
+    if (roleFilter) {
+        roleFilter.addEventListener('change', function() {
+            updateUsers({ role_filter: this.value || null });
+        });
+    }
+
+    if (tierFilter) {
+        tierFilter.addEventListener('change', function() {
+            updateUsers({ tier_filter: this.value || null });
+        });
+    }
+
+    if (marketExportFilter) {
+        marketExportFilter.addEventListener('change', function() {
+            updateUsers({ market_export_filter: this.value || null });
+        });
+    }
 
     // Initial sorting listeners
     attachSortingListeners();

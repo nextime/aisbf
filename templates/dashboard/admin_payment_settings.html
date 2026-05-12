@@ -44,6 +44,50 @@
             </form>
         </div>
 
+        <div style="background: var(--bg-panel); border: 2px solid var(--color-link); border-radius: 8px; padding: 20px; margin-bottom: 20px;">
+            <h3 style="margin: 0 0 20px 0; color: var(--color-link);">
+                <i class="fas fa-store-alt me-2"></i>Market Administration
+            </h3>
+            <div style="overflow:auto; border: 1px solid var(--color-border); border-radius: 8px; background: var(--bg-page);">
+                <table style="width:100%; border-collapse: collapse;">
+                    <thead>
+                        <tr style="background: var(--bg-accent);">
+                            <th style="padding:10px; text-align:left;">ID</th>
+                            <th style="padding:10px; text-align:left;">Title</th>
+                            <th style="padding:10px; text-align:left;">Owner</th>
+                            <th style="padding:10px; text-align:left;">Source</th>
+                            <th style="padding:10px; text-align:left;">Status</th>
+                            <th style="padding:10px; text-align:right;">1M Tokens</th>
+                            <th style="padding:10px; text-align:right;">1K Requests</th>
+                            <th style="padding:10px; text-align:right;">Revenue</th>
+                            <th style="padding:10px; text-align:right;">Requests</th>
+                            <th style="padding:10px; text-align:center;">Active</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    {% for listing in market_listings %}
+                        <tr style="border-top:1px solid var(--color-border);">
+                            <td style="padding:10px;">{{ listing.id }}</td>
+                            <td style="padding:10px;">{{ listing.title }}</td>
+                            <td style="padding:10px;">{{ listing.owner_username }}</td>
+                            <td style="padding:10px;">{{ listing.source_type }} / {{ listing.source_id }}</td>
+                            <td style="padding:10px;">{{ 'Online' if listing.online else 'Offline' }}</td>
+                            <td style="padding:10px; text-align:right;">{{ listing.price_per_million_tokens }}</td>
+                            <td style="padding:10px; text-align:right;">{{ listing.price_per_1000_requests }}</td>
+                            <td style="padding:10px; text-align:right;">{{ '%.2f'|format((listing.stats or {}).gross_revenue or 0) }}</td>
+                            <td style="padding:10px; text-align:right;">{{ (listing.stats or {}).total_requests or 0 }}</td>
+                            <td style="padding:10px; text-align:center;">{{ 'Yes' if listing.is_active else 'No' }}</td>
+                        </tr>
+                    {% else %}
+                        <tr>
+                            <td colspan="10" style="padding:16px; text-align:center; color: var(--color-muted);">No market listings yet.</td>
+                        </tr>
+                    {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+
         <!-- Global Currency Settings -->
         <div style="background: var(--bg-panel); border: 2px solid #17a2b8; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: var(--color-link);">

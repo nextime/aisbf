@@ -1503,7 +1503,8 @@ class DatabaseManager:
 
     def get_users_paginated(self, page: int = 1, limit: int = 25, search: str = None,
                            order_by: str = 'created_at', direction: str = 'desc',
-                           status_filter: str = None, role_filter: str = None) -> Dict:
+                           status_filter: str = None, role_filter: str = None,
+                           tier_filter: str = None, market_export_filter: str = None) -> Dict:
         """
         Get paginated users with search, sorting, and filtering support.
 
@@ -1515,6 +1516,8 @@ class DatabaseManager:
             direction: Sort direction (asc or desc)
             status_filter: Optional status filter ('active', 'inactive', or None)
             role_filter: Optional role filter ('admin', 'user', or None)
+            tier_filter: Optional account tier id filter
+            market_export_filter: Optional market export filter ('exporting', 'not_exporting', or None)
 
         Returns:
             Dictionary with 'users' list and 'total' count
@@ -1574,6 +1577,19 @@ class DatabaseManager:
             if role_filter:
                 where_conditions.append(f'u.role = {placeholder}')
                 params.append(role_filter)
+
+            if tier_filter:
+                where_conditions.append(f'u.tier_id = {placeholder}')
+                params.append(tier_filter)
+
+            if market_export_filter == 'exporting':
+                where_conditions.append(
+                    f'EXISTS (SELECT 1 FROM market_listings ml WHERE ml.owner_user_id = u.id AND ml.is_active = 1)'
+                )
+            elif market_export_filter == 'not_exporting':
+                where_conditions.append(
+                    f'NOT EXISTS (SELECT 1 FROM market_listings ml WHERE ml.owner_user_id = u.id AND ml.is_active = 1)'
+                )
 
             # Build final WHERE clause
             where_clause = 'WHERE ' + ' AND '.join(where_conditions) if where_conditions else ''
