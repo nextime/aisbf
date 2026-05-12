@@ -53,6 +53,29 @@ def _list_dashboard_market_references(db, user_id: int, reference_type: str) -> 
     return references
 
 
+def _market_reference_provider_choice(reference: dict) -> dict:
+    return {
+        'provider_id': reference['id'],
+        'config': {
+            'type': reference.get('type') or reference.get('source_type') or 'market_reference',
+            'name': reference.get('name') or reference['id'],
+            'market_reference': True,
+            'read_only': True,
+            'models': [],
+        },
+    }
+
+
+def _market_reference_rotation_choice(reference: dict) -> dict:
+    return {
+        'rotation_id': reference['id'],
+        'name': reference.get('name') or reference['id'],
+        'type': 'rotation',
+        'market_reference': True,
+        'read_only': True,
+    }
+
+
 def _serialize_provider_usage_snapshot(snapshot):
     if not snapshot:
         return None
@@ -1226,8 +1249,10 @@ async def dashboard_rotations(request: Request):
         # Database user: use ONLY their own providers
         db = DatabaseRegistry.get_config_database()
         user_providers = db.get_user_providers(current_user_id)
-        available_providers = [p['provider_id'] for p in user_providers]
-        providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in user_providers}
+        provider_references = _list_dashboard_market_references(db, current_user_id, 'provider')
+        available_provider_rows = user_providers + [_market_reference_provider_choice(reference) for reference in provider_references]
+        available_providers = [p['provider_id'] for p in available_provider_rows]
+        providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in available_provider_rows}
 
     # Check for success parameter
     success = request.query_params.get('success')
@@ -1502,18 +1527,24 @@ async def dashboard_autoselect(request: Request):
 
         # Get only user's own rotations
         user_rotations = db.get_user_rotations(current_user_id)
-        available_rotations = [rot['rotation_id'] for rot in user_rotations]
+        rotation_references = _list_dashboard_market_references(db, current_user_id, 'rotation')
+        available_rotation_rows = user_rotations + [_market_reference_rotation_choice(reference) for reference in rotation_references]
+        available_rotations = [rot['rotation_id'] if 'rotation_id' in rot else rot['id'] for rot in available_rotation_rows]
 
         # Get only user's own providers
         user_providers = db.get_user_providers(current_user_id)
+        provider_references = _list_dashboard_market_references(db, current_user_id, 'provider')
+        available_provider_rows = user_providers + [_market_reference_provider_choice(reference) for reference in provider_references]
         available_models = []
-        user_providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in user_providers}
+        user_providers_meta = {p['provider_id']: {"type": p['config'].get('type', 'openai')} for p in available_provider_rows}
 
         # Add user rotation IDs
-        for rotation_id in available_rotations:
+        for rotation in available_rotation_rows:
+            rotation_id = rotation['rotation_id'] if 'rotation_id' in rotation else rotation['id']
+            rotation_name = rotation.get('name') or rotation_id
             available_models.append({
                 'id': rotation_id,
-                'name': f'{rotation_id} (rotation)',
+                'name': f'{rotation_name} (rotation)',
                 'type': 'rotation'
             })
 

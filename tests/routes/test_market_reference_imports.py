@@ -398,6 +398,27 @@ def test_dashboard_rotations_renders_market_reference_alongside_local_rotation(m
     assert 'copyRotation(\'market-ref:2\')' not in response.text
 
 
+def test_dashboard_rotations_offers_market_provider_reference_in_provider_choices(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/rotations")
+
+    assert response.status_code == 200
+    context = capture.calls[-1]["context"]
+    available_providers = json.loads(context["available_providers"])
+    assert "local-provider" in available_providers
+    assert "market-ref:1" in available_providers
+
+
 def test_dashboard_autoselect_renders_market_reference_alongside_local_entry(monkeypatch):
     db = MarketReferenceImportDbStub()
     _seed_dashboard_market_reference_mix(db)
@@ -418,6 +439,29 @@ def test_dashboard_autoselect_renders_market_reference_alongside_local_entry(mon
     assert "Market-linked" in response.text
     assert "Read-only" in response.text
     assert 'copyAutoselect(\'market-ref:3\')' not in response.text
+
+
+def test_dashboard_autoselect_offers_market_rotation_reference_in_rotation_choices(monkeypatch):
+    db = MarketReferenceImportDbStub()
+    _seed_dashboard_market_reference_mix(db)
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_user(client)
+
+    monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
+    from aisbf.routes.dashboard import providers as dashboard_providers
+    monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/autoselect")
+
+    assert response.status_code == 200
+    context = capture.calls[-1]["context"]
+    available_rotations = json.loads(context["available_rotations"])
+    available_models = json.loads(context["available_models"])
+    assert "local-rotation" in available_rotations
+    assert "market-ref:2" in available_rotations
+    assert {"id": "market-ref:2", "name": "Alice Rotation (rotation)", "type": "rotation"} in available_models
 
 
 def test_import_market_listing_creates_market_reference_for_provider(monkeypatch):
