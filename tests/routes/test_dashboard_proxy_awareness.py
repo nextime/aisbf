@@ -9,6 +9,7 @@ from itsdangerous import TimestampSigner
 from jinja2 import Environment, FileSystemLoader, select_autoescape
 
 from aisbf.routes.dashboard import market as dashboard_market
+from aisbf.routes.dashboard import providers as dashboard_providers
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from main import app
@@ -21,7 +22,7 @@ class TemplateCapture:
             loader=FileSystemLoader(str(Path(__file__).resolve().parents[2] / "templates")),
             autoescape=select_autoescape(["html", "xml"]),
         )
-        self._env.globals["url_for"] = lambda request, path, **kwargs: path
+        self._env.globals["url_for"] = lambda request, path, **kwargs: f"{request.scope.get('root_path', '')}{path}"
 
     def TemplateResponse(self, *args, **kwargs):
         request = kwargs["request"]
@@ -179,6 +180,19 @@ def _login_as_user(client: TestClient, user_id: int = 11) -> None:
     )
 
 
+def _login_as_admin(client: TestClient) -> None:
+    _set_session_cookie(
+        client,
+        {
+            "logged_in": True,
+            "username": "admin",
+            "role": "admin",
+            "user_id": None,
+            "expires_at": 4102444800,
+        },
+    )
+
+
 def _forwarded_prefix_headers():
     return {
         "X-Forwarded-Prefix": "/proxy/app",
@@ -194,7 +208,6 @@ def test_user_providers_page_uses_proxy_aware_bootstrap_paths(monkeypatch):
     _login_as_user(client)
 
     monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
-    from aisbf.routes.dashboard import providers as dashboard_providers
     monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
     monkeypatch.setattr(dashboard_providers, "_templates", capture)
 
@@ -206,6 +219,21 @@ def test_user_providers_page_uses_proxy_aware_bootstrap_paths(monkeypatch):
     assert "window.location.href = '/dashboard/providers?success=1'" not in response.text
 
 
+def test_admin_providers_template_uses_single_proxy_aware_base_path(monkeypatch):
+    capture = TemplateCapture()
+    client = TestClient(app)
+    _login_as_admin(client)
+
+    monkeypatch.setattr(dashboard_providers, "_templates", capture)
+
+    response = client.get("/dashboard/providers", headers=_forwarded_prefix_headers())
+
+    assert response.status_code == 200
+    assert capture.calls[-1]["name"] == "dashboard/providers.html"
+    assert response.text.count('const BASE_PATH = "/proxy/app";') == 1
+    assert 'window.location.href = `${BASE_PATH}/dashboard/providers?success=1`;' in response.text
+
+
 def test_user_rotations_page_uses_proxy_aware_search_urls(monkeypatch):
     db = DashboardProxyDbStub()
     capture = TemplateCapture()
@@ -213,7 +241,6 @@ def test_user_rotations_page_uses_proxy_aware_search_urls(monkeypatch):
     _login_as_user(client)
 
     monkeypatch.setattr(dashboard_market, "DatabaseRegistry", RegistryStub(db))
-    from aisbf.routes.dashboard import providers as dashboard_providers
     monkeypatch.setattr(dashboard_providers, "DatabaseRegistry", RegistryStub(db))
     monkeypatch.setattr(dashboard_providers, "_templates", capture)
 
@@ -223,6 +250,30 @@ def test_user_rotations_page_uses_proxy_aware_search_urls(monkeypatch):
     assert 'const BASE_PATH = "/proxy/app"' in response.text
     assert "fetch(`${BASE_PATH}/dashboard/providers/" in response.text
     assert "fetch('/dashboard/providers/" not in response.text
+
+
+def test_admin_autoselect_template_uses_proxy_aware_cancel_link():
+    capture = TemplateCapture()
+    request = type("Req", (), {"scope": {"root_path": "/proxy/app"}, "session": {}})()
+    response = capture.TemplateResponse(
+        request=request,
+        name="dashboard/autoselect.html",
+        context={
+            "request": request,
+            "session": {},
+            "autoselect_json": "{}",
+            "available_rotations": "[]",
+            "available_models": "[]",
+            "providers_meta": "{}",
+            "success": None,
+            "error": None,
+        },
+    )
+
+    response_text = response.body.decode()
+
+    assert '<a href="/dashboard" class="btn btn-secondary">Cancel</a>' not in response_text
+    assert '<a href="/proxy/app/dashboard" class="btn btn-secondary">Cancel</a>' in response_text
 
 
 def test_market_page_uses_proxy_aware_market_api_urls(monkeypatch):

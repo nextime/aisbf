@@ -36,7 +36,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 <button type="button" class="btn" onclick="addAutoselect()" style="margin-top: 20px;"data-i18n="user_autoselects_page.add_autoselect">Add Autoselect</button>
 <div style="display: flex; gap: 10px; margin-top: 20px;">
     <button type="button" class="btn" onclick="saveAutoselect()"data-i18n="user_autoselects_page.save_config">Save Configuration</button>
-    <a href="/dashboard" class="btn btn-secondary">Cancel</a>
+    <a href="{{ url_for(request, '/dashboard') }}" class="btn btn-secondary">Cancel</a>
 </div>
 
 <script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>

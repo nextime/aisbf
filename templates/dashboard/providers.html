@@ -165,8 +165,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block extra_js %}
 <script src="{{ url_for(request, '/dashboard/static/dragsort.js') }}"></script>
 <script>
-const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
-
 function escHtmlAttr(s) {
     return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
 }
