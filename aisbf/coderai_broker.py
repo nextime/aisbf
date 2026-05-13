@@ -8,6 +8,7 @@ import asyncio
 from collections import deque
 import json
 import logging
+import os
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -235,8 +236,28 @@ class CoderAIBroker:
             ],
             "updated_at": time.time(),
         }
-        with open(self._state_path, 'w') as f:
+        temp_path = self._state_path.with_suffix(self._state_path.suffix + '.tmp')
+        with open(temp_path, 'w') as f:
             json.dump(payload, f, indent=2)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(temp_path, self._state_path)
+
+    def _quarantine_invalid_state_file(self) -> Optional[Path]:
+        if not self._state_path.exists():
+            return None
+        timestamp = int(time.time())
+        quarantine_path = self._state_path.with_name(f"{self._state_path.name}.corrupt.{timestamp}")
+        counter = 1
+        while quarantine_path.exists():
+            quarantine_path = self._state_path.with_name(f"{self._state_path.name}.corrupt.{timestamp}.{counter}")
+            counter += 1
+        try:
+            self._state_path.replace(quarantine_path)
+            return quarantine_path
+        except Exception:
+            logger.exception("Failed to quarantine invalid CoderAI broker session state file")
+            return None
 
     def _load_persisted_sessions(self) -> None:
         if not self._state_path.exists():
@@ -245,7 +266,15 @@ class CoderAIBroker:
             with open(self._state_path) as f:
                 payload = json.load(f)
         except Exception as e:
-            logger.warning(f"Failed to load persisted CoderAI broker sessions: {e}")
+            quarantine_path = self._quarantine_invalid_state_file()
+            if quarantine_path is not None:
+                logger.warning(
+                    "Failed to load persisted CoderAI broker sessions: %s. Moved invalid state file to %s",
+                    e,
+                    quarantine_path,
+                )
+            else:
+                logger.warning(f"Failed to load persisted CoderAI broker sessions: {e}")
             return
 
         for raw_session in payload.get("sessions") or []:

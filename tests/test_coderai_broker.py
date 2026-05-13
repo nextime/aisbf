@@ -2,11 +2,12 @@ import asyncio
 import json
 import sys
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from aisbf.coderai_broker import broker
+from aisbf.coderai_broker import broker, CoderAIBroker
 from aisbf.config import ProviderConfig, config
 from aisbf.database import DatabaseRegistry
 
@@ -330,3 +331,34 @@ def test_user_registration_rejects_global_provider_token(monkeypatch):
             config.providers.pop("coderai-global-only", None)
         else:
             config.providers["coderai-global-only"] = original_provider
+
+
+def test_load_persisted_sessions_quarantines_corrupt_state_file(tmp_path):
+    broker_instance = CoderAIBroker()
+    broker_instance._state_path = tmp_path / "coderai_broker_sessions.json"
+    broker_instance._state_path.write_text('{"sessions": [invalid]}', encoding="utf-8")
+    broker_instance._cache = SimpleNamespace(
+        broker_node_id=lambda: "node-test",
+        broker_set=lambda *args, **kwargs: None,
+        broker_get=lambda *args, **kwargs: None,
+        broker_delete=lambda *args, **kwargs: None,
+    )
+
+    broker_instance._load_persisted_sessions()
+
+    assert not broker_instance._state_path.exists()
+    quarantined = list(tmp_path.glob("coderai_broker_sessions.json.corrupt.*"))
+    assert len(quarantined) == 1
+
+
+def test_persist_sessions_locked_writes_state_atomically(tmp_path):
+    broker_instance = CoderAIBroker()
+    broker_instance._state_path = tmp_path / "coderai_broker_sessions.json"
+    broker_instance._sessions_by_id = {}
+
+    broker_instance._persist_sessions_locked()
+
+    assert broker_instance._state_path.exists()
+    assert not (tmp_path / "coderai_broker_sessions.json.tmp").exists()
+    payload = json.loads(broker_instance._state_path.read_text(encoding="utf-8"))
+    assert payload["sessions"] == []

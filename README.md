@@ -78,12 +78,34 @@ The dashboard provides:
 - Provider configuration and API key management
 - RunPod runtime controls and CoderAI broker session monitoring
 - Rotation and autoselect model setup
+- Prompt security controls, Context Lens analytics, and NSFW/privacy routing filters
 - AISBF Studio multimodal workflows and pipeline bindings
 - User wallet management and top-up options
 - Token usage analytics, broker telemetry, and cost tracking
 - Marketplace publishing, importing, and administration
 - SSL/TLS and TOR configuration
 - Multi-user administration
+
+## Featured Capabilities
+
+### Market
+
+- Publish providers, single models, rotations, and autoselect configurations to the built-in AISBF marketplace
+- Import published resources as locked references instead of cloning their full configuration locally
+- Track listing activity, usage settlement, revenue, and admin-side market visibility from the dashboard
+
+### CoderAI
+
+- Use `coderai` providers in direct HTTP mode, direct WebSocket bridge mode, or NAT-friendly broker mode
+- Register remote workers with provider-scoped tokens and inspect broker session status from the dashboard
+- Forward Studio-native endpoints over the CoderAI bridge so chat, multimodal, and long-running jobs can work through the same connection
+
+### Security Filters
+
+- Enable prompt-security scanning to detect suspicious prompt patterns before upstream execution
+- Enable Context Lens analytics to capture prompt composition metadata, risk summaries, and redacted evidence
+- Enable NSFW and privacy classification so AISBF can route or restrict traffic based on content sensitivity
+- Optionally block high-risk prompts and keep persisted prompt text disabled by default while redaction remains enabled
 
 ## API Usage
 
@@ -119,6 +141,7 @@ For complete documentation, configuration guides, and API reference:
 - **[📚 Full Documentation](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md)** - Comprehensive user and developer guide
 - **[🔧 Installation Guide](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#installation)** - Detailed setup instructions
 - **[⚙️ Configuration](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#configuration)** - All configuration options
+- **[🛡️ Security Filters](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#security-filters-and-prompt-analysis)** - Prompt security, Context Lens analytics, and content classification
 - **[🎛️ Studio Guide](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#aisbf-studio)** - Multimodal Studio, bindings, and pipelines
 - **[🛒 Marketplace](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#marketplace-and-references)** - Publishing, imports, and settlements
 - **[🤖 CoderAI Broker](https://git.nexlab.net/nexlab/aisbf/blob/master/docs/coderai-integration.md)** - Broker protocol and integration reference

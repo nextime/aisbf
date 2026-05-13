@@ -254,6 +254,56 @@ Important `runpod_config` fields:
 
 Dashboard support includes runtime refresh, status inspection, public catalog import, and persisted state tracking.
 
+## Security Filters and Prompt Analysis
+
+AISBF includes native request-time prompt analysis and content-safety controls that can be enabled globally and overridden at provider, rotation, autoselect, or model level.
+
+### Prompt-security controls
+
+The `prompt_security` feature group in `aisbf.json` controls:
+
+- `security_scan` - enables local prompt scanning before upstream execution
+- `context_lens` - enables prompt composition analytics and risk telemetry capture
+- `block_high_risk_prompts` - blocks requests whose local prompt analysis resolves to `high` risk
+- `persist_prompt_text` - stores raw prompt text when explicitly enabled
+- `redact_before_persist` - keeps redaction enabled before persistence to avoid storing sensitive content in plain text by default
+- `risk_threshold` - controls the blocking threshold, defaulting to `high`
+
+Default shipped posture:
+- prompt-security scanning: disabled
+- Context Lens analytics: disabled
+- block-high-risk prompts: disabled
+- persist raw prompt text: disabled
+- redact-before-persist: enabled
+
+### Request-time behavior
+
+When enabled, AISBF performs local prompt analysis before proxying the request upstream:
+
+- scans prompts using regex and heuristic detectors for suspicious prompt-injection and policy-evasion patterns
+- computes a risk level and aggregate risk score
+- builds a composition summary including prompt shape, dominant role, system-prompt presence, and tool usage posture
+- stores redacted summaries in prompt analytics tables for later dashboard inspection
+- can stop execution locally when `block_high_risk_prompts` is enabled and the resolved risk level is `high`
+
+### Content classification filters
+
+AISBF also supports request classification flags for:
+
+- NSFW-sensitive traffic via `enable_nsfw_classification`
+- privacy-sensitive traffic via `enable_privacy_classification`
+
+These controls can be applied on providers, rotations, autoselect configurations, and model entries so routing decisions can respect the sensitivity of the content being processed.
+
+### Dashboard visibility
+
+Prompt-security and analytics controls are exposed in the dashboard settings and resource editors:
+
+- global defaults can be configured from dashboard settings
+- provider/model editors expose tri-state overrides for prompt security and Context Lens analytics
+- rotation/autoselect editors expose inherited or explicit overrides for the same controls
+- prompt analysis results appear in the prompt analytics dashboard when scanning or Context Lens capture is enabled
+
 ## AISBF Studio
 
 AISBF Studio is the dashboard-native multimodal workspace exposed at `/dashboard/studio`.
@@ -307,6 +357,17 @@ AISBF includes a built-in marketplace for sharing configured resources between u
 - Settlement support for usage-based sharing
 - User export controls and market visibility filtering
 
+### Publishing model
+
+Listings can be created from:
+
+- full provider configurations
+- specific provider/model pairs
+- rotations
+- autoselect resources
+
+Each listing stores a sanitized configuration snapshot so secrets and local credential material are not exposed through the market export path.
+
 ### Imported references
 
 Users can import market listings as references instead of duplicating the underlying configuration.
@@ -316,6 +377,35 @@ Reference behavior:
 - AISBF resolves references at runtime before handling requests
 - Availability is tied to the source listing state
 - Dashboard UI clearly distinguishes imported resources from locally owned ones
+
+## CoderAI Integration
+
+AISBF supports CoderAI both as a directly reachable provider and as a brokered remote runtime.
+
+### Transport modes
+
+- direct HTTP mode for OpenAI-compatible endpoints
+- direct WebSocket bridge mode for framed request/response routing
+- broker mode for outbound-only NAT traversal where the CoderAI worker connects into AISBF
+
+### Broker features
+
+- provider-scoped registration tokens
+- global and user-scoped broker endpoints
+- persisted broker session snapshots in `~/.aisbf/coderai_broker_sessions.json`
+- dashboard session visibility with owner, client ID, transport, endpoint, Studio endpoints, and performance telemetry
+- Studio-native proxy forwarding for non-chat endpoints and long-running jobs
+
+### CoderAI dashboard workflow
+
+- create or edit a `coderai` provider
+- choose direct transport or broker mode
+- assign a stable `client_id`
+- generate or rotate the `registration_token`
+- connect the remote worker to the broker endpoint
+- inspect connection health and advertised capabilities from the providers page
+
+For protocol-level implementation details, see `docs/coderai-integration.md`.
 
 ## Wallet System
 

@@ -346,6 +346,44 @@ def test_record_prompt_analysis_run_uses_mysql_last_insert_id_fallback():
     assert '"has_tools": true' in insert_params[-1]
 
 
+def test_prompt_analysis_details_mysql_json_extract_uses_text_column_directly():
+    from aisbf.database import DatabaseManager
+
+    class CursorStub:
+        def __init__(self):
+            self.executed = []
+            self._fetchall_calls = 0
+
+        def execute(self, sql, params=None):
+            self.executed.append((sql, params))
+
+        def fetchall(self):
+            self._fetchall_calls += 1
+            return []
+
+        def fetchone(self):
+            return (0, 0, 0, 0)
+
+    class ConnStub:
+        def __init__(self, cursor):
+            self._cursor = cursor
+
+        def cursor(self):
+            return self._cursor
+
+    manager = DatabaseManager.__new__(DatabaseManager)
+    manager.db_type = "mysql"
+    cursor = CursorStub()
+    manager._get_connection = lambda: MysqlConnCtxStub(ConnStub(cursor))
+
+    now = __import__("datetime").datetime.now()
+    manager.get_prompt_analysis_details(start=now, end=now)
+
+    executed_sql = "\n".join(sql for sql, _ in cursor.executed)
+    assert "JSON_UNQUOTE(JSON_EXTRACT(summary_json, '$.composition.largest_segment_role'))" in executed_sql
+    assert "CAST(summary_json AS JSON)" not in executed_sql
+
+
 @pytest.mark.asyncio
 async def test_handle_chat_completion_uses_cache_when_provider_override_enables_it(monkeypatch):
     request = RequestStub()

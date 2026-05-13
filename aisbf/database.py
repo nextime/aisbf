@@ -2908,7 +2908,7 @@ class DatabaseManager:
             def _json_extract(column: str, path: str) -> str:
                 if self.db_type == 'sqlite':
                     return f"json_extract({column}, '$.{path}')"
-                return f"JSON_UNQUOTE(JSON_EXTRACT(CAST({column} AS JSON), '$.{path}'))"
+                return f"JSON_UNQUOTE(JSON_EXTRACT({column}, '$.{path}'))"
 
             role_expr = _json_extract('summary_json', 'composition.largest_segment_role')
             shape_expr = _json_extract('summary_json', 'composition.prompt_shape')
