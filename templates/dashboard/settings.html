@@ -27,7 +27,20 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 .settings-section { display: none; }
 .settings-section.active { display: block; }
 .section-title { font-size: 1.1em; font-weight: 600; color: var(--color-primary); margin: 0 0 20px; padding-bottom: 8px; border-bottom: 1px solid var(--color-border); }
+.tri-grid { display:grid; grid-template-columns:repeat(auto-fit, minmax(240px, 1fr)); gap:16px; }
 </style>
+
+{% macro tri_state_select(field_name, selected_value, label, help_text='') %}
+<div class="form-group">
+    <label for="{{ field_name }}">{{ label }}</label>
+    <select id="{{ field_name }}" name="{{ field_name }}">
+        <option value="inherit" {% if selected_value == 'inherit' %}selected{% endif %}>Inherit</option>
+        <option value="enabled" {% if selected_value == 'enabled' %}selected{% endif %}>Enabled</option>
+        <option value="disabled" {% if selected_value == 'disabled' %}selected{% endif %}>Disabled</option>
+    </select>
+    {% if help_text %}<small style="color: var(--color-subtle); display: block; margin-top: 5px;">{{ help_text }}</small>{% endif %}
+</div>
+{% endmacro %}
 
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
     <h2 style="margin:0;">Server Settings</h2>
@@ -58,7 +71,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="settings-tab" onclick="switchTab('models')"><i class="fas fa-brain"></i><span data-i18n="settings_page.tab_models">Models</span></div>
     <div class="settings-tab" onclick="switchTab('database')"><i class="fas fa-database"></i><span data-i18n="settings_page.tab_database">Database</span></div>
     <div class="settings-tab" onclick="switchTab('cache')"><i class="fas fa-bolt"></i><span data-i18n="settings_page.tab_cache">Cache</span></div>
-    <div class="settings-tab" onclick="switchTab('classification')"><i class="fas fa-filter"></i><span data-i18n="settings_page.tab_classification">Classification</span></div>
+    <div class="settings-tab" onclick="switchTab('classification')"><i class="fas fa-filter"></i><span data-i18n="settings_page.tab_classification">Features</span></div>
     <div class="settings-tab" onclick="switchTab('tor')"><i class="fas fa-user-secret"></i><span data-i18n="settings_page.tab_tor">TOR</span></div>
     <div class="settings-tab" onclick="switchTab('signup')"><i class="fas fa-user-plus"></i><span data-i18n="settings_page.tab_signup">Signup</span></div>
     <div class="settings-tab" onclick="switchTab('oauth2')"><i class="fab fa-openid"></i><span data-i18n="settings_page.tab_oauth2">OAuth2</span></div>
@@ -496,7 +509,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div><!-- /tab-cache -->
 
     <div class="settings-section" id="tab-classification">
-    <div class="section-title"><i class="fas fa-filter"></i> Content Classification</div>
+    <div class="section-title"><i class="fas fa-filter"></i> <span data-i18n="settings_page.section_classification">Features &amp; Prompt Analysis</span></div>
+    <p style="color: var(--color-muted); margin-bottom: 18px;">Global defaults for legacy classifiers, execution features, and prompt analysis / security controls.</p>
 
     <div class="form-group">
         <label>
@@ -520,6 +534,39 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             Enable Semantic Classification
         </label>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Enable semantic content classification using the configured model</small>
+    </div>
+
+    <div class="section-title" style="margin-top:28px;"><i class="fas fa-sliders-h"></i> Global Feature Defaults</div>
+    <p style="color:var(--color-muted);margin-bottom:16px;font-size:.9em;">These tri-state defaults drive inheritance for provider, model, rotation, and autoselect overrides.</p>
+    {% set feature_controls = config.feature_controls if config.feature_controls else none %}
+    {% set prompt_security = feature_controls.prompt_security if feature_controls and feature_controls.prompt_security else none %}
+    <div class="tri-grid">
+        {{ tri_state_select('feature_nsfw_classification_mode', feature_controls.nsfw_classification.mode if feature_controls and feature_controls.nsfw_classification else 'inherit', 'NSFW Classification', 'Default NSFW classification behavior.') }}
+        {{ tri_state_select('feature_privacy_classification_mode', feature_controls.privacy_classification.mode if feature_controls and feature_controls.privacy_classification else 'inherit', 'Privacy Classification', 'Default privacy classification behavior.') }}
+        {{ tri_state_select('feature_context_condensation_mode', feature_controls.context_condensation.mode if feature_controls and feature_controls.context_condensation else 'inherit', 'Context Condensation', 'Default context condensation behavior.') }}
+        {{ tri_state_select('feature_response_cache_mode', feature_controls.response_cache.mode if feature_controls and feature_controls.response_cache else 'inherit', 'Response Cache', 'Default response-cache behavior.') }}
+        {{ tri_state_select('feature_prompt_batching_mode', feature_controls.prompt_batching.mode if feature_controls and feature_controls.prompt_batching else 'inherit', 'Prompt Batching', 'Default batching behavior.') }}
+        {{ tri_state_select('feature_prompt_security_mode', prompt_security.security_scan.mode if prompt_security and prompt_security.security_scan else 'inherit', 'Prompt Security', 'Default local prompt scanning behavior.') }}
+        {{ tri_state_select('feature_context_lens_mode', prompt_security.context_lens.mode if prompt_security and prompt_security.context_lens else 'inherit', 'Context Lens Analytics', 'Default prompt composition analytics behavior.') }}
+        {{ tri_state_select('feature_block_high_risk_prompts_mode', prompt_security.block_high_risk_prompts.mode if prompt_security and prompt_security.block_high_risk_prompts else 'inherit', 'Block High-Risk Prompts', 'Default local high-risk blocking behavior.') }}
+    </div>
+
+    <div class="section-title" style="margin-top:28px;"><i class="fas fa-shield-alt"></i> Prompt Security Persistence</div>
+    <p style="color:var(--color-muted);margin-bottom:16px;font-size:.9em;">Controls how prompt analysis findings are stored when prompt-security features are active.</p>
+    <div class="tri-grid">
+        {{ tri_state_select('feature_persist_prompt_text_mode', prompt_security.persist_prompt_text.mode if prompt_security and prompt_security.persist_prompt_text else 'inherit', 'Persist Prompt Text', 'Store prompt text with prompt-analysis records when allowed.') }}
+        {{ tri_state_select('feature_redact_before_persist_mode', prompt_security.redact_before_persist.mode if prompt_security and prompt_security.redact_before_persist else 'inherit', 'Redact Before Persist', 'Redact sensitive fragments before storing prompt-analysis records.') }}
+    </div>
+
+    <div class="form-group" style="margin-top: 18px; max-width: 340px;">
+        <label for="feature_risk_threshold">Prompt Security Risk Threshold</label>
+        <select id="feature_risk_threshold" name="feature_risk_threshold">
+            {% set risk_threshold = prompt_security.risk_threshold if prompt_security and prompt_security.risk_threshold else 'high' %}
+            <option value="low" {% if risk_threshold == 'low' %}selected{% endif %}>Low</option>
+            <option value="medium" {% if risk_threshold == 'medium' %}selected{% endif %}>Medium</option>
+            <option value="high" {% if risk_threshold == 'high' %}selected{% endif %}>High</option>
+        </select>
+        <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Minimum risk level that should be treated as high-risk for blocking and alerting.</small>
     </div>
     </div><!-- /tab-classification -->
 

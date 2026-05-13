@@ -13,6 +13,50 @@ from starlette.middleware.base import BaseHTTPMiddleware
 
 logger = logging.getLogger(__name__)
 
+
+def _is_coderai_registration_route(path: str) -> bool:
+    return (
+        path == "/api/coderai/register"
+        or path == "/api/coderai/wss"
+        or path.startswith("/api/u/") and (path.endswith("/coderai/register") or path.endswith("/coderai/wss"))
+    )
+
+
+async def _record_dashboard_visit_event(request: Request, response) -> None:
+    try:
+        if not request.url.path.startswith("/dashboard"):
+            return
+        from aisbf.database import DatabaseRegistry
+        from aisbf import geolocation
+        db = DatabaseRegistry.get_config_database()
+        ip_address = _get_real_client_ip(request)
+        country_code = None
+        if ip_address and ip_address != 'unknown' and not _is_private_or_local_ip(ip_address):
+            try:
+                country_code = await geolocation.get_ip_country(ip_address)
+            except Exception:
+                country_code = None
+        session_token = None
+        if hasattr(request, 'session'):
+            session_token = request.session.get('username') or request.session.get('user_id') or request.session.get('role')
+        db.record_dashboard_event(
+            event_type='dashboard_visit',
+            path=request.url.path,
+            user_id=request.session.get('user_id') if hasattr(request, 'session') else None,
+            username=request.session.get('username') if hasattr(request, 'session') else None,
+            session_id=str(session_token) if session_token is not None else None,
+            ip_address=ip_address if ip_address != 'unknown' else None,
+            country_code=country_code,
+            method=request.method,
+            status_code=getattr(response, 'status_code', None),
+            metadata={
+                'query': dict(request.query_params),
+                'is_admin': request.session.get('role') == 'admin' if hasattr(request, 'session') else False,
+            },
+        )
+    except Exception:
+        logger.debug("Failed to record dashboard visit event", exc_info=True)
+
 # ---------------------------------------------------------------------------
 # Client rate limiter state
 # ---------------------------------------------------------------------------
@@ -153,6 +197,9 @@ def make_api_token_authorization_middleware(get_server_config, get_db):
         if request.method == "GET" and path in ["/api/models", "/api/v1/models"]:
             return await call_next(request)
 
+        if _is_coderai_registration_route(path):
+            return await call_next(request)
+
         if not (server_config and server_config.get('auth_enabled', False)):
             return await call_next(request)
 
@@ -208,6 +255,9 @@ def make_auth_middleware(get_server_config, get_config, get_db, url_for_fn):
                     return await call_next(request)
 
             if request.method == "GET" and request.url.path in ["/api/models", "/api/v1/models"]:
+                return await call_next(request)
+
+            if _is_coderai_registration_route(request.url.path):
                 return await call_next(request)
 
             auth_header = request.headers.get('Authorization', '')
@@ -355,7 +405,9 @@ def make_dashboard_context_middleware():
                 request.state.welcome_shown = request.session.get('welcome_shown', False)
             else:
                 request.state.welcome_shown = True
-        return await call_next(request)
+        response = await call_next(request)
+        await _record_dashboard_visit_event(request, response)
+        return response
     return dashboard_context_middleware
 
 

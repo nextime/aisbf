@@ -1270,17 +1270,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
         
         # Check user's cache settings (overrides provider config)
         if user_id and cache_config['enabled']:
-            try:
-                from aisbf.database import DatabaseRegistry
-                db = DatabaseRegistry.get_config_database()
-                user_setting = db.get_user_cache_settings(user_id, provider_id, model_name)
-                if not user_setting['cache_enabled']:
-                    cache_config['enabled'] = False
-                    import logging
-                    logging.getLogger(__name__).info(f"User {user_id} disabled cache for provider={provider_id}, model={model_name}")
-            except Exception as e:
+            if not self._native_cache_user_allows(model_name):
+                cache_config['enabled'] = False
                 import logging
-                logging.getLogger(__name__).warning(f"Error checking user cache settings: {e}")
+                logging.getLogger(__name__).info(f"User {user_id} disabled cache for provider={provider_id}, model={model_name}")
         
         return cache_config
     

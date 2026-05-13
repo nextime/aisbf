@@ -266,6 +266,14 @@ class StripePaymentHandler:
                 'metadata': {'payment_intent': payment_intent['id']}
             }
         )
+        self.db.record_dashboard_event(
+            event_type='payment_completed',
+            path='/api/webhooks/stripe',
+            user_id=user_id,
+            username=None,
+            method='POST',
+            metadata={'gateway': 'stripe', 'amount': str(amount), 'payment_intent': payment_intent['id']},
+        )
         logger.info(f"Wallet credited: user={user_id}, amount={amount}, intent={payment_intent['id']}")
 
     async def auto_charge(self, user_id: int, amount: Decimal, payment_method_id: str,

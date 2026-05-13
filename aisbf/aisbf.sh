@@ -371,15 +371,14 @@ start_server() {
 
     echo "Starting AISBF on $HOST:$PORT..."
 
-    # Check if debug mode is enabled
+    # Keep packaged launches out of debug mode unless explicitly requested.
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
-    fi
 
-    # Test importing main module before starting uvicorn
-    echo "=== DEBUG: Testing main module import ==="
-    python3 -c "
+        # Test importing main module before starting uvicorn
+        echo "=== DEBUG: Testing main module import ==="
+        python3 -c "
 try:
     import main
     print('main module imported successfully')
@@ -389,6 +388,9 @@ except Exception as e:
     traceback.print_exc()
     exit(1)
 " 2>&1
+    else
+        unset AISBF_DEBUG
+    fi
 
     # Start the proxy server - runs in foreground
     # Use exec to replace the shell process so signals are properly handled
@@ -423,10 +425,12 @@ start_daemon() {
     
     echo "Starting AISBF on $HOST:$PORT in background..."
     
-    # Check if debug mode is enabled
+    # Keep packaged launches out of debug mode unless explicitly requested.
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
+    else
+        unset AISBF_DEBUG
     fi
     
     # Start in background with nohup and logging

@@ -29,6 +29,14 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
             📊 <span data-i18n="rate_limits_page.analytics">Analytics</span>
         </a>
+        <a href="{{ url_for(request, '/dashboard/prompt-analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
+            🧠 Prompt Analytics
+        </a>
+        {% if session.get('role') == 'admin' and session.get('user_id') is none %}
+        <a href="{{ url_for(request, '/dashboard/traffic-visits') }}" class="btn btn-secondary" style="text-decoration: none;">
+            👣 Traffic &amp; Visits
+        </a>
+        {% endif %}
         <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn btn-secondary" style="text-decoration: none;">
             💾 <span data-i18n="rate_limits_page.response_cache">Response Cache</span>
         </a>

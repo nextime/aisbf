@@ -54,3 +54,33 @@ async def test_ensure_authenticated_initiates_device_flow_when_expired(mock_oaut
     assert result["verification_url"] == "https://kilo.ai/device"
     mock_oauth2_expired.get_valid_token_with_refresh.assert_called_once()
     mock_oauth2_expired.initiate_device_flow.assert_called_once()
+
+
+def test_native_cache_user_allows_defaults_true_on_db_error(monkeypatch):
+    handler = KiloProviderHandler(provider_id="test_kilo", api_key=None, user_id=5)
+
+    class BrokenRegistry:
+        @staticmethod
+        def get_config_database():
+            raise RuntimeError("db unavailable")
+
+    monkeypatch.setattr("aisbf.providers.base.DatabaseRegistry", BrokenRegistry)
+
+    assert handler._native_cache_user_allows("kilo-model") is True
+
+
+def test_native_cache_user_allows_respects_disabled_setting(monkeypatch):
+    handler = KiloProviderHandler(provider_id="test_kilo", api_key=None, user_id=5)
+
+    class DbStub:
+        def get_user_cache_settings(self, user_id, provider_id, model_name):
+            return {"cache_enabled": False}
+
+    class RegistryStub:
+        @staticmethod
+        def get_config_database():
+            return DbStub()
+
+    monkeypatch.setattr("aisbf.providers.base.DatabaseRegistry", RegistryStub)
+
+    assert handler._native_cache_user_allows("kilo-model") is False

@@ -130,6 +130,14 @@ def setup_logging():
     root_logger.addHandler(error_handler)
     root_logger.addHandler(console_handler)
 
+    for noisy_logger in (
+        'websockets.client',
+        'websockets.server',
+        'websockets.protocol',
+        'uvicorn.protocols.websockets.websockets_impl',
+    ):
+        logging.getLogger(noisy_logger).setLevel(logging.INFO if AISBF_DEBUG else logging.WARNING)
+
     bpf = BrokenPipeFilter()
     for h in (file_handler, error_handler, console_handler):
         h.addFilter(bpf)

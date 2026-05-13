@@ -2368,6 +2368,14 @@ async def dashboard_wallet_topup(request: Request):
             import traceback as _tb
             logger.error(f"Crypto address generation error: {e!r}\n{_tb.format_exc()}")
             return JSONResponse({"error": "Could not generate deposit address"}, status_code=503)
+        db.record_dashboard_event(
+            event_type='wallet_topup_started',
+            path=request.url.path,
+            user_id=user_id,
+            username=request.session.get('username'),
+            method=request.method,
+            metadata={'payment_method': method, 'amount': amount, 'crypto_type': crypto_type},
+        )
         return JSONResponse({
             "type": "crypto",
             "method": method,
@@ -2380,6 +2388,14 @@ async def dashboard_wallet_topup(request: Request):
     # Stripe: create checkout session (hosted redirect flow)
     if method == 'stripe':
         try:
+            db.record_dashboard_event(
+                event_type='wallet_topup_started',
+                path=request.url.path,
+                user_id=user_id,
+                username=request.session.get('username'),
+                method=request.method,
+                metadata={'payment_method': method, 'amount': amount},
+            )
             payment_service = getattr(request.app.state, 'payment_service', None)
             if not payment_service or not hasattr(payment_service, 'stripe_handler'):
                 return JSONResponse({"error": "Stripe payment service unavailable"}, status_code=503)
@@ -2401,6 +2417,14 @@ async def dashboard_wallet_topup(request: Request):
     # PayPal: create order
     if method == 'paypal':
         try:
+            db.record_dashboard_event(
+                event_type='wallet_topup_started',
+                path=request.url.path,
+                user_id=user_id,
+                username=request.session.get('username'),
+                method=request.method,
+                metadata={'payment_method': method, 'amount': amount},
+            )
             payment_service = getattr(request.app.state, 'payment_service', None)
             if not payment_service or not hasattr(payment_service, 'paypal_handler'):
                 return JSONResponse({"error": "PayPal payment service unavailable"}, status_code=503)

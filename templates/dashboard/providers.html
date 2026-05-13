@@ -19,7 +19,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 {% block title %}Providers - AISBF Dashboard{% endblock %}
 
 {% block content %}
-<script id="providers-bootstrap" type="application/json">{{ providers_data | tojson }}</script>
+<script id="providers-bootstrap" type="application/json">{{ providers_bootstrap_json | safe }}</script>
 <h2 style="margin-bottom: 30px;">Providers Configuration</h2>
 
 {% if success %}
@@ -192,6 +192,17 @@ function formatPerfNumber(value, digits = 1, suffix = '') {
     return `${num.toFixed(digits)}${suffix}`;
 }
 
+function renderCoderaiCollapsedStatus(provider) {
+    const coderaiConfig = provider?.coderai_config || {};
+    if (provider?.type !== 'coderai' || coderaiConfig.broker_mode === false) return '';
+    const connected = !!coderaiConfig?.broker_session?.connected;
+    const label = connected ? 'Online' : 'Offline';
+    const bg = connected ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)';
+    const border = connected ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
+    const color = connected ? '#22c55e' : '#ef4444';
+    return `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};border:1px solid ${border};color:${color};"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
+}
+
 function formatRunpodTimestamp(value) {
     if (value == null || value === '') return 'Never';
     const date = new Date(Number(value) * 1000);
@@ -307,7 +318,7 @@ const IS_LOCAL_CLIENT = {{ 'true' if is_local_client else 'false' }};
 const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 // Marker used by the AISBF Chrome Extension to auto-detect this page and configure itself.
 window.AISBF_PROVIDERS_PAGE = { serverUrl: window.location.origin + BASE_PATH };
-let providersData = {{ providers_data | tojson }};
+let providersData = {};
 const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices | tojson }};
 const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices | tojson }};
 const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices | tojson }};
@@ -315,8 +326,22 @@ let expandedProviders = new Set();
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
 let providerSearchFilter = '';
-let providerMasterOrder = Object.keys(providersData);
+let rawProviders = JSON.parse(document.getElementById('providers-bootstrap').textContent);
+if (typeof rawProviders === 'string') {
+    rawProviders = JSON.parse(rawProviders);
+}
+let providerMasterOrder = [];
 let _providerDS = null;
+
+if (Array.isArray(rawProviders)) {
+    rawProviders.forEach(provider => {
+        providersData[provider.provider_id] = provider.config;
+    });
+    providerMasterOrder = rawProviders.map(provider => provider.provider_id);
+} else {
+    providersData = rawProviders || {};
+    providerMasterOrder = Object.keys(providersData);
+}
 
 // Chunk size: 512KB chunks for maximum compatibility with restrictive proxies
 const CHUNK_SIZE = 512 * 1024;
@@ -704,6 +729,7 @@ function renderProvidersList() {
             const supportsUsage = _providerSupportsUsage(key);
             const cachedUsage = _usageCache[key];
             const compactBadge = supportsUsage ? `<div id="usage-badge-${escHtmlAttr(key)}" onclick="event.stopPropagation();" style="margin-left:8px;">${cachedUsage && cachedUsage.data ? _renderUsageCompact(cachedUsage.data) : '<span style="color:var(--color-muted);font-size:11px;">loading…</span>'}</div>` : '';
+            const coderaiCollapsedStatus = renderCoderaiCollapsedStatus(provider);
 
             providerItem.innerHTML = `
                 <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; flex-wrap: wrap; gap: 8px;">
@@ -712,6 +738,7 @@ function renderProvidersList() {
                         <span style="font-size: 18px;">${isExpanded ? '▼' : '▶'}</span>
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                         <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
+                        ${coderaiCollapsedStatus}
                         ${compactBadge}
                     </div>
                     <button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>
@@ -1583,6 +1610,68 @@ function renderProviderDetails(key) {
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $30, Anthropic Claude: $75, Google Gemini: $5.00
                     </small>
                 </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Monthly Cost</label>
+                    <input type="number" step="0.01" min="0" value="${provider.premium_reference_monthly_cost || ''}" onchange="updateProvider('${key}', 'premium_reference_monthly_cost', parseFloat(this.value) || null)" placeholder="e.g., 20.00">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">
+                        Used for free-tier equivalent savings estimates.
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Limit</label>
+                    <input type="number" step="1" min="0" value="${provider.free_tier_limit || ''}" onchange="updateProvider('${key}', 'free_tier_limit', this.value ? parseInt(this.value, 10) : null)" placeholder="e.g., 50">
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Period</label>
+                    <select onchange="updateProvider('${key}', 'free_tier_period', this.value || null)">
+                        <option value="" ${!provider.free_tier_period ? 'selected' : ''}>Unspecified</option>
+                        <option value="day" ${provider.free_tier_period === 'day' ? 'selected' : ''}>Daily</option>
+                        <option value="week" ${provider.free_tier_period === 'week' ? 'selected' : ''}>Weekly</option>
+                        <option value="month" ${provider.free_tier_period === 'month' ? 'selected' : ''}>Monthly</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Limit Type</label>
+                    <select onchange="updateProvider('${key}', 'free_tier_limit_type', this.value || null)">
+                        <option value="" ${!provider.free_tier_limit_type ? 'selected' : ''}>Unspecified</option>
+                        <option value="requests" ${provider.free_tier_limit_type === 'requests' ? 'selected' : ''}>Requests</option>
+                        <option value="tokens" ${provider.free_tier_limit_type === 'tokens' ? 'selected' : ''}>Tokens</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Daily</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_daily || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_daily', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Weekly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_weekly || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_weekly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Monthly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_monthly || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_monthly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Daily</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_daily || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_daily', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Weekly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_weekly || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_weekly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Monthly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_monthly || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_monthly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
             </div>
         </div>
 
@@ -1630,19 +1719,16 @@ function renderProviderDetails(key) {
             <input type="text" value="${Array.isArray(provider.default_condense_method) ? provider.default_condense_method.join(', ') : (provider.default_condense_method || '')}" onchange="updateProviderCondenseMethod('${key}', this.value)" placeholder="e.g., semantic, conversational">
         </div>
         
-        <div class="form-group">
-            <label>
-                <input type="checkbox" ${provider.nsfw ? 'checked' : ''} onchange="updateProvider('${key}', 'nsfw', this.checked)">
-                NSFW
-            </label>
-        </div>
-        
-        <div class="form-group">
-            <label>
-                <input type="checkbox" ${provider.privacy ? 'checked' : ''} onchange="updateProvider('${key}', 'privacy', this.checked)">
-                Privacy
-            </label>
-        </div>
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+        <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">Per-provider tri-state overrides. Inherit follows the global default.</small>
+        ${triStateSelect('Context Condensation', provider.enable_context_condensation, `updateProviderTriState('${key}', 'enable_context_condensation', this.value)`, 'Controls whether condensation is active for this provider.')}
+        ${triStateSelect('Response Cache', provider.enable_response_cache, `updateProviderTriState('${key}', 'enable_response_cache', this.value)`, 'Overrides the global response-cache default for this provider.')}
+        ${triStateSelect('Prompt Batching', provider.enable_prompt_batching, `updateProviderTriState('${key}', 'enable_prompt_batching', this.value)`, 'Overrides batching behavior for this provider.')}
+        ${triStateSelect('Prompt Security', provider.enable_prompt_security, `updateProviderTriState('${key}', 'enable_prompt_security', this.value)`, 'Runs local prompt scanning before provider execution.')}
+        ${triStateSelect('Context Lens Analytics', provider.enable_context_lens, `updateProviderTriState('${key}', 'enable_context_lens', this.value)`, 'Captures prompt composition analytics for this provider.')}
+        ${triStateSelect('Block High-Risk Prompts', provider.block_high_risk_prompts, `updateProviderTriState('${key}', 'block_high_risk_prompts', this.value)`, 'Rejects high-risk prompts locally before sending upstream.')}
+        ${triStateSelect('NSFW Classification', provider.enable_nsfw_classification, `updateProviderTriState('${key}', 'enable_nsfw_classification', this.value)`, 'Controls NSFW classification checks for this provider.')}
+        ${triStateSelect('Privacy Classification', provider.enable_privacy_classification, `updateProviderTriState('${key}', 'enable_privacy_classification', this.value)`, 'Controls privacy classification checks for this provider.')}
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.native_caching_section')}</h4>
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
@@ -1807,18 +1893,16 @@ function renderModels(providerKey) {
                 <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateModelCondenseMethod('${providerKey}', ${index}, this.value)" placeholder="e.g., semantic, conversational">
             </div>
             
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" ${model.nsfw ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'nsfw', this.checked)">
-                    NSFW
-                </label>
-            </div>
-            
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" ${model.privacy ? 'checked' : ''} onchange="updateModel('${providerKey}', ${index}, 'privacy', this.checked)">
-                    Privacy
-                </label>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border);">
+                <h5 style="margin: 0 0 10px 0;">Feature Overrides</h5>
+                ${triStateSelect('Context Condensation', model.enable_context_condensation, `updateModelTriState('${providerKey}', ${index}, 'enable_context_condensation', this.value)`)}
+                ${triStateSelect('Response Cache', model.enable_response_cache, `updateModelTriState('${providerKey}', ${index}, 'enable_response_cache', this.value)`)}
+                ${triStateSelect('Prompt Batching', model.enable_prompt_batching, `updateModelTriState('${providerKey}', ${index}, 'enable_prompt_batching', this.value)`)}
+                ${triStateSelect('Prompt Security', model.enable_prompt_security, `updateModelTriState('${providerKey}', ${index}, 'enable_prompt_security', this.value)`)}
+                ${triStateSelect('Context Lens Analytics', model.enable_context_lens, `updateModelTriState('${providerKey}', ${index}, 'enable_context_lens', this.value)`)}
+                ${triStateSelect('Block High-Risk Prompts', model.block_high_risk_prompts, `updateModelTriState('${providerKey}', ${index}, 'block_high_risk_prompts', this.value)`)}
+                ${triStateSelect('NSFW Classification', model.enable_nsfw_classification, `updateModelTriState('${providerKey}', ${index}, 'enable_nsfw_classification', this.value)`)}
+                ${triStateSelect('Privacy Classification', model.enable_privacy_classification, `updateModelTriState('${providerKey}', ${index}, 'enable_privacy_classification', this.value)`)}
             </div>
 
             <div class="form-group">
@@ -1916,6 +2000,38 @@ function togglePricingFields(key) {
     if (pricingFields) {
         pricingFields.style.display = provider.is_subscription ? 'none' : 'block';
     }
+}
+
+function triStateValue(value) {
+    if (value === true || value === 'enabled') return 'enabled';
+    if (value === false || value === 'disabled') return 'disabled';
+    return 'inherit';
+}
+
+function triStateSelect(label, value, onChange, helpText = '') {
+    return `
+        <div class="form-group">
+            <label>${label}</label>
+            <select onchange="${onChange}">
+                <option value="inherit" ${triStateValue(value) === 'inherit' ? 'selected' : ''}>Inherit</option>
+                <option value="enabled" ${triStateValue(value) === 'enabled' ? 'selected' : ''}>Enabled</option>
+                <option value="disabled" ${triStateValue(value) === 'disabled' ? 'selected' : ''}>Disabled</option>
+            </select>
+            ${helpText ? `<small style="color: var(--color-muted); display:block; margin-top:5px;">${helpText}</small>` : ''}
+        </div>
+    `;
+}
+
+function updateTriState(target, field, value) {
+    target[field] = value === 'inherit' ? null : value === 'enabled';
+}
+
+function updateProviderTriState(key, field, value) {
+    updateTriState(providersData[key], field, value);
+}
+
+function updateModelTriState(providerKey, index, field, value) {
+    updateTriState(providersData[providerKey].models[index], field, value);
 }
 
 // Helper function to format expiration time

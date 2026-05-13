@@ -467,7 +467,17 @@ function renderAutoselectDetails(autoselectKey) {
             </label>
             <small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${window.i18n.t('autoselect.classify_semantic_desc')}</small>
         </div>
-        
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+        ${triStateSelect('Context Condensation', autoselect.enable_context_condensation, `updateAutoselectTriState('${autoselectKey}', 'enable_context_condensation', this.value)`)}
+        ${triStateSelect('Response Cache', autoselect.enable_response_cache, `updateAutoselectTriState('${autoselectKey}', 'enable_response_cache', this.value)`)}
+        ${triStateSelect('Prompt Batching', autoselect.enable_prompt_batching, `updateAutoselectTriState('${autoselectKey}', 'enable_prompt_batching', this.value)`)}
+        ${triStateSelect('Prompt Security', autoselect.enable_prompt_security, `updateAutoselectTriState('${autoselectKey}', 'enable_prompt_security', this.value)`)}
+        ${triStateSelect('Context Lens Analytics', autoselect.enable_context_lens, `updateAutoselectTriState('${autoselectKey}', 'enable_context_lens', this.value)`)}
+        ${triStateSelect('Block High-Risk Prompts', autoselect.block_high_risk_prompts, `updateAutoselectTriState('${autoselectKey}', 'block_high_risk_prompts', this.value)`)}
+        ${triStateSelect('NSFW Classification', autoselect.enable_nsfw_classification, `updateAutoselectTriState('${autoselectKey}', 'enable_nsfw_classification', this.value)`)}
+        ${triStateSelect('Privacy Classification', autoselect.enable_privacy_classification, `updateAutoselectTriState('${autoselectKey}', 'enable_privacy_classification', this.value)`)}
+         
         <div class="form-group">
             <label>${window.i18n.t('autoselect.description')}</label>
             <textarea onchange="updateAutoselect('${autoselectKey}', 'description', this.value)" style="min-height: 60px;">${autoselect.description || ''}</textarea>
@@ -605,10 +615,50 @@ function renderAutoselectModels(autoselectKey) {
                     ${window.i18n.t('autoselect.privacy')}
                 </label>
             </div>
+
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border);">
+                <h5 style="margin: 0 0 10px 0;">Feature Overrides</h5>
+                ${triStateSelect('Context Condensation', model.enable_context_condensation, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_context_condensation', this.value)`)}
+                ${triStateSelect('Response Cache', model.enable_response_cache, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_response_cache', this.value)`)}
+                ${triStateSelect('Prompt Batching', model.enable_prompt_batching, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_prompt_batching', this.value)`)}
+                ${triStateSelect('Prompt Security', model.enable_prompt_security, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_prompt_security', this.value)`)}
+                ${triStateSelect('Context Lens Analytics', model.enable_context_lens, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_context_lens', this.value)`)}
+                ${triStateSelect('Block High-Risk Prompts', model.block_high_risk_prompts, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'block_high_risk_prompts', this.value)`)}
+                ${triStateSelect('NSFW Classification', model.enable_nsfw_classification, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_nsfw_classification', this.value)`)}
+                ${triStateSelect('Privacy Classification', model.enable_privacy_classification, `updateAutoselectModelTriState('${autoselectKey}', ${index}, 'enable_privacy_classification', this.value)`)}
+            </div>
         `;
         
         container.appendChild(modelDiv);
     });
+}
+
+function triStateValue(value) {
+    if (value === true || value === 'enabled') return 'enabled';
+    if (value === false || value === 'disabled') return 'disabled';
+    return 'inherit';
+}
+
+function triStateSelect(label, value, onChange, helpText = '') {
+    return `
+        <div class="form-group">
+            <label>${label}</label>
+            <select onchange="${onChange}">
+                <option value="inherit" ${triStateValue(value) === 'inherit' ? 'selected' : ''}>Inherit</option>
+                <option value="enabled" ${triStateValue(value) === 'enabled' ? 'selected' : ''}>Enabled</option>
+                <option value="disabled" ${triStateValue(value) === 'disabled' ? 'selected' : ''}>Disabled</option>
+            </select>
+            ${helpText ? `<small style="color: var(--color-muted); font-size: 12px; display: block; margin-top: 5px;">${helpText}</small>` : ''}
+        </div>
+    `;
+}
+
+function updateAutoselectTriState(autoselectKey, field, value) {
+    autoselectConfig[autoselectKey][field] = value === 'inherit' ? null : value === 'enabled';
+}
+
+function updateAutoselectModelTriState(autoselectKey, index, field, value) {
+    autoselectConfig[autoselectKey].available_models[index][field] = value === 'inherit' ? null : value === 'enabled';
 }
 
 async function saveAutoselectItem(key) {

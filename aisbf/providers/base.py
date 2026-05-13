@@ -916,6 +916,17 @@ class BaseProviderHandler:
         
         logger.info(f"[{self.provider_id}] API key present, validation passed")
         return True
+
+    def _native_cache_user_allows(self, model_name: Optional[str] = None) -> bool:
+        """Return whether user-scoped native prompt caching is allowed for this provider/model."""
+        if self.user_id is None:
+            return True
+        try:
+            db = DatabaseRegistry.get_config_database()
+            user_setting = db.get_user_cache_settings(self.user_id, self.provider_id, model_name)
+            return bool(user_setting.get('cache_enabled', True))
+        except Exception:
+            return True
     
     def parse_429_response(self, response_data: Union[Dict, str], headers: Dict = None) -> Optional[int]:
         """

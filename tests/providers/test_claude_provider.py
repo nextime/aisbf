@@ -65,3 +65,19 @@ async def test_handle_request_raises_error_when_token_refresh_fails(mock_auth_ex
     
     assert "authentication required" in str(exc_info.value).lower() or "token" in str(exc_info.value).lower()
     mock_auth_expired.get_valid_token_with_refresh.assert_called()
+
+
+def test_get_cache_config_disables_prompt_caching_when_user_override_blocks(monkeypatch):
+    handler = ClaudeProviderHandler(provider_id="test_claude", api_key=None, user_id=7)
+    handler.provider_config = {
+        "claude_config": {
+            "enable_prompt_caching": True,
+            "cache_min_messages": 6,
+        }
+    }
+    monkeypatch.setattr(handler, "_native_cache_user_allows", lambda model_name=None: False)
+
+    cache_config = handler._get_cache_config(user_id=7, provider_id="test_claude", model_name="claude-3-5-sonnet")
+
+    assert cache_config["enabled"] is False
+    assert cache_config["min_messages"] == 6

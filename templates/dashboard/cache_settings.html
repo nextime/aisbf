@@ -1,25 +1,30 @@
 {% extends "base.html" %}
 
-{% block title %}Prompt Cache Settings{% endblock %}
+{% block title %}Native Prompt Cache Settings{% endblock %}
 
 {% block content %}
 <div class="container-fluid" style="padding: 20px;">
     <div style="max-width: 1400px; margin: 0 auto;">
         <h2 style="color: var(--color-text); margin-bottom: 30px;">
-            <i class="fas fa-memory me-2"></i>Prompt Cache Settings
+            <i class="fas fa-memory me-2"></i>Native Prompt Cache Settings
         </h2>
+
+        <div style="background: rgba(59,130,246,0.12); border: 1px solid rgba(59,130,246,0.35); border-radius: 8px; padding: 16px 18px; margin-bottom: 20px; color: var(--color-text);">
+            <strong>Scope note:</strong> this page controls the legacy user-specific native prompt-caching overrides used by provider adapters such as OpenAI-compatible, Claude, and Kilo flows.
+            The newer request-time response-cache policy now lives in the dashboard feature overrides under <strong>Response Cache</strong>.
+        </div>
 
         <!-- User Default Cache Setting -->
         <div style="background: var(--bg-panel); border: 2px solid #f39c12; border-radius: 8px; padding: 20px; margin-bottom: 20px;">
             <h3 style="margin: 0 0 20px 0; color: #f39c12;">
-                <i class="fas fa-user-circle me-2"></i>User Default Cache Setting
+                <i class="fas fa-user-circle me-2"></i>User Default Native Cache Setting
             </h3>
             
             <div style="background: var(--bg-page); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
                 <div style="display: flex; align-items: center; justify-content: space-between;">
                     <div>
-                        <h5 style="margin: 0 0 5px 0; color: var(--color-text);">Enable Prompt Caching</h5>
-                        <p style="color: var(--color-muted); margin: 0; font-size: 14px;">Enable/disable prompt caching for all your providers and models</p>
+                        <h5 style="margin: 0 0 5px 0; color: var(--color-text);">Enable Native Prompt Caching</h5>
+                        <p style="color: var(--color-muted); margin: 0; font-size: 14px;">Enable or disable provider-native prompt caching overrides for all your providers and models.</p>
                     </div>
                 </div>
             </div>
@@ -29,7 +34,7 @@
                     <i class="fas fa-info-circle me-2"></i>Cache Override Hierarchy
                 </h5>
                 <p style="color: var(--color-muted); margin: 0; font-size: 13px; line-height: 1.6;">
-                    Settings are applied in this priority order (most specific takes precedence):
+                    Legacy native prompt-caching settings are applied in this priority order (most specific takes precedence):
                     <br><strong>1. Model-level setting</strong> → Overrides everything
                     <br><strong>2. Provider-level setting</strong> → Overrides user default
                     <br><strong>3. User default</strong> → Applied if no specific setting exists

@@ -20,6 +20,42 @@ _templates = None
 logger = logging.getLogger(__name__)
 
 
+def _feature_mode_payload(mode: str) -> dict:
+    return {'mode': mode}
+
+
+def _set_feature_control(feature_controls: dict, key: str, mode: str) -> None:
+    feature_controls[key] = _feature_mode_payload(mode)
+
+
+def _set_prompt_security_control(feature_controls: dict, key: str, mode: str) -> None:
+    prompt_security = feature_controls.setdefault('prompt_security', {})
+    prompt_security[key] = _feature_mode_payload(mode)
+
+
+def _set_prompt_security_threshold(feature_controls: dict, threshold: str) -> None:
+    prompt_security = feature_controls.setdefault('prompt_security', {})
+    normalized = str(threshold or 'high').strip().lower()
+    if normalized not in {'low', 'medium', 'high'}:
+        normalized = 'high'
+    prompt_security['risk_threshold'] = normalized
+
+
+def _record_dashboard_admin_event(request: Request, event_type: str, **kwargs) -> None:
+    try:
+        db = DatabaseRegistry.get_config_database()
+        db.record_dashboard_event(
+            event_type=event_type,
+            path=request.url.path,
+            user_id=request.session.get('user_id'),
+            username=request.session.get('username'),
+            method=request.method,
+            **kwargs,
+        )
+    except Exception:
+        logger.debug("Failed to record dashboard admin event %s", event_type, exc_info=True)
+
+
 def _reorder_dict(d: dict, order: list) -> dict:
     """Return a new dict with keys in the given order (unknown keys appended at end)."""
     result = {k: d[k] for k in order if k in d}
@@ -374,7 +410,18 @@ async def dashboard_settings_save(
    classify_nsfw: bool = Form(False),
    classify_privacy: bool = Form(False),
    classify_semantic: bool = Form(False),
-   batching_enabled: bool = Form(False),
+   feature_nsfw_classification_mode: str = Form("inherit"),
+   feature_privacy_classification_mode: str = Form("inherit"),
+   feature_context_condensation_mode: str = Form("inherit"),
+   feature_response_cache_mode: str = Form("inherit"),
+    feature_prompt_batching_mode: str = Form("inherit"),
+    feature_prompt_security_mode: str = Form("inherit"),
+    feature_context_lens_mode: str = Form("inherit"),
+    feature_block_high_risk_prompts_mode: str = Form("inherit"),
+    feature_persist_prompt_text_mode: str = Form("inherit"),
+    feature_redact_before_persist_mode: str = Form("inherit"),
+    feature_risk_threshold: str = Form("high"),
+    batching_enabled: bool = Form(False),
    batching_window_ms: int = Form(100),
    batching_max_batch_size: int = Form(8),
    batching_openai_enabled: bool = Form(False),
@@ -647,6 +694,21 @@ async def dashboard_settings_save(
     aisbf_config['classify_privacy'] = classify_privacy
     aisbf_config['classify_semantic'] = classify_semantic
 
+    if 'feature_controls' not in aisbf_config or not isinstance(aisbf_config['feature_controls'], dict):
+        aisbf_config['feature_controls'] = {}
+    feature_controls = aisbf_config['feature_controls']
+    _set_feature_control(feature_controls, 'nsfw_classification', feature_nsfw_classification_mode)
+    _set_feature_control(feature_controls, 'privacy_classification', feature_privacy_classification_mode)
+    _set_feature_control(feature_controls, 'context_condensation', feature_context_condensation_mode)
+    _set_feature_control(feature_controls, 'response_cache', feature_response_cache_mode)
+    _set_feature_control(feature_controls, 'prompt_batching', feature_prompt_batching_mode)
+    _set_prompt_security_control(feature_controls, 'security_scan', feature_prompt_security_mode)
+    _set_prompt_security_control(feature_controls, 'context_lens', feature_context_lens_mode)
+    _set_prompt_security_control(feature_controls, 'block_high_risk_prompts', feature_block_high_risk_prompts_mode)
+    _set_prompt_security_control(feature_controls, 'persist_prompt_text', feature_persist_prompt_text_mode)
+    _set_prompt_security_control(feature_controls, 'redact_before_persist', feature_redact_before_persist_mode)
+    _set_prompt_security_threshold(feature_controls, feature_risk_threshold)
+
     # Update internal model classifiers
     if 'internal_model' not in aisbf_config:
         aisbf_config['internal_model'] = {}
@@ -706,8 +768,11 @@ async def dashboard_settings_save(
         json.dump(aisbf_config, f, indent=2)
 
     # Reload dashboard credentials in memory so the new username/password takes effect immediately
-    if server_config is not None:
-        server_config['dashboard_config'] = aisbf_config.get('dashboard', {})
+    if _config is not None and hasattr(_config, 'aisbf'):
+        try:
+            _config.reload()
+        except Exception:
+            logger.debug("Config reload after settings save failed", exc_info=True)
 
     # Hot-reload global config so changes take effect without restart
     _reload_global_config()
@@ -853,6 +918,7 @@ async def dashboard_users_add(request: Request, username: str = Form(...), passw
         admin_username = request.session.get('username', 'admin')
         # Create user with display_name defaulting to username
         user_id = db.create_user(username, password_hash, role, admin_username, None, False, username)
+        _record_dashboard_admin_event(request, 'user_registered', target_user_id=user_id, metadata={'role': role, 'created_by': admin_username})
         return RedirectResponse(url=url_for(request, "/dashboard/users"), status_code=303)
     except Exception as e:
         users = db.get_users()
@@ -998,6 +1064,7 @@ async def dashboard_users_update_tier(request: Request, user_id: int):
         success = db.set_user_tier(user_id, tier_id)
         
         if success:
+            _record_dashboard_admin_event(request, 'tier_upgraded', target_user_id=user_id, metadata={'tier_id': tier_id, 'source': 'admin-users'})
             return JSONResponse({"success": True})
         else:
             return JSONResponse({"success": False, "error": "Failed to update user tier"}, status_code=500)

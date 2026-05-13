@@ -582,6 +582,18 @@ async def api_publish_market_listing(request: Request):
         return JSONResponse({'error': 'Unsupported source_type'}, status_code=400)
 
     listing_id = db.upsert_market_listing(owner_user_id, owner_username, payload)
+    db.record_dashboard_event(
+        event_type='market_export_created',
+        path=request.url.path,
+        user_id=request.session.get('user_id'),
+        username=request.session.get('username'),
+        method=request.method,
+        provider_id=payload.get('provider_id'),
+        rotation_id=payload.get('source_id') if source_type == 'rotation' else None,
+        autoselect_id=payload.get('source_id') if source_type == 'autoselect' else None,
+        listing_id=listing_id,
+        metadata={'source_type': source_type, 'source_scope': source_scope, 'owner_username': owner_username},
+    )
     return JSONResponse({'success': True, 'listing_id': listing_id})
 
 
@@ -627,6 +639,15 @@ async def api_import_market_listing(request: Request, listing_id: int):
         source_id=source_id,
     )
     db.record_market_import(user_id, listing_id, 'market_reference', str(reference_id))
+    db.record_dashboard_event(
+        event_type='market_import_created',
+        path=request.url.path,
+        user_id=user_id,
+        username=request.session.get('username'),
+        method=request.method,
+        listing_id=listing_id,
+        metadata={'reference_id': reference_id, 'source_type': source_type, 'source_id': source_id},
+    )
     return JSONResponse({'success': True, 'imported_config_type': 'market_reference', 'imported_config_id': reference_id})
 
 

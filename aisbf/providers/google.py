@@ -30,8 +30,9 @@ from .base import BaseProviderHandler, AISBF_DEBUG
 
 
 class GoogleProviderHandler(BaseProviderHandler):
-    def __init__(self, provider_id: str, api_key: str):
-        super().__init__(provider_id, api_key)
+    def __init__(self, provider_id: str, api_key: str, user_id=None, provider_config=None):
+        super().__init__(provider_id, api_key, user_id=user_id)
+        self.provider_config = provider_config
         # Initialize google-genai library
         from google import genai
         self.client = genai.Client(api_key=api_key)
@@ -82,6 +83,10 @@ class GoogleProviderHandler(BaseProviderHandler):
             enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
             cache_ttl = getattr(provider_config, 'cache_ttl', None)
             min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1000)
+
+            if enable_native_caching and not self._native_cache_user_allows(model):
+                enable_native_caching = False
+                logging.info(f"User {self.user_id} disabled cache for provider={self.provider_id}, model={model}")
 
             logging.info(f"GoogleProviderHandler: Native caching enabled: {enable_native_caching}")
             

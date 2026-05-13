@@ -1,6 +1,6 @@
 # AISBF - AI Service Broker Framework || AI Should Be Free
 
-A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, and AI-assisted model selection to optimize AI service usage across multiple providers.
+A modular proxy server for managing multiple AI provider integrations with unified API interface. AISBF provides intelligent routing, load balancing, AI-assisted model selection, hosted model marketplaces, and multimodal Studio workflows across local and remote providers.
 
 ---
 
@@ -19,19 +19,31 @@ Also available via TOR for privacy-first access:
 
 ## Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro, Kilocode, Codex, and Qwen
-- **Claude CLI Mode**: When the `claude` binary is in PATH, requests are proxied through the official Anthropic CLI (`claude -p`) — uses each user's own account, fully permitted by Claude's terms of service
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro, Kilocode, Codex, Qwen, CoderAI, and RunPod
+- **CoderAI Broker Mode**: NAT-friendly outbound WebSocket broker with provider-scoped registration tokens, persisted session metadata, direct dashboard status, and Studio endpoint forwarding
+- **RunPod Runtime Management**: Pod-backed, serverless-template, and public-catalog RunPod providers with runtime state persistence, startup polling, idle shutdown, and wrapper-mode delegation to OpenAI, Ollama, or CoderAI
+- **AISBF Studio**: Multimodal dashboard workspace for chat, image, video, audio, embedding, and 3D workflows with reusable characters, environments, voices, archives, and custom pipelines
+- **Marketplace & References**: Publish providers, models, rotations, and autoselects to a shared market, import them as locked references, and track listing analytics and revenue
+- **Claude CLI Mode**: When the `claude` binary is in PATH, requests are proxied through the official Anthropic CLI (`claude -p`) using each user's own account
 - **Unified Wallet System**: Fiat wallet with crypto/PayPal/Stripe top-ups and auto top-up for subscription renewals
 - **Intelligent Routing**: Weighted load balancing and AI-assisted model selection
 - **Streaming Support**: Full support for streaming responses from all providers
 - **Web Dashboard**: Complete configuration and management interface
 - **Multi-User Support**: Isolated configurations with role-based access control
-- **Token Usage Analytics**: Comprehensive analytics with cost estimation and export
+- **Token Usage Analytics**: Comprehensive analytics with cost estimation, broker telemetry, and export
 - **Adaptive Rate Limiting**: Learns from 429 responses for optimal request rates
 - **Provider-Native Caching**: 50-70% cost reduction with Anthropic, Google, and OpenAI caching
 - **Context Management**: Automatic condensation with 8+ methods when approaching limits
 - **SSL/TLS & TOR**: Built-in HTTPS with Let's Encrypt and TOR hidden service support
 - **MCP Server**: Model Context Protocol for remote agent integration
+
+## What's New Since 0.99.65
+
+- **CoderAI broker telemetry and NAT traversal**: Broker sessions now persist state across restarts, expose connection and performance telemetry in the dashboard, and support Studio-native proxying over WebSocket for remote or firewalled workers
+- **RunPod provider support**: AISBF can now manage RunPod pods, serverless templates, and public endpoints from the provider editor, including runtime refresh and protocol-aware delegation
+- **Marketplace administration**: Added dedicated market admin pages, publishing and settlement flows, user export filters, locked imported references, and improved search and ordering
+- **Studio expansion**: Added dashboard Studio bindings, multimodal function routing, reusable profile assets, custom pipelines, and admin/user scoped Studio persistence APIs
+- **Operational hardening**: Signup cleanup removes stale self-registered accounts after 14 days of inactivity, dashboard proxy path handling was normalized, and provider model caches are reused before refresh
 
 ## Quick Start
 
@@ -64,10 +76,12 @@ Access the dashboard at `http://localhost:17765/dashboard` (default credentials:
 
 The dashboard provides:
 - Provider configuration and API key management
+- RunPod runtime controls and CoderAI broker session monitoring
 - Rotation and autoselect model setup
+- AISBF Studio multimodal workflows and pipeline bindings
 - User wallet management and top-up options
-- Token usage analytics and cost tracking
-- Real-time monitoring and rate limit management
+- Token usage analytics, broker telemetry, and cost tracking
+- Marketplace publishing, importing, and administration
 - SSL/TLS and TOR configuration
 - Multi-user administration
 
@@ -94,12 +108,20 @@ curl -X POST http://localhost:17765/api/wallet/topup \
   }'
 ```
 
+### CoderAI Broker Session Status
+```bash
+curl http://localhost:17765/api/coderai/broker/sessions
+```
+
 ## Documentation
 
 For complete documentation, configuration guides, and API reference:
 - **[📚 Full Documentation](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md)** - Comprehensive user and developer guide
 - **[🔧 Installation Guide](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#installation)** - Detailed setup instructions
 - **[⚙️ Configuration](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#configuration)** - All configuration options
+- **[🎛️ Studio Guide](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#aisbf-studio)** - Multimodal Studio, bindings, and pipelines
+- **[🛒 Marketplace](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#marketplace-and-references)** - Publishing, imports, and settlements
+- **[🤖 CoderAI Broker](https://git.nexlab.net/nexlab/aisbf/blob/master/docs/coderai-integration.md)** - Broker protocol and integration reference
 - **[💰 Wallet System](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#wallet-system)** - Complete wallet documentation
 - **[🔌 API Reference](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#api-endpoints)** - Complete API documentation
 - **[🛠️ Development](https://git.nexlab.net/nexlab/aisbf/blob/master/DOCUMENTATION.md#development)** - Development and deployment guides

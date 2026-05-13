@@ -108,6 +108,7 @@ Configuration management with smart file location detection:
 - Creates `~/.aisbf/` directory on first run
 - Copies default configs to user directory
 - Reads from `~/.aisbf/` on subsequent runs
+- Contains shared tri-state feature resolution for request-time controls such as context condensation, response cache, prompt batching, prompt security, Context Lens analytics, and NSFW/privacy classification
 
 ### aisbf/models.py
 Pydantic models for data validation:
@@ -143,6 +144,13 @@ Request handling logic:
 - `AutoselectHandler` - Handles AI-powered model selection
 - Reuses shared Studio capability inference for model metadata normalization
 - Supports both streaming and non-streaming responses
+- Performs native local prompt analysis before upstream execution when enabled, including prompt-security scanning, Context Lens-style prompt composition capture, and optional local blocking for high-risk prompts
+
+### aisbf/prompt_analysis.py
+Native prompt security and prompt composition analytics:
+- Performs local regex/heuristic scanning inspired by Prompt Sail-style prompt governance
+- Builds Context Lens-style composition summaries from messages, tools, prompt/input payloads, and token-role distribution
+- Produces redacted evidence previews and hashed request fingerprints for persistence without storing raw sensitive content by default
 
 ### aisbf/studio.py
 Shared Studio integration helpers:
@@ -226,6 +234,8 @@ Installs to:
 **User Configuration Files (writable):**
 - `~/.aisbf/providers.json` - Provider configurations
 - `~/.aisbf/rotations.json` - Rotation configurations
+- `~/.aisbf/autoselect.json` - Autoselect configurations
+- `~/.aisbf/aisbf.json` - Global AISBF settings, including `feature_controls`
 
 **Development Mode:**
 - `config/providers.json` and `config/rotations.json` in source tree
@@ -235,6 +245,27 @@ Installs to:
 2. Creates `~/.aisbf/` directory if needed
 3. Copies default configs from installed location to `~/.aisbf/`
 4. Loads configuration from `~/.aisbf/` on subsequent runs
+
+### Feature Control Hierarchy
+- Shared request-time features use tri-state inheritance: `inherit`, `enabled`, `disabled`
+- Global defaults live in `aisbf.json` under `feature_controls`
+- Provider/model/rotation/autoselect configs may override global defaults with `enable_*` or related boolean override fields
+- Current tri-state-controlled feature families include:
+  - context condensation
+  - response cache
+  - prompt batching
+  - prompt security scanning
+  - Context Lens prompt analytics
+  - NSFW classification
+  - privacy classification
+  - high-risk prompt blocking
+
+### Prompt Analysis Persistence
+- Native prompt analysis results are stored in the configuration database using:
+  - `prompt_analysis_runs`
+  - `prompt_analysis_findings`
+- `/dashboard/analytics` now includes Prompt Analysis sections for both admin and user scopes
+- Visitor/activity analytics remain config-admin-only, while prompt-analysis summaries can be shown in filtered user scope
 
 ## AISBF Script Commands
 

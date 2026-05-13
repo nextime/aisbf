@@ -69,16 +69,24 @@ def _iter_user_coderai_matches(provider_id: str) -> list[Tuple[int, Dict[str, An
 
 def resolve_coderai_provider_owner(provider_id: str, username: Optional[str] = None) -> Tuple[Optional[int], Optional[Dict[str, Any]]]:
     user_matches = _iter_user_coderai_matches(provider_id)
-    if username and username != 'global':
+
+    if username == 'global':
+        global_config = _load_global_provider_config(provider_id)
+        if global_config and global_config.get('type') == 'coderai':
+            return None, global_config
+        return None, None
+
+    if username:
         try:
             db = DatabaseRegistry.get_config_database()
             user = db.get_user_by_username(username) if db else None
-            if user:
-                requested_user_id = user.get('id')
-                for user_id, provider_config in user_matches:
-                    if user_id == requested_user_id:
-                        return user_id, provider_config
+            if not user:
                 return None, None
+            requested_user_id = user.get('id')
+            for user_id, provider_config in user_matches:
+                if user_id == requested_user_id:
+                    return user_id, provider_config
+            return None, None
         except Exception as e:
             logger.debug(f"Failed to resolve user by username for provider={provider_id} username={username}: {e}")
             return None, None
@@ -86,7 +94,7 @@ def resolve_coderai_provider_owner(provider_id: str, username: Optional[str] = N
     if user_matches:
         if len(user_matches) == 1:
             return user_matches[0]
-        logger.warning(f"Ambiguous user-scoped coderai provider owner for provider_id={provider_id}; refusing global fallback")
+        logger.warning(f"Ambiguous user-scoped coderai provider owner for provider_id={provider_id}; refusing fallback without explicit username")
         return None, None
 
     global_config = _load_global_provider_config(provider_id)

@@ -79,6 +79,41 @@
     "mysql_password": "",
     "mysql_database": "aisbf_response_cache"
   },
+  "feature_controls": {
+    "nsfw_classification": {
+      "mode": "disabled"
+    },
+    "privacy_classification": {
+      "mode": "disabled"
+    },
+    "context_condensation": {
+      "mode": "disabled"
+    },
+    "response_cache": {
+      "mode": "enabled"
+    },
+    "prompt_batching": {
+      "mode": "disabled"
+    },
+    "prompt_security": {
+      "security_scan": {
+        "mode": "disabled"
+      },
+      "context_lens": {
+        "mode": "disabled"
+      },
+      "block_high_risk_prompts": {
+        "mode": "disabled"
+      },
+      "persist_prompt_text": {
+        "mode": "disabled"
+      },
+      "redact_before_persist": {
+        "mode": "enabled"
+      },
+      "risk_threshold": "high"
+    }
+  },
   "tor": {
     "enabled": false,
     "control_port": 9051,

@@ -22,7 +22,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 Configuration management for AISBF.
 """
-from typing import Dict, List, Optional, Union
+from typing import Any, Dict, List, Literal, Optional, Union
 from pydantic import BaseModel, Field, field_validator
 import json
 import shutil
@@ -46,8 +46,16 @@ class ProviderModelConfig(BaseModel):
     # Content classification flags
     nsfw: bool = False  # Model can handle NSFW content
     privacy: bool = False  # Model can handle privacy-sensitive content
+    # Tri-state feature overrides
+    enable_nsfw_classification: Optional[bool] = None  # None = inherit provider/global default
+    enable_privacy_classification: Optional[bool] = None  # None = inherit provider/global default
+    enable_context_condensation: Optional[bool] = None  # None = inherit provider/global default
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this model (None = use provider default)
+    enable_prompt_batching: Optional[bool] = None  # None = inherit provider/global default
+    enable_prompt_security: Optional[bool] = None  # None = inherit provider/global default
+    enable_context_lens: Optional[bool] = None  # None = inherit provider/global default
+    block_high_risk_prompts: Optional[bool] = None  # None = inherit provider/global default
     # Studio capability metadata
     studio_capabilities: Optional[List[str]] = None
     studio_capability_source: Optional[str] = None
@@ -62,6 +70,35 @@ class CondensationConfig(BaseModel):
     rotation_id: Optional[str] = None
     enabled: bool = True
     max_context: Optional[int] = None  # Maximum context size for condensation model
+
+
+class FeatureModeConfig(BaseModel):
+    """Tri-state feature mode. None/absent means inherit at parent scope."""
+    mode: Literal['inherit', 'enabled', 'disabled'] = 'inherit'
+
+
+class PromptFeatureConfig(BaseModel):
+    """Global prompt security and context analytics defaults."""
+    security_scan: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    context_lens: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    block_high_risk_prompts: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    persist_prompt_text: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    redact_before_persist: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('enabled'))
+    risk_threshold: str = 'high'
+
+
+class FeatureControlsConfig(BaseModel):
+    """Global tri-state defaults shared across request features."""
+    nsfw_classification: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    privacy_classification: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    context_condensation: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    response_cache: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    prompt_batching: FeatureModeConfig = Field(default_factory=lambda: _feature_mode_default('disabled'))
+    prompt_security: PromptFeatureConfig = Field(default_factory=PromptFeatureConfig)
+
+
+def _feature_mode_default(mode: str) -> FeatureModeConfig:
+    return FeatureModeConfig(mode=mode)
 
 
 class ProviderConfig(BaseModel):
@@ -101,8 +138,22 @@ class ProviderConfig(BaseModel):
     free_tier_limit_type: Optional[str] = None  # requests or tokens
     premium_reference_monthly_cost: Optional[float] = None  # Equivalent premium value for one extra upstream free tier
     free_tier_description: Optional[str] = None  # Human description for upstream free tier
+    pro_tier_requests_daily: Optional[int] = None  # Explicit request quota for one pro tier per day
+    pro_tier_requests_weekly: Optional[int] = None  # Explicit request quota for one pro tier per week
+    pro_tier_requests_monthly: Optional[int] = None  # Explicit request quota for one pro tier per month
+    pro_tier_tokens_daily: Optional[int] = None  # Explicit token quota for one pro tier per day
+    pro_tier_tokens_weekly: Optional[int] = None  # Explicit token quota for one pro tier per week
+    pro_tier_tokens_monthly: Optional[int] = None  # Explicit token quota for one pro tier per month
+    # Tri-state feature overrides
+    enable_nsfw_classification: Optional[bool] = None  # None = use global default
+    enable_privacy_classification: Optional[bool] = None  # None = use global default
+    enable_context_condensation: Optional[bool] = None  # None = use global default
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this provider (None = use global default)
+    enable_prompt_batching: Optional[bool] = None  # None = use global default
+    enable_prompt_security: Optional[bool] = None  # None = use global default
+    enable_context_lens: Optional[bool] = None  # None = use global default
+    block_high_risk_prompts: Optional[bool] = None  # None = use global default
 
 class RotationConfig(BaseModel):
     model_name: str
@@ -129,8 +180,16 @@ class RotationConfig(BaseModel):
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
+    # Tri-state feature overrides
+    enable_nsfw_classification: Optional[bool] = None  # None = use global default
+    enable_privacy_classification: Optional[bool] = None  # None = use global default
+    enable_context_condensation: Optional[bool] = None  # None = use global default
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this rotation (None = use global default)
+    enable_prompt_batching: Optional[bool] = None  # None = use global default
+    enable_prompt_security: Optional[bool] = None  # None = use global default
+    enable_context_lens: Optional[bool] = None  # None = use global default
+    block_high_risk_prompts: Optional[bool] = None  # None = use global default
 
 class AutoselectModelInfo(BaseModel):
     model_id: str
@@ -175,8 +234,16 @@ class AutoselectConfig(BaseModel):
     default_condense_context: Optional[int] = None
     default_condense_method: Optional[Union[str, List[str]]] = None
     default_error_cooldown: Optional[int] = None  # Default cooldown period in seconds after 3 consecutive failures (default: 300)
+    # Tri-state feature overrides
+    enable_nsfw_classification: Optional[bool] = None  # None = use global default
+    enable_privacy_classification: Optional[bool] = None  # None = use global default
+    enable_context_condensation: Optional[bool] = None  # None = use global default
     # Response caching control
     enable_response_cache: Optional[bool] = None  # Enable/disable response caching for this autoselect (None = use global default)
+    enable_prompt_batching: Optional[bool] = None  # None = use global default
+    enable_prompt_security: Optional[bool] = None  # None = use global default
+    enable_context_lens: Optional[bool] = None  # None = use global default
+    block_high_risk_prompts: Optional[bool] = None  # None = use global default
 
 class ResponseCacheConfig(BaseModel):
     """Configuration for response caching with semantic deduplication"""
@@ -307,6 +374,7 @@ class AISBFConfig(BaseModel):
     cache: Optional[Dict] = None
     response_cache: Optional[ResponseCacheConfig] = None
     batching: Optional[BatchingConfig] = None
+    feature_controls: Optional[FeatureControlsConfig] = None
     adaptive_rate_limiting: Optional[AdaptiveRateLimitingConfig] = None
     client_rate_limiting: Optional[ClientRateLimitingConfig] = None
     signup: Optional[SignupConfig] = None
@@ -887,6 +955,9 @@ class Config:
             batching_data = data.get('batching')
             if batching_data:
                 data['batching'] = BatchingConfig(**batching_data)
+            feature_controls_data = data.get('feature_controls')
+            if feature_controls_data:
+                data['feature_controls'] = FeatureControlsConfig(**feature_controls_data)
             # Parse adaptive_rate_limiting separately if present
             adaptive_data = data.get('adaptive_rate_limiting')
             if adaptive_data:
@@ -993,6 +1064,75 @@ class Config:
     
     def get_aisbf_config(self) -> AISBFConfig:
         return self.aisbf
+
+    @staticmethod
+    def _feature_mode_to_bool(value: Any) -> Optional[bool]:
+        if value is None:
+            return None
+        if isinstance(value, dict):
+            value = value.get('mode')
+        else:
+            value = getattr(value, 'mode', value)
+        if value in ('enabled', True):
+            return True
+        if value in ('disabled', False):
+            return False
+        return None
+
+    def resolve_feature_enabled(
+        self,
+        feature_name: str,
+        *,
+        model_config: Any = None,
+        provider_config: Any = None,
+        rotation_config: Any = None,
+        autoselect_config: Any = None,
+        global_default: Optional[bool] = None,
+    ) -> bool:
+        field_name = f'enable_{feature_name}'
+        if feature_name == 'block_high_risk_prompts':
+            field_name = 'block_high_risk_prompts'
+
+        def _value_from(scope: Any) -> Optional[bool]:
+            if scope is None:
+                return None
+            if isinstance(scope, dict):
+                return scope.get(field_name)
+            return getattr(scope, field_name, None)
+
+        for scope in (model_config, provider_config, rotation_config, autoselect_config):
+            resolved = _value_from(scope)
+            if resolved is not None:
+                return bool(resolved)
+
+        aisbf_config = self.get_aisbf_config()
+        feature_controls = getattr(aisbf_config, 'feature_controls', None) if aisbf_config else None
+        if feature_controls is not None:
+            control = getattr(feature_controls, feature_name, None)
+            resolved = self._feature_mode_to_bool(control)
+            if resolved is not None:
+                return resolved
+
+            prompt_security = getattr(feature_controls, 'prompt_security', None)
+            if feature_name == 'prompt_security' and prompt_security is not None:
+                resolved = self._feature_mode_to_bool(getattr(prompt_security, 'security_scan', None))
+                if resolved is not None:
+                    return resolved
+            if prompt_security is not None and hasattr(prompt_security, feature_name):
+                resolved = self._feature_mode_to_bool(getattr(prompt_security, feature_name, None))
+                if resolved is not None:
+                    return resolved
+
+        if feature_name == 'response_cache' and aisbf_config and aisbf_config.response_cache:
+            return bool(aisbf_config.response_cache.enabled)
+        if feature_name == 'prompt_batching' and aisbf_config and aisbf_config.batching:
+            return bool(aisbf_config.batching.enabled)
+        if feature_name == 'context_condensation':
+            condensation = self.get_condensation()
+            if condensation is not None:
+                return bool(condensation.enabled)
+
+        return bool(global_default) if global_default is not None else False
 
 config = Config()
 

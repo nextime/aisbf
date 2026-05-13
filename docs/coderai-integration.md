@@ -200,6 +200,20 @@ When CoderAI dials AISBF broker directly, it should connect using:
 - `provider_id=<provider_id>`
 - `client_id=<client_id>`
 - `username=<username-or-global>`
+- `registration_token=<owner-configured-token>`
+
+AISBF broker admission currently resolves connection data in this order:
+
+- `provider_id`: query param, then `x-coderai-provider-id`, then default `coderai`
+- `client_id`: query param, then `x-coderai-client-id`, then generated fallback `anon-<timestamp>`
+- `username`: query param, then `x-coderai-username`, then the scoped path value
+- `registration_token`: query param, then `x-coderai-registration-token`
+
+Important:
+
+- the WebSocket broker flow starts as an HTTP `GET` upgrade request; this is expected
+- the broker currently validates `registration_token`, not `Authorization: Bearer ...`, during WebSocket admission
+- `client_id` must stay stable and match the `coderai_config.client_id` AISBF uses for that provider, or requests like `models.list` may fail even if the dashboard shows the session as connected
 
 Example:
 
@@ -212,6 +226,70 @@ User-scoped example:
 ```text
 wss://your-aisbf.example/api/u/alice/coderai/wss?provider_id=my-coderai&client_id=workstation-01&username=alice&registration_token=<owner-configured-token>
 ```
+
+Recommended duplicate headers for robustness:
+
+```text
+x-coderai-provider-id: <provider_id>
+x-coderai-client-id: <client_id>
+x-coderai-username: <username>
+x-coderai-registration-token: <registration_token>
+```
+
+### Broker registration flow
+
+1. Open the WebSocket to the correct scoped AISBF broker URL.
+2. Wait for AISBF to send an initial `registered` event.
+3. Immediately send `op="register"` with hardware, capability, and endpoint metadata.
+4. Wait for the `status="ok"` registration ack with the same `request_id`.
+5. Enter the long-lived async broker loop for heartbeats, inbound requests, and outbound responses.
+
+Initial server event example:
+
+```json
+{
+  "v": 1,
+  "event": "registered",
+  "session_id": "coderai_abc123",
+  "provider_id": "coderai",
+  "client_id": "workstation-01",
+  "username": "global",
+  "scope_name": "global",
+  "accepted": true,
+  "owner_user_id": null,
+  "expires_at": 1747179540
+}
+```
+
+Required client follow-up:
+
+```json
+{
+  "v": 1,
+  "op": "register",
+  "request_id": "reg-1",
+  "payload": {
+    "endpoint": "wss://client-or-descriptive-local-endpoint",
+    "transport": "websocket",
+    "registration_token": "<same_registration_token>",
+    "hardware": {
+      "gpus": [],
+      "gpu_count": 0,
+      "total_vram_mb": 0,
+      "available_vram_mb": 0
+    },
+    "studio_endpoints": [],
+    "capabilities": {}
+  }
+}
+```
+
+AISBF reads these `register` fields today:
+
+- top-level: `v`, `op`, `request_id`, optional `registration_token`, optional `capabilities`
+- from `payload`: `endpoint`, `transport`, `registration_token`, `studio_endpoints`, `hardware`, `gpus`, `gpu_count`, `total_vram_mb`, `available_vram_mb`, `capabilities`
+
+If `payload.registration_token` or top-level `registration_token` is present and does not match the handshake token, AISBF replies with an error envelope.
 
 ### Envelope format
 
@@ -313,6 +391,17 @@ Important:
 - `payload.chunk` should be a full SSE fragment already formatted exactly as AISBF should relay it.
 - This keeps AISBF transport-simple and lets CoderAI own protocol correctness.
 - Include `data: [DONE]\n\n` as one of the streamed chunks when the upstream semantics require it.
+
+## Async broker behavior requirements
+
+The broker client must be fully asynchronous.
+
+- do not block the WebSocket receive loop on hardware probing, model loading, inference, file I/O, or reconnect bookkeeping
+- handle inbound requests concurrently and correlate replies by `request_id`
+- keep heartbeat handling lightweight
+- preserve responsiveness to ping/pong traffic while local work is running
+
+AISBF now independently drains queued outbound broker requests while also reading inbound WebSocket messages, so client implementations should not assume a strict request/response lockstep over the socket.
 
 ## Broker session visibility, persistence, and multi-node routing
 

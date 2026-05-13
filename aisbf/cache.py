@@ -1295,6 +1295,9 @@ class ResponseCache:
         self.sqlite_backend = None
         self.mysql_backend = None
         self.memory_cache = {}
+        self._memory_cache = {}
+        self._memory_timestamps = {}
+        self._memory_access_order = []
 
         if not self.enabled:
             logger.info("Response caching is disabled")
@@ -1342,10 +1345,6 @@ class ResponseCache:
             self.backend = 'memory'
 
         if self.backend == 'memory':
-            # Initialize LRU cache
-            self._memory_cache = {}
-            self._memory_timestamps = {}
-            self._memory_access_order = []
             logger.info(f"Response cache initialized with memory backend (max: {self.max_memory_cache} items)")
 
     def _generate_cache_key(self, request_data: Dict) -> str:

@@ -11,6 +11,14 @@
         <a href="{{ url_for(request, '/dashboard/analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
             📊 Analytics
         </a>
+        <a href="{{ url_for(request, '/dashboard/prompt-analytics') }}" class="btn btn-secondary" style="text-decoration: none;">
+            🧠 Prompt Analytics
+        </a>
+        {% if is_admin and session.get('user_id') is none %}
+        <a href="{{ url_for(request, '/dashboard/traffic-visits') }}" class="btn btn-secondary" style="text-decoration: none;">
+            👣 Traffic &amp; Visits
+        </a>
+        {% endif %}
         <a href="{{ url_for(request, '/dashboard/response-cache') }}" class="btn" style="text-decoration: none;">
             💾 Response Cache
         </a>

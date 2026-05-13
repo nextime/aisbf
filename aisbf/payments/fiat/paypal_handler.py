@@ -427,6 +427,14 @@ class PayPalPaymentHandler:
             return
         await self._credit_wallet_for_paypal(user_id, amount, order_id,
                                               'Wallet top up via PayPal')
+        self.db.record_dashboard_event(
+            event_type='payment_completed',
+            path='/api/webhooks/paypal',
+            user_id=user_id,
+            username=None,
+            method='POST',
+            metadata={'gateway': 'paypal', 'amount': str(amount), 'order_id': order_id},
+        )
 
     async def _handle_order_approved(self, resource: dict):
         """Handle approved order — record pending capture state."""
@@ -465,6 +473,14 @@ class PayPalPaymentHandler:
         if user_id > 0 and amount > 0:
             await self._credit_wallet_for_paypal(user_id, amount, capture_id,
                                                   'Payment capture via PayPal')
+            self.db.record_dashboard_event(
+                event_type='payment_completed',
+                path='/api/webhooks/paypal',
+                user_id=user_id,
+                username=None,
+                method='POST',
+                metadata={'gateway': 'paypal', 'amount': str(amount), 'capture_id': capture_id},
+            )
         else:
             logger.warning(f"PayPal capture completed but missing user_id/amount: {capture_id}")
 

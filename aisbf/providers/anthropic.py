@@ -30,8 +30,9 @@ from .base import BaseProviderHandler, AnthropicFormatConverter, AISBF_DEBUG
 
 
 class AnthropicProviderHandler(BaseProviderHandler):
-    def __init__(self, provider_id: str, api_key: str):
-        super().__init__(provider_id, api_key)
+    def __init__(self, provider_id: str, api_key: str, user_id=None, provider_config=None):
+        super().__init__(provider_id, api_key, user_id=user_id)
+        self.provider_config = provider_config
         self.client = Anthropic(api_key=api_key)
     
     def validate_credentials(self) -> bool:
@@ -69,6 +70,10 @@ class AnthropicProviderHandler(BaseProviderHandler):
             provider_config = config.providers.get(self.provider_id)
             enable_native_caching = getattr(provider_config, 'enable_native_caching', False)
             min_cacheable_tokens = getattr(provider_config, 'min_cacheable_tokens', 1000)
+
+            if enable_native_caching and not self._native_cache_user_allows(model):
+                enable_native_caching = False
+                logging.info(f"User {self.user_id} disabled cache for provider={self.provider_id}, model={model}")
 
             logging.info(f"AnthropicProviderHandler: Native caching enabled: {enable_native_caching}")
             if enable_native_caching:

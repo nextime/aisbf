@@ -60,6 +60,7 @@ from .streaming_optimization import (
     optimize_sse_chunk
 )
 from .database import DatabaseRegistry
+from .prompt_analysis import analyze_prompt_payload
 
 _autoselect_result_cache: dict = {}
 _autoselect_result_cache_ttl: int = 3600  # seconds
@@ -135,6 +136,97 @@ class RequestHandler:
         if isinstance(provider_config, dict):
             return provider_config.get('type', 'openai') or 'openai'
         return getattr(provider_config, 'type', 'openai') or 'openai'
+
+    def _record_dashboard_proxy_event(self, request, provider_id: str, model_name: str, success: bool, latency_ms: float, metadata: Dict | None = None):
+        try:
+            from aisbf.database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+            status_code = (metadata or {}).get('status_code')
+            if status_code is None:
+                status_code = 200 if success else 500
+            db.record_dashboard_event(
+                event_type='request_proxied',
+                path=request.url.path,
+                user_id=getattr(request.state, 'user_id', None),
+                username=request.session.get('username') if hasattr(request, 'session') else None,
+                method=request.method,
+                status_code=status_code,
+                provider_id=provider_id,
+                rotation_id=(metadata or {}).get('rotation_id'),
+                autoselect_id=(metadata or {}).get('autoselect_id'),
+                metadata={
+                    'model_name': model_name,
+                    'latency_ms': round(float(latency_ms or 0), 2),
+                    'stream': bool((metadata or {}).get('stream')),
+                    **(metadata or {}),
+                },
+            )
+        except Exception:
+            logger.debug("Failed to record proxied request dashboard event", exc_info=True)
+
+    def _run_prompt_analysis(self, request, provider_id: str, model_name: str, request_data: Dict, prompt_tokens: Optional[int] = None, effective_context: Optional[int] = None):
+        aisbf_config = self.config.get_aisbf_config()
+        if not aisbf_config:
+            return None
+
+        provider_config = self._get_provider_config(provider_id)
+        model_config = None
+        models = provider_config.get('models', []) if isinstance(provider_config, dict) else getattr(provider_config, 'models', None) or []
+        for candidate in models:
+            candidate_name = candidate.get('name') if isinstance(candidate, dict) else getattr(candidate, 'name', None)
+            if candidate_name == model_name:
+                model_config = candidate
+                break
+
+        scan_enabled = self.config.resolve_feature_enabled(
+            'prompt_security',
+            model_config=model_config,
+            provider_config=provider_config,
+        )
+        analytics_enabled = self.config.resolve_feature_enabled(
+            'context_lens',
+            model_config=model_config,
+            provider_config=provider_config,
+        )
+        block_high_risk = self.config.resolve_feature_enabled(
+            'block_high_risk_prompts',
+            model_config=model_config,
+            provider_config=provider_config,
+        )
+
+        if not scan_enabled and not analytics_enabled:
+            return None
+
+        analysis = analyze_prompt_payload(request_data, model_name=model_name)
+        blocked = bool(block_high_risk and analysis.get('risk_level') == 'high')
+
+        db = DatabaseRegistry.get_config_database()
+        run_id = db.record_prompt_analysis_run(
+            user_id=getattr(request.state, 'user_id', None) if request is not None else self.user_id,
+            token_id=getattr(request.state, 'token_id', None) if request is not None else None,
+            provider_id=provider_id,
+            model_name=model_name,
+            rotation_id=request_data.get('_rotation_id'),
+            autoselect_id=request_data.get('_autoselect_id'),
+            request_path=request.url.path if request is not None else None,
+            request_hash=analysis.get('request_hash'),
+            prompt_tokens=prompt_tokens,
+            effective_context=effective_context,
+            scan_enabled=scan_enabled,
+            analytics_enabled=analytics_enabled,
+            blocked=blocked,
+            risk_level=analysis.get('risk_level'),
+            risk_score=analysis.get('risk_score'),
+            findings_count=analysis.get('summary', {}).get('findings_count', 0),
+            summary_json={
+                'security_summary': analysis.get('summary', {}),
+                'composition': analysis.get('composition', {}),
+            },
+        )
+        if scan_enabled:
+            db.record_prompt_analysis_findings(run_id, analysis.get('findings', []))
+        analysis['blocked'] = blocked
+        return analysis
 
     def _adapt_studio_workflow_payload(self, provider_id: str, endpoint_path: str, body: Dict) -> Dict:
         payload = dict(body or {})
@@ -311,49 +403,15 @@ class RequestHandler:
         import logging
         logger = logging.getLogger(__name__)
         
-        # Check model-level setting (highest priority)
-        if model_config:
-            model_cache_setting = None
-            if isinstance(model_config, dict):
-                model_cache_setting = model_config.get('enable_response_cache')
-            else:
-                model_cache_setting = getattr(model_config, 'enable_response_cache', None)
-            
-            if model_cache_setting is not None:
-                logger.debug(f"Using model-level cache setting: {model_cache_setting}")
-                return model_cache_setting
-        
-        # Check provider-level setting
-        if provider_config:
-            provider_cache_setting = getattr(provider_config, 'enable_response_cache', None)
-            if provider_cache_setting is not None:
-                logger.debug(f"Using provider-level cache setting: {provider_cache_setting}")
-                return provider_cache_setting
-        
-        # Check rotation-level setting
-        if rotation_config:
-            rotation_cache_setting = getattr(rotation_config, 'enable_response_cache', None)
-            if rotation_cache_setting is not None:
-                logger.debug(f"Using rotation-level cache setting: {rotation_cache_setting}")
-                return rotation_cache_setting
-        
-        # Check autoselect-level setting
-        if autoselect_config:
-            autoselect_cache_setting = getattr(autoselect_config, 'enable_response_cache', None)
-            if autoselect_cache_setting is not None:
-                logger.debug(f"Using autoselect-level cache setting: {autoselect_cache_setting}")
-                return autoselect_cache_setting
-        
-        # Fall back to global setting
-        aisbf_config = self.config.get_aisbf_config()
-        if aisbf_config and aisbf_config.response_cache:
-            global_setting = aisbf_config.response_cache.enabled
-            logger.debug(f"Using global cache setting: {global_setting}")
-            return global_setting
-        
-        # Default to False if no configuration found
-        logger.debug("No cache configuration found, defaulting to False")
-        return False
+        resolved = self.config.resolve_feature_enabled(
+            'response_cache',
+            model_config=model_config,
+            provider_config=provider_config,
+            rotation_config=rotation_config,
+            autoselect_config=autoselect_config,
+        )
+        logger.debug(f"Resolved response cache setting: {resolved}")
+        return resolved
 
     async def _handle_chunked_request(
         self,
@@ -495,6 +553,7 @@ class RequestHandler:
         # Track request start time for analytics
         request_start_time = time.time()
         model_name = request_data.get('model', 'unknown')
+        autoselect_id = request_data.get('_autoselect_id')
 
         # Check for user-specific provider config first
         if self.user_id and provider_id in self.user_providers:
@@ -611,7 +670,9 @@ class RequestHandler:
             context_config = get_context_config_for_model(
                 model_name=model,
                 provider_config=provider_config,
-                rotation_model_config=None
+                rotation_model_config=None,
+                rotation_config=None,
+                autoselect_config=None,
             )
             logger.info(f"Context config: {context_config}")
             
@@ -625,6 +686,17 @@ class RequestHandler:
             # Calculate effective context (total tokens used)
             effective_context = count_messages_tokens(messages, model)
             logger.info(f"Effective context: {effective_context} tokens")
+
+            prompt_analysis = self._run_prompt_analysis(
+                request,
+                provider_id,
+                model,
+                request_data,
+                prompt_tokens=effective_context,
+                effective_context=effective_context,
+            )
+            if prompt_analysis and prompt_analysis.get('blocked'):
+                raise HTTPException(status_code=400, detail="Prompt blocked by local security policy")
             
             # Apply context condensation if needed
             if context_config.get('condense_context', 0) > 0:
@@ -812,6 +884,23 @@ class RequestHandler:
                         actual_cost=actual_cost,
                         analytics_kind='execution'
                     )
+                    self._record_dashboard_proxy_event(
+                        request,
+                        provider_id,
+                        model_name,
+                        True,
+                        latency_ms,
+                        metadata={
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens,
+                            'total_tokens': total_tokens,
+                            'actual_cost': actual_cost,
+                            'stream': bool(stream),
+                            'autoselect_id': autoselect_id,
+                            'prompt_risk_level': (prompt_analysis or {}).get('risk_level'),
+                            'prompt_findings_count': (prompt_analysis or {}).get('summary', {}).get('findings_count', 0),
+                        },
+                    )
                     
                     # Record context dimensions for model performance tracking
                     try:
@@ -866,12 +955,29 @@ class RequestHandler:
                     actual_cost=None,
                     analytics_kind='execution'
                 )
+                self._record_dashboard_proxy_event(
+                    request,
+                    provider_id,
+                    model_name,
+                    False,
+                    latency_ms,
+                        metadata={
+                            'error_type': type(e).__name__,
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens,
+                            'total_tokens': total_tokens,
+                            'stream': bool(request_data.get('stream', False)),
+                            'autoselect_id': autoselect_id,
+                            'prompt_blocked': 'local security policy' in str(e).lower(),
+                        },
+                    )
             except Exception as analytics_error:
                 logger.warning(f"Analytics recording for failed request failed: {analytics_error}")
             
             raise HTTPException(status_code=500, detail=str(e))
 
     async def handle_streaming_chat_completion(self, request: Request, provider_id: str, request_data: Dict):
+        autoselect_id = request_data.get('_autoselect_id')
         # Check for user-specific provider config first
         if self.user_id and provider_id in self.user_providers:
             provider_config = self.user_providers[provider_id]
@@ -909,10 +1015,23 @@ class RequestHandler:
         context_config = get_context_config_for_model(
             model_name=model,
             provider_config=provider_config,
-            rotation_model_config=None
+            rotation_model_config=None,
+            rotation_config=None,
+            autoselect_config=None,
         )
         
         effective_context = count_messages_tokens(messages, model)
+
+        prompt_analysis = self._run_prompt_analysis(
+            request,
+            provider_id,
+            model,
+            request_data,
+            prompt_tokens=effective_context,
+            effective_context=effective_context,
+        )
+        if prompt_analysis and prompt_analysis.get('blocked'):
+            raise HTTPException(status_code=400, detail="Prompt blocked by local security policy")
         
         # Apply context condensation if needed
         if context_config.get('condense_context', 0) > 0:
@@ -1507,6 +1626,22 @@ class RequestHandler:
                         actual_cost=None,
                         analytics_kind='execution'
                     )
+                    self._record_dashboard_proxy_event(
+                        request,
+                        provider_id,
+                        request_data['model'],
+                        True,
+                        latency_ms,
+                        metadata={
+                            'prompt_tokens': effective_context,
+                            'completion_tokens': completion_tokens,
+                            'total_tokens': total_tokens,
+                            'stream': True,
+                            'autoselect_id': autoselect_id,
+                            'prompt_risk_level': (prompt_analysis or {}).get('risk_level'),
+                            'prompt_findings_count': (prompt_analysis or {}).get('summary', {}).get('findings_count', 0),
+                        },
+                    )
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for streaming request failed: {analytics_error}")
                 
@@ -1545,6 +1680,22 @@ class RequestHandler:
                         completion_tokens=completion_tokens,
                         actual_cost=None,
                         analytics_kind='execution'
+                    )
+                    self._record_dashboard_proxy_event(
+                        request,
+                        provider_id,
+                        request_data['model'],
+                        False,
+                        latency_ms,
+                        metadata={
+                            'error_type': type(e).__name__,
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens,
+                            'total_tokens': total_tokens,
+                            'stream': True,
+                            'autoselect_id': autoselect_id,
+                            'prompt_blocked': 'local security policy' in str(e).lower(),
+                        },
                     )
                 except Exception as analytics_error:
                     logger.warning(f"Analytics recording for failed streaming request failed: {analytics_error}")
@@ -3018,7 +3169,9 @@ class RotationHandler:
                 context_config = get_context_config_for_model(
                     model_name=model_name,
                     provider_config=None,
-                    rotation_model_config=current_model
+                    rotation_model_config=current_model,
+                    rotation_config=rotation_config,
+                    autoselect_config=None,
                 )
                 logger.info(f"Context config: {context_config}")
                 
@@ -3236,6 +3389,22 @@ class RotationHandler:
                                 completion_tokens=completion_tokens if completion_tokens > 0 else None,
                                 actual_cost=actual_cost,
                                 analytics_kind='execution'
+                            )
+                            self._record_dashboard_proxy_event(
+                                request,
+                                provider_id,
+                                model_name,
+                                True,
+                                (time.time() - request_start_time) * 1000,
+                                metadata={
+                                    'prompt_tokens': prompt_tokens,
+                                    'completion_tokens': completion_tokens,
+                                    'total_tokens': total_tokens,
+                                    'actual_cost': actual_cost,
+                                    'stream': False,
+                                    'rotation_id': rotation_id,
+                                    'autoselect_id': request_data.get('_autoselect_id'),
+                                },
                             )
                     except Exception as analytics_error:
                         logger.warning(f"Analytics recording failed: {analytics_error}")
@@ -3999,6 +4168,21 @@ class RotationHandler:
                         actual_cost=None,
                         analytics_kind='execution'
                     )
+                    self._record_dashboard_proxy_event(
+                        request,
+                        provider_id,
+                        model_name,
+                        True,
+                        latency_ms,
+                        metadata={
+                            'prompt_tokens': prompt_tokens,
+                            'completion_tokens': completion_tokens_count,
+                            'total_tokens': total_tokens,
+                            'stream': True,
+                            'rotation_id': rotation_id,
+                            'autoselect_id': request_data.get('_autoselect_id'),
+                        },
+                    )
                     try:
                         self._settle_market_result(provider_id, {
                             'prompt_tokens': prompt_tokens,
@@ -4012,10 +4196,39 @@ class RotationHandler:
 
             except RateLimitError as e:
                 # Provider already disabled by handle_429 — do NOT call record_failure()
+                latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
+                self._record_dashboard_proxy_event(
+                    request,
+                    provider_id,
+                    model_name,
+                    False,
+                    latency_ms,
+                    metadata={
+                        'error_type': type(e).__name__,
+                        'stream': True,
+                        'rotation_id': rotation_id,
+                        'status_code': 503,
+                        'autoselect_id': request_data.get('_autoselect_id'),
+                    },
+                )
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
             except Exception as e:
                 handler.record_failure()
+                latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
+                self._record_dashboard_proxy_event(
+                    request,
+                    provider_id,
+                    model_name,
+                    False,
+                    latency_ms,
+                    metadata={
+                        'error_type': type(e).__name__,
+                        'stream': True,
+                        'rotation_id': rotation_id,
+                        'autoselect_id': request_data.get('_autoselect_id'),
+                    },
+                )
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
 
@@ -4148,6 +4361,21 @@ class AutoselectHandler:
             self.user_rotations = {}
             self.user_autoselects = {}
             self.autoselects = self.config.autoselect if hasattr(self.config, 'autoselect') else {}
+
+    def _get_response_cache_backend(self):
+        aisbf_config = self.config.get_aisbf_config()
+        if not (aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled):
+            return None
+        return get_response_cache(aisbf_config.response_cache.model_dump())
+
+    def _should_cache_response(self, provider_config=None, model_config=None, rotation_config=None, autoselect_config=None):
+        return self.config.resolve_feature_enabled(
+            'response_cache',
+            model_config=model_config,
+            provider_config=provider_config,
+            rotation_config=rotation_config,
+            autoselect_config=autoselect_config,
+        )
 
     def _load_user_configs(self):
         """Load user-specific configurations from database"""
@@ -4909,9 +5137,11 @@ class AutoselectHandler:
         stream = request_data.get('stream', False)
         if not stream:
             try:
-                aisbf_config = self.config.get_aisbf_config()
-                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
-                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                current_autoselect_config = self.autoselects.get(autoselect_id) if self.user_id else self.config.get_autoselect(autoselect_id)
+                if self._should_cache_response(autoselect_config=current_autoselect_config):
+                    response_cache = self._get_response_cache_backend()
+                    if response_cache is None:
+                        raise RuntimeError("Response cache backend unavailable")
                     cached_response = response_cache.get(request_data, user_id=self.user_id)
                     if cached_response:
                         logger.info(f"Cache hit for autoselect request {autoselect_id}")
@@ -5030,7 +5260,9 @@ class AutoselectHandler:
 
             logger.info(f"Proxying request to: {selected_model_id}")
             try:
-                response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, user_id, token_id)
+                proxied_request_data = dict(request_data)
+                proxied_request_data['_autoselect_id'] = autoselect_id
+                response = await rotation_handler.handle_rotation_request(selected_model_id, proxied_request_data, user_id, token_id)
             except Exception as e:
                 logger.warning(f"Model '{selected_model_id}' raised exception: {e} — escalating")
                 failed_models.append(selected_model_id)
@@ -5084,9 +5316,10 @@ class AutoselectHandler:
         # Cache the response for non-streaming requests
         if not stream:
             try:
-                aisbf_config = self.config.get_aisbf_config()
-                if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
-                    response_cache = get_response_cache(aisbf_config.response_cache.model_dump())
+                if self._should_cache_response(autoselect_config=autoselect_config):
+                    response_cache = self._get_response_cache_backend()
+                    if response_cache is None:
+                        raise RuntimeError("Response cache backend unavailable")
                     response_cache.set(request_data, response, user_id=self.user_id)
                     logger.debug(f"Cached response for autoselect request {autoselect_id}")
             except Exception as cache_error:
@@ -5241,27 +5474,29 @@ class AutoselectHandler:
 
             logger.info(f"Proxying streaming request to: {selected_model_id}")
             try:
+                proxied_request_data = dict(request_data)
+                proxied_request_data['_autoselect_id'] = autoselect_id
                 # Check if it's a rotation first
                 if (self.user_id and selected_model_id in self.rotations) or selected_model_id in self.config.rotations:
                     rotation_handler = RotationHandler(user_id=self.user_id)
-                    response = await rotation_handler.handle_rotation_request(selected_model_id, request_data, self.user_id)
+                    response = await rotation_handler.handle_rotation_request(selected_model_id, proxied_request_data, self.user_id)
                 elif '/' in selected_model_id:
                     provider_id, model_name = selected_model_id.split('/', 1)
                     if provider_id not in self.config.providers:
                         raise HTTPException(status_code=400, detail=f"Provider {provider_id} not found")
                     request_handler = RequestHandler()
-                    request_data['model'] = model_name
+                    proxied_request_data['model'] = model_name
                     response = await request_handler.handle_streaming_chat_completion(
-                        request=None, provider_id=provider_id, request_data=request_data)
+                        request=None, provider_id=provider_id, request_data=proxied_request_data)
                 elif selected_model_id in self.config.providers:
                     provider_config = self.config.get_provider(selected_model_id)
                     models = getattr(provider_config, "models", [])
                     if not models:
                         raise HTTPException(status_code=400, detail=f"Provider {selected_model_id} has no models configured")
                     request_handler = RequestHandler()
-                    request_data['model'] = models[0].name
+                    proxied_request_data['model'] = models[0].name
                     response = await request_handler.handle_streaming_chat_completion(
-                        request=None, provider_id=selected_model_id, request_data=request_data)
+                        request=None, provider_id=selected_model_id, request_data=proxied_request_data)
                 else:
                     raise HTTPException(status_code=400, detail=f"Model {selected_model_id} not found")
             except Exception as e:

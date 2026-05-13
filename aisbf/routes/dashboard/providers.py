@@ -264,8 +264,9 @@ def _augment_provider_broker_status(provider_id: str, provider_config: dict, bro
     coderai_config = dict(stamped.get('coderai_config') or {})
     status_metadata = dict((status or {}).get('metadata') or {})
     status_performance = dict((status or {}).get('performance') or {})
+    is_connected = bool((status or {}).get('connected'))
     coderai_config['broker_session'] = {
-        'connected': bool(status),
+        'connected': is_connected,
         'client_id': status.get('client_id') if status else None,
         'session_id': status.get('session_id') if status else None,
         'connected_at': status.get('connected_at') if status else None,
@@ -275,12 +276,35 @@ def _augment_provider_broker_status(provider_id: str, provider_config: dict, bro
         'endpoint': status_metadata.get('endpoint'),
         'studio_endpoints': status_metadata.get('studio_endpoints') or [],
         'capabilities': (status or {}).get('capabilities') or {},
-        'connection_state': status_metadata.get('connection_state') or ('connected' if status else 'disconnected'),
+        'connection_state': status_metadata.get('connection_state') or ('connected' if is_connected else 'disconnected'),
         'metadata': status_metadata,
         'performance': status_performance,
     }
     stamped['coderai_config'] = coderai_config
     return stamped
+
+
+def _record_dashboard_event(request: Request, event_type: str, **kwargs) -> None:
+    try:
+        db = DatabaseRegistry.get_config_database()
+        db.record_dashboard_event(
+            event_type=event_type,
+            path=request.url.path,
+            user_id=request.session.get('user_id'),
+            username=request.session.get('username'),
+            method=request.method,
+            **kwargs,
+        )
+    except Exception:
+        logger.debug("Failed to record dashboard event %s", event_type, exc_info=True)
+
+
+def _resource_change_event(existing_config: dict | None, new_config: dict | None, base_saved: str, base_removed: str) -> str:
+    if existing_config is None and new_config is not None:
+        return f"{base_saved}_created"
+    if existing_config is not None and new_config is not None:
+        return f"{base_saved}_updated"
+    return base_removed
 
 def init(config, templates, server_config=None):
     global _config, _templates, _server_config
@@ -529,6 +553,10 @@ async def dashboard_providers(request: Request):
             "session": request.session,
             "__version__": __version__,
             "providers_data": providers_data,
+            "providers_bootstrap_json": _json_parse_bootstrap([
+                {"provider_id": provider_id, "config": provider_config}
+                for provider_id, provider_config in providers_data.items()
+            ]),
             "studio_capability_choices": serialize_studio_capability_choices(),
             "studio_adapter_choices": serialize_studio_adapter_choices(),
             "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
@@ -811,6 +839,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
 
             providers_data = _reorder_dict(providers_data, list(providers_data.keys()))
 
+            existing_global_providers = dict(full_config.get('providers') or {})
             # Update providers section while preserving other keys
             full_config['providers'] = providers_data
             
@@ -820,12 +849,19 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            removed_global_provider_keys = set(existing_global_providers.keys()) - set(providers_data.keys())
+            for provider_key in removed_global_provider_keys:
+                _record_dashboard_event(request, 'provider_removed', provider_id=provider_key, metadata={'scope': 'global', 'source': 'bulk'})
+            for provider_key, provider_config in providers_data.items():
+                event_type = _resource_change_event(existing_global_providers.get(provider_key), provider_config, 'provider_saved', 'provider_removed')
+                _record_dashboard_event(request, event_type, provider_id=provider_key, metadata={'scope': 'global', 'provider_type': provider_config.get('type'), 'source': 'bulk'})
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
             
             # Get existing providers to find which to delete
             existing_providers = db.get_user_providers(current_user_id)
+            existing_provider_map = {p['provider_id']: p.get('config') for p in existing_providers}
             existing_provider_keys = {p['provider_id'] for p in existing_providers}
             new_provider_keys = set(providers_data.keys())
             
@@ -833,10 +869,13 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
             providers_to_delete = existing_provider_keys - new_provider_keys
             for provider_key in providers_to_delete:
                 db.delete_user_provider(current_user_id, provider_key)
+                _record_dashboard_event(request, 'provider_removed', provider_id=provider_key, metadata={'scope': 'user'})
             
             # Save each provider to database
             for provider_key, provider_config in providers_data.items():
                 db.save_user_provider(current_user_id, provider_key, provider_config)
+                event_type = _resource_change_event(existing_provider_map.get(provider_key), provider_config, 'provider_saved', 'provider_removed')
+                _record_dashboard_event(request, event_type, provider_id=provider_key, metadata={'scope': 'user', 'provider_type': provider_config.get('type')})
 
             providers_data = _ordered_resource_map(
                 providers_data,
@@ -857,6 +896,10 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_data": providers_data,
+                    "providers_bootstrap_json": _json_parse_bootstrap([
+                        {"provider_id": provider_id, "config": provider_config}
+                        for provider_id, provider_config in providers_data.items()
+                    ]),
                     "studio_capability_choices": serialize_studio_capability_choices(),
                     "studio_adapter_choices": serialize_studio_adapter_choices(),
                     "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
@@ -891,10 +934,11 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "success": success_msg
                 }
             )
-    except json.JSONDecodeError as e:
-        # Reload current config on error
+    except (json.JSONDecodeError, ValueError) as e:
+        # Reload current config on parse/validation error
         current_user_id = request.session.get('user_id')
         is_config_admin = current_user_id is None
+        error_prefix = 'Invalid JSON' if isinstance(e, json.JSONDecodeError) else 'Validation error'
 
         if is_config_admin:
             config_path = Path.home() / '.aisbf' / 'providers.json'
@@ -917,12 +961,16 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "session": request.session,
                     "__version__": __version__,
                     "providers_data": providers_data,
+                    "providers_bootstrap_json": _json_parse_bootstrap([
+                        {"provider_id": provider_id, "config": provider_config}
+                        for provider_id, provider_config in providers_data.items()
+                    ]),
                     "studio_capability_choices": serialize_studio_capability_choices(),
                     "studio_adapter_choices": serialize_studio_adapter_choices(),
                     "studio_adapter_profile_choices": serialize_studio_adapter_profile_choices(),
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
-                    "error": f"Invalid JSON: {str(e)}"
+                    "error": f"{error_prefix}: {str(e)}"
                 }
             )
         else:
@@ -944,7 +992,7 @@ async def dashboard_providers_save(request: Request, config: str = Form(...)):
                     "user_id": current_user_id,
                     "claude_cli_mode": _claude_cli_mode,
                     "is_local_client": _is_local_client(request),
-                    "error": f"Invalid JSON: {str(e)}"
+                    "error": f"{error_prefix}: {str(e)}"
                 }
             )
 
@@ -1360,6 +1408,11 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
         if is_config_admin:
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'rotations.json'
+            existing_global_rotations = {}
+            if config_path.exists():
+                with open(config_path) as f:
+                    existing_rotations_config = json.load(f)
+                existing_global_rotations = dict(existing_rotations_config.get('rotations') or {})
             config_path.parent.mkdir(parents=True, exist_ok=True)
             rotations_data['rotations'] = _reorder_dict(
                 rotations_data.get('rotations', {}),
@@ -1368,6 +1421,12 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             with open(config_path, 'w') as f:
                 json.dump(rotations_data, f, indent=2)
             _reload_global_config()
+            removed_global_rotation_keys = set(existing_global_rotations.keys()) - set(rotations_data.get('rotations', {}).keys())
+            for rotation_key in removed_global_rotation_keys:
+                _record_dashboard_event(request, 'rotation_removed', rotation_id=rotation_key, metadata={'scope': 'global', 'source': 'bulk'})
+            for rotation_key, rotation_config in rotations_data.get('rotations', {}).items():
+                event_type = _resource_change_event(existing_global_rotations.get(rotation_key), rotation_config, 'rotation_saved', 'rotation_removed')
+                _record_dashboard_event(request, event_type, rotation_id=rotation_key, metadata={'scope': 'global', 'source': 'bulk'})
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
@@ -1380,10 +1439,12 @@ async def dashboard_rotations_save(request: Request, config: str = Form(...)):
             new_rotation_keys = set(rotations.keys())
             for rotation_key in existing_rotation_keys - new_rotation_keys:
                 db.delete_user_rotation(current_user_id, rotation_key)
+                _record_dashboard_event(request, 'rotation_removed', rotation_id=rotation_key, metadata={'scope': 'user'})
 
             # Save each rotation to database
             for rotation_key, rotation_config in rotations.items():
                 db.save_user_rotation(current_user_id, rotation_key, rotation_config)
+                _record_dashboard_event(request, 'rotation_saved', rotation_id=rotation_key, metadata={'scope': 'user'})
 
             rotations_data['rotations'] = _ordered_resource_map(
                 rotations_data.get('rotations', {}),
@@ -1661,11 +1722,21 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
         if is_config_admin:
             # Config admin: save to JSON files
             config_path = Path.home() / '.aisbf' / 'autoselect.json'
+            existing_global_autoselects = {}
+            if config_path.exists():
+                with open(config_path) as f:
+                    existing_global_autoselects = dict(json.load(f) or {})
             config_path.parent.mkdir(parents=True, exist_ok=True)
             autoselect_data = _reorder_dict(autoselect_data, list(autoselect_data.keys()))
             with open(config_path, 'w') as f:
                 json.dump(autoselect_data, f, indent=2)
             _reload_global_config()
+            removed_global_autoselect_keys = set(existing_global_autoselects.keys()) - set(autoselect_data.keys())
+            for autoselect_key in removed_global_autoselect_keys:
+                _record_dashboard_event(request, 'autoselect_removed', autoselect_id=autoselect_key, metadata={'scope': 'global', 'source': 'bulk'})
+            for autoselect_key, autoselect_config in autoselect_data.items():
+                event_type = _resource_change_event(existing_global_autoselects.get(autoselect_key), autoselect_config, 'autoselect_saved', 'autoselect_removed')
+                _record_dashboard_event(request, event_type, autoselect_id=autoselect_key, metadata={'scope': 'global', 'source': 'bulk'})
         else:
             # Database user: save to database
             db = DatabaseRegistry.get_config_database()
@@ -1676,10 +1747,12 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
             new_autoselect_keys = set(autoselect_data.keys())
             for autoselect_key in existing_autoselect_keys - new_autoselect_keys:
                 db.delete_user_autoselect(current_user_id, autoselect_key)
+                _record_dashboard_event(request, 'autoselect_removed', autoselect_id=autoselect_key, metadata={'scope': 'user'})
 
             # Save each autoselect to database
             for autoselect_key, autoselect_config in autoselect_data.items():
                 db.save_user_autoselect(current_user_id, autoselect_key, autoselect_config)
+                _record_dashboard_event(request, 'autoselect_saved', autoselect_id=autoselect_key, metadata={'scope': 'user'})
 
             autoselect_data = _ordered_resource_map(
                 autoselect_data,
@@ -1934,9 +2007,11 @@ async def api_provider_save(request: Request):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'provider_saved', provider_id=provider_id, metadata={'scope': 'global', 'provider_type': provider_config.get('type'), 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.save_user_provider(current_user_id, provider_id, provider_config)
+            _record_dashboard_event(request, 'provider_saved', provider_id=provider_id, metadata={'scope': 'user', 'provider_type': provider_config.get('type'), 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -1971,6 +2046,7 @@ async def api_provider_coderai_token_rotate(request: Request, provider_id: str):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'provider_saved', provider_id=provider_id, metadata={'scope': 'global', 'provider_type': provider_config.get('type'), 'source': 'coderai-token'})
         else:
             db = DatabaseRegistry.get_config_database()
             record = db.get_user_provider(current_user_id, provider_id)
@@ -1980,6 +2056,7 @@ async def api_provider_coderai_token_rotate(request: Request, provider_id: str):
             provider_config.setdefault('coderai_config', {})
             provider_config['coderai_config']['registration_token'] = secrets.token_urlsafe(32)
             db.save_user_provider(current_user_id, provider_id, provider_config)
+            _record_dashboard_event(request, 'provider_saved', provider_id=provider_id, metadata={'scope': 'user', 'provider_type': provider_config.get('type'), 'source': 'coderai-token'})
 
         token = provider_config['coderai_config']['registration_token']
         return JSONResponse({"success": True, "registration_token": token})
@@ -2030,9 +2107,11 @@ async def api_provider_delete(request: Request, provider_id: str):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'provider_removed', provider_id=provider_id, metadata={'scope': 'global', 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.delete_user_provider(current_user_id, provider_id)
+            _record_dashboard_event(request, 'provider_removed', provider_id=provider_id, metadata={'scope': 'user', 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -2127,9 +2206,11 @@ async def api_rotation_save(request: Request):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'rotation_saved', rotation_id=rotation_id, metadata={'scope': 'global', 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.save_user_rotation(current_user_id, rotation_id, rotation_config)
+            _record_dashboard_event(request, 'rotation_saved', rotation_id=rotation_id, metadata={'scope': 'user', 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -2158,9 +2239,11 @@ async def api_rotation_delete(request: Request, rotation_id: str):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'rotation_removed', rotation_id=rotation_id, metadata={'scope': 'global', 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.delete_user_rotation(current_user_id, rotation_id)
+            _record_dashboard_event(request, 'rotation_removed', rotation_id=rotation_id, metadata={'scope': 'user', 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -2212,9 +2295,11 @@ async def api_autoselect_save(request: Request):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'autoselect_saved', autoselect_id=autoselect_id, metadata={'scope': 'global', 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.save_user_autoselect(current_user_id, autoselect_id, autoselect_config)
+            _record_dashboard_event(request, 'autoselect_saved', autoselect_id=autoselect_id, metadata={'scope': 'user', 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -2246,9 +2331,11 @@ async def api_autoselect_delete(request: Request, autoselect_id: str):
             with open(save_path, 'w') as f:
                 json.dump(full_config, f, indent=2)
             _reload_global_config()
+            _record_dashboard_event(request, 'autoselect_removed', autoselect_id=autoselect_id, metadata={'scope': 'global', 'source': 'api'})
         else:
             db = DatabaseRegistry.get_config_database()
             db.delete_user_autoselect(current_user_id, autoselect_id)
+            _record_dashboard_event(request, 'autoselect_removed', autoselect_id=autoselect_id, metadata={'scope': 'user', 'source': 'api'})
 
         return JSONResponse({"success": True})
     except Exception as e:
@@ -2272,18 +2359,21 @@ def _ordered_resource_map(resource_map: dict, saved_order: list | None) -> dict:
     return _reorder_dict(resource_map, saved_order)
 
 
-@router.get("/dashboard/analytics", response_class=HTMLResponse)
-async def dashboard_analytics(
+async def _render_dashboard_analytics(
     request: Request,
-    time_range: str = Query("24h"),
-    from_date: Optional[str] = Query(None),
-    to_date: Optional[str] = Query(None),
-    provider_filter: Optional[str] = Query(None),
-    model_filter: Optional[str] = Query(None),
-    rotation_filter: Optional[str] = Query(None),
-    autoselect_filter: Optional[str] = Query(None),
-    user_filter: Optional[str] = Query(None),
-    global_only: Optional[str] = Query(None)
+    time_range: str = "24h",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    provider_filter: Optional[str] = None,
+    model_filter: Optional[str] = None,
+    rotation_filter: Optional[str] = None,
+    autoselect_filter: Optional[str] = None,
+    user_filter: Optional[str] = None,
+    global_only: Optional[str] = None,
+    activity_event_filter: Optional[str] = None,
+    activity_path_filter: Optional[str] = None,
+    activity_country_filter: Optional[str] = None,
+    template_name: str = "dashboard/analytics.html",
 ):
     """Token usage analytics dashboard"""
     from decimal import Decimal
@@ -2441,7 +2531,87 @@ async def dashboard_analytics(
         rotation_filter=rotation_filter
     )
 
+    dashboard_visit_overview = None
+    dashboard_visit_series = []
+    dashboard_visit_pages = []
+    dashboard_visit_countries = []
+    dashboard_visit_users = []
+    dashboard_visit_events = []
+    prompt_analysis_overview = None
+    prompt_analysis_series = []
+    prompt_analysis_details = {
+        'provider_breakdown': [],
+        'model_breakdown': [],
+        'risk_breakdown': [],
+        'segment_breakdown': [],
+        'shape_breakdown': [],
+        'recent_runs': [],
+        'posture': {
+            'runs_with_tools': 0,
+            'runs_with_system_prompt': 0,
+            'avg_findings_count': 0.0,
+            'avg_risk_score': 0.0,
+        },
+    }
+
     is_config_admin = is_admin and current_user_id is None
+
+    if db:
+        prompt_analysis_overview = db.get_prompt_analysis_summary(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            user_id=user_filter_int,
+            provider_filter=effective_provider_filter,
+            model_filter=effective_model_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter,
+        )
+        prompt_analysis_series = db.get_prompt_analysis_series(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            bucket='hour' if time_range in ('1h', '6h', '24h', 'custom') else 'day',
+            user_id=user_filter_int,
+        )
+        prompt_analysis_details = db.get_prompt_analysis_details(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            user_id=user_filter_int,
+            provider_filter=effective_provider_filter,
+            model_filter=effective_model_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter,
+        )
+
+    if is_config_admin and db:
+        selected_event_types = [activity_event_filter] if activity_event_filter else None
+        dashboard_visit_overview = db.get_dashboard_event_summary(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            event_types=selected_event_types,
+            user_id=user_filter_int,
+            provider_filter=effective_provider_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter,
+            path_filter=activity_path_filter,
+            country_filter=activity_country_filter,
+        )
+        dashboard_visit_series = db.get_dashboard_event_series(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            bucket='hour' if time_range in ('1h', '6h', '24h', 'custom') else 'day',
+            event_types=selected_event_types,
+            user_id=user_filter_int,
+        )
+        dashboard_visit_pages = dashboard_visit_overview.get('pages', [])
+        dashboard_visit_countries = dashboard_visit_overview.get('countries', [])
+        dashboard_visit_users = dashboard_visit_overview.get('users', [])
+        dashboard_visit_events = db.get_dashboard_events(
+            from_datetime or (datetime.now() - timedelta(hours=24)),
+            to_datetime or datetime.now(),
+            event_types=selected_event_types,
+            user_id=user_filter_int,
+            limit=200,
+        )
 
     def decimal_default(obj):
         if isinstance(obj, Decimal):
@@ -2450,7 +2620,7 @@ async def dashboard_analytics(
 
     return _templates.TemplateResponse(
         request=request,
-        name="dashboard/analytics.html",
+        name=template_name,
         context={
             "request": request,
             "session": request.session,
@@ -2477,10 +2647,125 @@ async def dashboard_analytics(
             "selected_autoselect": autoselect_filter,
             "selected_user": user_filter,
             "global_only": global_only,
+            "activity_event_filter": activity_event_filter,
+            "activity_path_filter": activity_path_filter,
+            "activity_country_filter": activity_country_filter,
             "currency_symbol": db.get_currency_settings().get('currency_symbol', '$'),
             "rotation_breakdown": rotation_breakdown,
             "autoselect_breakdown": autoselect_breakdown,
+            "dashboard_visit_overview": dashboard_visit_overview,
+            "dashboard_visit_series": json.dumps(dashboard_visit_series, default=decimal_default),
+            "dashboard_visit_pages": dashboard_visit_pages,
+            "dashboard_visit_countries": dashboard_visit_countries,
+            "dashboard_visit_users": dashboard_visit_users,
+            "dashboard_visit_events": dashboard_visit_events,
+            "prompt_analysis_overview": prompt_analysis_overview,
+            "prompt_analysis_series": json.dumps(prompt_analysis_series, default=decimal_default),
+            "prompt_analysis_details": prompt_analysis_details,
         }
+    )
+
+
+@router.get("/dashboard/analytics", response_class=HTMLResponse)
+async def dashboard_analytics(
+    request: Request,
+    time_range: str = Query("24h"),
+    from_date: Optional[str] = Query(None),
+    to_date: Optional[str] = Query(None),
+    provider_filter: Optional[str] = Query(None),
+    model_filter: Optional[str] = Query(None),
+    rotation_filter: Optional[str] = Query(None),
+    autoselect_filter: Optional[str] = Query(None),
+    user_filter: Optional[str] = Query(None),
+    global_only: Optional[str] = Query(None),
+    activity_event_filter: Optional[str] = Query(None),
+    activity_path_filter: Optional[str] = Query(None),
+    activity_country_filter: Optional[str] = Query(None),
+):
+    return await _render_dashboard_analytics(
+        request=request,
+        time_range=time_range,
+        from_date=from_date,
+        to_date=to_date,
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter,
+        user_filter=user_filter,
+        global_only=global_only,
+        activity_event_filter=activity_event_filter,
+        activity_path_filter=activity_path_filter,
+        activity_country_filter=activity_country_filter,
+        template_name="dashboard/analytics.html",
+    )
+
+
+@router.get("/dashboard/prompt-analytics", response_class=HTMLResponse)
+async def dashboard_prompt_analytics(
+    request: Request,
+    time_range: str = "24h",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    provider_filter: Optional[str] = None,
+    model_filter: Optional[str] = None,
+    rotation_filter: Optional[str] = None,
+    autoselect_filter: Optional[str] = None,
+    user_filter: Optional[str] = None,
+    global_only: Optional[str] = None,
+):
+    return await _render_dashboard_analytics(
+        request=request,
+        time_range=time_range,
+        from_date=from_date,
+        to_date=to_date,
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter,
+        user_filter=user_filter,
+        global_only=global_only,
+        template_name="dashboard/prompt_analytics.html",
+    )
+
+
+@router.get("/dashboard/traffic-visits", response_class=HTMLResponse)
+async def dashboard_traffic_visits(
+    request: Request,
+    time_range: str = "24h",
+    from_date: Optional[str] = None,
+    to_date: Optional[str] = None,
+    provider_filter: Optional[str] = None,
+    model_filter: Optional[str] = None,
+    rotation_filter: Optional[str] = None,
+    autoselect_filter: Optional[str] = None,
+    user_filter: Optional[str] = None,
+    global_only: Optional[str] = None,
+    activity_event_filter: Optional[str] = None,
+    activity_path_filter: Optional[str] = None,
+    activity_country_filter: Optional[str] = None,
+): 
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+
+    if request.session.get('role') != 'admin' or request.session.get('user_id') is not None:
+        return RedirectResponse(url=str(request.url_for("dashboard_analytics")), status_code=302)
+
+    return await _render_dashboard_analytics(
+        request=request,
+        time_range=time_range,
+        from_date=from_date,
+        to_date=to_date,
+        provider_filter=provider_filter,
+        model_filter=model_filter,
+        rotation_filter=rotation_filter,
+        autoselect_filter=autoselect_filter,
+        user_filter=user_filter,
+        global_only=global_only,
+        activity_event_filter=activity_event_filter,
+        activity_path_filter=activity_path_filter,
+        activity_country_filter=activity_country_filter,
+        template_name="dashboard/traffic_visits.html",
     )
 
 

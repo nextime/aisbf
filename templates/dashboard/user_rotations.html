@@ -412,7 +412,17 @@ function renderRotationDetails(rotationKey) {
                 ${window.i18n.t('rotations.privacy')}
             </label>
         </div>
-        
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+        ${triStateCompact('Context Condensation', rotation.enable_context_condensation, `updateRotationTriState('${rotationKey}', 'enable_context_condensation', this.value)`)}
+        ${triStateCompact('Response Cache', rotation.enable_response_cache, `updateRotationTriState('${rotationKey}', 'enable_response_cache', this.value)`)}
+        ${triStateCompact('Prompt Batching', rotation.enable_prompt_batching, `updateRotationTriState('${rotationKey}', 'enable_prompt_batching', this.value)`)}
+        ${triStateCompact('Prompt Security', rotation.enable_prompt_security, `updateRotationTriState('${rotationKey}', 'enable_prompt_security', this.value)`)}
+        ${triStateCompact('Context Lens Analytics', rotation.enable_context_lens, `updateRotationTriState('${rotationKey}', 'enable_context_lens', this.value)`)}
+        ${triStateCompact('Block High-Risk Prompts', rotation.block_high_risk_prompts, `updateRotationTriState('${rotationKey}', 'block_high_risk_prompts', this.value)`)}
+        ${triStateCompact('NSFW Classification', rotation.enable_nsfw_classification, `updateRotationTriState('${rotationKey}', 'enable_nsfw_classification', this.value)`)}
+        ${triStateCompact('Privacy Classification', rotation.enable_privacy_classification, `updateRotationTriState('${rotationKey}', 'enable_privacy_classification', this.value)`)}
+         
         <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('rotations.providers_section')}</h4>
         <div id="providers-${rotationKey}"></div>
         <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${safeRKey}')" style="margin-top: 10px;">${window.i18n.t('rotations.add_provider')}</button>
@@ -546,6 +556,17 @@ function renderRotationModels(rotationKey, providerIndex) {
                 <label style="font-size: 12px;">${window.i18n.t('rotations.condense_method')}</label>
                 <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="${window.i18n.t('rotations.condense_method_placeholder')}" style="font-size: 12px; padding: 5px;">
             </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);">
+                ${triStateCompact('Context Condensation', model.enable_context_condensation, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_condensation', this.value)`)}
+                ${triStateCompact('Response Cache', model.enable_response_cache, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_response_cache', this.value)`)}
+                ${triStateCompact('Prompt Batching', model.enable_prompt_batching, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_batching', this.value)`)}
+                ${triStateCompact('Prompt Security', model.enable_prompt_security, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_security', this.value)`)}
+                ${triStateCompact('Context Lens Analytics', model.enable_context_lens, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_lens', this.value)`)}
+                ${triStateCompact('Block High-Risk Prompts', model.block_high_risk_prompts, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'block_high_risk_prompts', this.value)`)}
+                ${triStateCompact('NSFW Classification', model.enable_nsfw_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_nsfw_classification', this.value)`)}
+                ${triStateCompact('Privacy Classification', model.enable_privacy_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_privacy_classification', this.value)`)}
+            </div>
         `;
         
         container.appendChild(modelDiv);
@@ -557,6 +578,33 @@ async function apiCall(method, url, body) {
     if (body !== undefined) opts.body = JSON.stringify(body);
     const r = await fetch(url, opts);
     return r.json();
+}
+
+function triStateValue(value) {
+    if (value === true || value === 'enabled') return 'enabled';
+    if (value === false || value === 'disabled') return 'disabled';
+    return 'inherit';
+}
+
+function triStateCompact(label, value, onChange) {
+    return `
+        <div class="form-group" style="margin-bottom: 8px;">
+            <label style="font-size: 12px;">${label}</label>
+            <select onchange="${onChange}" style="font-size: 12px; padding: 5px;">
+                <option value="inherit" ${triStateValue(value) === 'inherit' ? 'selected' : ''}>Inherit</option>
+                <option value="enabled" ${triStateValue(value) === 'enabled' ? 'selected' : ''}>Enabled</option>
+                <option value="disabled" ${triStateValue(value) === 'disabled' ? 'selected' : ''}>Disabled</option>
+            </select>
+        </div>
+    `;
+}
+
+function updateRotationTriState(rotationKey, field, value) {
+    rotationsConfig.rotations[rotationKey][field] = value === 'inherit' ? null : value === 'enabled';
+}
+
+function updateRotationModelTriState(rotationKey, providerIndex, modelIndex, field, value) {
+    rotationsConfig.rotations[rotationKey].providers[providerIndex].models[modelIndex][field] = value === 'inherit' ? null : value === 'enabled';
 }
 
 async function saveRotation(key) {

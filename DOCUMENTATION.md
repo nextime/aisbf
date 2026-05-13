@@ -2,18 +2,20 @@
 
 ## Overview
 
-AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Claude Code, Ollama, Kiro, Kilocode, Codex, Qwen) with support for provider rotation, AI-assisted model selection, unified wallet system, and error tracking.
+AISBF is a modular proxy server for managing multiple AI provider integrations. It provides a unified API interface for interacting with various AI services (Google, OpenAI, Anthropic, Claude Code, Ollama, Kiro, Kilocode, Codex, Qwen, CoderAI, RunPod) with support for provider rotation, AI-assisted model selection, marketplace exports, multimodal Studio workflows, unified wallet operations, and operational analytics.
 
 ### Key Features
 
-- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro (Amazon Q Developer), Kilocode (OAuth2), Codex (OAuth2), and Qwen (API Key/OAuth2)
+- **Multi-Provider Support**: Unified interface for Google, OpenAI, Anthropic, Claude Code (OAuth2 or CLI), Ollama, Kiro (Amazon Q Developer), Kilocode (OAuth2), Codex (OAuth2), Qwen (API Key/OAuth2), CoderAI, and RunPod
 - **Unified Wallet System**: Fiat wallet with crypto/PayPal/Stripe top-ups and auto top-up for subscription renewals
 - **Claude OAuth2 Authentication**: Full OAuth2 PKCE flow for Claude Code with automatic token refresh, Chrome extension for remote servers, and curl_cffi TLS fingerprinting support
-- **Claude CLI Mode**: When the `claude` binary is present in PATH at startup, AISBF automatically enables CLI proxy mode — requests are piped through the official Anthropic CLI (`claude -p`) instead of the HTTP API, using per-user isolated config directories with a 10-minute idle cleanup
+- **Claude CLI Mode**: When the `claude` binary is present in PATH at startup, AISBF automatically enables CLI proxy mode and uses per-user isolated config directories with automatic idle cleanup
 - **Kiro-cli Support**: Full support for Amazon Q Developer CLI authentication with Device Authorization Grant
 - **Kilocode OAuth2 Authentication**: OAuth2 Device Authorization Grant for Kilo Code with automatic token refresh
 - **Codex OAuth2 Authentication**: OAuth2 Device Authorization Grant for OpenAI Codex with automatic token refresh and API key exchange
 - **Qwen Authentication**: API key authentication (recommended) or OAuth2 (discontinued as of April 2026)
+- **CoderAI Broker & Bridge**: Broker-backed and direct CoderAI integrations with WebSocket transport, NAT-friendly outbound registration, session persistence, runtime telemetry, and Studio-native proxy forwarding
+- **RunPod Runtime Integration**: Pod-backed, serverless-template, and public-catalog RunPod providers with lifecycle management, persistent runtime state, startup polling, idle shutdown, and protocol-aware delegation to OpenAI, Ollama, or CoderAI handlers
 - **Rotation Models**: Intelligent load balancing across multiple providers with weighted model selection and automatic failover
 - **Autoselect Models**: AI-powered model selection that analyzes request content to route to the most appropriate specialized model
 - **Semantic Classification**: Fast hybrid BM25 + semantic model selection using sentence transformers (optional)
@@ -24,15 +26,61 @@ AISBF is a modular proxy server for managing multiple AI provider integrations. 
 - **Provider-Native Caching**: 50-70% cost reduction using Anthropic `cache_control`, Google Context Caching, and OpenAI-compatible APIs
 - **Response Caching**: 20-30% cache hit rate with intelligent request deduplication using SHA256-based cache keys
 - **Smart Request Batching**: 15-25% latency reduction by batching similar requests within 100ms window
-- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, performance metrics, and export functionality
+- **Token Usage Analytics**: Comprehensive analytics dashboard with token usage tracking, cost estimation, performance metrics, broker telemetry, and export functionality
+- **Marketplace & References**: Publish providers, models, rotations, and autoselects to a shared market, import them as locked references, settle usage revenue, and administer listings from dedicated dashboard pages
+- **AISBF Studio**: Multimodal dashboard workspace with function bindings for chat, image, video, audio, embeddings, and 3D workflows, plus reusable characters, environments, voices, archive assets, and custom pipelines
 - **Context Management**: Automatic context condensation with 8+ methods when approaching model limits
 - **SSL/TLS Support**: Built-in HTTPS support with Let's Encrypt integration and automatic certificate renewal
 - **TOR Hidden Service**: Full support for exposing AISBF over TOR network as a hidden service
 - **MCP Server**: Model Context Protocol server for remote agent configuration and model access
-- **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, model embeddings, and user configurations
+- **Persistent Database**: SQLite/MySQL-based tracking of token usage, context dimensions, market data, RunPod runtime state, broker sessions, and user configurations
 - **Multi-User Support**: User management with isolated configurations, role-based access control, and API token management
 - **User-Specific API Endpoints**: Dedicated API endpoints for authenticated users to access their own configurations with Bearer token authentication
 - **Proxy-Awareness**: Full support for reverse proxy deployments with automatic URL generation and subpath support
+
+## New Since 0.99.65
+
+### CoderAI broker and telemetry
+
+- Added broker-side WebSocket endpoints for global and user-scoped CoderAI sessions
+- Added provider-scoped registration tokens with inline rotation in the provider editor
+- Persisted broker session metadata to `~/.aisbf/coderai_broker_sessions.json` so dashboards keep the last known status after restart
+- Added dashboard visibility into session owner, client ID, connection state, transport, advertised Studio endpoints, and estimated performance metrics such as latency and tokens-per-second
+- Expanded bridge proxy support so Studio-native endpoints, long-running jobs, multipart payloads, progress polling, and non-chat streaming envelopes can transit the broker connection
+
+### RunPod provider runtime management
+
+- Added `runpod` provider type with validation and dashboard configuration support
+- Added `pod`, `serverless_template`, and `public` RunPod operating modes
+- Added wrapper delegation so non-public RunPod resources can expose OpenAI-compatible, Ollama, or CoderAI-backed runtimes through one AISBF provider
+- Added persistent RunPod runtime state in the database, including endpoint URL, resource kind, public catalog metadata, and last-used timestamps
+- Added startup polling, timeout controls, idle shutdown, and runtime refresh actions in the provider dashboard
+- Added public catalog support with per-model protocol override for `runpod_public`, `openai`, `ollama`, or `coderai`
+
+### Marketplace and reference imports
+
+- Added a dedicated market administration page for filtering, reviewing, and paging through listings
+- Added marketplace publishing and settlement logic so providers, models, rotations, and autoselects can be shared and monetized
+- Added listing analytics snapshots, revenue tracking, usage counters, and market fee support
+- Added market import references so users can import shared resources as locked read-only references inside their provider, rotation, and autoselect selectors
+- Added runtime resolution of market references plus improved dashboard rendering for locked resources and import variants
+- Added user filtering and improved relevance ordering for market discovery and admin search
+
+### AISBF Studio expansion
+
+- Added Studio dashboard shell with multimodal tabs for chat, image, video, audio, embeddings, profiles, pipelines, archive, and 3D workflows
+- Added Studio function-binding APIs for admin and user scopes so each workflow can be bound to the right provider/model role
+- Added file-backed and database-backed persistence for Studio characters, environments, voices, archive items, custom pipelines, and binding definitions
+- Added custom pipeline creation, update, delete, and run endpoints in both admin and user scopes
+- Added capability-aware Studio adapter inference and profile shaping so different providers receive the payload format they expect for multimodal endpoints
+- Added support for progress endpoints, reusable thumbnails, and user-owned Studio assets
+
+### Operational hardening and dashboard fixes
+
+- Added automatic cleanup of stale self-registered accounts that never log in within 14 days
+- Reused cached provider model data before forced auto-detect refreshes to reduce unnecessary upstream calls
+- Normalized remaining dashboard proxy-aware paths and bootstrap URLs to improve reverse-proxy compatibility
+- Fixed analytics, dashboard state restoration, helper regressions, and market rendering issues introduced during the 0.99.65 to 0.99.66 cycle
 
 ## Project Structure
 
@@ -42,45 +90,36 @@ aisbf/
 │   ├── __init__.py               # Module initialization with exports
 │   ├── config.py                 # Configuration management
 │   ├── models.py                 # Pydantic models
-│   ├── providers.py              # Provider handlers
 │   ├── handlers.py               # Request handlers
-│   ├── payments/                 # Payment system
+│   ├── analytics.py              # Analytics and telemetry
+│   ├── coderai_broker.py         # CoderAI broker session registry and transport
+│   ├── studio.py                 # Studio catalog helpers
+│   ├── studio_adapters.py        # Studio adapter inference and payload shaping
+│   ├── studio_services.py        # Studio persistence and runtime services
+│   ├── providers/                # Provider handlers
 │   │   ├── __init__.py
-│   │   ├── models.py             # Payment models
-│   │   ├── service.py            # Payment service
-│   │   ├── fiat/                 # Fiat payment handlers
-│   │   │   ├── __init__.py
-│   │   │   ├── stripe_handler.py # Stripe integration
-│   │   │   └── paypal_handler.py # PayPal integration
-│   │   ├── crypto/               # Crypto payment handlers
-│   │   │   ├── __init__.py
-│   │   │   ├── wallet.py         # HD wallet manager
-│   │   │   └── monitor.py        # Crypto payment monitor
-│   │   ├── subscription/         # Subscription management
-│   │   │   ├── __init__.py
-│   │   │   ├── manager.py        # Subscription lifecycle
-│   │   │   ├── renewal.py        # Renewal processing
-│   │   │   └── quota.py          # Quota management
-│   │   └── wallet/               # Wallet system (NEW)
-│   │       ├── __init__.py
-│   │       └── manager.py        # Wallet operations
-│   ├── notifications/            # Notification system
-│   ├── __init__.py
+│   │   ├── base.py               # Shared provider utilities
+│   │   ├── claude.py
+│   │   ├── coderai.py            # CoderAI direct and bridge integration
+│   │   ├── codex.py
+│   │   ├── google.py
+│   │   ├── ollama.py
+│   │   ├── openai.py
+│   │   ├── qwen.py
+│   │   ├── runpod.py             # RunPod runtime lifecycle and delegation
+│   │   └── kiro/
+│   ├── auth/                     # Authentication modules
+│   ├── routes/                   # FastAPI routes
+│   │   ├── coderai_broker.py     # Broker transport endpoints
+│   │   ├── dashboard/            # Dashboard views and APIs
+│   │   └── user_api.py           # User-scoped API routes
+│   ├── payments/                 # Payment system
 │   └── [other modules...]
 ├── config/                       # Configuration files
-│   ├── providers.json            # Default provider configs
-│   ├── rotations.json            # Default rotation configs
-│   ├── autoselect.json           # Default autoselect configs
-│   └── aisbf.json                # Main configuration
-├── templates/                    # HTML templates
-│   └── dashboard/                # Dashboard templates
+├── docs/                         # Documentation and integration references
 ├── static/                       # Static assets (CSS, JS, images)
-├── docs/                         # Documentation
+├── templates/                    # HTML templates
 ├── main.py                       # FastAPI application entry point
-├── cli.py                        # Command-line interface
-├── setup.py                      # Installation script
-├── pyproject.toml                # Modern packaging configuration
-├── requirements.txt              # Python dependencies
 ├── README.md                     # Project overview
 └── DOCUMENTATION.md              # Comprehensive documentation (this file)
 ```
@@ -129,6 +168,10 @@ Creates local virtual environment and installs in development mode with auto-rel
 - `~/.aisbf/rotations.json` - Rotation configurations
 - `~/.aisbf/autoselect.json` - Autoselect configurations
 - `~/.aisbf/aisbf.json` - Main server configuration
+- `~/.aisbf/coderai_broker_sessions.json` - Persisted broker session snapshots
+- `~/.aisbf/studio/` - File-backed admin Studio assets
+- `~/.aisbf/pipelines.json` - Admin custom pipeline definitions
+- `~/.aisbf/studio_bindings.json` - Admin Studio function bindings
 
 **Development Mode:**
 - `config/providers.json` and `config/rotations.json` in source tree
@@ -139,7 +182,7 @@ Creates local virtual environment and installs in development mode with auto-rel
 3. Copies default configs from installed location to `~/.aisbf/`
 4. Loads configuration from `~/.aisbf/` on subsequent runs
 
-### Main Configuration (aisbf.json)
+### Main Configuration (`aisbf.json`)
 ```json
 {
   "host": "127.0.0.1",
@@ -175,6 +218,105 @@ Creates local virtual environment and installs in development mode with auto-rel
 }
 ```
 
+### Provider Highlights
+
+#### CoderAI provider
+
+Use `type: "coderai"` for local bridges, direct HTTP/WebSocket transport, or broker-first deployments.
+
+Important `coderai_config` fields:
+- `transport` - `http` or `websocket` for direct mode
+- `broker_enabled` - allow broker registration and queue-based routing
+- `broker_mode` - prefer inbound broker connectivity instead of direct calls
+- `broker_preferred` - prefer the broker even when direct transport is configured
+- `client_id` - stable client identity used for broker routing
+- `registration_token` - required provider-scoped secret for broker admission
+- `bridge_path` and `registration_path` - direct transport paths advertised to AISBF
+
+Broker endpoints:
+- `GET /api/coderai/broker/sessions`
+- `GET /api/coderai/broker/providers/{provider_id}/status`
+- `GET /api/coderai/wss`
+- `GET /api/u/{username}/coderai/wss`
+
+#### RunPod provider
+
+Use `type: "runpod"` for managed remote runtimes.
+
+Important `runpod_config` fields:
+- `mode` - `pod`, `serverless_template`, or `public`
+- `wrapper_mode` - `openai`, `ollama`, or `coderai` for non-public resources
+- `pod_id`, `endpoint_id`, `template_id`, `serverless_template_id` - mode-specific resource identifiers
+- `startup_poll_interval_ms` and `startup_timeout_ms` - runtime readiness controls
+- `idle_shutdown_ms` - automatic stop window for inactive pods
+- `public_endpoint_protocol_default` - protocol used when public catalog entries do not override it
+- `public_models` - per-model protocol and capability overrides for public catalog entries
+
+Dashboard support includes runtime refresh, status inspection, public catalog import, and persisted state tracking.
+
+## AISBF Studio
+
+AISBF Studio is the dashboard-native multimodal workspace exposed at `/dashboard/studio`.
+
+### Studio capabilities
+
+- Chat with bound text-generation models
+- Image generation, editing, inpainting, upscaling, segmentation, deblurring, outfit change, and 2D/3D conversions
+- Video generation, interpolation, subtitling, dubbing, upscaling, face swap, outfit change, and 3D-related transforms
+- Audio generation, TTS, transcription, voice cloning, voice conversion, stem extraction, and cleanup
+- Embeddings and model-binding aware workflow routing
+- Reusable profile assets: characters, environments, voices
+- Archive storage and custom pipelines for repeatable workflows
+
+### Studio persistence model
+
+- Admin/global Studio assets are stored under `~/.aisbf/studio/`
+- Admin custom pipelines are stored in `~/.aisbf/pipelines.json`
+- Admin function bindings are stored in `~/.aisbf/studio_bindings.json`
+- User-owned assets and pipelines are stored in the database
+- User-owned function bindings are stored in user prompt override state
+
+### Studio APIs
+
+Examples:
+- `GET /dashboard/api/studio/cached-models`
+- `GET /dashboard/api/studio/function-bindings`
+- `PUT /dashboard/api/studio/function-bindings/{binding_id}`
+- `GET /dashboard/api/studio/pipelines/custom`
+- `POST /dashboard/api/studio/pipelines/custom/{pipeline_id}/run`
+- `GET /dashboard/api/studio/u/{username}/characters`
+- `GET /dashboard/api/studio/u/{username}/audio/voices`
+
+## Marketplace and References
+
+AISBF includes a built-in marketplace for sharing configured resources between users.
+
+### What can be published
+
+- Providers
+- Individual provider models
+- Rotations
+- Autoselect configurations
+
+### Marketplace features
+
+- Dedicated admin market page at `/dashboard/admin/market`
+- Listing filters by search term, owner, source type, active status, and availability
+- Pricing per million tokens and per 1,000 requests
+- Revenue, request-count, vote, and analytics snapshots for each listing
+- Settlement support for usage-based sharing
+- User export controls and market visibility filtering
+
+### Imported references
+
+Users can import market listings as references instead of duplicating the underlying configuration.
+
+Reference behavior:
+- Imported entries appear as read-only locked resources in provider, rotation, and autoselect selectors
+- AISBF resolves references at runtime before handling requests
+- Availability is tied to the source listing state
+- Dashboard UI clearly distinguishes imported resources from locally owned ones
+
 ## Wallet System
 
 AISBF includes a comprehensive unified wallet system that manages user fiat balances for subscription payments and provides multiple top-up methods.
@@ -200,590 +342,61 @@ Each user has a single fiat wallet with the following properties:
 
 #### 1. Cryptocurrency Top-Up
 - **Supported Currencies**: BTC, ETH, USDT (ERC20), USDC (ERC20)
-- **Process**: Generate unique address → User sends crypto → Automatic balance credit
+- **Process**: Generate unique address -> User sends crypto -> Automatic balance credit
 - **Confirmation**: Requires blockchain confirmations (6 for BTC, 12 for ETH/ERC20)
 
 #### 2. PayPal Top-Up
 - **Integration**: PayPal Checkout Orders API
 - **Amounts**: Fixed presets or custom amounts
-- **Process**: Create payment link → User completes PayPal payment → Automatic balance credit
+- **Process**: Create payment link -> User completes PayPal payment -> Automatic balance credit
 
 #### 3. Stripe Top-Up (Credit Cards)
 - **Integration**: Stripe PaymentIntents API
 - **Amounts**: Fixed presets or custom amounts
-- **Process**: Secure card payment → User completes payment → Automatic balance credit
-
-### Auto Top-Up System
-
-Auto top-up automatically replenishes wallet balance when needed for subscription renewals:
-
-#### Configuration
-```json
-{
-  "wallet": {
-    "auto_topup_enabled": true,
-    "auto_topup_amount": 20.00,
-    "auto_topup_threshold": 5.00,
-    "auto_topup_payment_method_id": "stripe_card_123"
-  }
-}
-```
-
-#### How It Works
-1. **Threshold Monitoring**: System checks wallet balance before subscription renewal
-2. **Auto Top-Up Trigger**: If balance < threshold, auto top-up is activated
-3. **Payment Processing**: Uses stored Stripe payment method for automatic charge
-4. **Balance Credit**: Wallet is topped up with configured amount
-5. **Renewal Retry**: Subscription renewal proceeds with sufficient balance
-
-### Subscription Renewal Flow
-
-```
-Subscription Renewal Process:
-   ↳ Check Wallet Balance
-      ↳ Sufficient? → Deduct Amount → Success ✅
-      ↳ Insufficient?
-         ↳ Auto Top-Up Enabled?
-            ↳ Yes → Charge Stripe → Top Up Wallet → Retry Deduction → Success ✅
-            ↳ No → Renewal Failed → Grace Period → Future Retry ❌
-```
-
-### Wallet API Endpoints
-
-#### Get Wallet Balance
-```http
-GET /api/wallet/balance
-Authorization: Bearer <token>
-```
-
-Response:
-```json
-{
-  "balance": 25.50,
-  "currency": "USD",
-  "auto_topup_enabled": true,
-  "auto_topup_threshold": 10.00
-}
-```
-
-#### Top-Up Wallet
-```http
-POST /api/wallet/topup
-Content-Type: application/json
-Authorization: Bearer <token>
-
-{
-  "amount": 20.00,
-  "payment_method": "stripe",
-  "custom_amount": false
-}
-```
-
-#### Configure Auto Top-Up
-```http
-POST /api/wallet/auto-topup
-Content-Type: application/json
-Authorization: Bearer <token>
-
-{
-  "enabled": true,
-  "amount": 15.00,
-  "threshold": 5.00,
-  "payment_method_id": "stripe_pm_123"
-}
-```
-
-#### Transaction History
-```http
-GET /api/wallet/transactions?page=1&limit=20
-Authorization: Bearer <token>
-```
-
-Response:
-```json
-{
-  "transactions": [
-    {
-      "id": 123,
-      "type": "credit",
-      "amount": 10.00,
-      "description": "Stripe top-up",
-      "created_at": "2026-04-21T10:30:00Z"
-    }
-  ],
-  "total": 45,
-  "page": 1,
-  "pages": 3
-}
-```
-
-### Dashboard Wallet Management
-
-The dashboard provides complete wallet management:
-
-- **Balance Display**: Current balance and recent transactions
-- **Top-Up Options**: Quick top-up buttons for preset amounts
-- **Custom Top-Up**: Enter custom amounts with payment method selection
-- **Auto Top-Up Settings**: Configure automatic top-up preferences
-- **Transaction History**: Paginated view of all wallet activity
-- **Payment Method Management**: Add/remove payment methods for auto top-up
-
-### Supported Top-Up Amounts
-
-- **Fixed Amounts**: $10, $15, $20, $50, $100
-- **Custom Amounts**: $5 - $500 (configurable per payment method)
-- **Currency**: System-configured currency (default: USD)
-
-### Security Features
-
-- **Atomic Transactions**: All wallet operations use database transactions
-- **Audit Trail**: Complete transaction history with tamper-evident logging
-- **Payment Method Security**: Secure storage of payment method tokens
-- **Rate Limiting**: Protection against excessive top-up attempts
-- **Fraud Prevention**: Monitoring for suspicious transaction patterns
-
-### Integration with Subscriptions
-
-Wallet system integrates seamlessly with subscription management:
-
-- **Automatic Deduction**: Subscription renewals deduct from wallet first
-- **Graceful Handling**: Failed renewals enter grace period with retry logic
-- **Cost Tracking**: All subscription charges logged in transaction history
-- **Multi-Currency**: Supports system-wide currency configuration
+- **Process**: Secure card payment -> User completes payment -> Automatic balance credit
 
 ## API Endpoints
 
-### Three Proxy Paths
-
-AISBF provides three ways to proxy AI models:
-
-#### PATH 1: Direct Provider Models
-Format: `{provider_id}/{model_name}`
-- Access specific models from configured providers
-- Example: `openai/gpt-4`, `gemini/gemini-2.0-flash`, `anthropic/claude-3-5-sonnet-20241022`
-
-#### PATH 2: Rotations
-Format: `rotation/{rotation_name}`
-- Weighted load balancing across multiple providers
-- Example: `rotation/coding`, `rotation/general`
-
-#### PATH 3: Autoselect
-Format: `autoselect/{autoselect_name}`
-- AI-powered model selection based on content analysis
-- Example: `autoselect/autoselect`
-
-### General Endpoints
-- `GET /` - Server status and provider list
-- `GET /api/models` - List all available models from all three proxy paths
-- `GET /api/v1/models` - OpenAI-compatible model listing
-
-### Chat Completions
-
-#### Unified Endpoints (Recommended)
-These endpoints accept all three proxy path formats in the model field:
-
-**OpenAI-Compatible Format:**
-```bash
-POST /api/v1/chat/completions
-{
-  "model": "openai/gpt-4",           # PATH 1: Direct provider
-  "messages": [...]
-}
-
-POST /api/v1/chat/completions
-{
-  "model": "rotation/coding",        # PATH 2: Rotation
-  "messages": [...]
-}
-
-POST /api/v1/chat/completions
-{
-  "model": "autoselect/autoselect",  # PATH 3: Autoselect
-  "messages": [...]
-}
-```
-
-**Alternative Format:**
-```bash
-POST /api/{provider_id}/chat/completions
-# Where provider_id can be:
-# - A provider name (e.g., "openai", "gemini")
-# - A rotation name (e.g., "coding", "general")
-# - An autoselect name (e.g., "autoselect")
-```
-
-### User-Specific API Endpoints
-
-Authenticated users can access their own configurations via user-specific API endpoints. These endpoints require either a valid API token (generated in the user dashboard) or session authentication.
-
-#### Authentication
-
-**Option 1: Bearer Token (Recommended for API access)**
-```bash
-Authorization: Bearer YOUR_API_TOKEN
-```
-
-**Option 2: Query Parameter**
-```bash
-?token=YOUR_API_TOKEN
-```
-
-#### User API Endpoints
-
-| Endpoint | Description |
-|----------|-------------|
-| `GET /api/u/{username}/models` | List available models from user's own configurations |
-| `GET /api/u/{username}/providers` | List user's provider configurations |
-| `GET /api/u/{username}/rotations` | List user's rotation configurations |
-| `GET /api/u/{username}/autoselects` | List user's autoselect configurations |
-| `POST /api/u/{username}/chat/completions` | Chat completions using user's own models |
-| `GET /api/u/{username}/{config_type}/models` | List models for specific config type |
-
-**Access Control:**
-- **Global Tokens** (from `aisbf.json`): Access to global endpoints only (`/api/...`), no access to user-specific endpoints
-- **User Tokens** (from dashboard): Access to their user-specific endpoints (`/api/u/username/...`) and global endpoints
-
-#### Example: Using User API with cURL
-
-```bash
-# List user models
-curl -H "Authorization: Bearer YOUR_TOKEN" http://localhost:17765/api/u/yourusername/models
-
-# Chat using user's own models
-curl -X POST -H "Authorization: Bearer YOUR_TOKEN" \
-  -H "Content-Type: application/json" \
-  -d '{"model": "your-rotation/model", "messages": [{"role": "user", "content": "Hello"}]}' \
-  http://localhost:17765/api/u/yourusername/chat/completions
-```
-
-### MCP (Model Context Protocol)
-
-AISBF provides an MCP server for remote agent configuration and model access:
-
-**Global MCP Endpoints (Admin-configured tokens):**
-- `GET /mcp` - SSE endpoint for MCP communication
-- `POST /mcp` - HTTP POST endpoint for MCP
-- `GET /mcp/tools` - List available global MCP tools
-- `POST /mcp/tools/call` - Call global MCP tools
-
-**User-Specific MCP Endpoints (User API tokens):**
-- `GET /mcp/u/{username}/tools` - List user's MCP tools
-- `POST /mcp/u/{username}/tools/call` - Call user's MCP tool
-
-MCP tools include:
-- `list_models` - List available models
-- `chat_completions` - Send chat completion requests
-- `get_wallet_balance` - Check wallet balance
-- `get_wallet_transactions` - Get wallet transaction history
-- `get_providers` - Get provider configurations
-- `get_rotations` - Get rotation configurations
-- `get_autoselects` - Get autoselect configurations
-
-**User-specific MCP tools (when authenticated with user token):**
-- `list_user_models` - List user's available models
-- `get_user_wallet_balance` - Check user's wallet balance
-- `get_user_wallet_transactions` - Get user's wallet transaction history
-- `user_chat_completion` - Send chat completion using user's configurations
-
-## Provider Support
-
-### Model Metadata Extraction
-
-AISBF automatically extracts and tracks model metadata from provider responses:
-
-**Automatic Extraction:**
-- **Pricing Information**: `rate_multiplier`, `rate_unit` (e.g., "per million tokens")
-- **Token Usage**: `prompt_tokens`, `completion_tokens` from API responses
-- **Rate Limits**: Auto-configures rate limits from 429 responses with retry-after headers
-- **Model Details**: `description`, `context_length`, `architecture`, `supported_parameters`
-
-**Dashboard Features:**
-- **"Get Models" Button**: Fetches and displays comprehensive model metadata
-- **Real-time Display**: Shows pricing, rate limits, and capabilities for each model
-- **Extended Fields**: OpenRouter-style metadata including top_provider, pricing details, and architecture
-
-### Google
-- Uses google-genai SDK
-- Requires API key
-- Supports streaming and non-streaming responses
-- Context Caching API support for cost reduction
-
-### OpenAI
-- Uses openai SDK
-- Requires API key
-- Supports streaming and non-streaming responses
-- Automatic prefix caching (no configuration needed)
-
-### Anthropic
-- Uses anthropic SDK
-- Requires API key
-- Static model list (no dynamic model discovery)
-- cache_control support for cost reduction
-
-### Claude Code (OAuth2 / CLI)
-
-AISBF supports two modes for the Claude provider, selected automatically at runtime:
-
-#### HTTP API / OAuth2 mode (default)
-- Full OAuth2 PKCE authentication flow
-- Automatic token refresh with refresh token rotation
-- Chrome extension for remote server OAuth2 callback interception
-- Proxy-aware extension serving: automatically detects reverse proxy deployments
-- Supports all Claude models with streaming, tool calling, vision, and extended thinking
-- **Note**: this mode uses an unofficial client interface; use at your own risk as per Claude's terms of service
-
-#### CLI proxy mode (requires `claude` in PATH)
-- Activated automatically at startup when the `claude` binary is found in PATH
-- Requests are proxied through the official Anthropic CLI using `claude -p --input-format stream-json --output-format stream-json`
-- Uses the official CLI as intended by Anthropic — permitted by Claude's terms of service
-- Per-user isolated temporary config directories (`CLAUDE_CONFIG_DIR`) prevent credential cross-contamination
-- Idle session cleanup: temp dirs are removed after 10 minutes of inactivity; active requests always get a fresh subprocess
-- Multiple parallel requests are handled concurrently via `asyncio.create_subprocess_exec`
-- Credentials can be supplied in two ways:
-  - **"Use Claude CLI mode" checkbox**: derives credentials automatically from existing OAuth2 tokens already stored in AISBF, converting them to the `claudeAiOauth` schema expected by the CLI
-  - **Explicit upload**: users can upload their own `~/.claude/.credentials.json` file to use a specific account (takes priority over OAuth2-derived credentials)
-- Admin (config-file user): CLI credentials file path stored in `providers.json` under `claude_config.cli_credentials_file`
-- Database users (all roles): CLI credentials stored in `user_oauth2_credentials` with `auth_type='claude_cli_credentials'`
-
-##### Credentials file schema
-The CLI expects a `.credentials.json` with this structure:
-```json
-{
-  "claudeAiOauth": {
-    "accessToken": "sk-ant-oat01-...",
-    "refreshToken": "sk-ant-ort01-...",
-    "expiresAt": 1776940481301,
-    "scopes": ["user:inference", "user:file_upload", "user:profile", "user:mcp_servers", "user:sessions:claude_code"],
-    "subscriptionType": "pro",
-    "rateLimitTier": "default_claude_ai"
-  }
-}
-```
-When "Use Claude CLI mode" is checked without an explicit file upload, AISBF converts the stored OAuth2 tokens to this format automatically (`expires_at` seconds → `expiresAt` milliseconds, `scope` string → `scopes` list).
-
-### Ollama
-- Uses direct HTTP API
-- No API key required
-- Local model hosting support
-
-### Kiro (Amazon Q Developer)
-- Native integration with Kiro authentication
-- Supports IDE credentials and CLI authentication
-- No separate API key required
-
-### Kilocode
-- OAuth2 Device Authorization Grant flow
-- Supports both API key and OAuth2 authentication
-- Dashboard OAuth2 authentication UI
-
-### Codex
-- OAuth2 Device Authorization Grant for OpenAI protocol
-- API key exchange from ID token
-- Dashboard authentication UI
-
-### Qwen
-- API key authentication (recommended)
-- OpenAI-compatible DashScope API endpoint
-- Supports all Qwen models
-
-## Advanced Features
-
-### Provider-Native Caching
-
-AISBF supports provider-native caching APIs for cost reduction:
-
-#### Supported Providers
-- **Anthropic**: `cache_control` with ephemeral caching
-- **Google**: Context Caching API with TTL support
-- **OpenAI**: Automatic prefix caching
-
-#### Configuration
-```json
-{
-  "providers": {
-    "anthropic": {
-      "enable_native_caching": true,
-      "min_cacheable_tokens": 1024
-    }
-  }
-}
-```
-
-### Response Caching
-
-Intelligent response caching with semantic deduplication:
-
-#### Features
-- SHA256-based cache key generation
-- Multiple backends (Redis, SQLite, MySQL, memory)
-- TTL-based expiration
-- Cache statistics and dashboard management
-
-#### Configuration
-```json
-{
-  "response_cache": {
-    "enabled": true,
-    "backend": "redis",
-    "ttl": 600,
-    "max_size": 1000
-  }
-}
-```
-
-### Adaptive Rate Limiting
-
-Intelligent rate limit management that learns from provider responses:
-
-#### Features
-- Learns optimal request rates from 429 responses
-- Exponential backoff with jitter
-- Per-provider tracking
-- Dashboard monitoring
-
-#### Configuration
-```json
-{
-  "adaptive_rate_limiting": {
-    "enabled": true,
-    "learning_rate": 0.1,
-    "headroom_percent": 10
-  }
-}
-```
-
-### Context Management
-
-Automatic context condensation with multiple methods:
-
-#### Condensation Methods
-1. **Hierarchical**: Separates persistent and transient layers
-2. **Conversational**: Summarizes old messages
-3. **Semantic**: Prunes irrelevant context
-4. **Algorithmic**: Mathematical compression
-
-#### Configuration
-```json
-{
-  "models": [
-    {
-      "name": "gpt-4",
-      "context_size": 128000,
-      "condense_context": 80,
-      "condense_method": ["hierarchical", "semantic"]
-    }
-  ]
-}
-```
-
-### SSL/TLS Support
-
-Built-in HTTPS with Let's Encrypt integration:
-
-#### Self-Signed Certificates
-- Automatic generation for development
-- Stored in `~/.aisbf/cert.pem` and `key.pem`
-
-#### Let's Encrypt
-- Automatic certificate generation and renewal
-- Requires certbot installation
-- Public domain configuration in dashboard
-
-### TOR Hidden Service
-
-Anonymous access via TOR network:
-
-#### Configuration
-```json
-{
-  "tor": {
-    "enabled": true,
-    "control_port": 9051,
-    "hidden_service_dir": "~/.aisbf/tor_hidden_service"
-  }
-}
-```
+### Core chat endpoints
+- `POST /api/v1/chat/completions`
+- `GET /api/v1/models`
+- `POST /api/{provider_id}/chat/completions`
+- `GET /api/{provider_id}/models`
+
+### User-scoped endpoints
+- `POST /api/u/{username}/chat/completions`
+- `GET /api/u/{username}/models`
+- `GET /api/u/{username}/providers`
+- `GET /api/u/{username}/rotations`
+- `GET /api/u/{username}/autoselects`
+
+### Broker and runtime endpoints
+- `GET /api/coderai/broker/sessions`
+- `GET /api/coderai/broker/providers/{provider_id}/status`
+- `GET /dashboard/providers/{provider_id}/runpod-status`
+- `POST /dashboard/providers/{provider_id}/runpod-refresh`
+
+### Dashboard and Studio endpoints
+- `GET /dashboard`
+- `GET /dashboard/providers`
+- `GET /dashboard/studio`
+- `GET /dashboard/admin/market`
 
 ## Development
 
-### Building the Package
+### Documentation notes for 0.99.66
 
-```bash
-./build.sh
-```
+The 0.99.66 documentation refresh covers the major product additions since 0.99.65:
+- CoderAI broker state persistence and performance telemetry
+- RunPod provider lifecycle management
+- Marketplace publication, settlement, and reference imports
+- Studio bindings, assets, and custom pipelines
+- Stale signup cleanup and dashboard proxy hardening
 
-Creates distribution files in `dist/`.
+### Additional references
 
-### PyPI Publishing
-
-See `PYPI.md` for detailed publishing instructions.
-
-### Running Tests
-
-```bash
-pytest tests/
-```
-
-### Code Style
-
-- Follow PEP 8
-- Use type hints
-- Add docstrings to all functions
-
-## Troubleshooting
-
-### Common Issues
-
-#### Import Errors
-- Ensure AISBF is properly installed
-- Check Python path
-- Verify dependencies in requirements.txt
-
-#### Authentication Failures
-- Check API keys in provider configuration
-- Verify OAuth2 credentials are valid
-- Check network connectivity to provider endpoints
-
-#### Rate Limiting Issues
-- Monitor dashboard rate limit statistics
-- Adjust adaptive rate limiting settings
-- Check provider account limits
-
-#### Database Issues
-- Verify database file permissions
-- Check SQLite/MySQL connectivity
-- Run database migrations if needed
-
-### Debug Mode
-
-Enable debug logging:
-```bash
-export AISBF_DEBUG=1
-aisbf
-```
-
-### Logs Location
-
-- Application logs: Console output
-- Database logs: `~/.aisbf/aisbf.log`
-- Error logs: Check application output
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Add tests
-5. Submit a pull request
-
-## License
-
-GNU General Public License v3.0
-
-## Author
-
-Stefy Lanza <stefy@nexlab.net>
-
-## Repository
-
-https://git.nexlab.net/nexlab/aisbf.git
+- `README.md` - High-level feature overview
+- `docs/coderai-integration.md` - CoderAI integration contract
+- `docs/coderai-broker-implementation-reference.md` - Mirror reference for broker-side implementers
+- `RUNPOD_IMPLEMENTATION_PLAN.md` - RunPod rollout notes and recovery plan
+- `CHANGELOG.md` - Release-by-release history

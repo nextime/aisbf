@@ -188,6 +188,17 @@ function formatPerfNumber(value, digits = 1, suffix = '') {
     return `${num.toFixed(digits)}${suffix}`;
 }
 
+function renderCoderaiCollapsedStatus(provider) {
+    const coderaiConfig = provider?.coderai_config || {};
+    if (provider?.type !== 'coderai' || coderaiConfig.broker_mode === false) return '';
+    const connected = !!coderaiConfig?.broker_session?.connected;
+    const label = connected ? 'Online' : 'Offline';
+    const bg = connected ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)';
+    const border = connected ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
+    const color = connected ? '#22c55e' : '#ef4444';
+    return `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};border:1px solid ${border};color:${color};"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
+}
+
 function renderGpuSummary(metadata) {
     const gpus = Array.isArray(metadata?.gpus) ? metadata.gpus : [];
     if (!gpus.length) return 'None reported';
@@ -197,63 +208,6 @@ function renderGpuSummary(metadata) {
         const total = formatVramMb(gpu?.total_vram_mb);
         return `${name} (${free} free / ${total} total)`;
     }).join('; ');
-}
-
-async function setCacheSetting(provider_id, model_name, enabled) {
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/api/cache-settings") }}', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                provider_id: provider_id || null,
-                model_name: model_name || null,
-                cache_enabled: enabled
-            })
-        });
-        
-        if (response.ok) {
-            showToast('Cache setting updated', 'success');
-            // Refresh cache settings
-            await loadCacheSettings();
-        } else {
-            showToast('Failed to update cache setting', 'danger');
-        }
-    } catch (error) {
-        console.error('Error updating cache setting:', error);
-        showToast('Error updating cache setting', 'danger');
-    }
-}
-
-async function loadCacheSettings() {
-    try {
-        const response = await fetch('{{ url_for(request, "/dashboard/api/cache-settings") }}', {
-            credentials: 'same-origin'
-        });
-        const data = await response.json();
-        cacheSettings = data.settings || [];
-    } catch (error) {
-        console.error('Error loading cache settings:', error);
-    }
-}
-
-// Check if cache is enabled for a provider/model
-function isCacheEnabled(provider_id, model_name = null) {
-    // Check model-level setting first
-    if (model_name) {
-        const modelSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === model_name);
-        if (modelSetting) return modelSetting.cache_enabled;
-    }
-    
-    // Check provider-level setting
-    const providerSetting = cacheSettings.find(s => s.provider_id === provider_id && s.model_name === null);
-    if (providerSetting) return providerSetting.cache_enabled;
-    
-    // Check global setting
-    const globalSetting = cacheSettings.find(s => s.provider_id === null && s.model_name === null);
-    if (globalSetting) return globalSetting.cache_enabled;
-    
-    // Default: enabled
-    return true;
 }
 
 function showToast(message, type) {
@@ -670,6 +624,7 @@ function renderProvidersList() {
             const supportsUsage = _providerSupportsUsage(key);
             const cachedUsage = _usageCache[key];
             const compactBadge = supportsUsage ? `<div id="usage-badge-${escHtmlAttr(key)}" onclick="event.stopPropagation();" style="margin-left:8px;">${cachedUsage && cachedUsage.data ? _renderUsageCompact(cachedUsage.data) : '<span style="color:var(--color-muted);font-size:11px;">loading…</span>'}</div>` : '';
+            const coderaiCollapsedStatus = renderCoderaiCollapsedStatus(provider);
 
             providerItem.innerHTML = `
                 <div class="provider-header" onclick="toggleProvider('${safeKey}')" style="padding: 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; user-select: none; flex-wrap: wrap; gap: 8px;">
@@ -679,6 +634,7 @@ function renderProvidersList() {
                         <strong style="font-size: 16px;">${escHtmlAttr(key)}</strong>
                         <span style="color: var(--color-muted); font-size: 14px;">(${escHtmlAttr(provider.name || key)})</span>
                         ${isMarketReference ? '<span class="badge" data-market-reference="true" style="background: var(--color-link); color: white; padding: 2px 8px; border-radius: 999px; font-size: 12px;">Market-linked</span><span class="badge" style="background: var(--bg-accent); color: var(--color-text); padding: 2px 8px; border-radius: 999px; font-size: 12px;">Read-only</span>' : ''}
+                        ${coderaiCollapsedStatus}
                         ${compactBadge}
                     </div>
                     ${isMarketReference ? '' : `<button type="button" class="btn btn-secondary" onclick="event.stopPropagation(); removeProvider('${safeKey}')" style="background: #dc3545; padding: 5px 15px;">${window.i18n.t('providers.remove')}</button>`}
@@ -1363,6 +1319,68 @@ function renderProviderDetails(key) {
                         Leave empty to use default pricing. Examples: OpenAI GPT-4: $30, Anthropic Claude: $75, Google Gemini: $5.00
                     </small>
                 </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Monthly Cost</label>
+                    <input type="number" step="0.01" min="0" value="${provider.premium_reference_monthly_cost || ''}" onchange="updateProvider('${key}', 'premium_reference_monthly_cost', parseFloat(this.value) || null)" placeholder="e.g., 20.00">
+                    <small style="color: var(--color-muted); display: block; margin-top: 5px;">
+                        Used for free-tier equivalent savings estimates.
+                    </small>
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Limit</label>
+                    <input type="number" step="1" min="0" value="${provider.free_tier_limit || ''}" onchange="updateProvider('${key}', 'free_tier_limit', this.value ? parseInt(this.value, 10) : null)" placeholder="e.g., 50">
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Period</label>
+                    <select onchange="updateProvider('${key}', 'free_tier_period', this.value || null)">
+                        <option value="" ${!provider.free_tier_period ? 'selected' : ''}>Unspecified</option>
+                        <option value="day" ${provider.free_tier_period === 'day' ? 'selected' : ''}>Daily</option>
+                        <option value="week" ${provider.free_tier_period === 'week' ? 'selected' : ''}>Weekly</option>
+                        <option value="month" ${provider.free_tier_period === 'month' ? 'selected' : ''}>Monthly</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Free Tier Limit Type</label>
+                    <select onchange="updateProvider('${key}', 'free_tier_limit_type', this.value || null)">
+                        <option value="" ${!provider.free_tier_limit_type ? 'selected' : ''}>Unspecified</option>
+                        <option value="requests" ${provider.free_tier_limit_type === 'requests' ? 'selected' : ''}>Requests</option>
+                        <option value="tokens" ${provider.free_tier_limit_type === 'tokens' ? 'selected' : ''}>Tokens</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Daily</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_daily || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_daily', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Weekly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_weekly || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_weekly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Requests Monthly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_requests_monthly || ''}" onchange="updateProvider('${key}', 'pro_tier_requests_monthly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Daily</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_daily || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_daily', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Weekly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_weekly || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_weekly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
+
+                <div class="form-group">
+                    <label>Pro Tier Tokens Monthly</label>
+                    <input type="number" step="1" min="0" value="${provider.pro_tier_tokens_monthly || ''}" onchange="updateProvider('${key}', 'pro_tier_tokens_monthly', this.value ? parseInt(this.value, 10) : null)" placeholder="Optional">
+                </div>
             </div>
         </div>
 
@@ -1419,22 +1437,21 @@ function renderProviderDetails(key) {
         
         <div class="form-group">
             <label>
-                <input type="checkbox" ${provider.cache_enabled ? 'checked' : ''} onchange="setCacheSetting('${key}', null, this.checked)">
-                Enable Prompt Caching
-            </label>
-            <small style="color: var(--color-subtle); font-size: 12px;">
-                <strong>Provider-level cache override:</strong> Disabling this prevents the provider's native prompt 
-                caching feature from being used, even if enabled in the provider configuration. 
-                This takes priority over the global cache setting.
-            </small>
-        </div>
-        
-        <div class="form-group">
-            <label>
                 <input type="checkbox" ${provider.privacy ? 'checked' : ''} onchange="updateProvider('${key}', 'privacy', this.checked)">
                 Privacy
             </label>
         </div>
+
+        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+        <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">Per-provider tri-state overrides. Inherit follows the global default.</small>
+        ${triStateSelect('Context Condensation', provider.enable_context_condensation, `updateProviderTriState('${key}', 'enable_context_condensation', this.value)`)}
+        ${triStateSelect('Response Cache', provider.enable_response_cache, `updateProviderTriState('${key}', 'enable_response_cache', this.value)`)}
+        ${triStateSelect('Prompt Batching', provider.enable_prompt_batching, `updateProviderTriState('${key}', 'enable_prompt_batching', this.value)`)}
+        ${triStateSelect('Prompt Security', provider.enable_prompt_security, `updateProviderTriState('${key}', 'enable_prompt_security', this.value)`)}
+        ${triStateSelect('Context Lens Analytics', provider.enable_context_lens, `updateProviderTriState('${key}', 'enable_context_lens', this.value)`)}
+        ${triStateSelect('Block High-Risk Prompts', provider.block_high_risk_prompts, `updateProviderTriState('${key}', 'block_high_risk_prompts', this.value)`)}
+        ${triStateSelect('NSFW Classification', provider.enable_nsfw_classification, `updateProviderTriState('${key}', 'enable_nsfw_classification', this.value)`)}
+        ${triStateSelect('Privacy Classification', provider.enable_privacy_classification, `updateProviderTriState('${key}', 'enable_privacy_classification', this.value)`)}
 
         <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.native_caching_section')}</h4>
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
@@ -1608,15 +1625,16 @@ function renderModels(providerKey) {
                 </label>
             </div>
             
-            <div class="form-group">
-                <label>
-                    <input type="checkbox" ${model.cache_enabled ? 'checked' : ''} onchange="setCacheSetting('${providerKey}', '${model.name || model.id}', this.checked)">
-                    Enable Prompt Caching
-                </label>
-                <small style="color: var(--color-subtle); font-size: 12px;">
-                    <strong>Model-level cache override:</strong> Disabling this prevents prompt caching for this specific model.
-                    Overrides both provider-level cache setting and global cache setting.
-                </small>
+            <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border);">
+                <h5 style="margin: 0 0 10px 0;">Feature Overrides</h5>
+                ${triStateSelect('Context Condensation', model.enable_context_condensation, `updateModelTriState('${providerKey}', ${index}, 'enable_context_condensation', this.value)`)}
+                ${triStateSelect('Response Cache', model.enable_response_cache, `updateModelTriState('${providerKey}', ${index}, 'enable_response_cache', this.value)`)}
+                ${triStateSelect('Prompt Batching', model.enable_prompt_batching, `updateModelTriState('${providerKey}', ${index}, 'enable_prompt_batching', this.value)`)}
+                ${triStateSelect('Prompt Security', model.enable_prompt_security, `updateModelTriState('${providerKey}', ${index}, 'enable_prompt_security', this.value)`)}
+                ${triStateSelect('Context Lens Analytics', model.enable_context_lens, `updateModelTriState('${providerKey}', ${index}, 'enable_context_lens', this.value)`)}
+                ${triStateSelect('Block High-Risk Prompts', model.block_high_risk_prompts, `updateModelTriState('${providerKey}', ${index}, 'block_high_risk_prompts', this.value)`)}
+                ${triStateSelect('NSFW Classification', model.enable_nsfw_classification, `updateModelTriState('${providerKey}', ${index}, 'enable_nsfw_classification', this.value)`)}
+                ${triStateSelect('Privacy Classification', model.enable_privacy_classification, `updateModelTriState('${providerKey}', ${index}, 'enable_privacy_classification', this.value)`)}
             </div>
 
             <div class="form-group">
@@ -1715,6 +1733,38 @@ function togglePricingFields(key) {
     if (pricingFields) {
         pricingFields.style.display = provider.is_subscription ? 'none' : 'block';
     }
+}
+
+function triStateValue(value) {
+    if (value === true || value === 'enabled') return 'enabled';
+    if (value === false || value === 'disabled') return 'disabled';
+    return 'inherit';
+}
+
+function triStateSelect(label, value, onChange, helpText = '') {
+    return `
+        <div class="form-group">
+            <label>${label}</label>
+            <select onchange="${onChange}">
+                <option value="inherit" ${triStateValue(value) === 'inherit' ? 'selected' : ''}>Inherit</option>
+                <option value="enabled" ${triStateValue(value) === 'enabled' ? 'selected' : ''}>Enabled</option>
+                <option value="disabled" ${triStateValue(value) === 'disabled' ? 'selected' : ''}>Disabled</option>
+            </select>
+            ${helpText ? `<small style="color: var(--color-muted); display:block; margin-top:5px;">${helpText}</small>` : ''}
+        </div>
+    `;
+}
+
+function updateTriState(target, field, value) {
+    target[field] = value === 'inherit' ? null : value === 'enabled';
+}
+
+function updateProviderTriState(key, field, value) {
+    updateTriState(providersData[key], field, value);
+}
+
+function updateModelTriState(providerKey, index, field, value) {
+    updateTriState(providersData[providerKey].models[index], field, value);
 }
 
 // Helper function to format expiration time
@@ -2712,7 +2762,6 @@ async function saveProviders() {
 }
 
 async function initProviders() {
-    await loadCacheSettings();
     renderProvidersList();
     refreshAllUsage().then(() => renderProvidersList());
 }

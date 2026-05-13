@@ -371,7 +371,7 @@ start_server() {
 
     echo "Starting AISBF on $HOST:$PORT..."
 
-    # Check if debug mode is enabled
+    # Keep packaged launches out of debug mode unless explicitly requested.
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
@@ -388,6 +388,8 @@ except Exception as e:
     traceback.print_exc()
     exit(1)
 " 2>&1
+    else
+        unset AISBF_DEBUG
     fi
 
     # Signal to the aisbf package that it is running as a server
@@ -426,10 +428,12 @@ start_daemon() {
     
     echo "Starting AISBF on $HOST:$PORT in background..."
     
-    # Check if debug mode is enabled
+    # Keep packaged launches out of debug mode unless explicitly requested.
     if [ "$DEBUG" = "true" ]; then
         echo "Debug mode enabled - showing all debug messages"
         export AISBF_DEBUG=true
+    else
+        unset AISBF_DEBUG
     fi
 
     # Start in background with nohup and logging

@@ -1064,7 +1064,9 @@ class ContextManager:
 def get_context_config_for_model(
     model_name: str,
     provider_config: Any = None,
-    rotation_model_config: Optional[Dict] = None
+    rotation_model_config: Optional[Dict] = None,
+    rotation_config: Any = None,
+    autoselect_config: Any = None,
 ) -> Dict:
     """
     Get context configuration for a specific model with cascading fallback.
@@ -1087,7 +1089,14 @@ def get_context_config_for_model(
     context_config = {
         'context_size': None,
         'condense_context': 0,
-        'condense_method': None
+        'condense_method': None,
+        'condensation_enabled': config.resolve_feature_enabled(
+            'context_condensation',
+            model_config=rotation_model_config,
+            provider_config=provider_config,
+            rotation_config=rotation_config,
+            autoselect_config=autoselect_config,
+        ),
     }
     
     # Step 1: Get provider-level defaults and model-specific config
@@ -1171,6 +1180,10 @@ def get_context_config_for_model(
     if context_config.get('context_size') is None:
         context_config['context_size'] = _infer_context_size_from_model(model_name)
     
+    if not context_config.get('condensation_enabled'):
+        context_config['condense_context'] = 0
+        context_config['condense_method'] = None
+
     return context_config
 
 

@@ -78,15 +78,9 @@ class OpenAIProviderHandler(BaseProviderHandler):
             
             # Check user's cache settings (overrides provider config)
             if enable_native_caching and hasattr(self, 'user_id'):
-                try:
-                    from aisbf.database import DatabaseRegistry
-                    db = DatabaseRegistry.get_config_database()
-                    user_setting = db.get_user_cache_settings(self.user_id, self.provider_id, model)
-                    if not user_setting['cache_enabled']:
-                        enable_native_caching = False
-                        logging.info(f"User {self.user_id} disabled cache for provider={self.provider_id}, model={model}")
-                except Exception as e:
-                    logging.warning(f"Error checking user cache settings: {e}")
+                if not self._native_cache_user_allows(model):
+                    enable_native_caching = False
+                    logging.info(f"User {self.user_id} disabled cache for provider={self.provider_id}, model={model}")
 
             logging.info(f"OpenAIProviderHandler: Native caching enabled: {enable_native_caching}")
             if enable_native_caching:

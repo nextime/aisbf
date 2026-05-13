@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 from aisbf.coderai_broker import broker
 from aisbf.config import ProviderConfig, config
+from aisbf.database import DatabaseRegistry
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from main import app
@@ -188,6 +189,7 @@ def test_broker_stream_events_are_delivered_to_waiter():
 
 def test_user_scoped_broker_websocket_path_registers_username():
     original_provider = config.providers.get("coderai-user")
+    original_get_db = DatabaseRegistry.get_config_database
     config.providers["coderai-user"] = ProviderConfig(
         id="coderai-user",
         name="CoderAI User",
@@ -197,6 +199,25 @@ def test_user_scoped_broker_websocket_path_registers_username():
         rate_limit=0,
         coderai_config={"registration_token": "user-token"},
     )
+
+    class DbStub:
+        def get_user_by_username(self, username):
+            if username == "alice":
+                return {"id": 17, "username": "alice"}
+            return None
+
+        def get_all_user_providers(self):
+            return [{
+                "user_id": 17,
+                "provider_id": "coderai-user",
+                "config": {
+                    "id": "coderai-user",
+                    "type": "coderai",
+                    "coderai_config": {"registration_token": "user-token"},
+                },
+            }]
+
+    DatabaseRegistry.get_config_database = staticmethod(lambda: DbStub())
     try:
         with TestClient(app) as client:
             with client.websocket_connect("/api/u/alice/coderai/wss?provider_id=coderai-user&client_id=user-client&registration_token=user-token&username=alice") as websocket:
@@ -204,7 +225,108 @@ def test_user_scoped_broker_websocket_path_registers_username():
                 assert registered["username"] == "alice"
                 assert registered["scope_name"] == "alice"
     finally:
+        DatabaseRegistry.get_config_database = original_get_db
         if original_provider is None:
             config.providers.pop("coderai-user", None)
         else:
             config.providers["coderai-user"] = original_provider
+
+
+def test_coderai_register_endpoint_bypasses_bearer_auth_when_using_registration_token(monkeypatch):
+    original_get_db = DatabaseRegistry.get_config_database
+    DatabaseRegistry.get_config_database = staticmethod(lambda: None)
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/coderai/register",
+                json={
+                    "provider_id": "coderai",
+                    "client_id": "nat-client",
+                    "registration_token": "global-token",
+                    "username": "global",
+                },
+            )
+        assert response.status_code == 200
+        assert response.json()["accepted"] is True
+        assert response.json()["scope_name"] == "global"
+    finally:
+        DatabaseRegistry.get_config_database = original_get_db
+
+
+def test_global_registration_rejects_user_scoped_provider_token(monkeypatch):
+    class DbStub:
+        def get_all_user_providers(self):
+            return [{
+                "user_id": 17,
+                "provider_id": "coderai-user-only",
+                "config": {
+                    "id": "coderai-user-only",
+                    "type": "coderai",
+                    "coderai_config": {"registration_token": "user-token"},
+                },
+            }]
+
+        def get_user_by_username(self, username):
+            if username == "alice":
+                return {"id": 17, "username": "alice"}
+            return None
+
+    original_get_db = DatabaseRegistry.get_config_database
+    DatabaseRegistry.get_config_database = staticmethod(lambda: DbStub())
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/coderai/register",
+                json={
+                    "provider_id": "coderai-user-only",
+                    "client_id": "nat-client",
+                    "registration_token": "user-token",
+                    "username": "global",
+                },
+            )
+        assert response.status_code == 403
+    finally:
+        DatabaseRegistry.get_config_database = original_get_db
+
+
+def test_user_registration_rejects_global_provider_token(monkeypatch):
+    original_provider = config.providers.get("coderai-global-only")
+    config.providers["coderai-global-only"] = ProviderConfig(
+        id="coderai-global-only",
+        name="CoderAI Global Only",
+        endpoint="http://127.0.0.1:11437",
+        type="coderai",
+        api_key_required=False,
+        rate_limit=0,
+        coderai_config={"registration_token": "global-only-token"},
+    )
+
+    class DbStub:
+        def get_all_user_providers(self):
+            return []
+
+        def get_user_by_username(self, username):
+            if username == "alice":
+                return {"id": 17, "username": "alice"}
+            return None
+
+    original_get_db = DatabaseRegistry.get_config_database
+    DatabaseRegistry.get_config_database = staticmethod(lambda: DbStub())
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/api/u/alice/coderai/register",
+                json={
+                    "provider_id": "coderai-global-only",
+                    "client_id": "user-client",
+                    "registration_token": "global-only-token",
+                    "username": "alice",
+                },
+            )
+        assert response.status_code == 403
+    finally:
+        DatabaseRegistry.get_config_database = original_get_db
+        if original_provider is None:
+            config.providers.pop("coderai-global-only", None)
+        else:
+            config.providers["coderai-global-only"] = original_provider

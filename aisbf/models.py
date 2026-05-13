@@ -94,6 +94,12 @@ class Provider(BaseModel):
     free_tier_limit_type: Optional[str] = None
     premium_reference_monthly_cost: Optional[float] = None
     free_tier_description: Optional[str] = None
+    pro_tier_requests_daily: Optional[int] = None
+    pro_tier_requests_weekly: Optional[int] = None
+    pro_tier_requests_monthly: Optional[int] = None
+    pro_tier_tokens_daily: Optional[int] = None
+    pro_tier_tokens_weekly: Optional[int] = None
+    pro_tier_tokens_monthly: Optional[int] = None
 
 class ErrorTracking(BaseModel):
     failures: int
