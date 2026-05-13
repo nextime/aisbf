@@ -313,7 +313,14 @@ document.getElementById('timeRangeSelect').addEventListener('change', function()
     {% endif %}
 </div>
 {% else %}
-<p style="color: var(--color-muted);">No prompt analysis data available yet.</p>
+<div style="background: var(--bg-page); padding: 20px; border-radius: 8px; border: 1px solid rgba(148,163,184,0.15); margin-bottom: 20px;">
+    <p style="color: var(--color-muted); margin: 0 0 12px;">No prompt analysis data available yet.</p>
+    <div style="color: var(--color-muted); line-height: 1.7;">
+        <div>Prompt analytics are only recorded when <strong>Prompt Security</strong> or <strong>Context Lens Analytics</strong> is enabled for the active request path.</div>
+        <div style="margin-top: 8px;">The shipped defaults keep both features disabled. Enable them from <strong>Dashboard → Settings</strong> or via provider/model overrides, then send new requests through AISBF.</div>
+        <div style="margin-top: 8px;">Optional related controls include <strong>Block High-Risk Prompts</strong>, <strong>NSFW Classification</strong>, and <strong>Privacy Classification</strong>.</div>
+    </div>
+</div>
 {% endif %}
 
 <div style="margin-top: 30px; display: flex; gap: 10px; flex-wrap: wrap;">

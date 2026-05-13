@@ -276,6 +276,9 @@ Default shipped posture:
 - persist raw prompt text: disabled
 - redact-before-persist: enabled
 
+Important operational note:
+- if both `security_scan` and `context_lens` remain disabled, AISBF will not record any prompt-analysis rows, and the prompt analytics dashboard will remain empty even though the page itself loads correctly
+
 ### Request-time behavior
 
 When enabled, AISBF performs local prompt analysis before proxying the request upstream:

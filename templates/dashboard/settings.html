@@ -42,6 +42,17 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 </div>
 {% endmacro %}
 
+{% macro bool_mode_select(field_name, selected_value, label, help_text='') %}
+<div class="form-group">
+    <label for="{{ field_name }}">{{ label }}</label>
+    <select id="{{ field_name }}" name="{{ field_name }}">
+        <option value="enabled" {% if selected_value == 'enabled' %}selected{% endif %}>Enabled</option>
+        <option value="disabled" {% if selected_value == 'disabled' %}selected{% endif %}>Disabled</option>
+    </select>
+    {% if help_text %}<small style="color: var(--color-subtle); display: block; margin-top: 5px;">{{ help_text }}</small>{% endif %}
+</div>
+{% endmacro %}
+
 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:24px;">
     <h2 style="margin:0;">Server Settings</h2>
 </div>
@@ -537,25 +548,25 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
 
     <div class="section-title" style="margin-top:28px;"><i class="fas fa-sliders-h"></i> Global Feature Defaults</div>
-    <p style="color:var(--color-muted);margin-bottom:16px;font-size:.9em;">These tri-state defaults drive inheritance for provider, model, rotation, and autoselect overrides.</p>
+    <p style="color:var(--color-muted);margin-bottom:16px;font-size:.9em;">These are the global defaults used by provider, model, rotation, and autoselect overrides when they inherit behavior.</p>
     {% set feature_controls = config.feature_controls if config.feature_controls else none %}
     {% set prompt_security = feature_controls.prompt_security if feature_controls and feature_controls.prompt_security else none %}
     <div class="tri-grid">
-        {{ tri_state_select('feature_nsfw_classification_mode', feature_controls.nsfw_classification.mode if feature_controls and feature_controls.nsfw_classification else 'inherit', 'NSFW Classification', 'Default NSFW classification behavior.') }}
-        {{ tri_state_select('feature_privacy_classification_mode', feature_controls.privacy_classification.mode if feature_controls and feature_controls.privacy_classification else 'inherit', 'Privacy Classification', 'Default privacy classification behavior.') }}
-        {{ tri_state_select('feature_context_condensation_mode', feature_controls.context_condensation.mode if feature_controls and feature_controls.context_condensation else 'inherit', 'Context Condensation', 'Default context condensation behavior.') }}
-        {{ tri_state_select('feature_response_cache_mode', feature_controls.response_cache.mode if feature_controls and feature_controls.response_cache else 'inherit', 'Response Cache', 'Default response-cache behavior.') }}
-        {{ tri_state_select('feature_prompt_batching_mode', feature_controls.prompt_batching.mode if feature_controls and feature_controls.prompt_batching else 'inherit', 'Prompt Batching', 'Default batching behavior.') }}
-        {{ tri_state_select('feature_prompt_security_mode', prompt_security.security_scan.mode if prompt_security and prompt_security.security_scan else 'inherit', 'Prompt Security', 'Default local prompt scanning behavior.') }}
-        {{ tri_state_select('feature_context_lens_mode', prompt_security.context_lens.mode if prompt_security and prompt_security.context_lens else 'inherit', 'Context Lens Analytics', 'Default prompt composition analytics behavior.') }}
-        {{ tri_state_select('feature_block_high_risk_prompts_mode', prompt_security.block_high_risk_prompts.mode if prompt_security and prompt_security.block_high_risk_prompts else 'inherit', 'Block High-Risk Prompts', 'Default local high-risk blocking behavior.') }}
+        {{ bool_mode_select('feature_nsfw_classification_mode', feature_controls.nsfw_classification.mode if feature_controls and feature_controls.nsfw_classification else 'disabled', 'NSFW Classification', 'Default NSFW classification behavior.') }}
+        {{ bool_mode_select('feature_privacy_classification_mode', feature_controls.privacy_classification.mode if feature_controls and feature_controls.privacy_classification else 'disabled', 'Privacy Classification', 'Default privacy classification behavior.') }}
+        {{ bool_mode_select('feature_context_condensation_mode', feature_controls.context_condensation.mode if feature_controls and feature_controls.context_condensation else 'disabled', 'Context Condensation', 'Default context condensation behavior.') }}
+        {{ bool_mode_select('feature_response_cache_mode', feature_controls.response_cache.mode if feature_controls and feature_controls.response_cache else 'disabled', 'Response Cache', 'Default response-cache behavior.') }}
+        {{ bool_mode_select('feature_prompt_batching_mode', feature_controls.prompt_batching.mode if feature_controls and feature_controls.prompt_batching else 'disabled', 'Prompt Batching', 'Default batching behavior.') }}
+        {{ bool_mode_select('feature_prompt_security_mode', prompt_security.security_scan.mode if prompt_security and prompt_security.security_scan else 'disabled', 'Prompt Security', 'Default local prompt scanning behavior.') }}
+        {{ bool_mode_select('feature_context_lens_mode', prompt_security.context_lens.mode if prompt_security and prompt_security.context_lens else 'disabled', 'Context Lens Analytics', 'Default prompt composition analytics behavior.') }}
+        {{ bool_mode_select('feature_block_high_risk_prompts_mode', prompt_security.block_high_risk_prompts.mode if prompt_security and prompt_security.block_high_risk_prompts else 'disabled', 'Block High-Risk Prompts', 'Default local high-risk blocking behavior.') }}
     </div>
 
     <div class="section-title" style="margin-top:28px;"><i class="fas fa-shield-alt"></i> Prompt Security Persistence</div>
     <p style="color:var(--color-muted);margin-bottom:16px;font-size:.9em;">Controls how prompt analysis findings are stored when prompt-security features are active.</p>
     <div class="tri-grid">
-        {{ tri_state_select('feature_persist_prompt_text_mode', prompt_security.persist_prompt_text.mode if prompt_security and prompt_security.persist_prompt_text else 'inherit', 'Persist Prompt Text', 'Store prompt text with prompt-analysis records when allowed.') }}
-        {{ tri_state_select('feature_redact_before_persist_mode', prompt_security.redact_before_persist.mode if prompt_security and prompt_security.redact_before_persist else 'inherit', 'Redact Before Persist', 'Redact sensitive fragments before storing prompt-analysis records.') }}
+        {{ bool_mode_select('feature_persist_prompt_text_mode', prompt_security.persist_prompt_text.mode if prompt_security and prompt_security.persist_prompt_text else 'disabled', 'Persist Prompt Text', 'Store prompt text with prompt-analysis records when allowed.') }}
+        {{ bool_mode_select('feature_redact_before_persist_mode', prompt_security.redact_before_persist.mode if prompt_security and prompt_security.redact_before_persist else 'enabled', 'Redact Before Persist', 'Redact sensitive fragments before storing prompt-analysis records.') }}
     </div>
 
     <div class="form-group" style="margin-top: 18px; max-width: 340px;">

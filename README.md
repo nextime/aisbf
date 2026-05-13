@@ -106,6 +106,7 @@ The dashboard provides:
 - Enable Context Lens analytics to capture prompt composition metadata, risk summaries, and redacted evidence
 - Enable NSFW and privacy classification so AISBF can route or restrict traffic based on content sensitivity
 - Optionally block high-risk prompts and keep persisted prompt text disabled by default while redaction remains enabled
+- Prompt analytics stay empty until Prompt Security or Context Lens Analytics is explicitly enabled in settings or resource overrides
 
 ## API Usage
 
