@@ -115,7 +115,7 @@ class DatabaseManager:
     All database operations are non-blocking using asyncio and thread pool executors.
     """
 
-    def __init__(self, db_config: Optional[Dict[str, Any]] = None):
+    def __init__(self, db_config: Optional[Dict[str, Any]] = None, database_type: str = 'config'):
         """
         Initialize the database manager.
 
@@ -138,6 +138,7 @@ class DatabaseManager:
         else:
             self.db_config = db_config
 
+        self.database_type = database_type
         self.db_type = self.db_config.get('type', 'sqlite').lower()
         self.executor = get_db_executor()
         
@@ -168,6 +169,10 @@ class DatabaseManager:
                 raise
         else:
             raise ValueError(f"Unsupported database type: {self.db_type}")
+
+    @staticmethod
+    def _format_dt_db(value: datetime) -> str:
+        return value.strftime('%Y-%m-%d %H:%M:%S')
     
     @property
     def placeholder(self) -> str:
@@ -2475,6 +2480,608 @@ class DatabaseManager:
                 WHERE user_id = {placeholder} AND autoselect_id = {placeholder}
             ''', (user_id, autoselect_name))
             conn.commit()
+
+    def record_dashboard_event(
+        self,
+        event_type: str,
+        path: Optional[str] = None,
+        user_id: Optional[int] = None,
+        username: Optional[str] = None,
+        session_id: Optional[str] = None,
+        ip_address: Optional[str] = None,
+        country_code: Optional[str] = None,
+        method: Optional[str] = None,
+        status_code: Optional[int] = None,
+        provider_id: Optional[str] = None,
+        rotation_id: Optional[str] = None,
+        autoselect_id: Optional[str] = None,
+        listing_id: Optional[int] = None,
+        target_user_id: Optional[int] = None,
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            payload = json.dumps(metadata or {})
+            cursor.execute(f'''
+                INSERT INTO dashboard_events (
+                    event_type, path, user_id, username, session_id, ip_address, country_code,
+                    method, status_code, provider_id, rotation_id, autoselect_id, listing_id,
+                    target_user_id, metadata, created_at
+                ) VALUES (
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, CURRENT_TIMESTAMP
+                )
+            ''', (
+                event_type, path, user_id, username, session_id, ip_address, country_code,
+                method, status_code, provider_id, rotation_id, autoselect_id, listing_id,
+                target_user_id, payload,
+            ))
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_dashboard_event_summary(
+        self,
+        start: datetime,
+        end: datetime,
+        event_types: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None,
+        path_filter: Optional[str] = None,
+        country_filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+
+            if event_types:
+                where_clauses.append(f"event_type IN ({','.join([placeholder] * len(event_types))})")
+                params.extend(event_types)
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+            if provider_filter:
+                where_clauses.append(f"provider_id = {placeholder}")
+                params.append(provider_filter)
+            if rotation_filter:
+                where_clauses.append(f"rotation_id = {placeholder}")
+                params.append(rotation_filter)
+            if autoselect_filter:
+                where_clauses.append(f"autoselect_id = {placeholder}")
+                params.append(autoselect_filter)
+            if path_filter:
+                where_clauses.append(f"path = {placeholder}")
+                params.append(path_filter)
+            if country_filter:
+                where_clauses.append(f"country_code = {placeholder}")
+                params.append(country_filter)
+
+            where_sql = ' AND '.join(where_clauses)
+
+            cursor.execute(f'''SELECT COUNT(*), COUNT(DISTINCT ip_address), COUNT(DISTINCT COALESCE(user_id, -1)), COUNT(DISTINCT COALESCE(session_id, '')) FROM dashboard_events WHERE {where_sql}''', tuple(params))
+            counts = cursor.fetchone() or (0, 0, 0, 0)
+
+            cursor.execute(f'''SELECT event_type, COUNT(*) FROM dashboard_events WHERE {where_sql} GROUP BY event_type ORDER BY COUNT(*) DESC''', tuple(params))
+            by_type = [{'event_type': row[0], 'count': row[1]} for row in cursor.fetchall()]
+
+            cursor.execute(f'''SELECT path, COUNT(*) FROM dashboard_events WHERE {where_sql} GROUP BY path ORDER BY COUNT(*) DESC LIMIT 20''', tuple(params))
+            pages = [{'path': row[0] or 'unknown', 'count': row[1]} for row in cursor.fetchall()]
+
+            cursor.execute(f'''SELECT country_code, COUNT(*) FROM dashboard_events WHERE {where_sql} GROUP BY country_code ORDER BY COUNT(*) DESC LIMIT 20''', tuple(params))
+            countries = [{'country_code': row[0] or 'unknown', 'count': row[1]} for row in cursor.fetchall()]
+
+            cursor.execute(f'''SELECT username, user_id, COUNT(*) FROM dashboard_events WHERE {where_sql} GROUP BY username, user_id ORDER BY COUNT(*) DESC LIMIT 20''', tuple(params))
+            users = [{'username': row[0] or 'guest', 'user_id': row[1], 'count': row[2]} for row in cursor.fetchall()]
+
+            return {
+                'total_events': counts[0] or 0,
+                'unique_ips': counts[1] or 0,
+                'unique_visitors': counts[2] or 0,
+                'unique_sessions': counts[3] or 0,
+                'by_type': by_type,
+                'pages': pages,
+                'countries': countries,
+                'users': users,
+            }
+
+    def get_dashboard_event_series(
+        self,
+        start: datetime,
+        end: datetime,
+        bucket: str = 'hour',
+        event_types: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+            if event_types:
+                where_clauses.append(f"event_type IN ({','.join([placeholder] * len(event_types))})")
+                params.extend(event_types)
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+
+            if self.db_type == 'sqlite':
+                bucket_expr = "strftime('%Y-%m-%d %H:00:00', created_at)" if bucket == 'hour' else "strftime('%Y-%m-%d', created_at)"
+            else:
+                bucket_expr = "DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00')" if bucket == 'hour' else "DATE_FORMAT(created_at, '%Y-%m-%d')"
+
+            where_sql = ' AND '.join(where_clauses)
+            cursor.execute(f'''
+                SELECT {bucket_expr} AS bucket, COUNT(*), COUNT(DISTINCT ip_address), COUNT(DISTINCT COALESCE(user_id, -1))
+                FROM dashboard_events
+                WHERE {where_sql}
+                GROUP BY bucket
+                ORDER BY bucket ASC
+            ''', tuple(params))
+            return [
+                {'bucket': row[0], 'events': row[1], 'unique_ips': row[2], 'unique_visitors': row[3]}
+                for row in cursor.fetchall()
+            ]
+
+    def get_dashboard_events(
+        self,
+        start: datetime,
+        end: datetime,
+        event_types: Optional[List[str]] = None,
+        user_id: Optional[int] = None,
+        limit: int = 200,
+    ) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+            if event_types:
+                where_clauses.append(f"event_type IN ({','.join([placeholder] * len(event_types))})")
+                params.extend(event_types)
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+            params.append(limit)
+            where_sql = ' AND '.join(where_clauses)
+            cursor.execute(f'''
+                SELECT id, event_type, path, user_id, username, session_id, ip_address, country_code,
+                       method, status_code, provider_id, rotation_id, autoselect_id, listing_id,
+                       target_user_id, metadata, created_at
+                FROM dashboard_events
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT {placeholder}
+            ''', tuple(params))
+            rows = []
+            for row in cursor.fetchall():
+                rows.append({
+                    'id': row[0],
+                    'event_type': row[1],
+                    'path': row[2],
+                    'user_id': row[3],
+                    'username': row[4],
+                    'session_id': row[5],
+                    'ip_address': row[6],
+                    'country_code': row[7],
+                    'method': row[8],
+                    'status_code': row[9],
+                    'provider_id': row[10],
+                    'rotation_id': row[11],
+                    'autoselect_id': row[12],
+                    'listing_id': row[13],
+                    'target_user_id': row[14],
+                    'metadata': _studio_json_loads(row[15], {}),
+                    'created_at': row[16],
+                })
+            return rows
+
+    def record_prompt_analysis_run(
+        self,
+        *,
+        user_id: Optional[int],
+        token_id: Optional[int],
+        provider_id: str,
+        model_name: str,
+        rotation_id: Optional[str] = None,
+        autoselect_id: Optional[str] = None,
+        request_path: Optional[str] = None,
+        request_hash: Optional[str] = None,
+        prompt_tokens: Optional[int] = None,
+        effective_context: Optional[int] = None,
+        scan_enabled: bool = True,
+        analytics_enabled: bool = True,
+        blocked: bool = False,
+        risk_level: Optional[str] = None,
+        risk_score: Optional[int] = None,
+        findings_count: int = 0,
+        summary_json: Optional[Dict[str, Any]] = None,
+    ) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            summary_payload = _studio_json_dumps(summary_json or {})
+            cursor.execute(f'''
+                INSERT INTO prompt_analysis_runs (
+                    user_id, token_id, provider_id, model_name, rotation_id, autoselect_id,
+                    request_path, request_hash, prompt_tokens, effective_context, scan_enabled,
+                    analytics_enabled, blocked, risk_level, risk_score, findings_count, summary_json, created_at
+                ) VALUES (
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                    {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, CURRENT_TIMESTAMP
+                )
+            ''', (
+                user_id, token_id, provider_id, model_name, rotation_id, autoselect_id,
+                request_path, request_hash, prompt_tokens, effective_context, scan_enabled,
+                analytics_enabled, blocked, risk_level, risk_score, findings_count,
+                summary_payload,
+            ))
+            conn.commit()
+            run_id = cursor.lastrowid
+            if run_id:
+                return int(run_id)
+
+            if self.db_type == 'mysql':
+                cursor.execute('SELECT LAST_INSERT_ID()')
+                row = cursor.fetchone()
+                if row and row[0]:
+                    return int(row[0])
+
+            raise RuntimeError('Failed to resolve prompt analysis run id after insert')
+
+    def record_prompt_analysis_findings(self, run_id: int, findings: List[Dict[str, Any]]) -> None:
+        if not findings:
+            return
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            for finding in findings:
+                cursor.execute(f'''
+                    INSERT INTO prompt_analysis_findings (
+                        run_id, category, severity, detector, span_label, message_index,
+                        evidence_preview, metadata, created_at
+                    ) VALUES (
+                        {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                        {placeholder}, {placeholder}, CURRENT_TIMESTAMP
+                    )
+                ''', (
+                    run_id,
+                    finding.get('category'),
+                    finding.get('severity'),
+                    finding.get('detector'),
+                    finding.get('span_label'),
+                    finding.get('message_index'),
+                    finding.get('evidence_preview'),
+                    json.dumps(finding.get('metadata') or {}),
+                ))
+            conn.commit()
+
+    def get_prompt_analysis_summary(
+        self,
+        start: datetime,
+        end: datetime,
+        user_id: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+            if provider_filter:
+                where_clauses.append(f"provider_id = {placeholder}")
+                params.append(provider_filter)
+            if model_filter:
+                where_clauses.append(f"model_name = {placeholder}")
+                params.append(model_filter)
+            if rotation_filter:
+                where_clauses.append(f"rotation_id = {placeholder}")
+                params.append(rotation_filter)
+            if autoselect_filter:
+                where_clauses.append(f"autoselect_id = {placeholder}")
+                params.append(autoselect_filter)
+            where_sql = ' AND '.join(where_clauses)
+
+            cursor.execute(f'''
+                SELECT COUNT(*), SUM(CASE WHEN blocked THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN risk_level = 'high' THEN 1 ELSE 0 END),
+                       AVG(COALESCE(prompt_tokens, 0)), AVG(COALESCE(effective_context, 0))
+                FROM prompt_analysis_runs WHERE {where_sql}
+            ''', tuple(params))
+            counts = cursor.fetchone() or (0, 0, 0, 0, 0)
+
+            cursor.execute(f'''
+                SELECT category, severity, COUNT(*)
+                FROM prompt_analysis_findings
+                WHERE run_id IN (SELECT id FROM prompt_analysis_runs WHERE {where_sql})
+                GROUP BY category, severity
+                ORDER BY COUNT(*) DESC
+                LIMIT 20
+            ''', tuple(params))
+            findings = [
+                {'category': row[0], 'severity': row[1], 'count': row[2]}
+                for row in cursor.fetchall()
+            ]
+
+            return {
+                'total_runs': counts[0] or 0,
+                'blocked_runs': counts[1] or 0,
+                'high_risk_runs': counts[2] or 0,
+                'avg_prompt_tokens': float(counts[3] or 0),
+                'avg_effective_context': float(counts[4] or 0),
+                'findings': findings,
+            }
+
+    def get_prompt_analysis_series(
+        self,
+        start: datetime,
+        end: datetime,
+        bucket: str = 'hour',
+        user_id: Optional[int] = None,
+    ) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+
+            if self.db_type == 'sqlite':
+                bucket_expr = "strftime('%Y-%m-%d %H:00:00', created_at)" if bucket == 'hour' else "strftime('%Y-%m-%d', created_at)"
+            else:
+                bucket_expr = "DATE_FORMAT(created_at, '%Y-%m-%d %H:00:00')" if bucket == 'hour' else "DATE_FORMAT(created_at, '%Y-%m-%d')"
+            where_sql = ' AND '.join(where_clauses)
+            cursor.execute(f'''
+                SELECT {bucket_expr} AS bucket, COUNT(*),
+                       SUM(CASE WHEN risk_level = 'high' THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN blocked THEN 1 ELSE 0 END)
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY bucket
+                ORDER BY bucket ASC
+            ''', tuple(params))
+            return [
+                {'bucket': row[0], 'runs': row[1], 'high_risk': row[2] or 0, 'blocked': row[3] or 0}
+                for row in cursor.fetchall()
+            ]
+
+    def get_prompt_analysis_details(
+        self,
+        start: datetime,
+        end: datetime,
+        user_id: Optional[int] = None,
+        provider_filter: Optional[str] = None,
+        model_filter: Optional[str] = None,
+        rotation_filter: Optional[str] = None,
+        autoselect_filter: Optional[str] = None,
+        limit: int = 25,
+    ) -> Dict[str, Any]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            where_clauses = [f"created_at >= {placeholder}", f"created_at <= {placeholder}"]
+            params: List[Any] = [self._format_dt_db(start), self._format_dt_db(end)]
+
+            if user_id == -1:
+                where_clauses.append("user_id IS NULL")
+            elif user_id is not None:
+                where_clauses.append(f"user_id = {placeholder}")
+                params.append(user_id)
+            if provider_filter:
+                where_clauses.append(f"provider_id = {placeholder}")
+                params.append(provider_filter)
+            if model_filter:
+                where_clauses.append(f"model_name = {placeholder}")
+                params.append(model_filter)
+            if rotation_filter:
+                where_clauses.append(f"rotation_id = {placeholder}")
+                params.append(rotation_filter)
+            if autoselect_filter:
+                where_clauses.append(f"autoselect_id = {placeholder}")
+                params.append(autoselect_filter)
+
+            where_sql = ' AND '.join(where_clauses)
+
+            def _json_extract(column: str, path: str) -> str:
+                if self.db_type == 'sqlite':
+                    return f"json_extract({column}, '$.{path}')"
+                return f"JSON_UNQUOTE(JSON_EXTRACT(CAST({column} AS JSON), '$.{path}'))"
+
+            role_expr = _json_extract('summary_json', 'composition.largest_segment_role')
+            shape_expr = _json_extract('summary_json', 'composition.prompt_shape')
+            tools_expr = _json_extract('summary_json', 'composition.has_tools')
+            system_expr = _json_extract('summary_json', 'composition.has_system_prompt')
+
+            cursor.execute(f'''
+                SELECT provider_id, COUNT(*),
+                       SUM(CASE WHEN blocked THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN risk_level = 'high' THEN 1 ELSE 0 END),
+                       AVG(COALESCE(prompt_tokens, 0)),
+                       AVG(COALESCE(effective_context, 0))
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY provider_id
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            ''', tuple(params))
+            provider_breakdown = [
+                {
+                    'provider_id': row[0] or 'unknown',
+                    'runs': row[1] or 0,
+                    'blocked': row[2] or 0,
+                    'high_risk': row[3] or 0,
+                    'avg_prompt_tokens': float(row[4] or 0),
+                    'avg_effective_context': float(row[5] or 0),
+                }
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(f'''
+                SELECT model_name, COUNT(*),
+                       SUM(CASE WHEN blocked THEN 1 ELSE 0 END),
+                       SUM(CASE WHEN risk_level = 'high' THEN 1 ELSE 0 END)
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY model_name
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            ''', tuple(params))
+            model_breakdown = [
+                {
+                    'model_name': row[0] or 'unknown',
+                    'runs': row[1] or 0,
+                    'blocked': row[2] or 0,
+                    'high_risk': row[3] or 0,
+                }
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(f'''
+                SELECT COALESCE(risk_level, 'none') AS risk_level, COUNT(*)
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY COALESCE(risk_level, 'none')
+                ORDER BY COUNT(*) DESC
+            ''', tuple(params))
+            risk_breakdown = [
+                {'risk_level': row[0] or 'none', 'count': row[1] or 0}
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(f'''
+                SELECT COALESCE({role_expr}, 'unknown') AS role_name, COUNT(*)
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY COALESCE({role_expr}, 'unknown')
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            ''', tuple(params))
+            segment_breakdown = [
+                {'role': row[0] or 'unknown', 'count': row[1] or 0}
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(f'''
+                SELECT COALESCE({shape_expr}, 'empty') AS prompt_shape, COUNT(*)
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                GROUP BY COALESCE({shape_expr}, 'empty')
+                ORDER BY COUNT(*) DESC
+                LIMIT 10
+            ''', tuple(params))
+            shape_breakdown = [
+                {'prompt_shape': row[0] or 'empty', 'count': row[1] or 0}
+                for row in cursor.fetchall()
+            ]
+
+            cursor.execute(f'''
+                SELECT
+                    SUM(CASE WHEN LOWER(COALESCE({tools_expr}, 'false')) IN ('1', 'true') THEN 1 ELSE 0 END),
+                    SUM(CASE WHEN LOWER(COALESCE({system_expr}, 'false')) IN ('1', 'true') THEN 1 ELSE 0 END),
+                    AVG(COALESCE(findings_count, 0)),
+                    AVG(COALESCE(risk_score, 0))
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+            ''', tuple(params))
+            posture_row = cursor.fetchone() or (0, 0, 0, 0)
+
+            cursor.execute(f'''
+                SELECT id, created_at, user_id, provider_id, model_name, rotation_id, autoselect_id,
+                       blocked, COALESCE(risk_level, 'none'), COALESCE(risk_score, 0),
+                       COALESCE(prompt_tokens, 0), COALESCE(effective_context, 0),
+                       COALESCE(findings_count, 0), summary_json
+                FROM prompt_analysis_runs
+                WHERE {where_sql}
+                ORDER BY created_at DESC
+                LIMIT {placeholder}
+            ''', tuple([*params, limit]))
+            recent_runs = []
+            run_rows = cursor.fetchall()
+            for row in run_rows:
+                summary = _studio_json_loads(row[13], {})
+                composition = summary.get('composition') if isinstance(summary, dict) else {}
+                security_summary = summary.get('security_summary') if isinstance(summary, dict) else {}
+                recent_runs.append({
+                    'id': row[0],
+                    'created_at': row[1],
+                    'user_id': row[2],
+                    'provider_id': row[3],
+                    'model_name': row[4],
+                    'rotation_id': row[5],
+                    'autoselect_id': row[6],
+                    'blocked': bool(row[7]),
+                    'risk_level': row[8] or 'none',
+                    'risk_score': row[9] or 0,
+                    'prompt_tokens': row[10] or 0,
+                    'effective_context': row[11] or 0,
+                    'findings_count': row[12] or 0,
+                    'prompt_shape': composition.get('prompt_shape') or 'empty',
+                    'largest_segment_role': composition.get('largest_segment_role') or 'unknown',
+                    'has_tools': bool(composition.get('has_tools')),
+                    'has_system_prompt': bool(composition.get('has_system_prompt')),
+                    'high_count': security_summary.get('high_count', 0),
+                    'medium_count': security_summary.get('medium_count', 0),
+                    'info_count': security_summary.get('info_count', 0),
+                })
+
+            if run_rows:
+                run_ids = [row[0] for row in run_rows]
+                cursor.execute(f'''
+                    SELECT paf.run_id, paf.category, paf.severity, COUNT(*)
+                    FROM prompt_analysis_findings paf
+                    WHERE paf.run_id IN ({','.join([placeholder] * len(run_ids))})
+                    GROUP BY paf.run_id, paf.category, paf.severity
+                    ORDER BY paf.run_id DESC, COUNT(*) DESC
+                ''', tuple(run_ids))
+                findings_by_run: Dict[int, List[Dict[str, Any]]] = {}
+                for finding_row in cursor.fetchall():
+                    findings_by_run.setdefault(finding_row[0], []).append({
+                        'category': finding_row[1],
+                        'severity': finding_row[2],
+                        'count': finding_row[3] or 0,
+                    })
+                for run in recent_runs:
+                    run['findings'] = findings_by_run.get(run['id'], [])[:3]
+            else:
+                findings_by_run = {}
+
+            return {
+                'provider_breakdown': provider_breakdown,
+                'model_breakdown': model_breakdown,
+                'risk_breakdown': risk_breakdown,
+                'segment_breakdown': segment_breakdown,
+                'shape_breakdown': shape_breakdown,
+                'recent_runs': recent_runs,
+                'posture': {
+                    'runs_with_tools': posture_row[0] or 0,
+                    'runs_with_system_prompt': posture_row[1] or 0,
+                    'avg_findings_count': float(posture_row[2] or 0),
+                    'avg_risk_score': float(posture_row[3] or 0),
+                },
+            }
 
     # User-specific prompt methods
     def save_user_prompt(self, user_id: int, prompt_key: str, content: str):
@@ -5172,6 +5779,168 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
             logger.info("No duplicate cache settings found")
     except Exception as e:
         logger.warning(f"Migration check for duplicate cache settings: {e}")
+
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(dashboard_events)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE dashboard_events (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        event_type VARCHAR(64) NOT NULL,
+                        path VARCHAR(255),
+                        user_id INTEGER,
+                        username VARCHAR(255),
+                        session_id VARCHAR(255),
+                        ip_address VARCHAR(64),
+                        country_code VARCHAR(16),
+                        method VARCHAR(16),
+                        status_code INTEGER,
+                        provider_id VARCHAR(255),
+                        rotation_id VARCHAR(255),
+                        autoselect_id VARCHAR(255),
+                        listing_id INTEGER,
+                        target_user_id INTEGER,
+                        metadata TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_dashboard_events_created_at ON dashboard_events(created_at)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_dashboard_events_event_type ON dashboard_events(event_type)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_dashboard_events_user_id ON dashboard_events(user_id)')
+                logger.info("✅ Migration: Created dashboard_events table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME = 'dashboard_events'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE dashboard_events (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        event_type VARCHAR(64) NOT NULL,
+                        path VARCHAR(255),
+                        user_id INTEGER,
+                        username VARCHAR(255),
+                        session_id VARCHAR(255),
+                        ip_address VARCHAR(64),
+                        country_code VARCHAR(16),
+                        method VARCHAR(16),
+                        status_code INTEGER,
+                        provider_id VARCHAR(255),
+                        rotation_id VARCHAR(255),
+                        autoselect_id VARCHAR(255),
+                        listing_id INTEGER,
+                        target_user_id INTEGER,
+                        metadata TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+                cursor.execute('CREATE INDEX idx_dashboard_events_created_at ON dashboard_events(created_at)')
+                cursor.execute('CREATE INDEX idx_dashboard_events_event_type ON dashboard_events(event_type)')
+                cursor.execute('CREATE INDEX idx_dashboard_events_user_id ON dashboard_events(user_id)')
+                logger.info("✅ Migration: Created dashboard_events table")
+    except Exception as e:
+        logger.warning(f"Migration check for dashboard_events table: {e}")
+
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(prompt_analysis_runs)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE prompt_analysis_runs (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        token_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        model_name VARCHAR(255) NOT NULL,
+                        rotation_id VARCHAR(255),
+                        autoselect_id VARCHAR(255),
+                        request_path VARCHAR(255),
+                        request_hash VARCHAR(64),
+                        prompt_tokens INTEGER,
+                        effective_context INTEGER,
+                        scan_enabled {boolean_type} DEFAULT 1,
+                        analytics_enabled {boolean_type} DEFAULT 1,
+                        blocked {boolean_type} DEFAULT 0,
+                        risk_level VARCHAR(16),
+                        risk_score INTEGER,
+                        findings_count INTEGER DEFAULT 0,
+                        summary_json TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_prompt_analysis_runs_created_at ON prompt_analysis_runs(created_at)')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_prompt_analysis_runs_user_id ON prompt_analysis_runs(user_id)')
+                logger.info("✅ Migration: Created prompt_analysis_runs table")
+            cursor.execute("PRAGMA table_info(prompt_analysis_findings)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE prompt_analysis_findings (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        run_id INTEGER NOT NULL,
+                        category VARCHAR(64),
+                        severity VARCHAR(16),
+                        detector VARCHAR(64),
+                        span_label VARCHAR(64),
+                        message_index INTEGER,
+                        evidence_preview TEXT,
+                        metadata TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+                cursor.execute('CREATE INDEX IF NOT EXISTS idx_prompt_analysis_findings_run_id ON prompt_analysis_findings(run_id)')
+                logger.info("✅ Migration: Created prompt_analysis_findings table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME = 'prompt_analysis_runs'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE prompt_analysis_runs (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        token_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        model_name VARCHAR(255) NOT NULL,
+                        rotation_id VARCHAR(255),
+                        autoselect_id VARCHAR(255),
+                        request_path VARCHAR(255),
+                        request_hash VARCHAR(64),
+                        prompt_tokens INTEGER,
+                        effective_context INTEGER,
+                        scan_enabled {boolean_type} DEFAULT 1,
+                        analytics_enabled {boolean_type} DEFAULT 1,
+                        blocked {boolean_type} DEFAULT 0,
+                        risk_level VARCHAR(16),
+                        risk_score INTEGER,
+                        findings_count INTEGER DEFAULT 0,
+                        summary_json TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_NAME = 'prompt_analysis_findings'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE prompt_analysis_findings (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        run_id INTEGER NOT NULL,
+                        category VARCHAR(64),
+                        severity VARCHAR(16),
+                        detector VARCHAR(64),
+                        span_label VARCHAR(64),
+                        message_index INTEGER,
+                        evidence_preview TEXT,
+                        metadata TEXT,
+                        created_at TIMESTAMP DEFAULT {timestamp_default}
+                    )
+                ''')
+    except Exception as e:
+        logger.warning(f"Migration check for prompt analysis tables: {e}")
     
     # Migration: Create account_tiers table if missing
     try:

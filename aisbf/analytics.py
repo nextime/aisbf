@@ -200,6 +200,12 @@ class Analytics:
                     'limit': int(getattr(provider_config, 'free_tier_limit', 0) or 0),
                     'premium_monthly_cost': float(getattr(provider_config, 'premium_reference_monthly_cost', 0) or 0),
                     'description': getattr(provider_config, 'free_tier_description', None) or f'{provider_id} free tier',
+                    'pro_tier_requests_daily': getattr(provider_config, 'pro_tier_requests_daily', None),
+                    'pro_tier_requests_weekly': getattr(provider_config, 'pro_tier_requests_weekly', None),
+                    'pro_tier_requests_monthly': getattr(provider_config, 'pro_tier_requests_monthly', None),
+                    'pro_tier_tokens_daily': getattr(provider_config, 'pro_tier_tokens_daily', None),
+                    'pro_tier_tokens_weekly': getattr(provider_config, 'pro_tier_tokens_weekly', None),
+                    'pro_tier_tokens_monthly': getattr(provider_config, 'pro_tier_tokens_monthly', None),
                     'provider_family': provider_id,
                     'source': 'config'
                 }
@@ -211,6 +217,30 @@ class Analytics:
             if key in provider_lower:
                 return {**info, 'provider_family': key, 'source': 'default'}
         return None
+
+    def _resolve_pro_tier_capacity(self, tier_info: Dict[str, Any], limit_type: str, period: str) -> tuple[Optional[int], str]:
+        period = (period or 'month').lower()
+        limit_type = (limit_type or 'requests').lower()
+
+        configured_keys = {
+            ('requests', 'day'): 'pro_tier_requests_daily',
+            ('requests', 'week'): 'pro_tier_requests_weekly',
+            ('requests', 'month'): 'pro_tier_requests_monthly',
+            ('tokens', 'day'): 'pro_tier_tokens_daily',
+            ('tokens', 'week'): 'pro_tier_tokens_weekly',
+            ('tokens', 'month'): 'pro_tier_tokens_monthly',
+        }
+        config_key = configured_keys.get((limit_type, period))
+        if config_key:
+            configured_value = tier_info.get(config_key)
+            if configured_value:
+                return int(configured_value), 'configured'
+
+        free_limit = int(tier_info.get('limit', 0) or 0)
+        if free_limit > 0:
+            return free_limit * 5, 'derived_5x_free_tier'
+
+        return 1, 'single_pro_tier_estimate'
 
     def _derive_quota_from_usage(self, provider_id: str, usage_data: Optional[Dict[str, Any]]) -> Optional[Dict[str, Any]]:
         if not usage_data or not isinstance(usage_data, dict):
@@ -1246,6 +1276,12 @@ class Analytics:
     ) -> Dict[str, Any]:
         start, end, _ = self._normalize_time_window('custom' if from_datetime or to_datetime else '24h', from_datetime, to_datetime)
 
+        normalized_provider_filter = (provider_filter or '').strip().lower()
+        normalized_model_filter = (model_filter or '').strip().lower()
+
+        explicit_single_provider_scope = bool(normalized_provider_filter)
+        explicit_single_model_scope = bool(normalized_model_filter)
+
         provider_stats = self.get_all_providers_stats(
             start,
             end,
@@ -1294,9 +1330,6 @@ class Analytics:
             limit_type = (runtime_quota or {}).get('limit_type') or tier_info.get('limit_type') or 'requests'
             period = (runtime_quota or {}).get('period') or tier_info.get('period') or 'month'
 
-            if free_limit <= 0:
-                continue
-
             premium_price = float(tier_info.get('premium_monthly_cost', 0) or 0)
             if premium_price <= 0:
                 continue
@@ -1306,53 +1339,150 @@ class Analytics:
             else:
                 usage_amount = usage.get('request_count', 0) or 0
 
-            if usage_amount <= free_limit:
+            if usage_amount <= 0:
                 continue
 
-            extra_free_tiers = max((usage_amount - 1) // free_limit, 0)
-            if extra_free_tiers <= 0:
+            estimated_payg_cost = self._estimate_aggregate_cost({
+                provider_id: {
+                    'tokens_used': usage.get('tokens_used', 0),
+                    'prompt_tokens': usage.get('prompt_tokens', 0),
+                    'completion_tokens': usage.get('completion_tokens', 0),
+                    'actual_cost': usage.get('actual_cost', 0.0),
+                    'model_name': model_filter if explicit_single_model_scope else None,
+                }
+            })
+            if estimated_payg_cost <= 0:
                 continue
 
-            if tier_info.get('source') == 'default' and usage_amount > free_limit * 10:
+            if explicit_single_provider_scope or explicit_single_model_scope:
+                if premium_price <= estimated_payg_cost:
+                    continue
+
+            if free_limit <= 0:
                 continue
 
-            saved_tokens = usage['tokens_used'] * extra_free_tiers
+            covered_usage_amount = min(usage_amount, free_limit)
+            if covered_usage_amount <= 0:
+                continue
+
+            coverage_ratio = min(max(float(covered_usage_amount) / float(usage_amount), 0.0), 1.0)
+            saved_tokens = int((usage['tokens_used'] or 0) * coverage_ratio)
+            if saved_tokens <= 0:
+                continue
+
             equivalent_token_savings += saved_tokens
-            premium_equivalent_cost = premium_price * extra_free_tiers
+            premium_equivalent_cost = min(max(estimated_payg_cost, 0.0) * coverage_ratio, premium_price)
             provider_equivalents.append({
                 'provider_id': provider_id,
                 'tokens_used': usage['tokens_used'],
                 'request_count': usage.get('request_count', 0) or 0,
                 'usage_amount': usage_amount,
+                'covered_usage_amount': covered_usage_amount,
+                'coverage_ratio': coverage_ratio,
                 'free_tier_limit': free_limit,
                 'free_tier_period': period,
                 'free_tier_limit_type': limit_type,
-                'extra_free_tiers': extra_free_tiers,
                 'equivalent_saved_tokens': saved_tokens,
                 'premium_reference_name': tier_info.get('description'),
                 'premium_reference_monthly_cost': premium_price,
                 'equivalent_saved_cost': premium_equivalent_cost,
+                'estimated_payg_cost': estimated_payg_cost,
                 'quota_source': 'runtime' if runtime_quota else tier_info.get('source', 'default')
             })
             equivalent_cost_savings += premium_equivalent_cost
 
+        feature_savings = {}
+
+        provider_cost_rows = self.get_cost_overview(
+            start,
+            end,
+            user_filter=user_filter,
+            provider_filter=provider_filter,
+            model_filter=model_filter,
+            rotation_filter=rotation_filter,
+            autoselect_filter=autoselect_filter
+        ).get('providers', [])
+        total_requests = 0
+        for row in provider_stats:
+            request_count = row.get('request_count')
+            if isinstance(request_count, dict):
+                request_count = request_count.get('total') or 0
+            elif request_count is None:
+                request_count = row.get('requests', 0) or 0
+                if isinstance(request_count, dict):
+                    request_count = request_count.get('total') or 0
+            total_requests += int(request_count or 0)
+        total_estimated_cost = sum(float(row.get('estimated_cost', 0) or 0) for row in provider_cost_rows)
+        avg_tokens_per_request = int(sum((usage.get('tokens_used') or 0) for usage in provider_totals.values()) / total_requests) if total_requests > 0 else 0
+        avg_cost_per_request = (total_estimated_cost / total_requests) if total_requests > 0 else 0.0
+
+        try:
+            from .cache import get_response_cache
+            cache = get_response_cache()
+            cache_stats = cache.get_stats() if user_filter in (None, -1) else cache.get_user_stats(user_filter)
+            cache_hits = int(cache_stats.get('hits') or 0)
+            if cache_hits > 0 and avg_tokens_per_request > 0:
+                feature_savings['response_cache'] = {
+                    'count': cache_hits,
+                    'tokens_saved': cache_hits * avg_tokens_per_request,
+                    'cost_saved': cache_hits * avg_cost_per_request,
+                    'avg_tokens_saved': avg_tokens_per_request,
+                    'max_tokens_saved': avg_tokens_per_request,
+                }
+        except Exception:
+            pass
+
+        try:
+            from .batching import get_request_batcher
+            batcher = get_request_batcher()
+            batch_stats = batcher.get_stats() if batcher else {}
+            batches_formed = int(batch_stats.get('batches_formed') or 0)
+            requests_batched = int(batch_stats.get('requests_batched') or 0)
+            if batches_formed > 0 and requests_batched > batches_formed and avg_tokens_per_request > 0:
+                requests_avoided = max(requests_batched - batches_formed, 0)
+                feature_savings['batching'] = {
+                    'count': batches_formed,
+                    'tokens_saved': requests_avoided * avg_tokens_per_request,
+                    'cost_saved': requests_avoided * avg_cost_per_request,
+                    'avg_tokens_saved': int((requests_avoided * avg_tokens_per_request) / batches_formed) if batches_formed else 0,
+                    'max_tokens_saved': requests_avoided * avg_tokens_per_request if batches_formed == 1 else max(avg_tokens_per_request, int(avg_tokens_per_request * (batch_stats.get('avg_batch_size') or 1))),
+                }
+        except Exception:
+            pass
+
+        savings_by_type = {}
+        if provider_equivalents:
+            savings_by_type['free_tier_equivalent'] = {
+                'count': len(provider_equivalents),
+                'tokens_saved': equivalent_token_savings,
+                'cost_saved': equivalent_cost_savings,
+                'avg_tokens_saved': int(equivalent_token_savings / len(provider_equivalents)) if provider_equivalents else 0,
+                'max_tokens_saved': max((item['equivalent_saved_tokens'] for item in provider_equivalents), default=0)
+            }
+        savings_by_type.update(feature_savings)
+
+        total_feature_tokens_saved = sum(int(item.get('tokens_saved') or 0) for item in feature_savings.values())
+        total_feature_cost_saved = sum(float(item.get('cost_saved') or 0) for item in feature_savings.values())
+        direct_feature_savings = {
+            'tokens_saved': total_feature_tokens_saved,
+            'cost_saved': total_feature_cost_saved,
+        }
+        free_tier_equivalent_savings = {
+            'tokens_saved': equivalent_token_savings,
+            'cost_saved': equivalent_cost_savings,
+        }
+
         return {
-            'total_tokens_saved': equivalent_token_savings,
-            'total_cost_saved': equivalent_cost_savings,
+            'total_tokens_saved': equivalent_token_savings + total_feature_tokens_saved,
+            'total_cost_saved': equivalent_cost_savings + total_feature_cost_saved,
+            'direct_feature_savings': direct_feature_savings,
+            'free_tier_equivalent_savings': free_tier_equivalent_savings,
             'date_range': {
                 'start': start.isoformat(),
                 'end': end.isoformat()
             },
             'provider_equivalents': provider_equivalents,
-            'savings_by_type': {
-                'free_tier_equivalent': {
-                    'count': len(provider_equivalents),
-                    'tokens_saved': equivalent_token_savings,
-                    'cost_saved': equivalent_cost_savings,
-                    'avg_tokens_saved': int(equivalent_token_savings / len(provider_equivalents)) if provider_equivalents else 0,
-                    'max_tokens_saved': max((item['equivalent_saved_tokens'] for item in provider_equivalents), default=0)
-                }
-            } if provider_equivalents else {}
+            'savings_by_type': savings_by_type
         }
     
     def get_cost_overview(
