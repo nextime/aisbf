@@ -761,8 +761,10 @@ async def dashboard_settings_save(
         'requests_per_hour': max(0, client_rl_general_rph)
     }
 
-    # Save config
-    config_path = Path.home() / '.aisbf' / 'aisbf.json'
+    # Save config back to the same resolved path we loaded from
+    config_path = get_aisbf_config_path()
+    if not config_path.exists():
+        config_path = Path.home() / '.aisbf' / 'aisbf.json'
     config_path.parent.mkdir(parents=True, exist_ok=True)
     with open(config_path, 'w') as f:
         json.dump(aisbf_config, f, indent=2)

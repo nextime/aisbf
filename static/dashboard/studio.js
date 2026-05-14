@@ -1609,8 +1609,24 @@ const BLABEL = {text:'LLM',vision:'VLM',image:'IMG',video:'VID',audio:'STT',
 
 function renderSidebar() {
   const el = $('model-list');
+  const activeEl = document.activeElement;
+  const activeIsBindingSearch = activeEl && activeEl.classList && activeEl.classList.contains('binding-role-search');
+  const activeValue = activeIsBindingSearch ? activeEl.value : '';
+  const activeSelectionStart = activeIsBindingSearch && typeof activeEl.selectionStart === 'number' ? activeEl.selectionStart : null;
+  const activeSelectionEnd = activeIsBindingSearch && typeof activeEl.selectionEnd === 'number' ? activeEl.selectionEnd : null;
+  const restoreKey = activeIsBindingSearch ? activeEl.getAttribute('data-search-key') : null;
   if (!functionBindingDefs.length) { el.innerHTML='<div class="muted small" style="padding:.5rem .6rem">No Studio bindings</div>'; return; }
   el.innerHTML = `<div class="binding-list">${functionBindingDefs.map(renderBindingCard).join('')}</div>`;
+  if (restoreKey) {
+    const nextEl = el.querySelector(`.binding-role-search[data-search-key="${CSS.escape(restoreKey)}"]`);
+    if (nextEl) {
+      nextEl.focus();
+      if (nextEl.value !== activeValue) nextEl.value = activeValue;
+      if (activeSelectionStart !== null && activeSelectionEnd !== null && typeof nextEl.setSelectionRange === 'function') {
+        nextEl.setSelectionRange(activeSelectionStart, activeSelectionEnd);
+      }
+    }
+  }
 }
 
 function renderBindingCard(def) {
@@ -1657,7 +1673,7 @@ function renderBindingRole(def, role) {
       <div class="binding-role-state">${assignedModel ? 'Bound' : (role.optional ? 'Optional' : 'Missing')}</div>
     </div>
     <div class="binding-role-meta">${currentMeta}</div>
-    <input class="fi binding-role-search" type="search" value="${escapeHtml(query)}" placeholder="Search provider/model, rotation, autoselect" oninput="updateBindingSearch('${def.id}','${role.key}', this.value)">
+    <input class="fi binding-role-search" type="search" data-search-key="${escapeHtml(searchKey)}" value="${escapeHtml(query)}" placeholder="Search provider/model, rotation, autoselect" oninput="updateBindingSearch('${def.id}','${role.key}', this.value)">
     <div class="binding-role-results">${results}</div>
     ${assignedModel ? `<button class="btn btn-ghost btn-sm binding-role-clear" onclick="clearBindingRole('${def.id}','${role.key}');return false;">Clear</button>` : ''}
   </div>`;

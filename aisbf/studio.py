@@ -19,11 +19,13 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
 
+import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import json
 from typing import Any, Dict, Iterable, List, Optional
 
+from aisbf.app.model_cache import get_provider_models
 from aisbf.studio_adapters import effective_studio_adapter, infer_studio_adapter_profile
 
 
@@ -593,8 +595,41 @@ def build_studio_catalog(
         rotations = getattr(config, "rotations", None) or {}
         autoselects = getattr(config, "autoselect", None) or {}
 
+    provider_entries = _build_provider_entries(scope, owner_id, providers)
+
+    missing_provider_ids = {
+        provider_id
+        for provider_id, provider_config in (providers or {}).items()
+        if not _provider_models_from_config(provider_config)
+    }
+    if missing_provider_ids and config is not None:
+        for provider_id in missing_provider_ids:
+            provider_config = providers.get(provider_id)
+            if provider_config is None:
+                continue
+            try:
+                live_models = asyncio.run(get_provider_models(provider_id, provider_config, config, user_id=owner_id if scope == "user" else None))
+            except RuntimeError:
+                live_models = []
+            except Exception:
+                live_models = []
+            if not live_models:
+                continue
+            live_model_names = {
+                (model.get("name") or model.get("model_name") or model.get("id") or "").split("/", 1)[-1]
+                for model in live_models if isinstance(model, dict)
+            }
+            provider_entries = [
+                entry for entry in provider_entries
+                if not (entry.get("kind") == "provider_model" and entry.get("source_id") == provider_id and entry.get("target_id") in live_model_names)
+            ]
+            hydrated_provider = provider_config if isinstance(provider_config, dict) else provider_config.model_dump()
+            hydrated_provider = dict(hydrated_provider)
+            hydrated_provider["models"] = live_models
+            provider_entries.extend(_build_provider_entries(scope, owner_id, {provider_id: hydrated_provider}))
+
     entries = [
-        *_build_provider_entries(scope, owner_id, providers),
+        *provider_entries,
         *_build_rotation_entries(scope, owner_id, rotations),
         *_build_autoselect_entries(scope, owner_id, autoselects),
     ]

@@ -480,6 +480,12 @@ class CoderAIBroker:
 
     async def send_request(self, provider_id: str, op: str, payload: Dict[str, Any], timeout: float = 300.0, client_id: Optional[str] = None, owner_user_id: Optional[int] = None, extra: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
         snapshot = await self.get_session_snapshot(provider_id, client_id)
+        if (not snapshot or not snapshot.get("connected")) and client_id:
+            fallback_snapshot = await self.get_session_snapshot(client_id, client_id)
+            fallback_metadata = (fallback_snapshot or {}).get("metadata") or {}
+            if fallback_snapshot and fallback_snapshot.get("connected") and fallback_metadata.get("owner_user_id") == owner_user_id:
+                snapshot = fallback_snapshot
+                provider_id = snapshot.get("provider_id") or provider_id
         if not snapshot or not snapshot.get("connected"):
             raise RuntimeError(f"No active CoderAI broker session for provider '{provider_id}'")
         if owner_user_id != ((snapshot.get('metadata') or {}).get('owner_user_id')):
@@ -493,7 +499,7 @@ class CoderAIBroker:
             "v": 1,
             "op": op,
             "request_id": request_id,
-            "provider_id": provider_id,
+            "provider_id": snapshot.get("provider_id") or provider_id,
             "client_id": snapshot.get("client_id") or client_id,
             "payload": payload,
             "reply_key": self._reply_key(request_id),
@@ -509,7 +515,7 @@ class CoderAIBroker:
                 stream_queue=stream_queue,
                 request_snapshot={
                     "session_id": snapshot.get("session_id"),
-                    "provider_id": provider_id,
+                    "provider_id": snapshot.get("provider_id") or provider_id,
                     "client_id": snapshot.get("client_id") or client_id,
                     "op": op,
                 },

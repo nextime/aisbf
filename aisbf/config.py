@@ -472,6 +472,26 @@ class Config:
         
         raise FileNotFoundError("Could not find configuration files")
 
+    def _get_aisbf_config_path(self) -> Path:
+        """Resolve the active aisbf.json path consistently across startup and reloads."""
+        candidates = []
+        if self._custom_config_dir and self._custom_config_dir.exists():
+            candidates.append(self._custom_config_dir / 'aisbf.json')
+
+        candidates += [
+            Path.home() / '.aisbf' / 'aisbf.json',
+            Path.home() / '.local' / 'share' / 'aisbf' / 'aisbf.json',
+            Path('/usr/local/share/aisbf/aisbf.json'),
+            Path('/usr/share/aisbf/aisbf.json'),
+            Path(__file__).parent.parent / 'config' / 'aisbf.json',
+        ]
+
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+
+        return candidates[-1]
+
     def _ensure_config_directory(self):
         """Ensure ~/.aisbf/ directory exists and copy default config files if needed"""
         config_dir = Path.home() / '.aisbf'
@@ -930,7 +950,7 @@ class Config:
         logger = logging.getLogger(__name__)
         logger.info(f"=== Config._load_aisbf_config START ===")
         
-        aisbf_path = Path.home() / '.aisbf' / 'aisbf.json'
+        aisbf_path = self._get_aisbf_config_path()
         logger.info(f"Looking for AISBF config in: {aisbf_path}")
         
         if not aisbf_path.exists():
