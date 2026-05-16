@@ -252,7 +252,10 @@ async def _load_coderai_broker_status_map() -> dict[str, dict]:
         provider_id = session.get('provider_id')
         if not provider_id:
             continue
-        status_map[provider_id] = session
+        existing = status_map.get(provider_id)
+        # A connected session must never be shadowed by a stale closed one from persistence.
+        if existing is None or (session.get('connected') and not existing.get('connected')):
+            status_map[provider_id] = session
     return status_map
 
 

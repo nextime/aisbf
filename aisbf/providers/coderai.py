@@ -256,6 +256,18 @@ class CoderAIProviderHandler(BaseProviderHandler):
             event = message.get("event")
             payload_data = message.get("payload") or {}
 
+            # Broker HTTP envelope (ASGI bridge buffered the full response into payload.body).
+            # Yield the body as raw bytes — SSE or JSON — then stop.
+            if "status_code" in payload_data and "body" in payload_data:
+                body = payload_data.get("body")
+                if isinstance(body, str):
+                    yield body.encode("utf-8")
+                elif isinstance(body, bytes):
+                    yield body
+                elif isinstance(body, (dict, list)):
+                    yield json.dumps(body, separators=(",", ":")).encode("utf-8")
+                return
+
             if event in {"chunk", "progress", "output", "log", "data"}:
                 chunk = payload_data.get("chunk", payload_data)
                 yield self._decode_broker_chunk(chunk)
@@ -360,6 +372,19 @@ class CoderAIProviderHandler(BaseProviderHandler):
         response.raise_for_status()
         return response.json()
 
+    @staticmethod
+    def _unwrap_broker_body(payload: Dict[str, Any]) -> Any:
+        """Unwrap the HTTP envelope that the broker dispatcher puts around ASGI responses."""
+        body = payload.get("body")
+        if isinstance(body, str):
+            try:
+                return json.loads(body)
+            except Exception:
+                return payload
+        if isinstance(body, (dict, list)):
+            return body
+        return payload
+
     def _extract_models(self, payload: Dict[str, Any]) -> List[Model]:
         models_data = payload.get("data") if isinstance(payload, dict) else payload
         if not isinstance(models_data, list):
@@ -454,7 +479,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI broker request failed")
                 self.record_success()
-                return message.get("payload") or {}
+                return self._unwrap_broker_body(message.get("payload") or {})
             if self._is_direct_websocket_mode():
                 if stream:
                     return self._ws_stream("chat.completions", payload, timeout=self._request_timeout)
@@ -480,7 +505,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 message = await self._broker_request("models.list", {}, timeout=self._model_timeout)
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI broker model discovery failed")
-                return self._extract_models(message.get("payload") or {})
+                return self._extract_models(self._unwrap_broker_body(message.get("payload") or {}))
             if self._is_direct_websocket_mode():
                 message = await self._ws_roundtrip("models.list", {}, timeout=self._model_timeout)
                 if (message.get("status") or "ok") == "error":
@@ -502,7 +527,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
             message = await self._broker_request("capabilities", {}, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker capability discovery failed")
-            return message.get("payload") or {}
+            return self._unwrap_broker_body(message.get("payload") or {})
         if self._is_direct_websocket_mode():
             message = await self._ws_roundtrip("capabilities", {}, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
@@ -523,7 +548,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
             message = await self._broker_request("register", payload, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker registration failed")
-            return message.get("payload") or {}
+            return self._unwrap_broker_body(message.get("payload") or {})
         if self._is_direct_websocket_mode():
             message = await self._ws_roundtrip("register", payload, timeout=self._model_timeout)
             if (message.get("status") or "ok") == "error":
