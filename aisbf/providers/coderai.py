@@ -463,6 +463,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
                     raise Exception(message.get("error") or "CoderAI WebSocket request failed")
                 self.record_success()
                 return message.get("payload") or {}
+            if self._broker_preferred:
+                raise RuntimeError(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed with broker_preferred=True")
 
             response = self.client.chat.completions.create(**payload)
             self.record_success()
@@ -484,6 +486,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI model discovery failed")
                 return self._extract_models(message.get("payload") or {})
+            if self._broker_preferred:
+                raise RuntimeError(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed with broker_preferred=True")
             models = self.client.models.list()
             payload = {"data": [m.model_dump() if hasattr(m, "model_dump") else m for m in models]}
             return self._extract_models(payload)
@@ -504,8 +508,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI capability discovery failed")
             return message.get("payload") or {}
-        if self._broker_mode:
-            raise Exception("CoderAI broker mode requires an active broker session")
+        if self._broker_mode or self._broker_preferred:
+            raise Exception(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed")
         return await self._http_json("GET", "/coderai/capabilities", timeout=self._model_timeout)
 
     async def register_client(self) -> Dict[str, Any]:
@@ -525,8 +529,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI registration failed")
             return message.get("payload") or {}
-        if self._broker_mode:
-            raise Exception("CoderAI broker mode does not support outbound registration")
+        if self._broker_mode or self._broker_preferred:
+            raise Exception(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed")
         return await self._http_json("POST", self._registration_path, payload, timeout=self._model_timeout)
 
     async def proxy_native_request(
@@ -570,7 +574,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 raise Exception(message.get("error") or "CoderAI proxy request failed")
             envelope = message.get("payload") or {}
             return int(envelope.get("status_code") or 200), envelope
-        if self._broker_mode:
-            raise Exception("CoderAI broker mode requires an active broker session")
+        if self._broker_mode or self._broker_preferred:
+            raise Exception(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed")
         response = await self._http_json(method.upper(), endpoint_path, body or {}, timeout=self._request_timeout)
         return 200, response

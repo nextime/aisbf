@@ -23,7 +23,9 @@ def _is_broker_only_coderai(provider_config) -> bool:
     coderai_config = getattr(provider_config, 'coderai_config', None) or {}
     if not isinstance(coderai_config, dict):
         return False
-    return bool(coderai_config.get('broker_mode', False))
+    # broker_preferred also defers to the incoming WSS connection; direct fallback
+    # is blocked, so there is no point attempting a prefetch before a session exists.
+    return bool(coderai_config.get('broker_mode', False) or coderai_config.get('broker_preferred', False))
 
 
 def _is_runpod_public_provider(provider_config) -> bool:

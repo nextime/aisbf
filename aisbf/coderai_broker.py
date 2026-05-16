@@ -403,9 +403,12 @@ class CoderAIBroker:
                     candidates.sort(key=lambda session: session.last_seen, reverse=True)
                     return candidates[0]
 
+        # Session exists on another broker node: we have no local WebSocket handle,
+        # so we cannot deliver requests directly. Return None; send_request will
+        # route through the Redis queue to the owning node.
         snapshot = await self.get_session_snapshot(provider_id, client_id)
-        if not snapshot or not snapshot.get("connected"):
-            return None
+        if snapshot and snapshot.get("connected"):
+            logger.debug(f"CoderAI session for provider={provider_id} is connected on a remote broker node")
         return None
 
     async def list_sessions(self) -> list[Dict[str, Any]]:
