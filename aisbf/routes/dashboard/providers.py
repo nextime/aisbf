@@ -1020,16 +1020,21 @@ async def dashboard_providers_get_models(request: Request):
         # Get user ID from session
         current_user_id = request.session.get('user_id')
         
-        # Get provider handler - pass user_id to automatically handle user-specific providers
+        # Get provider handler - pass user_id to automatically handle user-specific providers.
+        # Fall back to user_id=None (global config) when the provider isn't in the user's
+        # personal config; this lets admins inspect globally-configured providers.
         from aisbf.providers import get_provider_handler
-        
+
         try:
             handler = get_provider_handler(provider_key, user_id=current_user_id)
-        except ValueError as e:
-            return JSONResponse({
-                "success": False,
-                "error": str(e)
-            }, status_code=404)
+        except ValueError:
+            try:
+                handler = get_provider_handler(provider_key, user_id=None)
+            except ValueError as e:
+                return JSONResponse({
+                    "success": False,
+                    "error": str(e)
+                }, status_code=404)
         
         # Fetch models from provider
         models_result = await handler.get_models()
