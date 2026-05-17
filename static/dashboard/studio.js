@@ -29,6 +29,7 @@ let functionBindingDefs = [];
 let functionBindings = {};
 let bindingSearchState = {};
 let selectedBindingId = 'chat';
+let _pendingBindingFocusKey = null;
 
 function _startVidPoll(prefix) {
   if (_vidPollTimer) { clearInterval(_vidPollTimer); _vidPollTimer = null; }
@@ -1617,7 +1618,14 @@ function renderSidebar() {
   const restoreKey = activeIsBindingSearch ? activeEl.getAttribute('data-search-key') : null;
   if (!functionBindingDefs.length) { el.innerHTML='<div class="muted small" style="padding:.5rem .6rem">No Studio bindings</div>'; return; }
   el.innerHTML = `<div class="binding-list">${functionBindingDefs.map(renderBindingCard).join('')}</div>`;
-  if (restoreKey) {
+  if (_pendingBindingFocusKey) {
+    const pendingEl = el.querySelector(`.binding-role-search[data-search-key="${CSS.escape(_pendingBindingFocusKey)}"]`);
+    if (pendingEl) {
+      pendingEl.focus();
+      pendingEl.setSelectionRange(pendingEl.value.length, pendingEl.value.length);
+    }
+    _pendingBindingFocusKey = null;
+  } else if (restoreKey) {
     const nextEl = el.querySelector(`.binding-role-search[data-search-key="${CSS.escape(restoreKey)}"]`);
     if (nextEl) {
       nextEl.focus();
@@ -1646,24 +1654,93 @@ function renderBindingCard(def) {
   </div>`;
 }
 
+function _providerSuggestionsForRole(role, queryLower) {
+  const capable = modelsForRole(role);
+  const map = new Map();
+  for (const model of capable) {
+    if (model.studioKind !== 'provider_model') continue;
+    const pid = model.sourceId || model.id?.split('/')[1] || '';
+    if (!pid) continue;
+    map.set(pid, (map.get(pid) || 0) + 1);
+  }
+  let providers = [...map.entries()].map(([id, count]) => ({ id, count }));
+  if (queryLower) {
+    providers = providers.filter(p => p.id.toLowerCase().includes(queryLower));
+    providers.sort((a, b) => {
+      const aPrefix = a.id.toLowerCase().startsWith(queryLower) ? 0 : 1;
+      const bPrefix = b.id.toLowerCase().startsWith(queryLower) ? 0 : 1;
+      if (aPrefix !== bPrefix) return aPrefix - bPrefix;
+      return a.id.localeCompare(b.id);
+    });
+  } else {
+    providers.sort((a, b) => a.id.localeCompare(b.id));
+  }
+  return providers;
+}
+
+function _renderBindingModelResult(def, role, model, assignedId) {
+  const isActive = model.id === assignedId;
+  return `<button class="binding-role-result${isActive ? ' active' : ''}" onclick="saveBindingRole('${def.id}','${role.key}','${encodeURIComponent(model.id)}');return false;">
+    <span>
+      <div class="binding-role-result-name">${escapeHtml(displayNameForModel(model))}</div>
+      <div class="binding-role-result-meta">${escapeHtml(model.id)} · ${escapeHtml(model.studioKind || model.type || 'model')}</div>
+    </span>
+    <span class="binding-role-result-meta">${escapeHtml((model.capabilities || []).slice(0, 3).join(', ') || 'capability')}</span>
+  </button>`;
+}
+
+function setBindingSearch(bindingId, roleKey, value) {
+  const key = `${bindingId}:${roleKey}`;
+  bindingSearchState[key] = value;
+  _pendingBindingFocusKey = key;
+  renderSidebar();
+}
+
 function renderBindingRole(def, role) {
   const searchKey = `${def.id}:${role.key}`;
   const query = bindingSearchState[searchKey] || '';
   const assignedId = bindingModelId(def.id, role.key);
   const assignedModel = models.find(model => model.id === assignedId) || null;
-  const candidates = modelsForRole(role).filter(model => modelMatchesQuery(model, query));
-  const results = candidates.length
-    ? candidates.slice(0, 50).map(model => {
-        const isActive = model.id === assignedId;
-        return `<button class="binding-role-result${isActive ? ' active' : ''}" onclick="saveBindingRole('${def.id}','${role.key}','${encodeURIComponent(model.id)}');return false;">
-          <span>
-            <div class="binding-role-result-name">${escapeHtml(displayNameForModel(model))}</div>
-            <div class="binding-role-result-meta">${escapeHtml(model.id)} · ${escapeHtml(model.studioKind || model.type || 'model')}</div>
-          </span>
-          <span class="binding-role-result-meta">${escapeHtml((model.capabilities || []).slice(0, 3).join(', ') || 'capability')}</span>
-        </button>`;
-      }).join('')
-    : `<div class="binding-empty">No matching provider/model, rotation, or autoselect with the required capability.</div>`;
+
+  let resultsHtml;
+  const slashIdx = query.indexOf('/');
+
+  if (slashIdx !== -1) {
+    // Provider-scoped: "providerid/" or "providerid/modelpart"
+    const providerPart = query.slice(0, slashIdx).toLowerCase();
+    const modelPart = query.slice(slashIdx + 1).toLowerCase();
+    const capable = modelsForRole(role);
+    const candidates = capable.filter(model => {
+      const pid = (model.sourceId || model.id?.split('/')[1] || '').toLowerCase();
+      if (pid !== providerPart) return false;
+      if (!modelPart) return true;
+      const tgt = (model.targetId || '').toLowerCase();
+      const name = displayNameForModel(model).toLowerCase();
+      return tgt.includes(modelPart) || name.includes(modelPart);
+    });
+    const breadcrumb = `<div class="binding-provider-breadcrumb"><span class="binding-provider-crumb-name">${escapeHtml(query.slice(0, slashIdx))}/</span><span class="binding-provider-crumb-hint">type to filter models</span></div>`;
+    resultsHtml = breadcrumb + (candidates.length
+      ? candidates.slice(0, 50).map(model => _renderBindingModelResult(def, role, model, assignedId)).join('')
+      : `<div class="binding-empty">No matching model for "${escapeHtml(providerPart)}" with the required capability.</div>`);
+  } else {
+    const q = query.trim().toLowerCase();
+    const capable = modelsForRole(role);
+    const providers = _providerSuggestionsForRole(role, q);
+    const providerHtml = providers.length
+      ? `<div class="binding-provider-chips">${providers.slice(0, 8).map(p =>
+          `<button class="binding-provider-chip" onclick="setBindingSearch('${escapeHtml(def.id)}','${escapeHtml(role.key)}','${escapeHtml(p.id)}/');return false;">${escapeHtml(p.id)}<span class="binding-chip-count">${p.count}</span></button>`
+        ).join('')}</div>`
+      : '';
+    const modelCandidates = q ? capable.filter(model => modelMatchesQuery(model, q)) : capable;
+    const modelHtml = modelCandidates.length
+      ? modelCandidates.slice(0, q ? 50 : 20).map(model => _renderBindingModelResult(def, role, model, assignedId)).join('')
+      : '';
+    const emptyHtml = !providerHtml && !modelHtml
+      ? `<div class="binding-empty">${q ? 'No matching provider/model, rotation, or autoselect with the required capability.' : 'No models available with the required capability.'}</div>`
+      : '';
+    resultsHtml = providerHtml + modelHtml + emptyHtml;
+  }
+
   const currentMeta = assignedModel
     ? `${escapeHtml(assignedModel.id)} · ${escapeHtml((role.capabilities || []).join(' or '))}`
     : `Needs ${escapeHtml((role.capabilities || []).join(' or '))}`;
@@ -1674,7 +1751,7 @@ function renderBindingRole(def, role) {
     </div>
     <div class="binding-role-meta">${currentMeta}</div>
     <input class="fi binding-role-search" type="search" data-search-key="${escapeHtml(searchKey)}" value="${escapeHtml(query)}" placeholder="Search provider/model, rotation, autoselect" oninput="updateBindingSearch('${def.id}','${role.key}', this.value)">
-    <div class="binding-role-results">${results}</div>
+    <div class="binding-role-results">${resultsHtml}</div>
     ${assignedModel ? `<button class="btn btn-ghost btn-sm binding-role-clear" onclick="clearBindingRole('${def.id}','${role.key}');return false;">Clear</button>` : ''}
   </div>`;
 }

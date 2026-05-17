@@ -19,7 +19,6 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 from __future__ import annotations
 
-import asyncio
 from dataclasses import dataclass
 from pathlib import Path
 import json
@@ -576,7 +575,7 @@ def _build_autoselect_entries(scope: str, owner_id: Optional[int], autoselects: 
     return entries
 
 
-def build_studio_catalog(
+async def build_studio_catalog(
     *,
     scope: str,
     owner_id: Optional[int],
@@ -608,9 +607,7 @@ def build_studio_catalog(
             if provider_config is None:
                 continue
             try:
-                live_models = asyncio.run(get_provider_models(provider_id, provider_config, config, user_id=owner_id if scope == "user" else None))
-            except RuntimeError:
-                live_models = []
+                live_models = await get_provider_models(provider_id, provider_config, config, user_id=owner_id if scope == "user" else None)
             except Exception:
                 live_models = []
             if not live_models:

@@ -112,6 +112,13 @@
 .binding-role-result-meta { font-size:10px; color:var(--text-3); margin-top:.08rem; }
 .binding-role-clear { align-self:flex-start; }
 .binding-empty { font-size:11px; color:var(--text-3); padding:.3rem 0; }
+.binding-provider-chips { display:flex; flex-wrap:wrap; gap:.3rem; padding-bottom:.15rem; }
+.binding-provider-chip { display:inline-flex; align-items:center; gap:.3rem; padding:.2rem .45rem; border:1px solid var(--border); border-radius:999px; background:var(--surface-2); color:var(--text-2); font-size:10px; font-weight:600; font-family:inherit; cursor:pointer; white-space:nowrap; }
+.binding-provider-chip:hover { background:var(--accent-dim); border-color:color-mix(in srgb, var(--accent) 50%, var(--border)); color:var(--text-1); }
+.binding-chip-count { background:var(--surface-3); border-radius:999px; padding:.05rem .3rem; font-size:9px; font-weight:400; color:var(--text-3); }
+.binding-provider-breadcrumb { display:flex; align-items:center; gap:.3rem; padding:.2rem 0 .1rem; }
+.binding-provider-crumb-name { font-size:11px; font-weight:700; color:var(--accent,#4e9cf5); }
+.binding-provider-crumb-hint { font-size:10px; color:var(--text-3); }
 .model-item:hover { background:var(--surface-2); }
 .model-item.active { background:var(--accent-dim,#1d3354); color:var(--accent,#4e9cf5); font-weight:500; }
 .mbadge {

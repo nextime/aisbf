@@ -601,7 +601,7 @@ async def dashboard_studio(request: Request):
     is_config_admin = request.session.get("role") == "admin" and current_user_id is None
     scope = "admin" if is_config_admin else "user"
     db = None if is_config_admin else DatabaseRegistry.get_config_database()
-    catalog = build_studio_catalog(
+    catalog = await build_studio_catalog(
         scope=scope,
         owner_id=current_user_id,
         config=_config,
@@ -636,7 +636,7 @@ async def dashboard_studio_catalog(request: Request):
     scope = "admin" if request.session.get("role") == "admin" else "user"
     db = None if scope == "admin" else DatabaseRegistry.get_config_database()
 
-    catalog = build_studio_catalog(
+    catalog = await build_studio_catalog(
         scope=scope,
         owner_id=current_user_id,
         config=_config,
