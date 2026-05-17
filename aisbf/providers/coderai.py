@@ -505,7 +505,11 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 message = await self._broker_request("models.list", {}, timeout=self._model_timeout)
                 if (message.get("status") or "ok") == "error":
                     raise Exception(message.get("error") or "CoderAI broker model discovery failed")
-                return self._extract_models(self._unwrap_broker_body(message.get("payload") or {}))
+                http_payload = message.get("payload") or {}
+                http_status = http_payload.get("status_code", 200)
+                if isinstance(http_status, int) and http_status >= 400:
+                    raise Exception(f"CoderAI model discovery failed: HTTP {http_status} from remote")
+                return self._extract_models(self._unwrap_broker_body(http_payload))
             if self._is_direct_websocket_mode():
                 message = await self._ws_roundtrip("models.list", {}, timeout=self._model_timeout)
                 if (message.get("status") or "ok") == "error":
