@@ -417,6 +417,8 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 supported_parameters=metadata.get("supported_parameters"),
                 default_parameters=metadata.get("default_parameters"),
                 description=metadata.get("description"),
+                type=metadata.get("type"),
+                capabilities=metadata.get("capabilities") or None,
             ))
         return result
 

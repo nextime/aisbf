@@ -143,8 +143,22 @@ class CoderAIBroker:
             result["gpus"] = normalized_gpus
             result["gpu_count"] = len(normalized_gpus)
             result["total_vram_mb"] = total_vram_mb
-            result["available_vram_mb"] = available_vram_mb
-            result["used_vram_mb"] = max(total_vram_mb - available_vram_mb, 0.0)
+            # Only overwrite the top-level available_vram_mb when the GPU loop
+            # actually produced data; otherwise keep the value that arrived at
+            # the top level of the metadata (e.g. coderai sends it there but
+            # does not repeat it inside each GPU dict).
+            if available_vram_mb > 0:
+                result["available_vram_mb"] = available_vram_mb
+            elif result.get("available_vram_mb") is None:
+                result["available_vram_mb"] = 0.0
+            # Propagate top-level free VRAM into the single GPU so the UI can
+            # read it from the per-GPU entry too.
+            if len(normalized_gpus) == 1 and normalized_gpus[0].get("available_vram_mb") is None:
+                top_free = result.get("available_vram_mb")
+                if top_free is not None:
+                    normalized_gpus[0]["available_vram_mb"] = float(top_free)
+            final_free = result.get("available_vram_mb") or 0.0
+            result["used_vram_mb"] = max(total_vram_mb - final_free, 0.0)
         return result
 
     @staticmethod

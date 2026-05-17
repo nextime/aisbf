@@ -64,6 +64,45 @@ STUDIO_CAPABILITY_MAP = {
     "segmentation": "segmentation",
     "3d_generation": "3d_generation",
     "animation": "animation",
+    # CoderAI / HuggingFace pipeline task names (long-form field names from ModelCapabilities)
+    "text_generation": "chat",
+    "text-generation": "chat",
+    "chat_completion": "chat",
+    "image_to_text": "vision",
+    "image_generation": "image_generation",
+    "text_to_image": "image_generation",
+    "image_to_image": "image_edit",
+    "inpainting": "image_edit",
+    "controlnet": "image_generation",
+    "video_generation": "video_generation",
+    "text_to_video": "video_generation",
+    "image_to_video": "video_generation",
+    "video_to_video": "video_generation",
+    "video_interpolation": "animation",
+    "video_upscaling": "video_generation",
+    "image_upscaling": "image_edit",
+    "face_restoration": "image_edit",
+    "depth_estimation": "object_detection",
+    "image_segmentation": "segmentation",
+    "image_classification": "classification",
+    "object_detection": "object_detection",
+    "style_transfer": "image_edit",
+    "automatic_speech_recognition": "transcription",
+    "speech_recognition": "transcription",
+    "speech_to_text": "transcription",
+    "subtitle_generation": "transcription",
+    "text_to_speech": "speech_generation",
+    "audio_generation": "audio_generation",
+    "lip_sync": "video_generation",
+    "video_dubbing": "video_generation",
+    "image_to_3d": "3d_generation",
+    "video_to_3d": "3d_generation",
+    "model_3d_generation": "3d_generation",
+    "model_3d_to_image": "3d_generation",
+    "feature_extraction": "embeddings",
+    "sentence_similarity": "embeddings",
+    "fill_mask": "chat",
+    "token_classification": "ner",
 }
 
 STUDIO_CAPABILITY_CHOICES = [
@@ -187,6 +226,16 @@ def infer_model_capabilities(
 
     provider_metadata = provider_metadata or {}
     capabilities = normalize_capabilities(provider_metadata.get("capabilities"))
+    if not capabilities and provider_metadata.get("type"):
+        _type_cap_map = {
+            "text": ["chat"],
+            "image": ["image_generation"],
+            "video": ["video_generation"],
+            "audio": ["audio_generation"],
+            "embedding": ["embeddings"],
+            "multimodal": ["multimodal", "chat"],
+        }
+        capabilities = _type_cap_map.get((provider_metadata["type"] or "").lower(), [])
     source = "provider_metadata" if capabilities else "heuristic"
     notes: List[str] = []
 

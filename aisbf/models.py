@@ -76,6 +76,8 @@ class Model(BaseModel):
     top_provider: Optional[Dict] = None  # context_length, max_completion_tokens, is_moderated
     supported_parameters: Optional[List[str]] = None
     default_parameters: Optional[Dict] = None
+    type: Optional[str] = None  # e.g. "text", "image", "video", "audio"
+    capabilities: Optional[List[str]] = None  # provider-native capability list
 
 class Provider(BaseModel):
     id: str
