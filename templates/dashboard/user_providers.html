@@ -196,7 +196,26 @@ function renderCoderaiCollapsedStatus(provider) {
     const bg = connected ? 'rgba(34,197,94,0.16)' : 'rgba(239,68,68,0.16)';
     const border = connected ? 'rgba(34,197,94,0.45)' : 'rgba(239,68,68,0.45)';
     const color = connected ? '#22c55e' : '#ef4444';
-    return `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};border:1px solid ${border};color:${color};"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
+    const statusBadge = `<span style="display:inline-flex;align-items:center;gap:6px;padding:3px 9px;border-radius:999px;font-size:12px;font-weight:600;background:${bg};border:1px solid ${border};color:${color};"><span style="width:8px;height:8px;border-radius:50%;background:${color};display:inline-block;"></span>${label}</span>`;
+    if (!connected) return statusBadge;
+    const meta = coderaiConfig.broker_session?.metadata || {};
+    return statusBadge + renderCoderaiHardwareChip(meta);
+}
+
+function renderCoderaiHardwareChip(meta) {
+    const gpus = Array.isArray(meta?.gpus) ? meta.gpus : [];
+    const gpuName = gpus[0]?.name || null;
+    const totalVram = meta?.total_vram_mb;
+    const freeVram = meta?.available_vram_mb;
+    if (!gpuName && totalVram == null) return '';
+    const parts = [];
+    if (gpuName) {
+        const shortName = gpuName.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').replace(/^AMD\s+(Radeon\s+RX\s+)?/i, '');
+        parts.push(shortName);
+    }
+    if (totalVram != null) parts.push(`${formatVramMb(freeVram)} / ${formatVramMb(totalVram)}`);
+    if (!parts.length) return '';
+    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;margin-left:4px;">${parts.join(' · ')}</span>`;
 }
 
 function renderGpuSummary(metadata) {

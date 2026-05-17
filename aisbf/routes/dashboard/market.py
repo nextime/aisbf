@@ -3,6 +3,7 @@ from fastapi.responses import HTMLResponse, JSONResponse
 from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_admin
 from aisbf.database import DatabaseRegistry
 from aisbf.analytics import get_analytics
+from aisbf.coderai_broker import broker as coderai_broker
 import json
 import logging
 
@@ -182,6 +183,29 @@ def _build_autoselect_listing_payload(owner_user_id: int, owner_username: str, a
         'config_snapshot': safe_autoselect,
         'is_active': True,
     }
+
+
+async def _attach_hardware_snapshot(listing: dict) -> dict:
+    """Attach live broker hardware metadata for coderai listings."""
+    metadata = listing.get('metadata') or {}
+    if metadata.get('provider_type') != 'coderai':
+        return listing
+    provider_id = listing.get('provider_id')
+    if not provider_id:
+        return listing
+    try:
+        snapshot = await coderai_broker.get_session_snapshot(provider_id)
+        if snapshot and snapshot.get('connected'):
+            smeta = snapshot.get('metadata') or {}
+            listing['hardware'] = {
+                'gpu_count': smeta.get('gpu_count', 0),
+                'gpus': smeta.get('gpus') or [],
+                'total_vram_mb': smeta.get('total_vram_mb'),
+                'available_vram_mb': smeta.get('available_vram_mb'),
+            }
+    except Exception:
+        pass
+    return listing
 
 
 def _attach_analytics_snapshot(listing: dict):
@@ -378,6 +402,7 @@ async def dashboard_market(request: Request):
         listing_copy['online'] = _listing_online(listing_copy)
         owner = db.get_user_by_id(listing['owner_user_id']) if listing.get('owner_user_id') else None
         listing_copy['owner_display_name'] = (owner or {}).get('display_name') or listing.get('owner_username')
+        await _attach_hardware_snapshot(listing_copy)
         enriched.append(listing_copy)
 
     return _templates.TemplateResponse(
@@ -477,6 +502,7 @@ async def api_market_listings(request: Request):
     for listing in filtered:
         listing.pop('_scope_priority', None)
         listing.pop('_match_priority', None)
+        await _attach_hardware_snapshot(listing)
 
     return JSONResponse({'listings': filtered})
 

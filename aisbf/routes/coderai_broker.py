@@ -121,9 +121,15 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
     registered_payload = _coderai_register_payload(session.provider_id, session.client_id, username, owner_user_id, expected_scope)
     registered_payload.update({"session_id": session.session_id, "status": "ok", "request_id": first_msg.get("request_id")})
     await websocket.send_text(json.dumps(registered_payload))
+    _gpu_names = ", ".join(
+        g.get("name", "?") for g in (metadata.get("gpus") or [])
+    ) or "none"
     logger.info(
-        "CoderAI broker registered provider=%s client=%s session_id=%s scope=%s",
+        "CoderAI broker registered provider=%s client=%s session_id=%s scope=%s"
+        " gpu_count=%s gpus=[%s] total_vram_mb=%s available_vram_mb=%s",
         provider_id, client_id, session.session_id, expected_scope,
+        metadata.get("gpu_count"), _gpu_names,
+        metadata.get("total_vram_mb"), metadata.get("available_vram_mb"),
     )
 
     # Populate the model cache in the background now that the session is live.

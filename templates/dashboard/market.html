@@ -66,6 +66,30 @@ function voteSummary(votes, target) {
     return `+${item.upvotes} / -${item.downvotes} (score ${item.score})`;
 }
 
+function formatVramMb(value) {
+    if (value == null || value === '') return '?';
+    const mb = Number(value);
+    if (!Number.isFinite(mb)) return '?';
+    if (mb >= 1024) return `${(mb / 1024).toFixed(1)} GB`;
+    return `${Math.round(mb)} MB`;
+}
+
+function renderListingHardware(hw) {
+    if (!hw) return '';
+    const gpus = Array.isArray(hw.gpus) ? hw.gpus : [];
+    const gpuName = gpus[0]?.name || null;
+    const total = hw.total_vram_mb;
+    const free = hw.available_vram_mb;
+    if (!gpuName && total == null) return '';
+    const parts = [];
+    if (gpuName) {
+        const short = gpuName.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').replace(/^AMD\s+(Radeon\s+RX\s+)?/i, '');
+        parts.push(short);
+    }
+    if (total != null) parts.push(`${formatVramMb(free)} / ${formatVramMb(total)} VRAM`);
+    return `<div style="font-size:12px;margin-bottom:8px;display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;background:rgba(99,102,241,0.1);border:1px solid rgba(99,102,241,0.3);color:#a5b4fc;">${parts.join(' · ')}</div>`;
+}
+
 function renderMarket() {
     const root = document.getElementById('market-grid');
     root.innerHTML = '';
@@ -86,6 +110,7 @@ function renderMarket() {
             <p style="color: var(--color-text); margin: 12px 0;">${listing.description || ''}</p>
             <div style="font-size:12px; color: var(--color-muted); margin-bottom: 10px;">Provider: ${listing.provider_id || '-'} ${listing.model_id ? ` | Model: ${listing.model_id}` : ''} ${listing.model_type_label ? ` | Type: ${listing.model_type_label}` : ''} ${listing.size_label ? ` | Size: ${listing.size_label}` : ''}</div>
             <div style="font-size:12px; color: var(--color-muted); margin-bottom: 10px;">Status: ${listing.online ? 'online' : 'offline'}${(listing.capabilities || []).length ? ` | Capabilities: ${(listing.capabilities || []).join(', ')}` : ''}</div>
+            ${renderListingHardware(listing.hardware)}
             <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; font-size:12px; margin-bottom:12px;">
                 <div>Listing votes: ${voteSummary(listing.votes, 'listing')}</div>
                 <div>User votes: ${voteSummary(listing.votes, 'user')}</div>
