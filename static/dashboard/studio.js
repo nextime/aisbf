@@ -120,6 +120,20 @@ function buildStudioUrl(path) {
   return `${STUDIO_API_BASE}${path}`;
 }
 
+function apiUrl(path) {
+  const withoutV1 = path.startsWith('/v1/') ? path.slice('/v1'.length) : path;
+  return STUDIO_IS_GLOBAL_ADMIN
+    ? `/api/v1${withoutV1}`
+    : `/api/u/${STUDIO_USERNAME}${withoutV1}`;
+}
+
+function apiModelId(catalogId) {
+  if (!catalogId) return '';
+  const parts = catalogId.split('/');
+  if (parts.length === 3 && parts[0] === 'provider') return parts[1] + '/' + parts[2];
+  return catalogId;
+}
+
 function buildBindingApiUrl(bindingId) {
   return buildStudioUrl(`/function-bindings/${encodeURIComponent(bindingId)}`);
 }
@@ -1102,8 +1116,8 @@ function previewExportBody(endpoint, body) {
 }
 
 function buildAudioPreviewData() {
-  return previewExportBody(buildStudioUrl('/audio/generate'), {
-    model: activeModel?.id || '',
+  return previewExportBody(apiUrl('/v1/audio/generate'), {
+    model: apiModelId(modelForSub('aud-gen')),
     prompt: val('ag-prompt'),
     duration: fval('ag-dur') || 10,
     temperature: fval('ag-temp') || 1.0,
@@ -1116,8 +1130,8 @@ function buildAudioPreviewData() {
 }
 
 function buildTTSPreviewData() {
-  return previewExportBody(buildStudioUrl('/audio/speech'), {
-    model: activeModel?.id || '',
+  return previewExportBody(apiUrl('/v1/audio/speech'), {
+    model: apiModelId(modelForSub('aud-tts')),
     input: val('at-text'),
     voice: val('at-voice') || undefined,
     speed: fval('at-speed') || 1.0,
@@ -1126,9 +1140,8 @@ function buildTTSPreviewData() {
 }
 
 function buildSTTPreviewData() {
-  const sttModel = bestModelForCap('speech_to_text') || activeModel;
-  return previewExportBody(buildStudioUrl('/audio/transcriptions'), {
-    model: sttModel?.id || '',
+  return previewExportBody(apiUrl('/v1/audio/transcriptions'), {
+    model: apiModelId(modelForSub('aud-stt')),
     file: fileOrNull('as-file') ? '<multipart audio/video file>' : undefined,
     language: val('as-lang') || undefined,
     prompt: val('as-prompt') || undefined,
@@ -1137,8 +1150,8 @@ function buildSTTPreviewData() {
 }
 
 function buildImageGenPreviewData() {
-  return previewExportBody(buildStudioUrl('/images/generations'), {
-    model: activeModel?.id || '',
+  return previewExportBody(apiUrl('/v1/images/generations'), {
+    model: apiModelId(modelForSub('img-gen')),
     prompt: val('ig-prompt'),
     negative_prompt: val('ig-neg') || undefined,
     size: `${ival('ig-w') || 1024}x${ival('ig-h') || 1024}`,
@@ -1154,8 +1167,8 @@ function buildImageGenPreviewData() {
 function buildEmbeddingsPreviewData() {
   const lines = val('em-text').split('\n').filter(l => l.trim());
   const input = lines.length <= 1 ? (lines[0] || '') : lines;
-  return previewExportBody(buildStudioUrl('/embeddings'), {
-    model: activeModel?.id || '',
+  return previewExportBody(apiUrl('/v1/embeddings'), {
+    model: apiModelId(modelForSub('embed')),
     input,
     encoding_format: val('em-enc') || 'float',
     dimensions: val('em-dims') ? ival('em-dims') : undefined,
@@ -1163,9 +1176,9 @@ function buildEmbeddingsPreviewData() {
 }
 
 function buildAudioUnderstandPreviewData() {
-  return previewExportBody(buildStudioUrl('/pipelines/audio-understand'), {
+  return previewExportBody(apiUrl('/v1/pipelines/audio-understand'), {
     audio: fileOrNull('au-file') ? '<audio/video file data>' : undefined,
-    audio_model: activeModel?.id || '',
+    audio_model: apiModelId(modelForSub('aud-understand')),
     text_model: val('au-text-model') || undefined,
     input: val('au-goal') || undefined,
     language: val('as-lang') || undefined,
@@ -1173,10 +1186,10 @@ function buildAudioUnderstandPreviewData() {
 }
 
 function buildMusicDubPreviewData() {
-  return previewExportBody(buildStudioUrl('/pipelines/audio-music-dub'), {
+  return previewExportBody(apiUrl('/v1/pipelines/audio-music-dub'), {
     audio: fileOrNull('amd-file') ? '<audio/video file data>' : undefined,
-    stt_model: getAssignedModelId('aud-music-dub', 'speech_to_text'),
-    tts_model: getAssignedModelId('aud-music-dub', 'text_to_speech'),
+    stt_model: apiModelId(getAssignedModelId('aud-music-dub', 'speech_to_text')),
+    tts_model: apiModelId(getAssignedModelId('aud-music-dub', 'text_to_speech')),
     source_lang: val('amd-slang') || undefined,
     target_lang: val('amd-tlang') || undefined,
     notes: val('amd-notes') || undefined,
@@ -1184,7 +1197,7 @@ function buildMusicDubPreviewData() {
 }
 
 function buildStemPreviewData() {
-  return previewExportBody(buildStudioUrl('/audio/stems'), {
+  return previewExportBody(apiUrl('/v1/audio/stems'), {
     audio: fileOrNull('ast-file') ? '<audio/video file data>' : undefined,
     stem_mode: val('ast-mode') || 'vocals-instrumental',
     response_format: 'url',
@@ -1192,7 +1205,7 @@ function buildStemPreviewData() {
 }
 
 function buildCleanupPreviewData() {
-  return previewExportBody(buildStudioUrl('/audio/cleanup'), {
+  return previewExportBody(apiUrl('/v1/audio/cleanup'), {
     audio: fileOrNull('ac-file') ? '<audio/video file data>' : undefined,
     noise_reduction: chk('ac-noise'),
     normalize: chk('ac-level'),
@@ -1204,9 +1217,9 @@ function buildCleanupPreviewData() {
 
 function buildDubPreviewData() {
   const preview = buildDubPreferencePreview();
-  return previewExportBody(buildStudioUrl('/video/dub'), {
-    stt_model: getAssignedModelId('vid-dub', 'speech_to_text'),
-    tts_model: getAssignedModelId('vid-dub', 'text_to_speech'),
+  return previewExportBody(apiUrl('/v1/video/dub'), {
+    stt_model: apiModelId(getAssignedModelId('vid-dub', 'speech_to_text')),
+    tts_model: apiModelId(getAssignedModelId('vid-dub', 'text_to_speech')),
     video: fileOrNull('vd-src') ? '<video file data>' : undefined,
     source_lang: preview.source_lang,
     target_lang: preview.target_lang,
