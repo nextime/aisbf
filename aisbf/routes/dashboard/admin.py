@@ -350,6 +350,77 @@ async def dashboard_studio_pipeline_custom_run(request: Request, pipeline_id: st
     return JSONResponse(studio_service.run_pipeline("admin", None, payload))
 
 
+def _parse_studio_model_id(model: str):
+    """Parse studio model IDs → (kind, source_id, target_id).
+
+    <provider>/<model>         → ('provider', provider, model)
+    rotation/<name>            → ('rotation', name, name)
+    autoselect[ion]/<name>     → ('autoselect', name, name)
+    provider/<src>/<tgt>       → ('provider', src, tgt)  # legacy 3-part form
+    """
+    parts = (model or '').split('/', 2)
+    if not parts or not parts[0]:
+        return None, None, None
+    kind = parts[0].lower()
+    if kind in ('rotation',):
+        name = parts[1] if len(parts) > 1 else ''
+        return 'rotation', name, name
+    if kind in ('autoselect', 'autoselection'):
+        name = parts[1] if len(parts) > 1 else ''
+        return 'autoselect', name, name
+    if kind == 'provider' and len(parts) == 3:
+        return 'provider', parts[1], parts[2]
+    if len(parts) >= 2:
+        return 'provider', parts[0], '/'.join(parts[1:])
+    return None, None, None
+
+
+@router.post("/dashboard/api/studio/chat/completions")
+async def dashboard_studio_chat_completions(request: Request):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+    body = await request.json()
+    kind, source_id, target_id = _parse_studio_model_id(body.get('model') or '')
+    if not kind:
+        raise HTTPException(status_code=400, detail="model required in format provider/source/target, rotation/name, or autoselect/name")
+    body_dict = dict(body)
+    if kind == 'rotation':
+        handler = RotationHandler(user_id=None)
+        body_dict['model'] = source_id
+        return await handler.handle_rotation_request(source_id, body_dict, None, None)
+    if kind == 'autoselect':
+        handler = AutoselectHandler(user_id=None)
+        body_dict['model'] = source_id
+        return await handler.handle_autoselect_request(source_id, body_dict, None, None)
+    handler = RequestHandler(user_id=None)
+    body_dict['model'] = target_id
+    return await handler.handle_chat_completion(request, source_id, body_dict)
+
+
+@router.post("/dashboard/api/studio/u/{username}/chat/completions")
+async def dashboard_user_studio_chat_completions(request: Request, username: str):
+    scope, user_id = _dashboard_studio_user_scope(request, username)
+    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+    body = await request.json()
+    kind, source_id, target_id = _parse_studio_model_id(body.get('model') or '')
+    if not kind:
+        raise HTTPException(status_code=400, detail="model required in format provider/source/target, rotation/name, or autoselect/name")
+    body_dict = dict(body)
+    if kind == 'rotation':
+        handler = RotationHandler(user_id=user_id)
+        body_dict['model'] = source_id
+        return await handler.handle_rotation_request(source_id, body_dict, user_id, None)
+    if kind == 'autoselect':
+        handler = AutoselectHandler(user_id=user_id)
+        body_dict['model'] = source_id
+        return await handler.handle_autoselect_request(source_id, body_dict, user_id, None)
+    handler = RequestHandler(user_id=user_id)
+    body_dict['model'] = target_id
+    return await handler.handle_chat_completion(request, source_id, body_dict)
+
+
 @router.get("/dashboard/api/studio/u/{username}/characters")
 async def dashboard_user_studio_characters(request: Request, username: str):
     scope, owner_id = _dashboard_studio_user_scope(request, username)
