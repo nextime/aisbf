@@ -609,3 +609,52 @@ class CoderAIProviderHandler(BaseProviderHandler):
             raise Exception(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed")
         response = await self._http_json(method.upper(), endpoint_path, body or {}, timeout=self._request_timeout)
         return 200, response
+
+    async def fetch_file(self, path: str) -> Tuple[bytes, str]:
+        """Fetch a generated file from coderai.
+
+        For broker-connected providers the file is transferred through the WSS
+        tunnel (no direct network access required).  For direct providers it
+        falls back to a plain HTTP GET.
+        """
+        if await self._use_broker():
+            message = await self._broker_request("proxy", {
+                "endpoint_path": path,
+                "method": "GET",
+                "body": {},
+                "headers": {},
+                "query_params": {},
+            }, timeout=self._request_timeout)
+            if (message.get("status") or "ok") == "error":
+                raise Exception(message.get("error") or f"CoderAI broker file fetch failed: {path}")
+            envelope = message.get("payload") or {}
+            content_type = envelope.get("content_type") or "application/octet-stream"
+            if envelope.get("body_base64"):
+                return base64.b64decode(envelope["body_base64"]), content_type
+            if isinstance(envelope.get("body"), str):
+                return envelope["body"].encode("utf-8"), content_type
+            raise Exception(f"No file content in broker response for {path}")
+        if self._is_direct_websocket_mode():
+            message = await self._ws_roundtrip("proxy", {
+                "endpoint_path": path,
+                "method": "GET",
+                "body": {},
+                "headers": {},
+                "query_params": {},
+            }, timeout=self._request_timeout)
+            if (message.get("status") or "ok") == "error":
+                raise Exception(message.get("error") or f"CoderAI file fetch failed: {path}")
+            envelope = message.get("payload") or {}
+            content_type = envelope.get("content_type") or "application/octet-stream"
+            if envelope.get("body_base64"):
+                return base64.b64decode(envelope["body_base64"]), content_type
+            if isinstance(envelope.get("body"), str):
+                return envelope["body"].encode("utf-8"), content_type
+            raise Exception(f"No file content in WS response for {path}")
+        if self._broker_mode or self._broker_preferred:
+            raise Exception(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed")
+        url = f"{self._base_endpoint.rstrip('/')}/{path.lstrip('/')}"
+        async with httpx.AsyncClient(timeout=self._request_timeout) as client:
+            resp = await client.get(url, headers=self._build_http_headers(), follow_redirects=True)
+            resp.raise_for_status()
+            return resp.content, resp.headers.get("content-type", "application/octet-stream")

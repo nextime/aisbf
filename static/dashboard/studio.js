@@ -40,12 +40,18 @@ function _startVidPoll(prefix, provider) {
   _vidPollTimer = setInterval(async () => {
     try {
       const p = await (await dashboardFetch(_progUrl)).json();
-      if (p.total > 0) {
-        fill.style.width = p.pct + '%';
-        const spd = p.it_per_s > 0 ? ` · ${p.it_per_s} it/s` : (p.elapsed > 0 ? ` · ${p.elapsed}s` : '');
-        lbl.textContent = `${p.current} / ${p.total} steps${spd}`;
-      } else if (p.elapsed > 0) {
-        lbl.textContent = `${p.elapsed}s`;
+      if (p.phase === 'loading') {
+        fill.style.width = ''; fill.style.animation = 'progressPulse 1.2s ease-in-out infinite';
+        lbl.textContent = `Loading model${p.model ? ': ' + p.model : ''}… ${p.elapsed > 0 ? p.elapsed + 's' : ''}`;
+      } else {
+        fill.style.animation = '';
+        if (p.total > 0) {
+          fill.style.width = p.pct + '%';
+          const spd = p.it_per_s > 0 ? ` · ${p.it_per_s} it/s` : (p.elapsed > 0 ? ` · ${p.elapsed}s` : '');
+          lbl.textContent = `${p.current} / ${p.total} steps${spd}`;
+        } else if (p.elapsed > 0) {
+          lbl.textContent = `${p.elapsed}s`;
+        }
       }
       if (!p.active) { clearInterval(_vidPollTimer); _vidPollTimer = null; }
     } catch(_) {}
@@ -69,13 +75,19 @@ function _startAudPoll(prefix, provider) {
   _audPollTimer = setInterval(async () => {
     try {
       const p = await (await dashboardFetch(_progUrl)).json();
-      if (p.total > 0) {
-        fill.style.width = p.pct + '%';
-        const unit = p.unit || 'it';
-        const spd = p.it_per_s > 0 ? ` · ${p.it_per_s} ${unit}/s` : (p.elapsed > 0 ? ` · ${p.elapsed}s` : '');
-        lbl.textContent = `${p.current} / ${p.total} steps${spd}`;
-      } else if (p.elapsed > 0) {
-        lbl.textContent = `Elapsed: ${p.elapsed}s`;
+      if (p.phase === 'loading') {
+        fill.style.width = ''; fill.style.animation = 'progressPulse 1.2s ease-in-out infinite';
+        lbl.textContent = `Loading model${p.model ? ': ' + p.model : ''}… ${p.elapsed > 0 ? p.elapsed + 's' : ''}`;
+      } else {
+        fill.style.animation = '';
+        if (p.total > 0) {
+          fill.style.width = p.pct + '%';
+          const unit = p.unit || 'it';
+          const spd = p.it_per_s > 0 ? ` · ${p.it_per_s} ${unit}/s` : (p.elapsed > 0 ? ` · ${p.elapsed}s` : '');
+          lbl.textContent = `${p.current} / ${p.total} steps${spd}`;
+        } else if (p.elapsed > 0) {
+          lbl.textContent = `Elapsed: ${p.elapsed}s`;
+        }
       }
       if (!p.active) { clearInterval(_audPollTimer); _audPollTimer = null; }
     } catch(_) {}
@@ -2709,10 +2721,16 @@ async function genImage() {
   _imgPollTimer = setInterval(async()=>{
     try{
       const p=await (await dashboardFetch(_igProgUrl)).json();
-      if(p.total>0){
-        fill.style.width=p.pct+'%';
-        const spd = p.it_per_s>0 ? ` · ${p.it_per_s} it/s` : (p.elapsed>0 ? ` · ${p.elapsed}s` : '');
-        lbl.textContent=`${p.current} / ${p.total} steps${spd}`;
+      if(p.phase==='loading'){
+        fill.style.width=''; fill.style.animation='progressPulse 1.2s ease-in-out infinite';
+        lbl.textContent=`Loading model${p.model?': '+p.model:''}… ${p.elapsed>0?p.elapsed+'s':''}`;
+      } else {
+        fill.style.animation='';
+        if(p.total>0){
+          fill.style.width=p.pct+'%';
+          const spd = p.it_per_s>0 ? ` · ${p.it_per_s} it/s` : (p.elapsed>0 ? ` · ${p.elapsed}s` : '');
+          lbl.textContent=`${p.current} / ${p.total} steps${spd}`;
+        }
       }
       if(!p.active){ clearInterval(_imgPollTimer); _imgPollTimer=null; }
     }catch(_){}

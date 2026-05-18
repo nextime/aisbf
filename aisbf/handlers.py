@@ -64,6 +64,12 @@ from .prompt_analysis import analyze_prompt_payload
 
 _autoselect_result_cache: dict = {}
 _autoselect_result_cache_ttl: int = 3600  # seconds
+
+# Registry for proxied content — shared across all RequestHandler instances.
+# Values: {"type": "broker", "provider_id": str, "path": str}
+#      or {"type": "http",   "url": str}
+_proxy_file_registry: dict = {}
+_proxy_file_registry_lock = threading.Lock()
 # In-flight Future registry for single-flight deduplication of identical concurrent selections
 _autoselect_inflight: dict = {}  # cache_key → asyncio.Future
 
@@ -2062,7 +2068,24 @@ class RequestHandler:
                 if payload.get('body_base64'):
                     media_type = payload.get('content_type') or 'application/octet-stream'
                     return Response(content=base64.b64decode(payload['body_base64']), status_code=status_code, media_type=media_type, headers=response_headers)
-                return JSONResponse(status_code=status_code, content=payload.get('body', payload), headers=response_headers)
+                body_content = payload.get('body', payload)
+                # Rewrite any /v1/files/ URLs in JSON responses so the client
+                # fetches them through our proxy (via broker tunnel when applicable).
+                if isinstance(body_content, str) and '/v1/files/' in body_content:
+                    uses_broker = await provider_handler._use_broker()
+                    body_content = self._rewrite_coderai_file_urls(
+                        body_content, provider_id, request, via_broker=uses_broker
+                    )
+                # body from the broker dispatcher is already a JSON string — return it
+                # directly to avoid double-encoding by JSONResponse.
+                if isinstance(body_content, str):
+                    return Response(
+                        content=body_content.encode("utf-8"),
+                        status_code=status_code,
+                        media_type="application/json",
+                        headers=response_headers,
+                    )
+                return JSONResponse(status_code=status_code, content=body_content, headers=response_headers)
 
             async with httpx.AsyncClient(timeout=300) as client:
                 if method == "GET":
@@ -2177,18 +2200,24 @@ class RequestHandler:
         else:
             api_key = None
         
+        provider_type = getattr(provider_config, 'type', None)
+        if provider_type == 'coderai':
+            # coderai image generation goes through the same generic proxy path so that
+            # broker-tunnelled file URLs are rewritten correctly.
+            return await self.handle_generic_proxy(request, provider_id, "v1/images/generations", request_data)
+
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
-        
+
         if handler.is_rate_limited():
             raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
-        
+
         try:
             await handler.apply_rate_limit()
             result = await handler.handle_image_generation(request_data)
-            
+
             # Rewrite URLs in the response to point to our proxy
             result = self._rewrite_content_urls(result, request)
-            
+
             handler.record_success()
             try:
                 usage = result.get('usage', {}) if isinstance(result, dict) else {}
@@ -2234,6 +2263,59 @@ class RequestHandler:
             handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
+    def _rewrite_coderai_file_urls(self, body_str: str, provider_id: str, request: Request, *, via_broker: bool) -> str:
+        """Rewrite /v1/files/ URLs in a JSON body string to go through our proxy endpoint.
+
+        For broker-connected providers the proxy entry records (provider_id, path) so that
+        handle_content_proxy can fetch the file back through the WSS tunnel.  For direct
+        providers the proxy entry records the original URL for a plain HTTP fetch.
+        """
+        try:
+            data = json.loads(body_str)
+        except Exception:
+            return body_str
+
+        scheme = request.url.scheme
+        host = request.headers.get('host', request.url.netloc)
+        root_path = (request.scope.get('root_path') or '').rstrip('/')
+        base_url = f"{scheme}://{host}{root_path}"
+
+        from urllib.parse import urlparse as _urlparse
+
+        def rewrite_url(url: str) -> str:
+            if '/v1/files/' not in url:
+                return url
+            parsed = _urlparse(url)
+            file_path = parsed.path  # e.g. /v1/files/image_abc.png
+            key = f"{provider_id}:{file_path}" if via_broker else url
+            content_id = hashlib.md5(key.encode()).hexdigest()[:16]
+            entry = (
+                {"type": "broker", "provider_id": provider_id, "path": file_path}
+                if via_broker
+                else {"type": "http", "url": url}
+            )
+            with _proxy_file_registry_lock:
+                _proxy_file_registry[content_id] = entry
+            return f"{base_url}/api/proxy/{content_id}"
+
+        def _walk(obj):
+            if isinstance(obj, dict):
+                for key in list(obj.keys()):
+                    v = obj[key]
+                    if key in ('url', 'image_url', 'video_url', 'audio_url') and isinstance(v, str):
+                        obj[key] = rewrite_url(v)
+                    else:
+                        _walk(v)
+            elif isinstance(obj, list):
+                for i, item in enumerate(obj):
+                    if isinstance(item, str) and '/v1/files/' in item:
+                        obj[i] = rewrite_url(item)
+                    else:
+                        _walk(item)
+
+        _walk(data)
+        return json.dumps(data)
+
     def _rewrite_content_urls(self, response: Dict, request: Request) -> Dict:
         """Rewrite content URLs to point to our proxy endpoint"""
         import logging
@@ -2296,43 +2378,58 @@ class RequestHandler:
         
         return any(domain in url.lower() for domain in public_domains)
     
-    async def handle_content_proxy(self, content_id: str) -> StreamingResponse:
-        """Proxy content from the original URL"""
+    async def handle_content_proxy(self, content_id: str) -> Response:
+        """Proxy content — fetches via broker WSS tunnel for broker coderai providers,
+        or via plain HTTP for everything else."""
         import logging
         import httpx
         logger = logging.getLogger(__name__)
-        
-        # Get the original URL from cache
-        if not hasattr(self, '_url_cache'):
-            self._url_cache = {}
-        
-        original_url = self._url_cache.get(content_id)
-        if not original_url:
+
+        with _proxy_file_registry_lock:
+            entry = _proxy_file_registry.get(content_id)
+        # Legacy per-instance cache fallback (old _rewrite_content_urls path)
+        if entry is None:
+            original_url = getattr(self, '_url_cache', {}).get(content_id)
+            if original_url:
+                entry = {"type": "http", "url": original_url}
+
+        if entry is None:
             raise HTTPException(status_code=404, detail="Content not found")
-        
-        logger.info(f"Proxying content: {content_id} -> {original_url}")
-        
+
+        if entry.get("type") == "broker":
+            provider_id = entry["provider_id"]
+            file_path = entry["path"]
+            logger.info(f"Proxy content via broker tunnel: provider={provider_id} path={file_path}")
+            try:
+                provider_handler = get_provider_handler(provider_id, None, user_id=self.user_id)
+                content_bytes, content_type = await provider_handler.fetch_file(file_path)
+                return Response(
+                    content=content_bytes,
+                    media_type=content_type,
+                    headers={"Cache-Control": "public, max-age=3600"},
+                )
+            except Exception as e:
+                logger.error(f"Error fetching file via broker {provider_id} {file_path}: {e}")
+                raise HTTPException(status_code=500, detail=f"Error fetching file: {e}")
+
+        original_url = entry.get("url", "")
+        logger.info(f"Proxy content via HTTP: {content_id} -> {original_url}")
         try:
-            # Fetch the content from the original URL
-            async with httpx.AsyncClient() as client:
+            async with httpx.AsyncClient(timeout=120) as client:
                 response = await client.get(original_url, follow_redirects=True)
                 response.raise_for_status()
-                
-                # Determine content type
                 content_type = response.headers.get('content-type', 'application/octet-stream')
-                
-                # Return the content as a streaming response
-                return StreamingResponse(
-                    iter([response.content]),
+                return Response(
+                    content=response.content,
                     media_type=content_type,
                     headers={
                         'Content-Disposition': response.headers.get('content-disposition', ''),
-                        'Cache-Control': 'public, max-age=3600'
-                    }
+                        'Cache-Control': 'public, max-age=3600',
+                    },
                 )
         except Exception as e:
-            logger.error(f"Error proxying content: {str(e)}")
-            raise HTTPException(status_code=500, detail=f"Error fetching content: {str(e)}")
+            logger.error(f"Error proxying content {original_url}: {e}")
+            raise HTTPException(status_code=500, detail=f"Error fetching content: {e}")
 
 # Round-robin state for even load distribution across equal-priority models
 _rotation_round_robin: Dict[str, int] = {}

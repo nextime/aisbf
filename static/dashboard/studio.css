@@ -231,6 +231,11 @@
   animation:prog-pulse 1.6s ease-in-out infinite;
 }
 @keyframes prog-pulse { 0%,100%{opacity:1;border-color:#6366f1} 50%{opacity:.7;border-color:#a5b4fc} }
+@keyframes progressPulse {
+  0%   { width:15%; margin-left:0%; }
+  50%  { width:40%; margin-left:50%; }
+  100% { width:15%; margin-left:0%; }
+}
 .gen-progress-wrap { display:none; margin-top:.4rem; }
 .gen-progress-wrap.active { display:block; }
 .gen-progress-bar-bg {
