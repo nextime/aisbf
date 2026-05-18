@@ -2049,7 +2049,8 @@ class RequestHandler:
                     multipart=multipart_payload,
                     stream=wants_stream,
                 )
-                response_headers = payload.get('headers') or {}
+                _skip_headers = {'content-length', 'transfer-encoding', 'content-encoding'}
+                response_headers = {k: v for k, v in (payload.get('headers') or {}).items() if k.lower() not in _skip_headers}
                 if payload.get('stream_chunks'):
                     media_type = payload.get('content_type') or 'text/event-stream'
 

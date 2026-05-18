@@ -31,14 +31,15 @@ let bindingSearchState = {};
 let selectedBindingId = 'chat';
 let _pendingBindingFocusKey = null;
 
-function _startVidPoll(prefix) {
+function _startVidPoll(prefix, provider) {
   if (_vidPollTimer) { clearInterval(_vidPollTimer); _vidPollTimer = null; }
   const wrap = $(prefix+'-pbar-wrap'), fill = $(prefix+'-pbar-fill'), lbl = $(prefix+'-pbar-label');
   if (!wrap) return;
   wrap.classList.add('active'); fill.style.width='0%'; lbl.textContent='';
+  const _progUrl = buildStudioUrl('/video/progress') + (provider ? '?provider='+encodeURIComponent(provider) : '');
   _vidPollTimer = setInterval(async () => {
     try {
-      const p = await (await dashboardFetch(buildStudioUrl('/video/progress'))).json();
+      const p = await (await dashboardFetch(_progUrl)).json();
       if (p.total > 0) {
         fill.style.width = p.pct + '%';
         const spd = p.it_per_s > 0 ? ` · ${p.it_per_s} it/s` : (p.elapsed > 0 ? ` · ${p.elapsed}s` : '');
@@ -59,14 +60,15 @@ function _stopVidPoll(prefix, done) {
   else { wrap.classList.remove('active'); }
 }
 
-function _startAudPoll(prefix) {
+function _startAudPoll(prefix, provider) {
   if (_audPollTimer) { clearInterval(_audPollTimer); _audPollTimer = null; }
   const wrap = $(prefix+'-pbar-wrap'), fill = $(prefix+'-pbar-fill'), lbl = $(prefix+'-pbar-label');
   if (!wrap) return;
   wrap.classList.add('active'); fill.style.width='0%'; lbl.textContent='';
+  const _progUrl = buildStudioUrl('/audio/progress') + (provider ? '?provider='+encodeURIComponent(provider) : '');
   _audPollTimer = setInterval(async () => {
     try {
-      const p = await (await dashboardFetch(buildStudioUrl('/audio/progress'))).json();
+      const p = await (await dashboardFetch(_progUrl)).json();
       if (p.total > 0) {
         fill.style.width = p.pct + '%';
         const unit = p.unit || 'it';
@@ -2033,6 +2035,17 @@ function modelForSub(sub) {
   return activeModel?.id || '';
 }
 
+function providerForModelId(modelId) {
+  const m = models.find(x => x.id === modelId);
+  if (m?.sourceId) return m.sourceId;
+  const parts = (modelId || '').split('/');
+  if (parts.length === 3 && parts[0] === 'provider') return parts[1];
+  if (parts.length >= 2) return parts[0];
+  return '';
+}
+
+function providerForSub(sub) { return providerForModelId(modelForSub(sub)); }
+
 // Assigns a model to a single-cap sub without changing the global activeModel.
 function selectSubModel(sub, model) {
   const cap = SUB_API_CAP[sub]
@@ -2678,9 +2691,11 @@ async function genImage() {
   const wrap=$('ig-pbar-wrap'), fill=$('ig-pbar-fill'), lbl=$('ig-pbar-label');
   wrap.classList.add('active'); fill.style.width='0%'; lbl.textContent='';
   $('ig-prog').scrollIntoView({behavior:'smooth', block:'nearest'});
+  const _igProvider = providerForSub('img-gen');
+  const _igProgUrl = buildStudioUrl('/images/progress') + (_igProvider ? '?provider='+encodeURIComponent(_igProvider) : '');
   _imgPollTimer = setInterval(async()=>{
     try{
-      const p=await (await dashboardFetch(buildStudioUrl('/images/progress'))).json();
+      const p=await (await dashboardFetch(_igProgUrl)).json();
       if(p.total>0){
         fill.style.width=p.pct+'%';
         const spd = p.it_per_s>0 ? ` · ${p.it_per_s} it/s` : (p.elapsed>0 ? ` · ${p.elapsed}s` : '');
@@ -2816,8 +2831,8 @@ async function genVideo(mode) {
   const prefixMap = {t2v:'vt',       i2v:'vi',        v2v:'vv'};
   const prog = progMap[mode], outId = outMap[mode], prefix = prefixMap[mode];
   $(prog).textContent='Generating… (this may take several minutes)';
-  _startVidPoll(prefix);
   const subId = {t2v:'vid-t2v', i2v:'vid-i2v', v2v:'vid-v2v'}[mode];
+  _startVidPoll(prefix, providerForSub(subId));
   const body = {model:modelForSub(subId), mode};
   if (mode==='t2v') {
     body.prompt=val('vt-prompt'); body.negative_prompt=val('vt-neg');
@@ -2882,7 +2897,7 @@ async function genTi2V() {
   $('ti-prog').textContent='Generating… (may take several minutes)';
   const [initImg, endImg, srcVid] = await Promise.all([b64OrNull('ti-init'), b64OrNull('ti-end'), b64OrNull('ti-vid')]);
   if (!srcVid && !initImg) { $('ti-prog').textContent='Select an initial image or source video.'; return; }
-  _startVidPoll('ti');
+  _startVidPoll('ti', providerForSub('vid-ti2v'));
 
   const body = {
     model:modelForSub('vid-ti2v'),
@@ -3664,7 +3679,7 @@ async function runPipeline4() {
 async function genAudio() {
   if (!activeModel) return;
   $('ag-prog').textContent='Generating audio…';
-  _startAudPoll('ag');
+  _startAudPoll('ag', providerForSub('aud-gen'));
   const melody = await b64OrNull('ag-melody');
   const body = {
     model:modelForSub('aud-gen'), prompt:val('ag-prompt'),
