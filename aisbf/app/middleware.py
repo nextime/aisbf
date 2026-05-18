@@ -254,6 +254,12 @@ def make_auth_middleware(get_server_config, get_config, get_db, url_for_fn):
                         not (expires_at and int(time.time()) > expires_at)):
                     return await call_next(request)
 
+            if request.url.path.startswith("/api/market"):
+                expires_at = request.session.get('expires_at')
+                if (request.session.get('logged_in') and
+                        not (expires_at and int(time.time()) > expires_at)):
+                    return await call_next(request)
+
             if request.method == "GET" and request.url.path in ["/api/models", "/api/v1/models"]:
                 return await call_next(request)
 

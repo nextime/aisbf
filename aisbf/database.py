@@ -1049,7 +1049,7 @@ class DatabaseManager:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
             cursor.execute(f'''
-                SELECT id, username, email, display_name, role, is_active, email_verified, created_at, last_verification_email_sent, profile_pic
+                SELECT id, username, email, display_name, role, is_active, email_verified, created_at, last_verification_email_sent, profile_pic, can_publish_market
                 FROM users
                 WHERE id = {placeholder}
             ''', (user_id,))
@@ -1066,7 +1066,8 @@ class DatabaseManager:
                     'email_verified': row[6],
                     'created_at': row[7],
                     'last_verification_email_sent': row[8],
-                    'profile_pic': row[9] or None
+                    'profile_pic': row[9] or None,
+                    'can_publish_market': bool(row[10]) if row[10] is not None else True
                 }
             return None
 
@@ -1628,7 +1629,8 @@ class DatabaseManager:
                     u.is_active,
                     u.tier_id,
                     u.display_name,
-                    t.name as tier_name
+                    t.name as tier_name,
+                    u.can_publish_market
                 FROM users u
                 LEFT JOIN account_tiers t ON u.tier_id = t.id
                 {where_clause}
@@ -1645,10 +1647,10 @@ class DatabaseManager:
             users = []
             for row in cursor.fetchall():
                 user = dict(zip(columns, row))
-                # Normalize boolean fields
                 user['is_active'] = bool(user['is_active']) if user['is_active'] is not None else True
+                user['can_publish_market'] = bool(user['can_publish_market']) if user.get('can_publish_market') is not None else True
                 users.append(user)
-            
+
             return {
                 'users': users,
                 'total': total
@@ -1718,6 +1720,16 @@ class DatabaseManager:
             
             query = f"UPDATE users SET {', '.join(updates)} WHERE id = {placeholder}"
             cursor.execute(query, params)
+            conn.commit()
+
+    def set_user_market_publish(self, user_id: int, can_publish: bool):
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(
+                f'UPDATE users SET can_publish_market = {placeholder} WHERE id = {placeholder}',
+                (1 if can_publish else 0, user_id)
+            )
             conn.commit()
 
     def create_notification(self, user_id: int, title: str, message: str, notification_type: str = 'message') -> int:
@@ -6117,6 +6129,7 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
             ('reset_password_token', 'VARCHAR(255)'),
             ('reset_password_token_expires', 'TIMESTAMP NULL'),
             ('profile_pic', 'MEDIUMTEXT'),
+            ('can_publish_market', f'{boolean_type} DEFAULT 1'),
         ]
         if self.db_type == 'sqlite':
             cursor.execute("PRAGMA table_info(users)")

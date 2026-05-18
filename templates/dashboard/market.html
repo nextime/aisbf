@@ -6,30 +6,39 @@
 <h2 style="margin-bottom: 20px;"><i class="fas fa-store" style="color: var(--color-link);"></i> Market</h2>
 <p style="color: var(--color-muted); margin-bottom: 20px;">Browse shared providers and models, review pricing and reputation, and import market resources into your account.</p>
 
-<div style="background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px; margin-bottom: 18px; display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px;">
-    <input id="market-search" placeholder="Search name, type, capability" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-    <select id="market-source-type" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-        <option value="">All resource types</option>
-        <option value="provider">Provider</option>
-        <option value="model">Model</option>
-        <option value="rotation">Rotation</option>
-        <option value="autoselect">Autoselect</option>
-    </select>
-    <input id="market-capabilities" placeholder="Capabilities comma-separated" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-    <input id="market-model-type" placeholder="Model type / family" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-    <input id="market-model-name" placeholder="Model name" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-    <input id="market-size" placeholder="Size / params" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-    <label style="display:flex; align-items:center; gap:8px; color:var(--color-text);"><input type="checkbox" id="market-online-only"> Online only</label>
-    <select id="market-sort" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-        <option value="newest">Newest</option>
-        <option value="price_asc">Price low to high</option>
-        <option value="price_desc">Price high to low</option>
-        <option value="upvotes">Best rated</option>
-        <option value="performance">Best performance</option>
-        <option value="requests">Most used</option>
-        <option value="revenue">Top grossing</option>
-    </select>
-    <button class="btn btn-secondary" onclick="reloadMarket()">Apply Filters</button>
+<div style="background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 10px; padding: 16px; margin-bottom: 18px;">
+    <datalist id="market-search-suggestions"></datalist>
+    <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 12px; margin-bottom: 12px;">
+        <input id="market-search" list="market-search-suggestions" placeholder="Search name, type, capability" autocomplete="off" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <select id="market-source-type" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+            <option value="">All resource types</option>
+            <option value="provider">Provider</option>
+            <option value="model">Model</option>
+            <option value="rotation">Rotation</option>
+            <option value="autoselect">Autoselect</option>
+        </select>
+        <input id="market-model-type" placeholder="Model type / family" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <input id="market-model-name" placeholder="Model name" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <input id="market-size" placeholder="Size / params" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <label style="display:flex; align-items:center; gap:8px; color:var(--color-text);"><input type="checkbox" id="market-online-only"> Online only</label>
+        <select id="market-sort" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+            <option value="newest">Newest</option>
+            <option value="price_asc">Price low to high</option>
+            <option value="price_desc">Price high to low</option>
+            <option value="upvotes">Best rated</option>
+            <option value="performance">Best performance</option>
+            <option value="requests">Most used</option>
+            <option value="revenue">Top grossing</option>
+        </select>
+    </div>
+    <div style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; margin-bottom:10px;">
+        <div id="capabilities-filter" style="display:flex; flex-wrap:wrap; gap:8px; align-items:center; flex:1;">
+            <span style="font-size:13px; color:var(--color-muted); margin-right:4px;">Capabilities:</span>
+            <button type="button" onclick="setAllCaps(true)" style="padding:3px 10px; border-radius:999px; border:1px solid var(--color-border); background:var(--bg-page); color:var(--color-muted); font-size:12px; cursor:pointer;">all</button>
+            <button type="button" onclick="setAllCaps(false)" style="padding:3px 10px; border-radius:999px; border:1px solid var(--color-border); background:var(--bg-page); color:var(--color-muted); font-size:12px; cursor:pointer;">none</button>
+        </div>
+        <button class="btn btn-secondary" onclick="reloadMarket()" style="white-space:nowrap;">Search</button>
+    </div>
 </div>
 
 <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); gap: 16px;" id="market-grid"></div>
@@ -37,15 +46,17 @@
 <div style="margin-top: 30px; background: var(--bg-panel); border: 1px solid var(--color-border); border-radius: 10px; padding: 18px;">
     <h3 style="margin-top:0;">Publish one of your resources</h3>
     <div style="display:grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-        <select id="publish-source-type" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <select id="publish-source-type" onchange="onPublishTypeChange()" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
             <option value="provider">Provider</option>
             <option value="model">Model</option>
             <option value="rotation">Rotation</option>
             <option value="autoselect">Autoselect</option>
         </select>
-        <input id="publish-source-id" placeholder="Provider / model / rotation / autoselect id" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <select id="publish-source-select" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        </select>
         <input id="publish-title" placeholder="Listing title" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
-        <input id="publish-provider-id" placeholder="Provider id for model listings" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
+        <select id="publish-provider-select" onchange="onPublishProviderChange()" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text); display:none;">
+        </select>
         <input id="publish-price-tokens" type="number" step="0.0001" min="0" placeholder="Price / 1M tokens" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
         <input id="publish-price-requests" type="number" step="0.0001" min="0" placeholder="Price / 1000 requests" style="padding:10px; border:1px solid var(--color-border); border-radius:6px; background:var(--bg-page); color:var(--color-text);">
     </div>
@@ -60,6 +71,8 @@ const BASE_PATH = {{ (request.scope.get('root_path', '') or '') | tojson }};
 const listings = {{ market_listings_json | safe }};
 const currencySymbol = {{ currency_symbol | tojson }};
 const marketSettings = {{ market_settings_json | safe }};
+const userResources = {{ user_resources_json | safe }};
+const allCapabilities = {{ all_capabilities_json | safe }};
 
 function voteSummary(votes, target) {
     const item = (votes || {})[target] || {upvotes:0, downvotes:0, score:0};
@@ -165,12 +178,58 @@ async function voteListing(id, targetType, vote) {
     renderMarket();
 }
 
+function _populateSelect(selectEl, items, valueFn, labelFn, placeholder) {
+    selectEl.innerHTML = '';
+    if (placeholder) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = placeholder;
+        selectEl.appendChild(opt);
+    }
+    for (const item of items) {
+        const opt = document.createElement('option');
+        opt.value = valueFn(item);
+        opt.textContent = labelFn(item);
+        selectEl.appendChild(opt);
+    }
+}
+
+function onPublishTypeChange() {
+    const type = document.getElementById('publish-source-type').value;
+    const sourceSelect = document.getElementById('publish-source-select');
+    const providerSelect = document.getElementById('publish-provider-select');
+
+    providerSelect.style.display = 'none';
+
+    if (type === 'provider') {
+        _populateSelect(sourceSelect, userResources.providers, i => i.id, i => i.label, '— select provider —');
+    } else if (type === 'rotation') {
+        _populateSelect(sourceSelect, userResources.rotations, i => i.id, i => i.label, '— select rotation —');
+    } else if (type === 'autoselect') {
+        _populateSelect(sourceSelect, userResources.autoselects, i => i.id, i => i.label, '— select autoselect —');
+    } else if (type === 'model') {
+        _populateSelect(providerSelect, userResources.providers, i => i.id, i => i.label, '— select provider —');
+        providerSelect.style.display = '';
+        onPublishProviderChange();
+    }
+}
+
+function onPublishProviderChange() {
+    const pid = document.getElementById('publish-provider-select').value;
+    const sourceSelect = document.getElementById('publish-source-select');
+    const models = (userResources.models_by_provider[pid] || []);
+    _populateSelect(sourceSelect, models, m => m.name, m => m.name, models.length ? '— select model —' : '(no models configured)');
+}
+
 async function publishListing() {
+    const sourceType = document.getElementById('publish-source-type').value;
+    const sourceId = document.getElementById('publish-source-select').value.trim();
+    const providerId = document.getElementById('publish-provider-select').value.trim();
     const body = {
-        source_type: document.getElementById('publish-source-type').value,
-        provider_id: document.getElementById('publish-provider-id').value.trim(),
-        source_id: document.getElementById('publish-source-id').value.trim(),
-        model_id: document.getElementById('publish-source-type').value === 'model' ? document.getElementById('publish-source-id').value.trim() : undefined,
+        source_type: sourceType,
+        source_id: sourceId,
+        provider_id: sourceType === 'model' ? providerId : undefined,
+        model_id: sourceType === 'model' ? sourceId : undefined,
         title: document.getElementById('publish-title').value.trim(),
         description: document.getElementById('publish-description').value.trim(),
         price_per_million_tokens: parseFloat(document.getElementById('publish-price-tokens').value || '0'),
@@ -189,13 +248,88 @@ async function publishListing() {
     window.location.reload();
 }
 
+function updateSearchSuggestions() {
+    const suggestions = new Set();
+    for (const l of listings) {
+        if (l.title) suggestions.add(l.title);
+        const meta = l.metadata || {};
+        const mn = l.model_id || meta.model_name;
+        if (mn) suggestions.add(mn);
+        const pt = meta.provider_type || meta.type;
+        if (pt) suggestions.add(pt);
+    }
+    const dl = document.getElementById('market-search-suggestions');
+    dl.innerHTML = '';
+    for (const s of suggestions) {
+        const opt = document.createElement('option');
+        opt.value = s;
+        dl.appendChild(opt);
+    }
+}
+
+function _setPillActive(btn, active) {
+    btn.dataset.active = active ? '1' : '0';
+    btn.style.background = active ? 'var(--color-link)' : 'var(--bg-page)';
+    btn.style.color = active ? '#fff' : 'var(--color-text)';
+    btn.style.borderColor = active ? 'var(--color-link)' : 'var(--color-border)';
+}
+
+function setAllCaps(active) {
+    document.querySelectorAll('#capabilities-filter button[data-cap]').forEach(btn => _setPillActive(btn, active));
+    reloadMarket();
+}
+
+function initCapabilityPills() {
+    const container = document.getElementById('capabilities-filter');
+    while (container.children.length > 1) container.removeChild(container.lastChild);
+    for (const cap of allCapabilities) {
+        const btn = document.createElement('button');
+        btn.type = 'button';
+        btn.dataset.cap = cap;
+        btn.textContent = cap.replace(/_/g, ' ');
+        btn.style.cssText = 'padding:4px 12px; border-radius:999px; border:1px solid var(--color-border); background:var(--bg-page); color:var(--color-text); font-size:13px; cursor:pointer; transition: background 0.15s, color 0.15s;';
+        _setPillActive(btn, true);
+        btn.addEventListener('click', () => {
+            _setPillActive(btn, btn.dataset.active !== '1');
+            reloadMarket();
+        });
+        container.appendChild(btn);
+    }
+}
+
+let _searchDebounce = null;
+document.addEventListener('DOMContentLoaded', () => {
+    const searchEl = document.getElementById('market-search');
+    searchEl.addEventListener('input', () => {
+        if (searchEl.value.length === 0 || searchEl.value.length >= 2) {
+            clearTimeout(_searchDebounce);
+            _searchDebounce = setTimeout(reloadMarket, 300);
+        }
+    });
+    for (const id of ['market-source-type', 'market-sort', 'market-online-only', 'market-model-type', 'market-model-name', 'market-size']) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('change', reloadMarket);
+    }
+    for (const id of ['market-model-type', 'market-model-name', 'market-size']) {
+        const el = document.getElementById(id);
+        if (el) el.addEventListener('input', () => {
+            clearTimeout(_searchDebounce);
+            _searchDebounce = setTimeout(reloadMarket, 300);
+        });
+    }
+});
+
 renderMarket();
+updateSearchSuggestions();
+initCapabilityPills();
+onPublishTypeChange();
 
 async function reloadMarket() {
     const params = new URLSearchParams();
     const q = document.getElementById('market-search').value.trim();
     const sourceType = document.getElementById('market-source-type').value;
-    const capabilities = document.getElementById('market-capabilities').value.trim();
+    const activePills = [...document.querySelectorAll('#capabilities-filter button[data-active="1"]')];
+    const selectedCaps = activePills.length === allCapabilities.length ? [] : activePills.map(b => b.dataset.cap);
     const modelType = document.getElementById('market-model-type').value.trim();
     const modelName = document.getElementById('market-model-name').value.trim();
     const size = document.getElementById('market-size').value.trim();
@@ -203,7 +337,7 @@ async function reloadMarket() {
     const sortBy = document.getElementById('market-sort').value;
     if (q) params.set('q', q);
     if (sourceType) params.set('source_type', sourceType);
-    if (capabilities) params.set('capabilities', capabilities);
+    if (selectedCaps.length) params.set('capabilities', selectedCaps.join(','));
     if (modelType) params.set('model_type', modelType);
     if (modelName) params.set('model_name', modelName);
     if (size) params.set('size', size);
@@ -218,6 +352,7 @@ async function reloadMarket() {
     listings.length = 0;
     for (const listing of result.listings || []) listings.push(listing);
     renderMarket();
+    updateSearchSuggestions();
 }
 </script>
 {% endblock %}

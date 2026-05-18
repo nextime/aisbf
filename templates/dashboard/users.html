@@ -211,6 +211,9 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
                         <button onclick="toggleUserStatus({{ user.id }}, {{ user.is_active|lower }})" class="btn btn-warning" style="padding: 5px 10px; font-size: 12px; margin: 0;">
                             {% if user.is_active %}Disable{% else %}Enable{% endif %}
                         </button>
+                        <button onclick="toggleMarketPublish({{ user.id }}, {{ (user.can_publish_market if user.can_publish_market is defined else true)|lower }})" class="btn" style="padding: 5px 10px; font-size: 12px; margin: 0; background: {% if user.can_publish_market is defined and not user.can_publish_market %}#6b7280{% else %}#0ea5e9{% endif %};">
+                            {% if user.can_publish_market is defined and not user.can_publish_market %}Allow Publish{% else %}Block Publish{% endif %}
+                        </button>
                         <button onclick="impersonateUser({{ user.id }}, '{{ user.username }}')" class="btn" style="padding: 5px 10px; font-size: 12px; margin: 0; background: #7c3aed;">Impersonate</button>
                         <button onclick="deleteUser({{ user.id }}, '{{ user.username }}')" class="btn btn-danger" style="padding: 5px 10px; font-size: 12px; margin: 0;" data-i18n="users_page.delete_btn">Delete</button>
                     </div>
@@ -828,6 +831,28 @@ async function toggleUserStatus(userId, currentStatus) {
                 location.reload();
             } else {
                 showAlert(data.error || 'Failed to toggle user status', 'Error', '❌', 'danger');
+            }
+        })
+        .catch(error => {
+            showAlert('Error: ' + error, 'Error', '❌', 'danger');
+        });
+    }
+}
+
+async function toggleMarketPublish(userId, canPublish) {
+    const action = canPublish ? 'block this user from publishing to the market' : 'allow this user to publish to the market';
+    const ok = await showConfirm('Are you sure you want to ' + action + '?', 'Confirm');
+    if (ok) {
+        fetch(baseUrl + userId + '/toggle-market-publish', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json'}
+        })
+        .then(response => response.json())
+        .then(data => {
+            if (data.success) {
+                location.reload();
+            } else {
+                showAlert(data.error || 'Failed to update market publish permission', 'Error', '❌', 'danger');
             }
         })
         .catch(error => {

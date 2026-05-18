@@ -985,6 +985,24 @@ async def dashboard_users_toggle(request: Request, user_id: int):
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
+@router.post("/dashboard/users/{user_id}/toggle-market-publish")
+async def dashboard_users_toggle_market_publish(request: Request, user_id: int):
+    """Toggle a user's ability to publish to the market"""
+    auth_check = require_admin(request)
+    if auth_check:
+        return auth_check
+
+    db = DatabaseRegistry.get_config_database()
+    try:
+        user = db.get_user_by_id(user_id)
+        if not user:
+            return JSONResponse({"success": False, "error": "User not found"}, status_code=404)
+        new_value = not user.get('can_publish_market', True)
+        db.set_user_market_publish(user_id, new_value)
+        return JSONResponse({"success": True, "can_publish_market": new_value})
+    except Exception as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
 @router.post("/dashboard/users/{user_id}/delete")
 async def dashboard_users_delete(request: Request, user_id: int):
     """Delete a user"""

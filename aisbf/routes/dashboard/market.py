@@ -4,6 +4,7 @@ from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_
 from aisbf.database import DatabaseRegistry
 from aisbf.analytics import get_analytics
 from aisbf.coderai_broker import broker as coderai_broker
+from aisbf.studio import serialize_studio_capability_choices
 import json
 import logging
 
@@ -405,6 +406,41 @@ async def dashboard_market(request: Request):
         await _attach_hardware_snapshot(listing_copy)
         enriched.append(listing_copy)
 
+    is_admin = request.session.get('role') == 'admin'
+    user_resources = {'providers': [], 'rotations': [], 'autoselects': [], 'models_by_provider': {}}
+
+    def _add_provider(pid, cfg):
+        user_resources['providers'].append({'id': pid, 'label': cfg.get('name') or pid})
+        models = cfg.get('models') or []
+        if models:
+            user_resources['models_by_provider'][pid] = [
+                {'name': (m.get('name') if isinstance(m, dict) else str(m))}
+                for m in models if (m.get('name') if isinstance(m, dict) else m)
+            ]
+
+    if current_user_id:
+        for p in db.get_user_providers(current_user_id):
+            _add_provider(p['provider_id'], p.get('config') or {})
+        for r in db.get_user_rotations(current_user_id):
+            cfg = r.get('config') or {}
+            rid = r['rotation_id']
+            user_resources['rotations'].append({'id': rid, 'label': cfg.get('name') or rid})
+        for a in db.get_user_autoselects(current_user_id):
+            cfg = a.get('config') or {}
+            aid = a['autoselect_id']
+            user_resources['autoselects'].append({'id': aid, 'label': cfg.get('name') or aid})
+
+    if is_admin and _config:
+        for pid, pobj in (getattr(_config, 'providers', None) or {}).items():
+            cfg = pobj.model_dump() if hasattr(pobj, 'model_dump') else (vars(pobj) if not isinstance(pobj, dict) else pobj)
+            _add_provider(pid, cfg)
+        for rid, robj in (getattr(_config, 'rotations', None) or {}).items():
+            cfg = robj.model_dump() if hasattr(robj, 'model_dump') else (vars(robj) if not isinstance(robj, dict) else robj)
+            user_resources['rotations'].append({'id': rid, 'label': cfg.get('name') or rid})
+        for aid, aobj in (getattr(_config, 'autoselects', None) or {}).items():
+            cfg = aobj.model_dump() if hasattr(aobj, 'model_dump') else (vars(aobj) if not isinstance(aobj, dict) else aobj)
+            user_resources['autoselects'].append({'id': aid, 'label': cfg.get('name') or aid})
+
     return _templates.TemplateResponse(
         request=request,
         name='dashboard/market.html',
@@ -415,6 +451,8 @@ async def dashboard_market(request: Request):
             'currency_symbol': db.get_currency_settings().get('currency_symbol', '$'),
             'current_user_id': current_user_id,
             'market_settings_json': json.dumps(market_settings),
+            'user_resources_json': json.dumps(user_resources),
+            'all_capabilities_json': json.dumps(serialize_studio_capability_choices()),
         },
     )
 
@@ -525,6 +563,8 @@ async def api_publish_market_listing(request: Request):
         if not market_settings.get('allow_user_publish', True):
             return JSONResponse({'error': 'User publishing is disabled'}, status_code=403)
         user = db.get_user_by_id(user_id)
+        if not user.get('can_publish_market', True):
+            return JSONResponse({'error': 'Your account is not allowed to publish to the market'}, status_code=403)
         owner_user_id = user_id
         owner_username = user['username']
         source_scope = 'user'
