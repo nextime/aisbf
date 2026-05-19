@@ -21,8 +21,11 @@ logger = logging.getLogger(__name__)
 async def _broker_refresh_models(provider_id: str, user_id: Optional[int]) -> None:
     """Fetch and cache the model list for a provider that just connected via broker."""
     try:
-        from aisbf.app.model_cache import fetch_provider_models
+        from aisbf.app.model_cache import fetch_provider_models, invalidate_provider_cache
         from aisbf.config import config as aisbf_config
+        # Always bypass the cache so a reconnect or re-register produces a live fetch,
+        # not a 24-hour stale snapshot.
+        invalidate_provider_cache(provider_id, user_id)
         models = await fetch_provider_models(provider_id, aisbf_config, user_id=user_id)
         logger.info(
             "CoderAI broker model refresh: provider=%s user=%s models=%d",

@@ -61,6 +61,17 @@ def _get_cached_provider_models(cache_key: str) -> Optional[list]:
     return _model_cache.get(cache_key)
 
 
+def invalidate_provider_cache(provider_id: str, user_id: Optional[int] = None) -> None:
+    """Drop cached model data for a provider so the next fetch hits the live source."""
+    cache_key = _cache_key_for_provider(provider_id, user_id)
+    _model_cache.pop(cache_key, None)
+    _model_cache_timestamps.pop(cache_key, None)
+    # Also drop the endpoint-level cache so a different user_id doesn't serve stale data
+    for key in list(_endpoint_model_cache.keys()):
+        if key.startswith(f"coderai:") or provider_id in key:
+            _endpoint_model_cache.pop(key, None)
+
+
 def _store_provider_models_in_cache(cache_key: str, models: list, cached_at: Optional[float] = None) -> float:
     now = cached_at if cached_at is not None else time.time()
     _model_cache[cache_key] = models
