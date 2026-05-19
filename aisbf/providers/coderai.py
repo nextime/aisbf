@@ -197,14 +197,16 @@ class CoderAIProviderHandler(BaseProviderHandler):
             return False
         if self._broker_mode:
             return True
-        if not self._broker_preferred:
+        # Use get_session_snapshot() so clustered deployments are handled correctly:
+        # the session may live on a different node; send_request() routes via the
+        # shared-cache queue in that case — no direct HTTP fallback needed.
+        snapshot = await coderai_broker.get_session_snapshot(self.provider_id, self._client_id)
+        if not snapshot or not snapshot.get("connected"):
             return False
-        session = await coderai_broker.get_session(self.provider_id, self._client_id)
-        if session is None:
-            return False
+        meta = snapshot.get("metadata") or {}
         if self.user_id is None:
-            return session.metadata.get("owner_user_id") is None
-        return session.metadata.get("owner_user_id") == self.user_id
+            return meta.get("owner_user_id") is None
+        return meta.get("owner_user_id") == self.user_id
 
     async def _broker_request(self, op: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
         extra = {}

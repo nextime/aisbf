@@ -2798,3 +2798,80 @@ async def dashboard_studio_audio_speech(request: Request):
 async def dashboard_user_studio_audio_speech(request: Request, username: str):
     scope, user_id = _dashboard_studio_user_scope(request, username)
     return await _studio_audio_speech(request, user_id=user_id)
+
+
+async def _studio_any_dispatch(request: Request, path: str, user_id: Optional[int]):
+    """Generic dispatcher for any studio path.
+
+    Provider resolution order:
+    1. ?provider=<provider_id> query param (works for any path including admin/static)
+    2. model field in JSON body as 'provider_id/model_name' (works for v1/ endpoints)
+
+    This is the catch-all for paths not handled by more specific studio routes.
+    """
+    from aisbf.handlers import RequestHandler, RotationHandler, AutoselectHandler
+
+    method = request.method
+    provider_id = request.query_params.get("provider", "").strip()
+
+    try:
+        body = await request.json()
+        body = dict(body)
+    except Exception:
+        body = {}
+
+    if not provider_id:
+        model_str = _studio_normalize_model(path, body)
+        if model_str:
+            kind, source_id, target_id = _parse_studio_model_id(model_str)
+            if kind == 'rotation':
+                rot = RotationHandler(user_id=user_id)
+                if not hasattr(rot, '_select_provider_and_model'):
+                    raise HTTPException(status_code=400, detail=f"Rotation '{source_id}' cannot be resolved for this endpoint")
+                provider_id, actual_model = rot._select_provider_and_model(source_id)
+                body['model'] = actual_model
+            elif kind == 'autoselect':
+                asel_cfg = (_config.autoselect or {}).get(source_id) if _config else None
+                if not asel_cfg:
+                    asel = AutoselectHandler(user_id=user_id)
+                    asel_cfg = getattr(asel, 'user_autoselects', {}).get(source_id)
+                if not asel_cfg:
+                    raise HTTPException(status_code=404, detail=f"Autoselect '{source_id}' not found")
+                fallback = getattr(asel_cfg, 'fallback', None) or (asel_cfg.get('fallback') if isinstance(asel_cfg, dict) else '') or ''
+                if '/' in fallback:
+                    provider_id, actual_model = fallback.split('/', 1)
+                    body['model'] = actual_model
+                else:
+                    raise HTTPException(status_code=400, detail=f"Cannot resolve autoselect '{source_id}' for non-chat endpoint")
+            elif kind == 'provider':
+                provider_id = source_id
+                body['model'] = target_id
+
+    if not provider_id:
+        return JSONResponse(
+            {"error": "provider required: use ?provider=<provider_id> or include model as 'provider_id/model_name' in the request body"},
+            status_code=400,
+        )
+
+    handler = RequestHandler(user_id=user_id)
+    return await handler.handle_generic_proxy(request, provider_id, path, body, method=method)
+
+
+@router.api_route(
+    "/dashboard/api/studio/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+)
+async def dashboard_studio_any_proxy(request: Request, path: str):
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return auth_check
+    return await _studio_any_dispatch(request, path, user_id=None)
+
+
+@router.api_route(
+    "/dashboard/api/studio/u/{username}/{path:path}",
+    methods=["GET", "POST", "PUT", "DELETE", "PATCH"],
+)
+async def dashboard_user_studio_any_proxy(request: Request, username: str, path: str):
+    scope, user_id = _dashboard_studio_user_scope(request, username)
+    return await _studio_any_dispatch(request, path, user_id=user_id)
