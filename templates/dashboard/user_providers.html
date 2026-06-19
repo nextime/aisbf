@@ -203,19 +203,25 @@ function renderCoderaiCollapsedStatus(provider) {
 }
 
 function renderCoderaiHardwareChip(meta) {
+    const chipStyle = 'display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;margin-left:4px;';
+    const shortName = (name) => name.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').replace(/^AMD\s+(Radeon\s+RX\s+)?/i, '');
     const gpus = Array.isArray(meta?.gpus) ? meta.gpus : [];
-    const gpuName = gpus[0]?.name || null;
+    // Show every GPU coderai reported, one chip per GPU, not just the first.
+    if (gpus.length) {
+        return gpus.map((gpu, index) => {
+            const name = gpu?.name ? shortName(gpu.name) : `GPU ${gpu?.index ?? index}`;
+            const parts = [escHtmlAttr(name)];
+            if (gpu?.total_vram_mb != null) {
+                parts.push(`${formatVramMb(gpu.available_vram_mb)} / ${formatVramMb(gpu.total_vram_mb)}`);
+            }
+            return `<span style="${chipStyle}">${parts.join(' · ')}</span>`;
+        }).join('');
+    }
+    // No per-GPU detail reported – fall back to an aggregate VRAM chip.
     const totalVram = meta?.total_vram_mb;
     const freeVram = meta?.available_vram_mb;
-    if (!gpuName && totalVram == null) return '';
-    const parts = [];
-    if (gpuName) {
-        const shortName = gpuName.replace(/^NVIDIA\s+(GeForce\s+)?/i, '').replace(/^AMD\s+(Radeon\s+RX\s+)?/i, '');
-        parts.push(shortName);
-    }
-    if (totalVram != null) parts.push(`${formatVramMb(freeVram)} / ${formatVramMb(totalVram)}`);
-    if (!parts.length) return '';
-    return `<span style="display:inline-flex;align-items:center;gap:4px;padding:3px 9px;border-radius:999px;font-size:12px;background:rgba(99,102,241,0.12);border:1px solid rgba(99,102,241,0.35);color:#a5b4fc;margin-left:4px;">${parts.join(' · ')}</span>`;
+    if (totalVram == null) return '';
+    return `<span style="${chipStyle}">${formatVramMb(freeVram)} / ${formatVramMb(totalVram)}</span>`;
 }
 
 function renderGpuSummary(metadata) {
