@@ -2956,6 +2956,11 @@ class RotationHandler:
         # Check if notifyerrors is enabled for this rotation
         notify_errors = getattr(rotation_config, 'notifyerrors', False)
         logger.info(f"notifyerrors setting for rotation '{rotation_id}': {notify_errors}")
+
+        # Check if failover notifications are enabled for this rotation (banner/metadata/headers
+        # emitted when a failover changes the served provider/model vs. the preferred one)
+        notify_on_failover = getattr(rotation_config, 'notify_on_failover', False)
+        logger.info(f"notify_on_failover setting for rotation '{rotation_id}': {notify_on_failover}")
         
         # Extract stream setting early - needed for error handling
         stream = request_data.get('stream', False)
@@ -3305,6 +3310,12 @@ class RotationHandler:
         logger.info(f"Model rate limit: {selected_model.get('rate_limit', 'N/A')}")
         logger.info(f"=== MODEL SELECTION PROCESS END ===")
 
+        # Remember the preferred (highest-weight) pick so we can detect, on success,
+        # whether a failover ended up serving a different provider/model and notify
+        # the client when notify_on_failover is enabled.
+        preferred_provider_id = selected_model['provider_id']
+        preferred_model_name = selected_model['name']
+
         # Retry logic: Try up to 5 times, allowing model retries with rate limiting
         max_retries = 5
         tried_models = []  # Track which models have been tried
@@ -3444,6 +3455,15 @@ class RotationHandler:
                             logger.info("Chunked streaming response primed successfully (first chunk received)")
 
                         handler.record_success()
+
+                        # Build a failover notification if the served provider/model
+                        # differs from the preferred pick (opt-in via notify_on_failover).
+                        failover_notice = None
+                        if notify_on_failover:
+                            failover_notice = self._build_failover_notice(
+                                rotation_id, preferred_provider_id, preferred_model_name, provider_id, model_name
+                            )
+
                         logger.info(f"=== RotationHandler.handle_rotation_request END ===")
                         logger.info(f"Request succeeded on attempt {attempt + 1}")
                         logger.info(f"Successfully used model: {model_name} (provider: {provider_id})")
@@ -3465,10 +3485,12 @@ class RotationHandler:
                                 rotation_id=rotation_id,
                                 user_id=user_id,
                                 token_id=token_id,
-                                request_start_time=request_start_time
+                                request_start_time=request_start_time,
+                                failover_info=failover_notice
                             )
                         else:
-                            # Cache the response for non-streaming chunked requests
+                            # Cache the clean response for non-streaming chunked requests
+                            # (before injecting the failover banner — see non-chunked path).
                             try:
                                 aisbf_config = self.config.get_aisbf_config()
                                 if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
@@ -3477,7 +3499,8 @@ class RotationHandler:
                                     logger.debug(f"Cached chunked response for rotation request {rotation_id}")
                             except Exception as cache_error:
                                 logger.warning(f"Response cache set failed for chunked request: {cache_error}")
-                            
+
+                            self._apply_failover_notice_to_dict(response, failover_notice)
                             logger.info("Returning non-streaming response")
                             return response
                 
@@ -3534,11 +3557,21 @@ class RotationHandler:
                 successful_model = current_model
                 successful_handler = handler
                 successful_response = response
-                
+
+                # If a failover changed the served provider/model vs. the preferred
+                # one, build a notification for the client (opt-in via notify_on_failover).
+                failover_notice = None
+                if notify_on_failover:
+                    failover_notice = self._build_failover_notice(
+                        rotation_id, preferred_provider_id, preferred_model_name, provider_id, model_name
+                    )
+                    if failover_notice:
+                        logger.info(f"Failover notice: preferred {preferred_provider_id}/{preferred_model_name} -> used {provider_id}/{model_name}")
+
                 logger.info(f"=== RotationHandler.handle_rotation_request END ===")
                 logger.info(f"Request succeeded on attempt {attempt + 1}")
                 logger.info(f"Successfully used model: {successful_model['name']} (provider: {successful_model['provider_id']})")
-                
+
                 # Check if response is a streaming request
                 is_streaming = request_data.get('stream', False)
                 if is_streaming:
@@ -3556,10 +3589,13 @@ class RotationHandler:
                         rotation_id=rotation_id,
                         user_id=user_id,
                         token_id=token_id,
-                        request_start_time=request_start_time
+                        request_start_time=request_start_time,
+                        failover_info=failover_notice
                     )
                 else:
-                    # Cache the response for non-streaming requests
+                    # Cache the response for non-streaming requests (store the clean
+                    # response BEFORE injecting the failover banner, so a later cache
+                    # hit doesn't replay a stale "provider switched" notice).
                     try:
                         aisbf_config = self.config.get_aisbf_config()
                         if aisbf_config and aisbf_config.response_cache and aisbf_config.response_cache.enabled:
@@ -3568,7 +3604,10 @@ class RotationHandler:
                             logger.debug(f"Cached response for rotation request {rotation_id}")
                     except Exception as cache_error:
                         logger.warning(f"Response cache set failed: {cache_error}")
-                    
+
+                    # Notify the client of the provider/model change (body metadata + banner)
+                    self._apply_failover_notice_to_dict(response, failover_notice)
+
                     logger.info("Returning non-streaming response")
 
                     try:
@@ -3941,6 +3980,59 @@ class RotationHandler:
         sr.aisbf_error = True
         return sr
 
+    def _build_failover_notice(self, rotation_id, preferred_provider, preferred_model, used_provider, used_model):
+        """Build the client-facing failover notification payloads.
+
+        Returns a dict with ``metadata`` (JSON body field), ``headers`` (X-AISBF-*
+        HTTP headers) and ``banner`` (human-readable content prefix), or ``None``
+        when no real failover occurred (the served provider/model matches the
+        preferred one). Header values are sanitised to be HTTP/latin-1 safe.
+        """
+        if str(used_provider) == str(preferred_provider) and str(used_model) == str(preferred_model):
+            return None
+
+        def _hsafe(value):
+            return str(value).encode('ascii', 'ignore').decode('ascii')
+
+        metadata = {
+            "switched": True,
+            "rotation": rotation_id,
+            "preferred": {"provider": preferred_provider, "model": preferred_model},
+            "used": {"provider": used_provider, "model": used_model},
+        }
+        headers = {
+            "X-AISBF-Failover": "true",
+            "X-AISBF-Provider": _hsafe(used_provider),
+            "X-AISBF-Model": _hsafe(used_model),
+            "X-AISBF-Preferred-Provider": _hsafe(preferred_provider),
+            "X-AISBF-Preferred-Model": _hsafe(preferred_model),
+        }
+        banner = (
+            f"ℹ️ Provider switched to {used_provider} ({used_model}) — "
+            f"preferred {preferred_provider} ({preferred_model}) was unavailable.\n\n"
+        )
+        return {"metadata": metadata, "headers": headers, "banner": banner}
+
+    def _apply_failover_notice_to_dict(self, response, failover_notice):
+        """Inject failover metadata and a visible banner into a non-streaming
+        chat-completion dict in place. Safe no-op for non-dict responses or when
+        there is no notice."""
+        if not failover_notice or not isinstance(response, dict):
+            return response
+        response['aisbf_failover'] = failover_notice['metadata']
+        try:
+            choices = response.get('choices') or []
+            if choices:
+                message = choices[0].setdefault('message', {})
+                existing = message.get('content') or ''
+                # OpenAI allows content alongside tool_calls, so prefixing the
+                # banner is safe even for tool-call responses.
+                message['content'] = failover_notice['banner'] + existing
+        except Exception as inject_error:
+            import logging
+            logging.getLogger(__name__).warning(f"Failed to inject failover banner: {inject_error}")
+        return response
+
     def _is_non_retryable_error(self, error) -> bool:
         """Return True when retrying the same provider for this error is pointless.
 
@@ -4021,7 +4113,7 @@ class RotationHandler:
         # Not a stream (dict / unexpected type) — nothing to prime.
         return response
 
-    def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int, rotation_id: Optional[str] = None, user_id: Optional[int] = None, token_id: Optional[int] = None, request_start_time: Optional[float] = None):
+    def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int, rotation_id: Optional[str] = None, user_id: Optional[int] = None, token_id: Optional[int] = None, request_start_time: Optional[float] = None, failover_info: Optional[Dict] = None):
         """
         Create a StreamingResponse with proper handling based on provider type.
         
@@ -4058,6 +4150,26 @@ class RotationHandler:
             accumulated_response_text = ""
             final_usage = None
             try:
+                # If a failover changed the served provider/model, emit a leading
+                # notification chunk carrying both a visible banner (delta content)
+                # and the structured aisbf_failover metadata, before the real stream.
+                if failover_info:
+                    notice_chunk = {
+                        "id": f"failover-{provider_id}-{int(time.time())}",
+                        "object": "chat.completion.chunk",
+                        "created": int(time.time()),
+                        "model": model_name,
+                        "system_fingerprint": system_fingerprint,
+                        "provider": provider_id,
+                        "aisbf_failover": failover_info["metadata"],
+                        "choices": [{
+                            "index": 0,
+                            "delta": {"role": "assistant", "content": failover_info["banner"]},
+                            "finish_reason": None
+                        }]
+                    }
+                    yield f"data: {json.dumps(notice_chunk)}\n\n".encode('utf-8')
+
                 if is_google_provider:
                     # Handle Google's streaming response
                     # Google provider returns an async generator
@@ -4559,7 +4671,8 @@ class RotationHandler:
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
 
-        return StreamingResponse(stream_generator(effective_context), media_type="text/event-stream")
+        stream_headers = failover_info["headers"] if failover_info else None
+        return StreamingResponse(stream_generator(effective_context), media_type="text/event-stream", headers=stream_headers)
 
     async def handle_rotation_model_list(self, rotation_id: str) -> List[Dict]:
         rotation_config = self.config.get_rotation(rotation_id)

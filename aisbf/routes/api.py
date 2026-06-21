@@ -162,7 +162,26 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
         user_id = getattr(request.state, 'user_id', None)
         token_id = getattr(request.state, 'token_id', None)
         handler = _get_user_handler('rotation', user_id)
-        return await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
+        result = await handler.handle_rotation_request(actual_model, body_dict, user_id, token_id)
+        # Attach failover HTTP headers for non-streaming responses (streaming
+        # responses already carry them on the StreamingResponse). Derived from the
+        # aisbf_failover metadata that the handler placed in the body.
+        if isinstance(result, dict):
+            failover_meta = result.get('aisbf_failover')
+            if isinstance(failover_meta, dict) and failover_meta.get('switched'):
+                used = failover_meta.get('used', {}) or {}
+                preferred = failover_meta.get('preferred', {}) or {}
+                def _hsafe(value):
+                    return str(value).encode('ascii', 'ignore').decode('ascii')
+                failover_headers = {
+                    'X-AISBF-Failover': 'true',
+                    'X-AISBF-Provider': _hsafe(used.get('provider', '')),
+                    'X-AISBF-Model': _hsafe(used.get('model', '')),
+                    'X-AISBF-Preferred-Provider': _hsafe(preferred.get('provider', '')),
+                    'X-AISBF-Preferred-Model': _hsafe(preferred.get('model', '')),
+                }
+                return JSONResponse(content=result, headers=failover_headers)
+        return result
 
     if provider_id == "autoselections":
         if actual_model not in _config.autoselect:

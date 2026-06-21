@@ -159,6 +159,7 @@ class RotationConfig(BaseModel):
     model_name: str
     providers: List[Dict]
     notifyerrors: bool = False
+    notify_on_failover: bool = False  # Notify the client (banner/metadata/headers) when a failover changes provider/model
     capabilities: Optional[List[str]] = None  # Capabilities for this rotation
     # Content classification flags
     nsfw: bool = False  # Model can handle NSFW content
@@ -611,7 +612,11 @@ class Config:
                 # Extract global notifyerrors setting (top-level, outside rotations)
                 self.global_notifyerrors = data.get('notifyerrors', False)
                 logger.info(f"Global notifyerrors setting: {self.global_notifyerrors}")
-                
+
+                # Extract global notify_on_failover setting (top-level, outside rotations)
+                self.global_notify_on_failover = data.get('notify_on_failover', False)
+                logger.info(f"Global notify_on_failover setting: {self.global_notify_on_failover}")
+
                 # Load rotations, merging global notifyerrors with rotation-specific settings
                 self.rotations = {}
                 for k, v in data['rotations'].items():
@@ -621,6 +626,12 @@ class Config:
                         logger.info(f"Rotation '{k}' using global notifyerrors: {self.global_notifyerrors}")
                     else:
                         logger.info(f"Rotation '{k}' has own notifyerrors: {v['notifyerrors']}")
+                    # If rotation doesn't have its own notify_on_failover, use global setting
+                    if 'notify_on_failover' not in v:
+                        v['notify_on_failover'] = self.global_notify_on_failover
+                        logger.info(f"Rotation '{k}' using global notify_on_failover: {self.global_notify_on_failover}")
+                    else:
+                        logger.info(f"Rotation '{k}' has own notify_on_failover: {v['notify_on_failover']}")
                     self.rotations[k] = RotationConfig(**v)
                 
                 logger.info(f"Loaded {len(self.rotations)} rotations: {list(self.rotations.keys())}")
