@@ -4409,260 +4409,350 @@ class RotationHandler:
                     completion_tokens = 0
                     accumulated_response_text = ""  # Track full response for token counting
                     
-                    # Collect all chunks first to know when we're at the last one
-                    chunks_list = []
-                    async for chunk in response:
-                        chunks_list.append(chunk)
-                    
-                    total_chunks = len(chunks_list)
-                    chunk_idx = 0
-                    
-                    for chunk in chunks_list:
-                        try:
-                            logger.debug(f"Google chunk type: {type(chunk)}")
-                            logger.debug(f"Google chunk: {chunk}")
-                            
-                            # Extract text and tool calls from Google chunk (this is accumulated text)
+                    # Whether the client requested tools. Text-encoded tool-call
+                    # detection (see the buffered path below) needs the COMPLETE
+                    # response, so we only stream incrementally when no tools were
+                    # requested -- the dominant chat case.
+                    request_has_tools = bool(request_data.get('tools'))
+
+                    if not request_has_tools:
+                        # TRUE INCREMENTAL streaming: forward each text delta to
+                        # the client as soon as Google yields it.
+                        sent_role = False
+                        async for chunk in response:
                             chunk_text = ""
-                            chunk_tool_calls = []
-                            finish_reason = None
+                            chunk_finish = None
                             try:
                                 if hasattr(chunk, 'candidates') and chunk.candidates:
                                     candidate = chunk.candidates[0] if chunk.candidates else None
                                     if candidate and hasattr(candidate, 'content') and candidate.content:
                                         if hasattr(candidate.content, 'parts') and candidate.content.parts:
                                             for part in candidate.content.parts:
-                                                # Extract text content
                                                 if hasattr(part, 'text') and part.text:
                                                     chunk_text += part.text
-                                                # Extract function calls (Google's format)
-                                                if hasattr(part, 'function_call') and part.function_call:
-                                                    function_call = part.function_call
-                                                    # Convert Google function call to OpenAI format
-                                                    import json
-                                                    openai_tool_call = {
-                                                        "id": f"call_{len(chunk_tool_calls)}",
-                                                        "type": "function",
-                                                        "function": {
-                                                            "name": function_call.name,
-                                                            "arguments": json.dumps(function_call.args) if hasattr(function_call, 'args') else "{}"
-                                                        }
-                                                    }
-                                                    chunk_tool_calls.append(openai_tool_call)
-                                                    logger.info(f"Extracted tool call from Google chunk: {openai_tool_call}")
-                                    # Check for finish reason in candidate
-                                    if hasattr(candidate, 'finish_reason'):
-                                        google_finish = str(candidate.finish_reason)
-                                        if google_finish in ('STOP', 'END_TURN', 'FINISH_REASON_UNSPECIFIED'):
-                                            finish_reason = "stop"
-                                        elif google_finish == 'MAX_TOKENS':
-                                            finish_reason = "length"
+                                        if hasattr(candidate, 'finish_reason'):
+                                            google_finish = str(candidate.finish_reason)
+                                            if google_finish in ('STOP', 'END_TURN', 'FINISH_REASON_UNSPECIFIED'):
+                                                chunk_finish = "stop"
+                                            elif google_finish == 'MAX_TOKENS':
+                                                chunk_finish = "length"
                             except Exception as e:
-                                logger.error(f"Error extracting text from Google chunk: {e}")
-                            
-                            # Calculate the delta (only the new text since last chunk)
-                            delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
-                            accumulated_text = chunk_text  # Update accumulated text for next iteration
-                            
-                            # Track completion tokens for Google responses
+                                logger.error(f"Error extracting text from Google stream chunk: {e}")
+                                continue
+
+                            # Google chunk text is the incremental delta; guard
+                            # against providers that send accumulated text.
+                            delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) and accumulated_text else chunk_text
                             if delta_text:
+                                accumulated_text += delta_text
                                 accumulated_response_text += delta_text
-                            
-                            chunk_idx += 1
-                        except Exception as chunk_error:
-                            error_msg = str(chunk_error)
-                            logger.error(f"Error processing Google chunk: {error_msg}")
-                            logger.error(f"Chunk type: {type(chunk)}")
-                            logger.error(f"Chunk content: {chunk}")
-                            chunk_idx += 1
-                            continue
-                    
-                    # After collecting all chunks, check if the accumulated text contains a tool call pattern
-                    # This handles models that return tool calls as text instead of using function_call attributes
-                    tool_calls = None
-                    final_text = accumulated_response_text
-                    
-                    # Check for tool call patterns in the accumulated text
-                    if accumulated_response_text:
-                        import re as re_module
-                        
-                        # Simple approach: just look for "tool: {...}" pattern and extract the JSON
-                        # This avoids complex nested parsing issues
-                        tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
-                        tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
-                        
-                        if tool_match:
-                            try:
-                                # Extract the tool JSON using brace counting for robustness
-                                tool_start = accumulated_response_text.find('tool:')
-                                if tool_start != -1:
-                                    json_start = accumulated_response_text.find('{', tool_start)
-                                    if json_start != -1:
-                                        brace_count = 0
-                                        json_end = json_start
-                                        for i, c in enumerate(accumulated_response_text[json_start:], json_start):
-                                            if c == '{':
-                                                brace_count += 1
-                                            elif c == '}':
-                                                brace_count -= 1
-                                                if brace_count == 0:
-                                                    json_end = i + 1
-                                                    break
-                                        
-                                        tool_json_str = accumulated_response_text[json_start:json_end]
-                                        logger.debug(f"Extracted tool JSON: {tool_json_str[:200]}...")
-                                        
-                                        try:
-                                            parsed_tool = json.loads(tool_json_str)
-                                        except json.JSONDecodeError:
-                                            # Try fixing common issues: single quotes, trailing commas
-                                            fixed_json = tool_json_str.replace("'", '"')
-                                            fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
-                                            fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
-                                            parsed_tool = json.loads(fixed_json)
-                                        
-                                        # Convert to OpenAI tool_calls format
-                                        tool_calls = [{
-                                            "id": f"call_0",
-                                            "type": "function",
-                                            "function": {
-                                                "name": parsed_tool.get('action', parsed_tool.get('name', 'unknown')),
-                                                "arguments": json.dumps({k: v for k, v in parsed_tool.items() if k not in ['action', 'name']})
-                                            }
-                                        }]
-                                        logger.info(f"Converted streaming tool call to OpenAI format: {tool_calls}")
-                                        
-                                        # Extract final assistant text after the tool JSON
-                                        # Look for pattern: }\\nassistant: [{'type': 'text', 'text': "..."}]
-                                        # or just return empty since the tool call is the main content
-                                        after_tool = accumulated_response_text[json_end:]
-                                        assistant_pattern = r"assistant:\s*\[.*'text':\s*['\"](.+?)['\"].*\]\s*\]?\s*$"
-                                        assistant_match = re_module.search(assistant_pattern, after_tool, re_module.DOTALL)
-                                        if assistant_match:
-                                            final_text = assistant_match.group(1)
-                                            # Unescape common escape sequences
-                                            final_text = final_text.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
-                                        else:
-                                            final_text = ""
-                            except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
-                                logger.debug(f"Failed to parse tool JSON in streaming: {e}")
-                    
-                    # Now send the response chunks
-                    # If we detected tool calls, send them in the first chunk with role
-                    if tool_calls:
-                        # First chunk with tool_calls
-                        tool_chunk = {
+                                delta = {"content": delta_text, "refusal": None, "role": None, "tool_calls": None}
+                                if not sent_role:
+                                    delta["role"] = "assistant"
+                                    sent_role = True
+                                out_chunk = {
+                                    "id": response_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model_name,
+                                    "service_tier": None,
+                                    "system_fingerprint": system_fingerprint,
+                                    "usage": None,
+                                    "provider": provider_id,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": delta,
+                                        "finish_reason": None,
+                                        "logprobs": None,
+                                        "native_finish_reason": None
+                                    }]
+                                }
+                                yield f"data: {json.dumps(out_chunk)}\n\n".encode('utf-8')
+                                await asyncio.sleep(0)
+
+                        # Final chunk with finish reason and usage statistics.
+                        if accumulated_response_text:
+                            completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name)
+                        total_tokens = effective_context + completion_tokens
+                        final_chunk = {
                             "id": response_id,
                             "object": "chat.completion.chunk",
                             "created": created_time,
                             "model": model_name,
                             "service_tier": None,
                             "system_fingerprint": system_fingerprint,
-                            "usage": None,
+                            "usage": {
+                                "prompt_tokens": effective_context,
+                                "completion_tokens": completion_tokens,
+                                "total_tokens": total_tokens,
+                                "effective_context": effective_context
+                            },
+                            "provider": provider_id,
+                            "choices": [{
+                                "index": 0,
+                                "delta": {"content": "", "function_call": None, "refusal": None, "role": None, "tool_calls": None},
+                                "finish_reason": "stop",
+                                "logprobs": None,
+                                "native_finish_reason": "stop"
+                            }]
+                        }
+                        yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+                        await asyncio.sleep(0)
+                    else:
+                        # Collect all chunks first to know when we're at the last one
+                        chunks_list = []
+                        async for chunk in response:
+                            chunks_list.append(chunk)
+                    
+                        total_chunks = len(chunks_list)
+                        chunk_idx = 0
+                    
+                        for chunk in chunks_list:
+                            try:
+                                logger.debug(f"Google chunk type: {type(chunk)}")
+                                logger.debug(f"Google chunk: {chunk}")
+                            
+                                # Extract text and tool calls from Google chunk (this is accumulated text)
+                                chunk_text = ""
+                                chunk_tool_calls = []
+                                finish_reason = None
+                                try:
+                                    if hasattr(chunk, 'candidates') and chunk.candidates:
+                                        candidate = chunk.candidates[0] if chunk.candidates else None
+                                        if candidate and hasattr(candidate, 'content') and candidate.content:
+                                            if hasattr(candidate.content, 'parts') and candidate.content.parts:
+                                                for part in candidate.content.parts:
+                                                    # Extract text content
+                                                    if hasattr(part, 'text') and part.text:
+                                                        chunk_text += part.text
+                                                    # Extract function calls (Google's format)
+                                                    if hasattr(part, 'function_call') and part.function_call:
+                                                        function_call = part.function_call
+                                                        # Convert Google function call to OpenAI format
+                                                        import json
+                                                        openai_tool_call = {
+                                                            "id": f"call_{len(chunk_tool_calls)}",
+                                                            "type": "function",
+                                                            "function": {
+                                                                "name": function_call.name,
+                                                                "arguments": json.dumps(function_call.args) if hasattr(function_call, 'args') else "{}"
+                                                            }
+                                                        }
+                                                        chunk_tool_calls.append(openai_tool_call)
+                                                        logger.info(f"Extracted tool call from Google chunk: {openai_tool_call}")
+                                        # Check for finish reason in candidate
+                                        if hasattr(candidate, 'finish_reason'):
+                                            google_finish = str(candidate.finish_reason)
+                                            if google_finish in ('STOP', 'END_TURN', 'FINISH_REASON_UNSPECIFIED'):
+                                                finish_reason = "stop"
+                                            elif google_finish == 'MAX_TOKENS':
+                                                finish_reason = "length"
+                                except Exception as e:
+                                    logger.error(f"Error extracting text from Google chunk: {e}")
+                            
+                                # Calculate the delta (only the new text since last chunk)
+                                delta_text = chunk_text[len(accumulated_text):] if chunk_text.startswith(accumulated_text) else chunk_text
+                                accumulated_text = chunk_text  # Update accumulated text for next iteration
+                            
+                                # Track completion tokens for Google responses
+                                if delta_text:
+                                    accumulated_response_text += delta_text
+                            
+                                chunk_idx += 1
+                            except Exception as chunk_error:
+                                error_msg = str(chunk_error)
+                                logger.error(f"Error processing Google chunk: {error_msg}")
+                                logger.error(f"Chunk type: {type(chunk)}")
+                                logger.error(f"Chunk content: {chunk}")
+                                chunk_idx += 1
+                                continue
+                    
+                        # After collecting all chunks, check if the accumulated text contains a tool call pattern
+                        # This handles models that return tool calls as text instead of using function_call attributes
+                        tool_calls = None
+                        final_text = accumulated_response_text
+                    
+                        # Check for tool call patterns in the accumulated text
+                        if accumulated_response_text:
+                            import re as re_module
+                        
+                            # Simple approach: just look for "tool: {...}" pattern and extract the JSON
+                            # This avoids complex nested parsing issues
+                            tool_pattern = r'tool:\s*(\{[^{}]*\{[^{}]*\}[^{}]*\}|\{[^{}]+\})'
+                            tool_match = re_module.search(tool_pattern, accumulated_response_text, re_module.DOTALL)
+                        
+                            if tool_match:
+                                try:
+                                    # Extract the tool JSON using brace counting for robustness
+                                    tool_start = accumulated_response_text.find('tool:')
+                                    if tool_start != -1:
+                                        json_start = accumulated_response_text.find('{', tool_start)
+                                        if json_start != -1:
+                                            brace_count = 0
+                                            json_end = json_start
+                                            for i, c in enumerate(accumulated_response_text[json_start:], json_start):
+                                                if c == '{':
+                                                    brace_count += 1
+                                                elif c == '}':
+                                                    brace_count -= 1
+                                                    if brace_count == 0:
+                                                        json_end = i + 1
+                                                        break
+                                        
+                                            tool_json_str = accumulated_response_text[json_start:json_end]
+                                            logger.debug(f"Extracted tool JSON: {tool_json_str[:200]}...")
+                                        
+                                            try:
+                                                parsed_tool = json.loads(tool_json_str)
+                                            except json.JSONDecodeError:
+                                                # Try fixing common issues: single quotes, trailing commas
+                                                fixed_json = tool_json_str.replace("'", '"')
+                                                fixed_json = re_module.sub(r',\s*}', '}', fixed_json)
+                                                fixed_json = re_module.sub(r',\s*]', ']', fixed_json)
+                                                parsed_tool = json.loads(fixed_json)
+                                        
+                                            # Convert to OpenAI tool_calls format
+                                            tool_calls = [{
+                                                "id": f"call_0",
+                                                "type": "function",
+                                                "function": {
+                                                    "name": parsed_tool.get('action', parsed_tool.get('name', 'unknown')),
+                                                    "arguments": json.dumps({k: v for k, v in parsed_tool.items() if k not in ['action', 'name']})
+                                                }
+                                            }]
+                                            logger.info(f"Converted streaming tool call to OpenAI format: {tool_calls}")
+                                        
+                                            # Extract final assistant text after the tool JSON
+                                            # Look for pattern: }\\nassistant: [{'type': 'text', 'text': "..."}]
+                                            # or just return empty since the tool call is the main content
+                                            after_tool = accumulated_response_text[json_end:]
+                                            assistant_pattern = r"assistant:\s*\[.*'text':\s*['\"](.+?)['\"].*\]\s*\]?\s*$"
+                                            assistant_match = re_module.search(assistant_pattern, after_tool, re_module.DOTALL)
+                                            if assistant_match:
+                                                final_text = assistant_match.group(1)
+                                                # Unescape common escape sequences
+                                                final_text = final_text.replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
+                                            else:
+                                                final_text = ""
+                                except (json.JSONDecodeError, ValueError, SyntaxError, Exception) as e:
+                                    logger.debug(f"Failed to parse tool JSON in streaming: {e}")
+                    
+                        # Now send the response chunks
+                        # If we detected tool calls, send them in the first chunk with role
+                        if tool_calls:
+                            # First chunk with tool_calls
+                            tool_chunk = {
+                                "id": response_id,
+                                "object": "chat.completion.chunk",
+                                "created": created_time,
+                                "model": model_name,
+                                "service_tier": None,
+                                "system_fingerprint": system_fingerprint,
+                                "usage": None,
+                                "provider": provider_id,
+                                "choices": [{
+                                    "index": 0,
+                                    "delta": {
+                                        "content": None,
+                                        "refusal": None,
+                                        "role": "assistant",
+                                        "tool_calls": tool_calls
+                                    },
+                                    "finish_reason": None,
+                                    "logprobs": None,
+                                    "native_finish_reason": None
+                                }]
+                            }
+                            yield f"data: {json.dumps(tool_chunk)}\n\n".encode('utf-8')
+                        
+                            # If there's final assistant text, send it
+                            if final_text:
+                                text_chunk = {
+                                    "id": response_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model_name,
+                                    "service_tier": None,
+                                    "system_fingerprint": system_fingerprint,
+                                    "usage": None,
+                                    "provider": provider_id,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {
+                                            "content": final_text,
+                                            "refusal": None,
+                                            "role": None,
+                                            "tool_calls": None
+                                        },
+                                        "finish_reason": None,
+                                        "logprobs": None,
+                                        "native_finish_reason": None
+                                    }]
+                                }
+                                yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
+                        else:
+                            # No tool calls detected, send text normally
+                            # Send the accumulated text as a single chunk
+                            if accumulated_response_text:
+                                text_chunk = {
+                                    "id": response_id,
+                                    "object": "chat.completion.chunk",
+                                    "created": created_time,
+                                    "model": model_name,
+                                    "service_tier": None,
+                                    "system_fingerprint": system_fingerprint,
+                                    "usage": None,
+                                    "provider": provider_id,
+                                    "choices": [{
+                                        "index": 0,
+                                        "delta": {
+                                            "content": accumulated_response_text,
+                                            "refusal": None,
+                                            "role": "assistant",
+                                            "tool_calls": None
+                                        },
+                                        "finish_reason": None,
+                                        "logprobs": None,
+                                        "native_finish_reason": None
+                                    }]
+                                }
+                                yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
+                    
+                        # Send final chunk with finish reason and usage statistics
+                        if accumulated_response_text:
+                            completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name)
+                        total_tokens = effective_context + completion_tokens
+                        final_chunk = {
+                            "id": response_id,
+                            "object": "chat.completion.chunk",
+                            "created": created_time,
+                            "model": model_name,
+                            "service_tier": None,
+                            "system_fingerprint": system_fingerprint,
+                            "usage": {
+                                "prompt_tokens": effective_context,
+                                "completion_tokens": completion_tokens,
+                                "total_tokens": total_tokens,
+                                "effective_context": effective_context
+                            },
                             "provider": provider_id,
                             "choices": [{
                                 "index": 0,
                                 "delta": {
-                                    "content": None,
+                                    "content": "",
+                                    "function_call": None,
                                     "refusal": None,
-                                    "role": "assistant",
-                                    "tool_calls": tool_calls
+                                    "role": None,
+                                    "tool_calls": None
                                 },
-                                "finish_reason": None,
+                                "finish_reason": "stop",
                                 "logprobs": None,
-                                "native_finish_reason": None
+                                "native_finish_reason": "stop"
                             }]
                         }
-                        yield f"data: {json.dumps(tool_chunk)}\n\n".encode('utf-8')
-                        
-                        # If there's final assistant text, send it
-                        if final_text:
-                            text_chunk = {
-                                "id": response_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_time,
-                                "model": model_name,
-                                "service_tier": None,
-                                "system_fingerprint": system_fingerprint,
-                                "usage": None,
-                                "provider": provider_id,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "content": final_text,
-                                        "refusal": None,
-                                        "role": None,
-                                        "tool_calls": None
-                                    },
-                                    "finish_reason": None,
-                                    "logprobs": None,
-                                    "native_finish_reason": None
-                                }]
-                            }
-                            yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
-                    else:
-                        # No tool calls detected, send text normally
-                        # Send the accumulated text as a single chunk
-                        if accumulated_response_text:
-                            text_chunk = {
-                                "id": response_id,
-                                "object": "chat.completion.chunk",
-                                "created": created_time,
-                                "model": model_name,
-                                "service_tier": None,
-                                "system_fingerprint": system_fingerprint,
-                                "usage": None,
-                                "provider": provider_id,
-                                "choices": [{
-                                    "index": 0,
-                                    "delta": {
-                                        "content": accumulated_response_text,
-                                        "refusal": None,
-                                        "role": "assistant",
-                                        "tool_calls": None
-                                    },
-                                    "finish_reason": None,
-                                    "logprobs": None,
-                                    "native_finish_reason": None
-                                }]
-                            }
-                            yield f"data: {json.dumps(text_chunk)}\n\n".encode('utf-8')
-                    
-                    # Send final chunk with finish reason and usage statistics
-                    if accumulated_response_text:
-                        completion_tokens = count_messages_tokens([{"role": "assistant", "content": accumulated_response_text}], model_name)
-                    total_tokens = effective_context + completion_tokens
-                    final_chunk = {
-                        "id": response_id,
-                        "object": "chat.completion.chunk",
-                        "created": created_time,
-                        "model": model_name,
-                        "service_tier": None,
-                        "system_fingerprint": system_fingerprint,
-                        "usage": {
-                            "prompt_tokens": effective_context,
-                            "completion_tokens": completion_tokens,
-                            "total_tokens": total_tokens,
-                            "effective_context": effective_context
-                        },
-                        "provider": provider_id,
-                        "choices": [{
-                            "index": 0,
-                            "delta": {
-                                "content": "",
-                                "function_call": None,
-                                "refusal": None,
-                                "role": None,
-                                "tool_calls": None
-                            },
-                            "finish_reason": "stop",
-                            "logprobs": None,
-                            "native_finish_reason": "stop"
-                        }]
-                    }
-                    yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
-                    # Yield control to event loop to ensure final chunk is flushed to client
-                    await asyncio.sleep(0)
+                        yield f"data: {json.dumps(final_chunk)}\n\n".encode('utf-8')
+                        # Yield control to event loop to ensure final chunk is flushed to client
+                        await asyncio.sleep(0)
                 elif is_kilo_provider or is_coderai_provider:
                     # Handle Kilo/KiloCode streaming response
                     # Kilo/CoderAI return async generators that yield OpenAI-compatible SSE bytes

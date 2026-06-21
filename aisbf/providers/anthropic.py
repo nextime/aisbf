@@ -316,6 +316,14 @@ class AnthropicProviderHandler(BaseProviderHandler):
                 logging.info(f"Full payload: {_json.dumps(debug_params, indent=2, default=str)}")
                 logging.info(f"=== END ANTHROPIC API REQUEST PAYLOAD ===")
             
+            # Streaming mode: return an async generator that converts Anthropic
+            # SSE events into OpenAI-compatible chat.completion.chunk dicts. The
+            # caller records success after the stream is primed/consumed, so we
+            # do NOT record success here (the upstream call has not run yet).
+            if stream:
+                logging.info(f"AnthropicProviderHandler: Using streaming mode")
+                return self._handle_streaming_request(api_params, model)
+
             response = self.client.messages.create(**api_params)
             logging.info(f"AnthropicProviderHandler: Response received: {response}")
             self.record_success()
@@ -457,6 +465,123 @@ class AnthropicProviderHandler(BaseProviderHandler):
             logging.error(f"AnthropicProviderHandler: Error: {str(e)}", exc_info=True)
             self.record_failure()
             raise e
+
+    async def _handle_streaming_request(self, api_params: Dict, model: str):
+        """Async generator that streams an Anthropic request and yields
+        OpenAI-compatible chat.completion.chunk dicts.
+
+        The Anthropic SDK client is synchronous, so the underlying event stream
+        is iterated with a regular ``for`` loop (matching how the OpenAI provider
+        forwards its sync SDK stream). Records failure on error and success once
+        the stream finishes.
+        """
+        logging.info(f"AnthropicProviderHandler: Starting streaming request for model {model}")
+
+        response_id = f"anthropic-{model}-{int(time.time())}"
+        created_time = int(time.time())
+
+        stop_reason_map = {
+            'end_turn': 'stop',
+            'max_tokens': 'length',
+            'stop_sequence': 'stop',
+            'tool_use': 'tool_calls',
+        }
+
+        def _base_chunk():
+            return {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": f"{self.provider_id}/{model}",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+            }
+
+        try:
+            stream_params = dict(api_params)
+            stream_params["stream"] = True
+
+            prompt_tokens = 0
+            completion_tokens = 0
+            tool_block_index = -1  # OpenAI tool_calls index, incremented per tool_use block
+            finish_reason = "stop"
+
+            # First chunk announces the assistant role (OpenAI convention).
+            first = _base_chunk()
+            first["choices"][0]["delta"] = {"role": "assistant"}
+            yield first
+
+            stream = self.client.messages.create(**stream_params)
+            for event in stream:
+                    etype = getattr(event, "type", None)
+
+                    if etype == "message_start":
+                        usage = getattr(getattr(event, "message", None), "usage", None)
+                        if usage is not None:
+                            prompt_tokens = getattr(usage, "input_tokens", 0) or 0
+
+                    elif etype == "content_block_start":
+                        block = getattr(event, "content_block", None)
+                        if block is not None and getattr(block, "type", None) == "tool_use":
+                            tool_block_index += 1
+                            chunk = _base_chunk()
+                            chunk["choices"][0]["delta"] = {
+                                "tool_calls": [{
+                                    "index": tool_block_index,
+                                    "id": getattr(block, "id", "") or f"call_{tool_block_index}",
+                                    "type": "function",
+                                    "function": {"name": getattr(block, "name", "") or "", "arguments": ""},
+                                }]
+                            }
+                            yield chunk
+
+                    elif etype == "content_block_delta":
+                        delta = getattr(event, "delta", None)
+                        dtype = getattr(delta, "type", None)
+                        if dtype == "text_delta":
+                            text = getattr(delta, "text", "") or ""
+                            if text:
+                                chunk = _base_chunk()
+                                chunk["choices"][0]["delta"] = {"content": text}
+                                yield chunk
+                        elif dtype == "input_json_delta":
+                            partial = getattr(delta, "partial_json", "") or ""
+                            if partial and tool_block_index >= 0:
+                                chunk = _base_chunk()
+                                chunk["choices"][0]["delta"] = {
+                                    "tool_calls": [{
+                                        "index": tool_block_index,
+                                        "function": {"arguments": partial},
+                                    }]
+                                }
+                                yield chunk
+
+                    elif etype == "message_delta":
+                        delta = getattr(event, "delta", None)
+                        sr = getattr(delta, "stop_reason", None)
+                        if sr:
+                            finish_reason = stop_reason_map.get(sr, "stop")
+                        usage = getattr(event, "usage", None)
+                        if usage is not None:
+                            completion_tokens = getattr(usage, "output_tokens", 0) or completion_tokens
+
+            # Final chunk with finish_reason and usage.
+            final = _base_chunk()
+            final["choices"][0]["finish_reason"] = finish_reason
+            final["usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+            yield final
+
+            yield b"data: [DONE]\n\n"
+
+            self.record_success()
+            logging.info(f"AnthropicProviderHandler: Streaming completed successfully")
+        except Exception as e:
+            logging.error(f"AnthropicProviderHandler: Streaming error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise
 
     async def get_models(self) -> List[Model]:
         """

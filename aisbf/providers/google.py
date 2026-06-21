@@ -173,36 +173,44 @@ class GoogleProviderHandler(BaseProviderHandler):
                 
                 from google import genai
                 stream_client = genai.Client(api_key=self.api_key)
-                
-                chunks = []
-                
-                for chunk in stream_client.models.generate_content_stream(
-                    model=model,
-                    contents=content,
-                    config=config_params
-                ):
-                    chunks.append(chunk)
-                
-                logging.info(f"GoogleProviderHandler: Streaming response received (total chunks: {len(chunks)})")
-                self.record_success()
-                
-                # After successful streaming response, create cached content if pending
-                if hasattr(self, '_pending_cache_key') and self._pending_cache_key:
-                    cache_key, cache_ttl, cache_messages = self._pending_cache_key
-                    try:
-                        new_cached_name = self._create_cached_content(cache_messages, model, cache_ttl)
-                        if new_cached_name:
-                            expiry_time = time.time() + cache_ttl
-                            self._cached_content_refs[cache_key] = (new_cached_name, expiry_time)
-                            logging.info(f"GoogleProviderHandler: Cached content stored (streaming): {new_cached_name}, expires in {cache_ttl}s")
-                    except Exception as e:
-                        logging.warning(f"GoogleProviderHandler: Failed to create cache after streaming: {e}")
-                    self._pending_cache_key = None
-                
+
+                # Return an async generator that forwards each chunk to the caller
+                # AS IT ARRIVES (true incremental streaming) rather than buffering
+                # the whole response first. Success/cache-creation happen after the
+                # upstream stream is fully consumed. record_success is intentionally
+                # NOT called eagerly here: the caller records success after priming/
+                # consuming the stream (the upstream request has not run yet).
+                provider_self = self
+
                 async def async_generator():
-                    for chunk in chunks:
-                        yield chunk
-                
+                    try:
+                        for chunk in stream_client.models.generate_content_stream(
+                            model=model,
+                            contents=content,
+                            config=config_params
+                        ):
+                            yield chunk
+
+                        logging.info(f"GoogleProviderHandler: Streaming response fully received")
+                        provider_self.record_success()
+
+                        # After a successful stream, create cached content if pending.
+                        if hasattr(provider_self, '_pending_cache_key') and provider_self._pending_cache_key:
+                            cache_key, cache_ttl, cache_messages = provider_self._pending_cache_key
+                            try:
+                                new_cached_name = provider_self._create_cached_content(cache_messages, model, cache_ttl)
+                                if new_cached_name:
+                                    expiry_time = time.time() + cache_ttl
+                                    provider_self._cached_content_refs[cache_key] = (new_cached_name, expiry_time)
+                                    logging.info(f"GoogleProviderHandler: Cached content stored (streaming): {new_cached_name}, expires in {cache_ttl}s")
+                            except Exception as e:
+                                logging.warning(f"GoogleProviderHandler: Failed to create cache after streaming: {e}")
+                            provider_self._pending_cache_key = None
+                    except Exception as e:
+                        logging.error(f"GoogleProviderHandler: Streaming error: {str(e)}", exc_info=True)
+                        provider_self.record_failure()
+                        raise
+
                 return async_generator()
             else:
                 # Non-streaming request

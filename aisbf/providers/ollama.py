@@ -111,7 +111,14 @@ class OllamaProviderHandler(BaseProviderHandler):
             options = {"temperature": temperature}
             if max_tokens is not None:
                 options["num_predict"] = max_tokens
-            
+
+            # Streaming mode: return an async generator yielding OpenAI-compatible
+            # chunks. The caller records success after the stream is consumed, so
+            # we don't record success here.
+            if stream:
+                logger.info("OllamaProviderHandler: Using streaming mode")
+                return self._handle_streaming_request(model, prompt, options)
+
             request_data = {
                 "model": model,
                 "prompt": prompt,
@@ -212,6 +219,92 @@ class OllamaProviderHandler(BaseProviderHandler):
         except Exception as e:
             self.record_failure()
             raise e
+
+    async def _handle_streaming_request(self, model: str, prompt: str, options: dict):
+        """Async generator that streams an Ollama /api/generate request and
+        yields OpenAI-compatible chat.completion.chunk dicts."""
+        logger = logging.getLogger(__name__)
+        logger.info(f"OllamaProviderHandler: Starting streaming request for model {model}")
+
+        response_id = f"ollama-{model}-{int(time.time())}"
+        created_time = int(time.time())
+
+        headers = {}
+        if self.api_key:
+            headers["Authorization"] = f"Bearer {self.api_key}"
+
+        request_data = {
+            "model": model,
+            "prompt": prompt,
+            "options": options,
+            "stream": True,
+        }
+
+        def _base_chunk():
+            return {
+                "id": response_id,
+                "object": "chat.completion.chunk",
+                "created": created_time,
+                "model": f"{self.provider_id}/{model}",
+                "choices": [{"index": 0, "delta": {}, "finish_reason": None}],
+            }
+
+        try:
+            prompt_tokens = 0
+            completion_tokens = 0
+
+            first = _base_chunk()
+            first["choices"][0]["delta"] = {"role": "assistant"}
+            yield first
+
+            async with self.client.stream("POST", "/api/generate", json=request_data, headers=headers) as response:
+                if response.status_code == 429:
+                    body = await response.aread()
+                    try:
+                        response_data = json.loads(body)
+                    except Exception:
+                        response_data = body.decode("utf-8", errors="replace")
+                    self.handle_429_error(response_data, dict(response.headers))
+                    response.raise_for_status()
+
+                response.raise_for_status()
+
+                async for line in response.aiter_lines():
+                    if not line.strip():
+                        continue
+                    try:
+                        obj = json.loads(line)
+                    except json.JSONDecodeError:
+                        logger.warning(f"OllamaProviderHandler: Skipping unparseable stream line: {line[:200]}")
+                        continue
+
+                    text = obj.get("response", "")
+                    if text:
+                        chunk = _base_chunk()
+                        chunk["choices"][0]["delta"] = {"content": text}
+                        yield chunk
+
+                    if obj.get("done"):
+                        prompt_tokens = obj.get("prompt_eval_count", 0) or 0
+                        completion_tokens = obj.get("eval_count", 0) or 0
+
+            final = _base_chunk()
+            final["choices"][0]["finish_reason"] = "stop"
+            final["usage"] = {
+                "prompt_tokens": prompt_tokens,
+                "completion_tokens": completion_tokens,
+                "total_tokens": prompt_tokens + completion_tokens,
+            }
+            yield final
+
+            yield b"data: [DONE]\n\n"
+
+            self.record_success()
+            logger.info("OllamaProviderHandler: Streaming completed successfully")
+        except Exception as e:
+            logger.error(f"OllamaProviderHandler: Streaming error: {str(e)}", exc_info=True)
+            self.record_failure()
+            raise
 
     async def get_models(self) -> List[Model]:
         await self.apply_rate_limit()
