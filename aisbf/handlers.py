@@ -150,12 +150,18 @@ class RequestHandler:
             status_code = (metadata or {}).get('status_code')
             if status_code is None:
                 status_code = 200 if success else 500
+            # Rotation/MCP code paths invoke this without an HTTP request object;
+            # fall back to handler-level context when request is unavailable.
+            path = request.url.path if request is not None else '/rotation'
+            user_id = getattr(request.state, 'user_id', None) if request is not None else getattr(self, 'user_id', None)
+            username = request.session.get('username') if (request is not None and hasattr(request, 'session')) else None
+            method = request.method if request is not None else 'POST'
             db.record_dashboard_event(
                 event_type='request_proxied',
-                path=request.url.path,
-                user_id=getattr(request.state, 'user_id', None),
-                username=request.session.get('username') if hasattr(request, 'session') else None,
-                method=request.method,
+                path=path,
+                user_id=user_id,
+                username=username,
+                method=method,
                 status_code=status_code,
                 provider_id=provider_id,
                 rotation_id=(metadata or {}).get('rotation_id'),
@@ -2477,12 +2483,18 @@ class RotationHandler:
             status_code = (metadata or {}).get('status_code')
             if status_code is None:
                 status_code = 200 if success else 500
+            # Rotation/MCP code paths invoke this without an HTTP request object;
+            # fall back to handler-level context when request is unavailable.
+            path = request.url.path if request is not None else '/rotation'
+            user_id = getattr(request.state, 'user_id', None) if request is not None else getattr(self, 'user_id', None)
+            username = request.session.get('username') if (request is not None and hasattr(request, 'session')) else None
+            method = request.method if request is not None else 'POST'
             db.record_dashboard_event(
                 event_type='request_proxied',
-                path=request.url.path,
-                user_id=getattr(request.state, 'user_id', None),
-                username=request.session.get('username') if hasattr(request, 'session') else None,
-                method=request.method,
+                path=path,
+                user_id=user_id,
+                username=username,
+                method=method,
                 status_code=status_code,
                 provider_id=provider_id,
                 rotation_id=(metadata or {}).get('rotation_id'),
@@ -3422,12 +3434,20 @@ class RotationHandler:
                             provider_id=provider_id,
                             logger=logger
                         )
-                        
+
+                        # Prime streaming chunked responses so immediate provider
+                        # errors trigger failover instead of being streamed to the
+                        # client (see _prime_stream / the non-chunked path below).
+                        if request_data.get('stream', False):
+                            logger.info("Priming chunked streaming response to surface immediate provider errors")
+                            response = await self._prime_stream(response)
+                            logger.info("Chunked streaming response primed successfully (first chunk received)")
+
                         handler.record_success()
                         logger.info(f"=== RotationHandler.handle_rotation_request END ===")
                         logger.info(f"Request succeeded on attempt {attempt + 1}")
                         logger.info(f"Successfully used model: {model_name} (provider: {provider_id})")
-                        
+
                         # Check if response is a streaming request
                         is_streaming = request_data.get('stream', False)
                         if is_streaming:
@@ -3480,7 +3500,22 @@ class RotationHandler:
                 )
                 logger.info(f"Response received from provider")
                 logger.info(f"Response type: {type(response)}")
-                
+
+                # For streaming requests the provider call is lazy: the actual
+                # upstream HTTP request is only made when the generator is first
+                # iterated. If we returned the StreamingResponse now, an immediate
+                # provider error (e.g. HTTP 400/429) would surface *inside* the
+                # response generator after the 200 OK headers were already sent to
+                # the client — making transparent failover impossible.
+                #
+                # Prime the stream here (pull the first chunk) so that such errors
+                # are raised within this try/except and trigger failover to the
+                # next provider by weight, completely transparently to the client.
+                if request_data.get('stream', False):
+                    logger.info("Priming streaming response to surface immediate provider errors")
+                    response = await self._prime_stream(response)
+                    logger.info("Streaming response primed successfully (first chunk received)")
+
                 # Record token usage for rate limit tracking
                 if isinstance(response, dict):
                     usage = response.get('usage', {})
@@ -3593,7 +3628,7 @@ class RotationHandler:
                                 analytics_kind='execution'
                             )
                             self._record_dashboard_proxy_event(
-                                request,
+                                None,
                                 provider_id,
                                 model_name,
                                 True,
@@ -3633,6 +3668,16 @@ class RotationHandler:
                 logger.error(f"Attempt {attempt + 1} failed: {str(e)}")
                 logger.error(f"Error type: {type(e).__name__}")
                 logger.error(f"Model retry count: {model_retry_counts[model_key]}")
+
+                # Non-retryable errors (e.g. HTTP 400/401/403/404/422 — bad request,
+                # unsupported model, auth failure) will fail identically if we retry
+                # the same provider, so don't waste attempts: move straight to the
+                # next provider by weight. Only transient errors (5xx, timeouts,
+                # network) are worth retrying on the same model.
+                if self._is_non_retryable_error(e):
+                    logger.warning(f"Non-retryable error on {model_name} (provider: {provider_id}); skipping to next provider by weight (transparent to client)")
+                    tried_models.append(current_model)
+                    continue
 
                 # If this is the first failure for this model, allow retry with rate limiting
                 if model_retry_counts[model_key] < 2:
@@ -3895,6 +3940,86 @@ class RotationHandler:
         sr = StreamingResponse(error_stream_generator(), media_type="text/event-stream", status_code=status_code)
         sr.aisbf_error = True
         return sr
+
+    def _is_non_retryable_error(self, error) -> bool:
+        """Return True when retrying the same provider for this error is pointless.
+
+        Client errors that reflect the request/credentials rather than a transient
+        condition (HTTP 400/401/403/404/405/422) will fail identically on retry, so
+        the rotation should fail over to the next provider immediately. Rate limits
+        (408/429) and server/network errors (5xx, timeouts) remain retryable.
+        Rate-limit handling has its own RateLimitError path and never reaches here.
+        """
+        non_retryable_codes = {400, 401, 403, 404, 405, 422}
+
+        # Prefer the structured status code when the exception carries an HTTP
+        # response (httpx.HTTPStatusError and similar).
+        status_code = None
+        response = getattr(error, 'response', None)
+        if response is not None:
+            status_code = getattr(response, 'status_code', None)
+        if status_code is None:
+            status_code = getattr(error, 'status_code', None)
+        if isinstance(status_code, int):
+            return status_code in non_retryable_codes
+
+        # Fall back to scanning the error text for an explicit status code.
+        msg = str(error)
+        import re as _re
+        for match in _re.findall(r'\b([45]\d{2})\b', msg):
+            try:
+                code = int(match)
+            except ValueError:
+                continue
+            if code in non_retryable_codes:
+                return True
+        return False
+
+    async def _prime_stream(self, response):
+        """Pull the first chunk of a streaming response so that immediate provider
+        errors are raised here (within the rotation retry loop) instead of after the
+        client's StreamingResponse has started.
+
+        Returns an object with the same iteration semantics as ``response`` (async
+        generator stays async, sync iterable stays sync) with the consumed first
+        chunk re-injected at the front. Non-iterable responses (e.g. dicts) are
+        returned unchanged. Any exception raised while reading the first chunk
+        propagates to the caller so it can fail over to the next provider.
+        """
+        # Async generators / async iterables (codex, kiro, google, etc.)
+        if hasattr(response, '__aiter__'):
+            aiter = response.__aiter__()
+            try:
+                first_chunk = await aiter.__anext__()
+            except StopAsyncIteration:
+                # Valid but empty stream — hand back an empty async generator.
+                async def _empty_async():
+                    return
+                    yield  # pragma: no cover - makes this an async generator
+                return _empty_async()
+
+            async def _rewound_async():
+                yield first_chunk
+                async for chunk in aiter:
+                    yield chunk
+            return _rewound_async()
+
+        # Sync iterables (e.g. OpenAI SDK Stream) — exclude mapping/bytes/str.
+        if hasattr(response, '__iter__') and not isinstance(response, (dict, bytes, str)):
+            iterator = iter(response)
+            try:
+                first_chunk = next(iterator)
+            except StopIteration:
+                return iter(())
+
+            def _rewound_sync():
+                yield first_chunk
+                for chunk in iterator:
+                    yield chunk
+            return _rewound_sync()
+
+        # Not a stream (dict / unexpected type) — nothing to prime.
+        return response
 
     def _create_streaming_response(self, response, provider_type: str, provider_id: str, model_name: str, handler, request_data: Dict, effective_context: int, rotation_id: Optional[str] = None, user_id: Optional[int] = None, token_id: Optional[int] = None, request_start_time: Optional[float] = None):
         """
@@ -4371,7 +4496,7 @@ class RotationHandler:
                         analytics_kind='execution'
                     )
                     self._record_dashboard_proxy_event(
-                        request,
+                        None,
                         provider_id,
                         model_name,
                         True,
@@ -4400,7 +4525,7 @@ class RotationHandler:
                 # Provider already disabled by handle_429 — do NOT call record_failure()
                 latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                 self._record_dashboard_proxy_event(
-                    request,
+                    None,
                     provider_id,
                     model_name,
                     False,
@@ -4419,7 +4544,7 @@ class RotationHandler:
                 handler.record_failure()
                 latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                 self._record_dashboard_proxy_event(
-                    request,
+                    None,
                     provider_id,
                     model_name,
                     False,
