@@ -997,10 +997,17 @@ class DatabaseManager:
             ''', (inactivity_days,))
             user_ids = [row[0] for row in cursor.fetchall()]
 
-            for user_id in user_ids:
+        # Delete outside the SELECT's connection; each delete_user runs in its
+        # own transaction, so one failing user can't abort the whole batch.
+        deleted = 0
+        for user_id in user_ids:
+            try:
                 self.delete_user(user_id)
+                deleted += 1
+            except Exception as exc:
+                logger.warning(f"Failed to delete stale signup user {user_id}: {exc}")
 
-            return len(user_ids)
+        return deleted
     
     def get_user_by_email(self, email: str) -> Optional[Dict]:
         """
@@ -1656,9 +1663,58 @@ class DatabaseManager:
                 'total': total
             }
 
+    # Child tables referencing users(id), ordered so that dependents are
+    # deleted before the rows they point at (FK-safe on MySQL/InnoDB, where
+    # constraints are enforced per-statement). Each entry is (table, column).
+    # Tables missing from a given deployment are skipped gracefully.
+    _USER_CHILD_TABLES = [
+        # Level A: leaf dependents (reference other child tables and/or users)
+        ('wallet_transactions', 'user_id'),
+        ('crypto_transactions', 'user_id'),
+        ('market_import_references', 'user_id'),
+        ('market_imports', 'user_id'),
+        ('market_usage_transactions', 'consumer_user_id'),
+        ('market_usage_transactions', 'provider_user_id'),
+        ('market_votes', 'voter_user_id'),
+        ('payment_transactions', 'user_id'),
+        ('payment_retry_queue', 'user_id'),
+        ('user_token_usage', 'user_id'),
+        ('email_notification_queue', 'user_id'),
+        ('api_requests', 'user_id'),
+        ('studio_assets', 'user_id'),
+        ('studio_pipelines', 'user_id'),
+        ('user_providers', 'user_id'),
+        ('user_rotations', 'user_id'),
+        ('user_autoselects', 'user_id'),
+        ('user_notifications', 'user_id'),
+        ('user_oauth', 'user_id'),
+        ('user_prompts', 'user_id'),
+        ('user_cache_settings', 'user_id'),
+        ('user_auth_files', 'user_id'),
+        # Level B: referenced by level A, themselves reference level C
+        ('user_wallets', 'user_id'),
+        ('subscriptions', 'user_id'),
+        ('user_subscriptions', 'user_id'),
+        ('user_crypto_addresses', 'user_id'),
+        ('user_crypto_addresses_new', 'user_id'),
+        ('user_crypto_wallets', 'user_id'),
+        ('market_listings', 'owner_user_id'),
+        ('user_api_tokens', 'user_id'),
+        # Level C: referenced by level B
+        ('payment_methods', 'user_id'),
+    ]
+
+    @staticmethod
+    def _is_missing_table_error(exc: Exception) -> bool:
+        """True if the exception is a 'table does not exist' error (MySQL 1146 / SQLite)."""
+        if getattr(exc, 'errno', None) == 1146:
+            return True
+        msg = str(exc).lower()
+        return 'no such table' in msg or "doesn't exist" in msg
+
     def delete_user(self, user_id: int):
         """
-        Delete a user and all their configurations.
+        Delete a user and all their related rows across every child table.
 
         Args:
             user_id: User ID to delete
@@ -1666,14 +1722,18 @@ class DatabaseManager:
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
-            # Delete user configurations first (due to foreign key constraints)
-            cursor.execute(f'DELETE FROM user_providers WHERE user_id = {placeholder}', (user_id,))
-            cursor.execute(f'DELETE FROM user_rotations WHERE user_id = {placeholder}', (user_id,))
-            cursor.execute(f'DELETE FROM user_autoselects WHERE user_id = {placeholder}', (user_id,))
-            cursor.execute(f'DELETE FROM user_api_tokens WHERE user_id = {placeholder}', (user_id,))
-            cursor.execute(f'DELETE FROM user_token_usage WHERE user_id = {placeholder}', (user_id,))
-            cursor.execute(f'DELETE FROM user_notifications WHERE user_id = {placeholder}', (user_id,))
-            # Delete the user
+            # Delete all child rows first (FK constraints are enforced on MySQL).
+            for table, column in self._USER_CHILD_TABLES:
+                try:
+                    cursor.execute(
+                        f'DELETE FROM {table} WHERE {column} = {placeholder}',
+                        (user_id,),
+                    )
+                except Exception as exc:
+                    if self._is_missing_table_error(exc):
+                        continue
+                    raise
+            # Finally delete the user itself.
             cursor.execute(f'DELETE FROM users WHERE id = {placeholder}', (user_id,))
             conn.commit()
 
@@ -4364,6 +4424,72 @@ class DatabaseManager:
             )
             conn.commit()
             return cursor.lastrowid
+
+    def create_market_import_reference(self, user_id: int, listing_id: int, reference_type: str,
+                                       display_name: str, owner_username: str, source_type: str,
+                                       source_id: str) -> int:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                INSERT INTO market_import_references
+                    (user_id, listing_id, reference_type, display_name, owner_username, source_type, source_id,
+                     is_active, created_at, updated_at)
+                VALUES ({placeholder}, {placeholder}, {placeholder}, {placeholder}, {placeholder},
+                        {placeholder}, {placeholder}, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)
+                ''',
+                (user_id, listing_id, reference_type, display_name, owner_username, source_type, source_id)
+            )
+            conn.commit()
+            return cursor.lastrowid
+
+    def get_market_import_reference(self, reference_id: int) -> Optional[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT id, user_id, listing_id, reference_type, display_name, owner_username,
+                       source_type, source_id, is_active, created_at, updated_at
+                FROM market_import_references
+                WHERE id = {placeholder}
+                ''',
+                (reference_id,)
+            )
+            row = cursor.fetchone()
+            if not row:
+                return None
+            return {
+                'id': row[0], 'user_id': row[1], 'listing_id': row[2],
+                'reference_type': row[3], 'display_name': row[4], 'name': row[4],
+                'owner_username': row[5], 'source_type': row[6], 'source_id': row[7],
+                'is_active': bool(row[8]), 'created_at': row[9], 'updated_at': row[10],
+            }
+
+    def list_market_import_references(self, user_id: int) -> List[Dict[str, Any]]:
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = self.placeholder
+            cursor.execute(
+                f'''
+                SELECT id, user_id, listing_id, reference_type, display_name, owner_username,
+                       source_type, source_id, is_active, created_at, updated_at
+                FROM market_import_references
+                WHERE user_id = {placeholder}
+                ORDER BY created_at DESC
+                ''',
+                (user_id,)
+            )
+            return [
+                {
+                    'id': row[0], 'user_id': row[1], 'listing_id': row[2],
+                    'reference_type': row[3], 'display_name': row[4], 'name': row[4],
+                    'owner_username': row[5], 'source_type': row[6], 'source_id': row[7],
+                    'is_active': bool(row[8]), 'created_at': row[9], 'updated_at': row[10],
+                }
+                for row in cursor.fetchall()
+            ]
 
     def get_market_listing_for_share(self, owner_username: str, resource_type: str, resource_id: str) -> Optional[Dict[str, Any]]:
         with self._get_connection() as conn:

@@ -104,7 +104,7 @@ def _feature_mode_default(mode: str) -> FeatureModeConfig:
 class ProviderConfig(BaseModel):
     id: str
     name: str
-    endpoint: str
+    endpoint: str = ""  # May be empty for pre-configured handler types that supply their own default
     type: str
     api_key_required: bool
     rate_limit: float = 0.0

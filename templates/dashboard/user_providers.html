@@ -42,16 +42,104 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="form-group">
         <label data-i18n="providers.provider_type">Provider Type</label>
         <select id="new-provider-type" onchange="updateNewProviderDefaults()">
-            <option value="openai">OpenAI</option>
-            <option value="google">Google</option>
-            <option value="anthropic">Anthropic</option>
-            <option value="ollama">Ollama</option>
-            <option value="kiro">Kiro (Amazon Q Developer)</option>
-            <option value="claude">Claude (OAuth2)</option>
-            <option value="kilocode">Kilocode (OAuth2)</option>
-            <option value="qwen">Qwen (OAuth2)</option>
-            <option value="codex">Codex (OpenAI OAuth2)</option>
-            <option value="coderai">CoderAI</option>
+            <optgroup label="— Generic types —">
+                <option value="openai">OpenAI-compatible (generic)</option>
+                <option value="google">Google (Gemini API)</option>
+                <option value="anthropic">Anthropic (API key)</option>
+            </optgroup>
+            <optgroup label="— OAuth2 / Special —">
+                <option value="kiro">Kiro (Amazon Q Developer)</option>
+                <option value="claude">Claude (OAuth2)</option>
+                <option value="kilocode">Kilocode (OAuth2)</option>
+                <option value="qwen">Qwen (OAuth2)</option>
+                <option value="codex">Codex / ChatGPT (OAuth2)</option>
+                <option value="coderai">CoderAI Broker</option>
+                <option value="runpod">RunPod (Pod platform)</option>
+            </optgroup>
+            <optgroup label="— Pre-configured API providers —">
+                <option value="abliteration">Abliteration AI</option>
+                <option value="ai21">AI21 Labs</option>
+                <option value="aihubmix">AIHubMix</option>
+                <option value="aiml">AI/ML API</option>
+                <option value="apertis">Apertis (Stima)</option>
+                <option value="assemblyai_llm">AssemblyAI LLM Gateway</option>
+                <option value="baseten">Baseten</option>
+                <option value="cerebras">Cerebras</option>
+                <option value="charity_engine">Charity Engine</option>
+                <option value="chutes">Chutes AI</option>
+                <option value="clarifai">Clarifai</option>
+                <option value="cohere">Cohere</option>
+                <option value="codestral">Codestral (Mistral Code)</option>
+                <option value="cometapi">CometAPI</option>
+                <option value="compactifai">CompactifAI</option>
+                <option value="crusoe">Crusoe Cloud</option>
+                <option value="dashscope">DashScope (Alibaba / Qwen)</option>
+                <option value="deepinfra">DeepInfra</option>
+                <option value="deepseek">DeepSeek</option>
+                <option value="empower">Empower</option>
+                <option value="featherless_ai">Featherless AI</option>
+                <option value="fireworks_ai">Fireworks AI</option>
+                <option value="friendliai">FriendliAI</option>
+                <option value="galadriel">Galadriel</option>
+                <option value="github_models">GitHub Models</option>
+                <option value="gmi">GMI Serving</option>
+                <option value="gradient_ai">Gradient AI</option>
+                <option value="groq">Groq</option>
+                <option value="helicone">Helicone AI Gateway</option>
+                <option value="huggingface">HuggingFace Inference API</option>
+                <option value="hyperbolic">Hyperbolic</option>
+                <option value="jina_ai">Jina AI</option>
+                <option value="lambda_ai">Lambda AI</option>
+                <option value="llamagate">LlamaGate</option>
+                <option value="maritalk">MariTalk (Maritaca AI)</option>
+                <option value="meta_llama">Meta Llama API</option>
+                <option value="minimax">MiniMax</option>
+                <option value="mistral">Mistral AI</option>
+                <option value="moonshot">Moonshot AI (Kimi)</option>
+                <option value="morph">Morph</option>
+                <option value="nano_gpt">Nano-GPT</option>
+                <option value="nebius">Nebius AI Studio</option>
+                <option value="nlp_cloud">NLP Cloud</option>
+                <option value="novita">Novita AI</option>
+                <option value="nscale">NScale</option>
+                <option value="nvidia_nim">NVIDIA NIM</option>
+                <option value="openrouter">OpenRouter</option>
+                <option value="ovhcloud">OVHcloud AI Endpoints</option>
+                <option value="perplexity">Perplexity AI</option>
+                <option value="poe">Poe API</option>
+                <option value="predibase">Predibase</option>
+                <option value="publicai">PublicAI</option>
+                <option value="sambanova">SambaNova</option>
+                <option value="sarvam">Sarvam AI</option>
+                <option value="scaleway">Scaleway</option>
+                <option value="synthetic">Synthetic AI</option>
+                <option value="together_ai">Together AI</option>
+                <option value="veniceai">Venice AI</option>
+                <option value="vercel_ai_gateway">Vercel AI Gateway</option>
+                <option value="volcengine">VolcEngine (ByteDance Ark)</option>
+                <option value="voyage">VoyageAI</option>
+                <option value="wandb_inference">W&amp;B Inference</option>
+                <option value="xai">xAI (Grok)</option>
+                <option value="xiaomi_mimo">Xiaomi MiMo</option>
+                <option value="zai">ZAI / 01.AI</option>
+            </optgroup>
+            <optgroup label="— Local / self-hosted —">
+                <option value="ollama">Ollama</option>
+                <option value="docker_model_runner">Docker Model Runner</option>
+                <option value="infinity">Infinity</option>
+                <option value="llamafile">Llamafile</option>
+                <option value="lm_studio">LM Studio</option>
+                <option value="oobabooga">Oobabooga (Text Gen WebUI)</option>
+                <option value="tabbyapi">TabbyAPI</option>
+                <option value="vllm">vLLM</option>
+                <option value="xinference">Xorbits Inference</option>
+            </optgroup>
+            <optgroup label="— Cloud (configure endpoint) —">
+                <option value="azure_openai">Azure OpenAI</option>
+                <option value="databricks">Databricks Model Serving</option>
+                <option value="heroku">Heroku AI</option>
+                <option value="snowflake">Snowflake Cortex</option>
+            </optgroup>
         </select>
         <small style="color: var(--color-muted); display: block; margin-top: 5px;">Select the type of provider to configure appropriate settings</small>
     </div>
@@ -1301,15 +1389,104 @@ function renderProviderDetails(key) {
         <div class="form-group">
             <label>${window.i18n.t('providers.provider_type')}</label>
             <select onchange="updateProviderType('${key}', this.value)" required>
-                <option value="google" ${provider.type === 'google' ? 'selected' : ''}>Google</option>
-                <option value="openai" ${provider.type === 'openai' ? 'selected' : ''}>OpenAI</option>
-                <option value="anthropic" ${provider.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
-                <option value="ollama" ${provider.type === 'ollama' ? 'selected' : ''}>Ollama</option>
-                <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
-                <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
-                <option value="kilocode" ${provider.type === 'kilocode' ? 'selected' : ''}>Kilocode (OAuth2)</option>
-                <option value="qwen" ${provider.type === 'qwen' ? 'selected' : ''}>Qwen (OAuth2)</option>
-                <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
+                <optgroup label="Generic types">
+                    <option value="openai" ${provider.type === 'openai' ? 'selected' : ''}>OpenAI</option>
+                    <option value="google" ${provider.type === 'google' ? 'selected' : ''}>Google</option>
+                    <option value="anthropic" ${provider.type === 'anthropic' ? 'selected' : ''}>Anthropic</option>
+                </optgroup>
+                <optgroup label="OAuth2 / Special">
+                    <option value="kiro" ${provider.type === 'kiro' ? 'selected' : ''}>Kiro (Amazon Q Developer)</option>
+                    <option value="claude" ${provider.type === 'claude' ? 'selected' : ''}>Claude (OAuth2)</option>
+                    <option value="kilocode" ${provider.type === 'kilocode' ? 'selected' : ''}>Kilocode (OAuth2)</option>
+                    <option value="qwen" ${provider.type === 'qwen' ? 'selected' : ''}>Qwen (OAuth2)</option>
+                    <option value="codex" ${provider.type === 'codex' ? 'selected' : ''}>Codex (OpenAI OAuth2)</option>
+                    <option value="coderai" ${provider.type === 'coderai' ? 'selected' : ''}>CoderAI</option>
+                    <option value="runpod" ${provider.type === 'runpod' ? 'selected' : ''}>RunPod (Pod platform)</option>
+                </optgroup>
+                <optgroup label="Pre-configured API providers">
+                    <option value="abliteration" ${provider.type === 'abliteration' ? 'selected' : ''}>Abliteration AI</option>
+                    <option value="ai21" ${provider.type === 'ai21' ? 'selected' : ''}>AI21</option>
+                    <option value="aiml" ${provider.type === 'aiml' ? 'selected' : ''}>AI/ML API</option>
+                    <option value="aihubmix" ${provider.type === 'aihubmix' ? 'selected' : ''}>AIHubMix</option>
+                    <option value="apertis" ${provider.type === 'apertis' ? 'selected' : ''}>Apertis (Stima)</option>
+                    <option value="assemblyai_llm" ${provider.type === 'assemblyai_llm' ? 'selected' : ''}>AssemblyAI LLM</option>
+                    <option value="baseten" ${provider.type === 'baseten' ? 'selected' : ''}>Baseten</option>
+                    <option value="cerebras" ${provider.type === 'cerebras' ? 'selected' : ''}>Cerebras</option>
+                    <option value="charity_engine" ${provider.type === 'charity_engine' ? 'selected' : ''}>Charity Engine</option>
+                    <option value="chutes" ${provider.type === 'chutes' ? 'selected' : ''}>Chutes</option>
+                    <option value="clarifai" ${provider.type === 'clarifai' ? 'selected' : ''}>Clarifai</option>
+                    <option value="cohere" ${provider.type === 'cohere' ? 'selected' : ''}>Cohere</option>
+                    <option value="codestral" ${provider.type === 'codestral' ? 'selected' : ''}>Codestral (Mistral)</option>
+                    <option value="cometapi" ${provider.type === 'cometapi' ? 'selected' : ''}>CometAPI</option>
+                    <option value="compactifai" ${provider.type === 'compactifai' ? 'selected' : ''}>CompactifAI</option>
+                    <option value="crusoe" ${provider.type === 'crusoe' ? 'selected' : ''}>Crusoe Cloud</option>
+                    <option value="dashscope" ${provider.type === 'dashscope' ? 'selected' : ''}>DashScope (Alibaba)</option>
+                    <option value="deepinfra" ${provider.type === 'deepinfra' ? 'selected' : ''}>DeepInfra</option>
+                    <option value="deepseek" ${provider.type === 'deepseek' ? 'selected' : ''}>DeepSeek</option>
+                    <option value="empower" ${provider.type === 'empower' ? 'selected' : ''}>Empower</option>
+                    <option value="featherless_ai" ${provider.type === 'featherless_ai' ? 'selected' : ''}>Featherless AI</option>
+                    <option value="fireworks_ai" ${provider.type === 'fireworks_ai' ? 'selected' : ''}>Fireworks AI</option>
+                    <option value="friendliai" ${provider.type === 'friendliai' ? 'selected' : ''}>Friendli AI</option>
+                    <option value="galadriel" ${provider.type === 'galadriel' ? 'selected' : ''}>Galadriel</option>
+                    <option value="github_models" ${provider.type === 'github_models' ? 'selected' : ''}>GitHub Models</option>
+                    <option value="gmi" ${provider.type === 'gmi' ? 'selected' : ''}>GMI Serving</option>
+                    <option value="gradient_ai" ${provider.type === 'gradient_ai' ? 'selected' : ''}>Gradient AI (DigitalOcean)</option>
+                    <option value="groq" ${provider.type === 'groq' ? 'selected' : ''}>Groq</option>
+                    <option value="helicone" ${provider.type === 'helicone' ? 'selected' : ''}>Helicone AI Gateway</option>
+                    <option value="huggingface" ${provider.type === 'huggingface' ? 'selected' : ''}>HuggingFace Inference</option>
+                    <option value="hyperbolic" ${provider.type === 'hyperbolic' ? 'selected' : ''}>Hyperbolic</option>
+                    <option value="jina_ai" ${provider.type === 'jina_ai' ? 'selected' : ''}>Jina AI</option>
+                    <option value="lambda_ai" ${provider.type === 'lambda_ai' ? 'selected' : ''}>Lambda AI</option>
+                    <option value="llamagate" ${provider.type === 'llamagate' ? 'selected' : ''}>LlamaGate</option>
+                    <option value="maritalk" ${provider.type === 'maritalk' ? 'selected' : ''}>MariTalk</option>
+                    <option value="meta_llama" ${provider.type === 'meta_llama' ? 'selected' : ''}>Meta Llama API</option>
+                    <option value="minimax" ${provider.type === 'minimax' ? 'selected' : ''}>MiniMax</option>
+                    <option value="mistral" ${provider.type === 'mistral' ? 'selected' : ''}>Mistral AI</option>
+                    <option value="moonshot" ${provider.type === 'moonshot' ? 'selected' : ''}>Moonshot AI</option>
+                    <option value="morph" ${provider.type === 'morph' ? 'selected' : ''}>Morph LLM</option>
+                    <option value="nano_gpt" ${provider.type === 'nano_gpt' ? 'selected' : ''}>NanoGPT</option>
+                    <option value="nebius" ${provider.type === 'nebius' ? 'selected' : ''}>Nebius AI Studio</option>
+                    <option value="nlp_cloud" ${provider.type === 'nlp_cloud' ? 'selected' : ''}>NLP Cloud</option>
+                    <option value="novita" ${provider.type === 'novita' ? 'selected' : ''}>Novita AI</option>
+                    <option value="nscale" ${provider.type === 'nscale' ? 'selected' : ''}>NScale</option>
+                    <option value="nvidia_nim" ${provider.type === 'nvidia_nim' ? 'selected' : ''}>NVIDIA NIM</option>
+                    <option value="openrouter" ${provider.type === 'openrouter' ? 'selected' : ''}>OpenRouter</option>
+                    <option value="ovhcloud" ${provider.type === 'ovhcloud' ? 'selected' : ''}>OVHcloud AI</option>
+                    <option value="perplexity" ${provider.type === 'perplexity' ? 'selected' : ''}>Perplexity AI</option>
+                    <option value="poe" ${provider.type === 'poe' ? 'selected' : ''}>Poe</option>
+                    <option value="predibase" ${provider.type === 'predibase' ? 'selected' : ''}>Predibase</option>
+                    <option value="publicai" ${provider.type === 'publicai' ? 'selected' : ''}>PublicAI</option>
+                    <option value="sambanova" ${provider.type === 'sambanova' ? 'selected' : ''}>SambaNova</option>
+                    <option value="sarvam" ${provider.type === 'sarvam' ? 'selected' : ''}>Sarvam AI</option>
+                    <option value="scaleway" ${provider.type === 'scaleway' ? 'selected' : ''}>Scaleway</option>
+                    <option value="synthetic" ${provider.type === 'synthetic' ? 'selected' : ''}>Synthetic</option>
+                    <option value="together_ai" ${provider.type === 'together_ai' ? 'selected' : ''}>Together AI</option>
+                    <option value="veniceai" ${provider.type === 'veniceai' ? 'selected' : ''}>Venice AI</option>
+                    <option value="vercel_ai_gateway" ${provider.type === 'vercel_ai_gateway' ? 'selected' : ''}>Vercel AI Gateway</option>
+                    <option value="volcengine" ${provider.type === 'volcengine' ? 'selected' : ''}>VolcEngine (ByteDance)</option>
+                    <option value="voyage" ${provider.type === 'voyage' ? 'selected' : ''}>Voyage AI</option>
+                    <option value="wandb_inference" ${provider.type === 'wandb_inference' ? 'selected' : ''}>W&amp;B Inference</option>
+                    <option value="xai" ${provider.type === 'xai' ? 'selected' : ''}>xAI (Grok)</option>
+                    <option value="xiaomi_mimo" ${provider.type === 'xiaomi_mimo' ? 'selected' : ''}>Xiaomi MiMo</option>
+                    <option value="zai" ${provider.type === 'zai' ? 'selected' : ''}>Z.AI</option>
+                </optgroup>
+                <optgroup label="Local / self-hosted">
+                    <option value="ollama" ${provider.type === 'ollama' ? 'selected' : ''}>Ollama</option>
+                    <option value="docker_model_runner" ${provider.type === 'docker_model_runner' ? 'selected' : ''}>Docker Model Runner</option>
+                    <option value="infinity" ${provider.type === 'infinity' ? 'selected' : ''}>Infinity</option>
+                    <option value="llamafile" ${provider.type === 'llamafile' ? 'selected' : ''}>Llamafile</option>
+                    <option value="lm_studio" ${provider.type === 'lm_studio' ? 'selected' : ''}>LM Studio</option>
+                    <option value="oobabooga" ${provider.type === 'oobabooga' ? 'selected' : ''}>Oobabooga (Text Gen WebUI)</option>
+                    <option value="tabbyapi" ${provider.type === 'tabbyapi' ? 'selected' : ''}>TabbyAPI</option>
+                    <option value="vllm" ${provider.type === 'vllm' ? 'selected' : ''}>vLLM</option>
+                    <option value="xinference" ${provider.type === 'xinference' ? 'selected' : ''}>Xinference</option>
+                </optgroup>
+                <optgroup label="Cloud (configure endpoint)">
+                    <option value="azure_openai" ${provider.type === 'azure_openai' ? 'selected' : ''}>Azure OpenAI</option>
+                    <option value="databricks" ${provider.type === 'databricks' ? 'selected' : ''}>Databricks</option>
+                    <option value="heroku" ${provider.type === 'heroku' ? 'selected' : ''}>Heroku AI</option>
+                    <option value="snowflake" ${provider.type === 'snowflake' ? 'selected' : ''}>Snowflake Cortex</option>
+                </optgroup>
             </select>
         </div>
         
@@ -1726,7 +1903,88 @@ function updateNewProviderDefaults() {
         'kilocode': 'Kilocode provider. Uses OAuth2 Device Authorization Grant. Endpoint: https://api.kilo.ai/api/gateway',
         'qwen': 'Qwen provider. Uses OAuth2 Device Authorization Grant or API key. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'Codex provider. Uses OAuth2 Device Authorization Grant (same protocol as OpenAI). Endpoint: https://api.openai.com/v1',
-        'coderai': 'CoderAI provider. In broker mode, CoderAI connects inbound to AISBF using a provider-scoped registration token. In direct mode, AISBF calls it as an OpenAI-compatible endpoint. Default endpoint: http://127.0.0.1:11437'
+        'coderai': 'CoderAI provider. In broker mode, CoderAI connects inbound to AISBF using a provider-scoped registration token. In direct mode, AISBF calls it as an OpenAI-compatible endpoint. Default endpoint: http://127.0.0.1:11437',
+        // Pre-configured API providers
+        'abliteration': 'Abliteration AI — OpenAI-compatible inference API. Endpoint: https://api.abliteration.ai/v1',
+        'ai21': 'AI21 Labs — OpenAI-compatible endpoint for Jamba and Jurassic models. Endpoint: https://api.ai21.com/studio/v1',
+        'aiml': 'AI/ML API — unified gateway for many models. Endpoint: https://api.aimlapi.com/v1',
+        'aihubmix': 'AIHubMix — OpenAI-compatible aggregator. Endpoint: https://aihubmix.com/v1',
+        'apertis': 'Apertis (Stima Tech) — OpenAI-compatible inference. Endpoint: https://api.stima.tech/v1',
+        'assemblyai_llm': 'AssemblyAI LLM Gateway — OpenAI-compatible endpoint. Endpoint: https://llm-gateway.assemblyai.com/v1',
+        'baseten': 'Baseten — deploy and serve ML models. Endpoint: https://inference.baseten.co/v1',
+        'cerebras': 'Cerebras — fast inference on Cerebras hardware. Endpoint: https://api.cerebras.ai/v1',
+        'charity_engine': 'Charity Engine — distributed compute for AI. Endpoint: https://api.charityengine.services/remotejobs/v2/inference',
+        'chutes': 'Chutes — decentralized AI inference. Endpoint: https://llm.chutes.ai/v1',
+        'clarifai': 'Clarifai — AI platform with OpenAI-compatible API. Endpoint: https://api.clarifai.com/v2/ext/openai/v1',
+        'cohere': 'Cohere — language models via OpenAI compatibility layer. Endpoint: https://api.cohere.ai/compatibility/v1',
+        'codestral': 'Codestral — Mistral\'s code-focused model endpoint. Endpoint: https://codestral.mistral.ai/v1',
+        'cometapi': 'CometAPI — OpenAI-compatible model aggregator. Endpoint: https://api.cometapi.com/v1',
+        'compactifai': 'CompactifAI — efficient model inference. Endpoint: https://api.compactif.ai/v1',
+        'crusoe': 'Crusoe Cloud — GPU cloud with managed inference. Endpoint: https://managed-inference-api-proxy.crusoecloud.com/v1',
+        'dashscope': 'DashScope (Alibaba Cloud) — Qwen and other models. Endpoint: https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'deepinfra': 'DeepInfra — run open-source models at scale. Endpoint: https://api.deepinfra.com/v1/openai',
+        'deepseek': 'DeepSeek — reasoning and chat models. Endpoint: https://api.deepseek.com/v1',
+        'empower': 'Empower — AI inference platform. Endpoint: https://app.empower.dev/api/v1',
+        'featherless_ai': 'Featherless AI — serverless open-source model hosting. Endpoint: https://api.featherless.ai/v1',
+        'fireworks_ai': 'Fireworks AI — fast open-source model inference. Endpoint: https://api.fireworks.ai/inference/v1',
+        'friendliai': 'Friendli AI — serverless model inference. Endpoint: https://api.friendli.ai/serverless/v1',
+        'galadriel': 'Galadriel — decentralized AI inference. Endpoint: https://api.galadriel.com/v1',
+        'github_models': 'GitHub Models — run AI models from the GitHub Marketplace. Endpoint: https://models.inference.ai.azure.com',
+        'gmi': 'GMI Serving — OpenAI-compatible GPU inference. Endpoint: https://api.gmi-serving.com/v1',
+        'gradient_ai': 'Gradient AI / DigitalOcean GenAI — managed inference. Endpoint: https://inference.do-ai.run/v1',
+        'groq': 'Groq — ultra-fast LPU inference. Endpoint: https://api.groq.com/openai/v1',
+        'helicone': 'Helicone AI Gateway — observability proxy for LLMs. Endpoint: https://ai-gateway.helicone.ai',
+        'huggingface': 'HuggingFace Inference — run models from the HuggingFace Hub. Endpoint: https://api-inference.huggingface.co/v1',
+        'hyperbolic': 'Hyperbolic — GPU cloud inference platform. Endpoint: https://api.hyperbolic.xyz/v1',
+        'jina_ai': 'Jina AI — embeddings and reranking. Endpoint: https://api.jina.ai/v1',
+        'lambda_ai': 'Lambda AI — GPU cloud with inference API. Endpoint: https://api.lambda.ai/v1',
+        'llamagate': 'LlamaGate — open model inference gateway. Endpoint: https://api.llamagate.dev/v1',
+        'maritalk': 'MariTalk — Brazilian Portuguese AI models. Endpoint: https://api.maritalk.com/v1',
+        'meta_llama': 'Meta Llama API — official Meta inference endpoint. Endpoint: https://api.llama.com/compat/v1',
+        'minimax': 'MiniMax — Chinese AI provider with global models. Endpoint: https://api.minimax.io/v1',
+        'mistral': 'Mistral AI — Mistral and Mixtral models. Endpoint: https://api.mistral.ai/v1',
+        'moonshot': 'Moonshot AI — long-context Chinese AI provider. Endpoint: https://api.moonshot.ai/v1',
+        'morph': 'Morph LLM — OpenAI-compatible inference. Endpoint: https://api.morphllm.com/v1',
+        'nano_gpt': 'NanoGPT — pay-per-token model marketplace. Endpoint: https://nano-gpt.com/api/v1',
+        'nebius': 'Nebius AI Studio — GPU cloud with inference API. Endpoint: https://api.studio.nebius.ai/v1',
+        'nlp_cloud': 'NLP Cloud — production-ready NLP models. Endpoint: https://api.nlpcloud.io/v1',
+        'novita': 'Novita AI — affordable GPU inference. Endpoint: https://api.novita.ai/v3/openai',
+        'nscale': 'NScale — high-performance GPU inference. Endpoint: https://inference.api.nscale.com/v1',
+        'nvidia_nim': 'NVIDIA NIM — NVIDIA-optimized model microservices. Endpoint: https://integrate.api.nvidia.com/v1',
+        'openrouter': 'OpenRouter — unified API for 100+ models across providers. Endpoint: https://openrouter.ai/api/v1',
+        'ovhcloud': 'OVHcloud AI — European cloud AI endpoint. Endpoint: https://oai.endpoints.kepler.ai.cloud.ovh.net/v1',
+        'perplexity': 'Perplexity AI — search-augmented language models. Endpoint: https://api.perplexity.ai',
+        'poe': 'Poe — access many AI models through Poe. Endpoint: https://api.poe.com/v1',
+        'predibase': 'Predibase — fine-tuned model serving. Endpoint: https://serving.app.predibase.com/v1',
+        'publicai': 'PublicAI — open model inference. Endpoint: https://api.publicai.co/v1',
+        'runpod': 'RunPod — serverless GPU cloud for AI workloads. Configure endpoint per pod.',
+        'sambanova': 'SambaNova — enterprise AI inference platform. Endpoint: https://api.sambanova.ai/v1',
+        'sarvam': 'Sarvam AI — Indian language AI models. Endpoint: https://api.sarvam.ai/v1',
+        'scaleway': 'Scaleway — European cloud inference API. Endpoint: https://api.scaleway.ai/v1',
+        'synthetic': 'Synthetic — AI inference platform. Endpoint: https://api.synthetic.new/openai/v1',
+        'together_ai': 'Together AI — collaborative open-source model inference. Endpoint: https://api.together.xyz/v1',
+        'veniceai': 'Venice AI — privacy-first AI inference. Endpoint: https://api.venice.ai/api/v1',
+        'vercel_ai_gateway': 'Vercel AI Gateway — managed AI gateway from Vercel. Endpoint: https://ai-gateway.vercel.sh/v1',
+        'volcengine': 'VolcEngine (ByteDance) — Doubao and other models. Endpoint: https://ark.cn-beijing.volces.com/api/v3',
+        'voyage': 'Voyage AI — specialized embedding and reranking models. Endpoint: https://api.voyageai.com/v1',
+        'wandb_inference': 'W&B Inference — Weights & Biases model inference. Endpoint: https://api.inference.wandb.ai/v1',
+        'xai': 'xAI (Grok) — Grok models by Elon Musk\'s xAI. Endpoint: https://api.x.ai/v1',
+        'xiaomi_mimo': 'Xiaomi MiMo — Xiaomi\'s open-source reasoning model. Endpoint: https://api.xiaomimimo.com/v1',
+        'zai': 'Z.AI — OpenAI-compatible inference. Endpoint: https://api.z.ai/api/paas/v4',
+        // Local / self-hosted
+        'docker_model_runner': 'Docker Model Runner — run AI models via Docker Desktop. No API key required. Endpoint: http://localhost:12434/engines/llama.cpp/v1',
+        'infinity': 'Infinity — fast embedding and reranking server. No API key required. Endpoint: http://localhost:8000/v1',
+        'llamafile': 'Llamafile — self-contained executable LLM server. No API key required. Endpoint: http://localhost:8080/v1',
+        'lm_studio': 'LM Studio — local GUI for running LLMs. No API key required. Endpoint: http://localhost:1234/v1',
+        'oobabooga': 'Oobabooga (Text Generation WebUI) — local LLM frontend. No API key required. Endpoint: http://localhost:5000/v1',
+        'tabbyapi': 'TabbyAPI — local ExLlamaV2-based inference server. No API key required. Endpoint: http://localhost:5000/v1',
+        'vllm': 'vLLM — high-throughput local model server. No API key required. Endpoint: http://localhost:8000/v1',
+        'xinference': 'Xinference — distributed model inference. No API key required. Endpoint: http://localhost:9997/v1',
+        // Cloud (configure endpoint)
+        'azure_openai': 'Azure OpenAI — Microsoft Azure-hosted OpenAI models. Requires your Azure resource endpoint (e.g. https://YOUR-RESOURCE.openai.azure.com/openai/v1).',
+        'databricks': 'Databricks — AI/BI and model serving on Databricks. Requires your workspace endpoint.',
+        'heroku': 'Heroku AI — managed inference on Heroku. Requires your Heroku inference endpoint.',
+        'snowflake': 'Snowflake Cortex — AI inference within Snowflake. Requires your Snowflake account endpoint.',
     };
 
     descriptionEl.textContent = descriptions[providerType] || window.i18n.t('providers.standard_config');
@@ -2680,16 +2938,98 @@ async function confirmAddProvider() {
 
 function getDefaultEndpoint(type) {
     const defaults = {
+        // Generic types
         'openai': 'https://api.openai.com/v1',
         'google': 'https://generativelanguage.googleapis.com/v1beta',
         'anthropic': 'https://api.anthropic.com/v1',
         'ollama': 'http://localhost:11434/api',
+        // OAuth2 / Special
         'kiro': 'https://q.us-east-1.amazonaws.com',
         'claude': 'https://api.anthropic.com/v1',
         'kilocode': 'https://api.kilo.ai/api/gateway',
         'qwen': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
         'codex': 'https://api.openai.com/v1',
-        'coderai': 'http://127.0.0.1:11437'
+        'coderai': 'http://127.0.0.1:11437',
+        // Pre-configured API providers
+        'abliteration': 'https://api.abliteration.ai/v1',
+        'ai21': 'https://api.ai21.com/studio/v1',
+        'aiml': 'https://api.aimlapi.com/v1',
+        'aihubmix': 'https://aihubmix.com/v1',
+        'apertis': 'https://api.stima.tech/v1',
+        'assemblyai_llm': 'https://llm-gateway.assemblyai.com/v1',
+        'baseten': 'https://inference.baseten.co/v1',
+        'cerebras': 'https://api.cerebras.ai/v1',
+        'charity_engine': 'https://api.charityengine.services/remotejobs/v2/inference',
+        'chutes': 'https://llm.chutes.ai/v1',
+        'clarifai': 'https://api.clarifai.com/v2/ext/openai/v1',
+        'cohere': 'https://api.cohere.ai/compatibility/v1',
+        'codestral': 'https://codestral.mistral.ai/v1',
+        'cometapi': 'https://api.cometapi.com/v1',
+        'compactifai': 'https://api.compactif.ai/v1',
+        'crusoe': 'https://managed-inference-api-proxy.crusoecloud.com/v1',
+        'dashscope': 'https://dashscope.aliyuncs.com/compatible-mode/v1',
+        'deepinfra': 'https://api.deepinfra.com/v1/openai',
+        'deepseek': 'https://api.deepseek.com/v1',
+        'empower': 'https://app.empower.dev/api/v1',
+        'featherless_ai': 'https://api.featherless.ai/v1',
+        'fireworks_ai': 'https://api.fireworks.ai/inference/v1',
+        'friendliai': 'https://api.friendli.ai/serverless/v1',
+        'galadriel': 'https://api.galadriel.com/v1',
+        'github_models': 'https://models.inference.ai.azure.com',
+        'gmi': 'https://api.gmi-serving.com/v1',
+        'gradient_ai': 'https://inference.do-ai.run/v1',
+        'groq': 'https://api.groq.com/openai/v1',
+        'helicone': 'https://ai-gateway.helicone.ai',
+        'huggingface': 'https://api-inference.huggingface.co/v1',
+        'hyperbolic': 'https://api.hyperbolic.xyz/v1',
+        'jina_ai': 'https://api.jina.ai/v1',
+        'lambda_ai': 'https://api.lambda.ai/v1',
+        'llamagate': 'https://api.llamagate.dev/v1',
+        'maritalk': 'https://api.maritalk.com/v1',
+        'meta_llama': 'https://api.llama.com/compat/v1',
+        'minimax': 'https://api.minimax.io/v1',
+        'mistral': 'https://api.mistral.ai/v1',
+        'moonshot': 'https://api.moonshot.ai/v1',
+        'morph': 'https://api.morphllm.com/v1',
+        'nano_gpt': 'https://nano-gpt.com/api/v1',
+        'nebius': 'https://api.studio.nebius.ai/v1',
+        'nlp_cloud': 'https://api.nlpcloud.io/v1',
+        'novita': 'https://api.novita.ai/v3/openai',
+        'nscale': 'https://inference.api.nscale.com/v1',
+        'nvidia_nim': 'https://integrate.api.nvidia.com/v1',
+        'openrouter': 'https://openrouter.ai/api/v1',
+        'ovhcloud': 'https://oai.endpoints.kepler.ai.cloud.ovh.net/v1',
+        'perplexity': 'https://api.perplexity.ai',
+        'poe': 'https://api.poe.com/v1',
+        'predibase': 'https://serving.app.predibase.com/v1',
+        'publicai': 'https://api.publicai.co/v1',
+        'sambanova': 'https://api.sambanova.ai/v1',
+        'sarvam': 'https://api.sarvam.ai/v1',
+        'scaleway': 'https://api.scaleway.ai/v1',
+        'synthetic': 'https://api.synthetic.new/openai/v1',
+        'together_ai': 'https://api.together.xyz/v1',
+        'veniceai': 'https://api.venice.ai/api/v1',
+        'vercel_ai_gateway': 'https://ai-gateway.vercel.sh/v1',
+        'volcengine': 'https://ark.cn-beijing.volces.com/api/v3',
+        'voyage': 'https://api.voyageai.com/v1',
+        'wandb_inference': 'https://api.inference.wandb.ai/v1',
+        'xai': 'https://api.x.ai/v1',
+        'xiaomi_mimo': 'https://api.xiaomimimo.com/v1',
+        'zai': 'https://api.z.ai/api/paas/v4',
+        // Local / self-hosted
+        'docker_model_runner': 'http://localhost:12434/engines/llama.cpp/v1',
+        'infinity': 'http://localhost:8000/v1',
+        'llamafile': 'http://localhost:8080/v1',
+        'lm_studio': 'http://localhost:1234/v1',
+        'oobabooga': 'http://localhost:5000/v1',
+        'tabbyapi': 'http://localhost:5000/v1',
+        'vllm': 'http://localhost:8000/v1',
+        'xinference': 'http://localhost:9997/v1',
+        // Cloud (configure endpoint — left empty so user must fill in)
+        'azure_openai': '',
+        'databricks': '',
+        'heroku': '',
+        'snowflake': '',
     };
     return defaults[type] || '';
 }

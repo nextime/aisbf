@@ -2470,6 +2470,110 @@ class RotationHandler:
             for rotation in self.user_rotations:
                 self.rotations[rotation['rotation_id']] = rotation['config']
 
+    def _record_dashboard_proxy_event(self, request, provider_id: str, model_name: str, success: bool, latency_ms: float, metadata: Dict | None = None):
+        try:
+            from aisbf.database import DatabaseRegistry
+            db = DatabaseRegistry.get_config_database()
+            status_code = (metadata or {}).get('status_code')
+            if status_code is None:
+                status_code = 200 if success else 500
+            db.record_dashboard_event(
+                event_type='request_proxied',
+                path=request.url.path,
+                user_id=getattr(request.state, 'user_id', None),
+                username=request.session.get('username') if hasattr(request, 'session') else None,
+                method=request.method,
+                status_code=status_code,
+                provider_id=provider_id,
+                rotation_id=(metadata or {}).get('rotation_id'),
+                autoselect_id=(metadata or {}).get('autoselect_id'),
+                metadata={
+                    'model_name': model_name,
+                    'latency_ms': round(float(latency_ms or 0), 2),
+                    'stream': bool((metadata or {}).get('stream')),
+                    **(metadata or {}),
+                },
+            )
+        except Exception:
+            logger.debug("Failed to record proxied request dashboard event", exc_info=True)
+
+    def _get_market_source_details(self, provider_id: str):
+        provider_config = None
+        if self.user_id and provider_id in getattr(self, 'user_providers', {}):
+            provider_config = self.user_providers.get(provider_id)
+        elif provider_id in getattr(self.config, 'providers', {}):
+            cfg = self.config.get_provider(provider_id)
+            provider_config = cfg.model_dump() if hasattr(cfg, 'model_dump') else cfg
+        if isinstance(provider_config, dict):
+            return provider_config.get('market_source')
+        return None
+
+    @staticmethod
+    def _market_request_id(request_data: Optional[Dict], fallback_provider_id: str) -> str:
+        payload = {
+            'provider_id': fallback_provider_id,
+            'model': (request_data or {}).get('model'),
+            'messages': (request_data or {}).get('messages'),
+            'input': (request_data or {}).get('input'),
+            'prompt': (request_data or {}).get('prompt'),
+            'voice': (request_data or {}).get('voice'),
+            'endpoint_path': (request_data or {}).get('_market_endpoint_path'),
+        }
+        serialized = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def _settle_market_result(self, provider_id: str, usage: Optional[Dict], requests_count: int = 1, metadata: Optional[Dict] = None, request_data: Optional[Dict] = None):
+        market_source = self._get_market_source_details(provider_id)
+        if not self.user_id or not market_source:
+            return None
+        listing_id = market_source.get('listing_id')
+        if not listing_id:
+            return None
+        db = DatabaseRegistry.get_config_database()
+        settlement_metadata = {
+            'provider_id': provider_id,
+            'market_imported': True,
+            'market_request_id': self._market_request_id(request_data, provider_id),
+        }
+        if metadata:
+            settlement_metadata.update(metadata)
+        return db.settle_market_usage(
+            consumer_user_id=self.user_id,
+            listing_id=int(listing_id),
+            prompt_tokens=(usage or {}).get('prompt_tokens', 0),
+            completion_tokens=(usage or {}).get('completion_tokens', 0),
+            requests_count=requests_count,
+            metadata=settlement_metadata,
+        )
+
+    def _extract_usage_from_sse_chunk(self, chunk_payload) -> Optional[Dict[str, int]]:
+        try:
+            if isinstance(chunk_payload, bytes):
+                chunk_payload = chunk_payload.decode('utf-8', errors='ignore')
+            if isinstance(chunk_payload, str):
+                for line in chunk_payload.splitlines():
+                    line = line.strip()
+                    if not line.startswith('data: '):
+                        continue
+                    raw = line[6:].strip()
+                    if not raw or raw == '[DONE]':
+                        continue
+                    try:
+                        parsed = json.loads(raw)
+                    except Exception:
+                        continue
+                    if isinstance(parsed, dict) and isinstance(parsed.get('usage'), dict):
+                        usage = parsed.get('usage') or {}
+                        if usage.get('total_tokens') is not None or usage.get('prompt_tokens') is not None or usage.get('completion_tokens') is not None:
+                            return usage
+            elif isinstance(chunk_payload, dict):
+                usage = chunk_payload.get('usage')
+                if isinstance(usage, dict):
+                    return usage
+        except Exception:
+            return None
+        return None
+
     def _get_provider_type(self, provider_id: str) -> str:
         """Get the provider type from configuration"""
         provider_config = self.config.get_provider(provider_id)
@@ -4459,6 +4563,55 @@ class AutoselectHandler:
             self.user_rotations = {}
             self.user_autoselects = {}
             self.autoselects = self.config.autoselect if hasattr(self.config, 'autoselect') else {}
+
+    def _get_market_source_details(self, provider_id: str):
+        provider_config = None
+        if self.user_id and provider_id in getattr(self, 'user_providers', {}):
+            provider_config = self.user_providers.get(provider_id)
+        elif provider_id in getattr(self.config, 'providers', {}):
+            cfg = self.config.get_provider(provider_id)
+            provider_config = cfg.model_dump() if hasattr(cfg, 'model_dump') else cfg
+        if isinstance(provider_config, dict):
+            return provider_config.get('market_source')
+        return None
+
+    @staticmethod
+    def _market_request_id(request_data: Optional[Dict], fallback_provider_id: str) -> str:
+        payload = {
+            'provider_id': fallback_provider_id,
+            'model': (request_data or {}).get('model'),
+            'messages': (request_data or {}).get('messages'),
+            'input': (request_data or {}).get('input'),
+            'prompt': (request_data or {}).get('prompt'),
+            'voice': (request_data or {}).get('voice'),
+            'endpoint_path': (request_data or {}).get('_market_endpoint_path'),
+        }
+        serialized = json.dumps(payload, sort_keys=True, default=str)
+        return hashlib.sha256(serialized.encode('utf-8')).hexdigest()
+
+    def _settle_market_result(self, provider_id: str, usage: Optional[Dict], requests_count: int = 1, metadata: Optional[Dict] = None, request_data: Optional[Dict] = None):
+        market_source = self._get_market_source_details(provider_id)
+        if not self.user_id or not market_source:
+            return None
+        listing_id = market_source.get('listing_id')
+        if not listing_id:
+            return None
+        db = DatabaseRegistry.get_config_database()
+        settlement_metadata = {
+            'provider_id': provider_id,
+            'market_imported': True,
+            'market_request_id': self._market_request_id(request_data, provider_id),
+        }
+        if metadata:
+            settlement_metadata.update(metadata)
+        return db.settle_market_usage(
+            consumer_user_id=self.user_id,
+            listing_id=int(listing_id),
+            prompt_tokens=(usage or {}).get('prompt_tokens', 0),
+            completion_tokens=(usage or {}).get('completion_tokens', 0),
+            requests_count=requests_count,
+            metadata=settlement_metadata,
+        )
 
     def _get_response_cache_backend(self):
         aisbf_config = self.config.get_aisbf_config()

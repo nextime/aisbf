@@ -822,7 +822,12 @@ class BaseProviderHandler:
                 "disabled_until": None
             }
         else:
-            self.error_tracking = config.error_tracking[provider_id]
+            # Fall back to defaults for pre-configured handler types not in providers.json
+            self.error_tracking = config.error_tracking.get(provider_id, {
+                "failures": 0,
+                "last_failure": None,
+                "disabled_until": None,
+            })
             
         self.last_request_time = 0
         
@@ -834,7 +839,8 @@ class BaseProviderHandler:
             # Default rate limit for user providers
             self.rate_limit = 60
         else:
-            self.rate_limit = config.providers[provider_id].rate_limit
+            _pcfg = config.providers.get(provider_id)
+            self.rate_limit = _pcfg.rate_limit if _pcfg else 0
         # Add model-level rate limit tracking
         self.model_last_request_time = {}  # {model_name: timestamp}
         # Token usage tracking for rate limits

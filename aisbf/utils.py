@@ -61,16 +61,16 @@ def count_messages_tokens(messages: List[Dict], model: str) -> int:
         content = msg.get('content', '')
         if content:
             if isinstance(content, str):
-                total_tokens += len(encoding.encode(content))
+                total_tokens += len(encoding.encode(content, disallowed_special=()))
             elif isinstance(content, list):
                 # Handle complex content (e.g., with images)
                 for item in content:
                     if isinstance(item, dict):
                         text = item.get('text', '')
                         if text:
-                            total_tokens += len(encoding.encode(text))
+                            total_tokens += len(encoding.encode(text, disallowed_special=()))
                     elif isinstance(item, str):
-                        total_tokens += len(encoding.encode(item))
+                        total_tokens += len(encoding.encode(item, disallowed_special=()))
     
     logger.debug(f"Token count for model {model}: {total_tokens}")
     return total_tokens

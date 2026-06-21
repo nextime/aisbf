@@ -32,12 +32,20 @@ logger = logging.getLogger(__name__)
 
 
 def cleanup_stale_signup_users() -> int:
-    """Delete self-registered users who never logged in within 14 days."""
-    db = DatabaseRegistry.get_config_database()
-    deleted_count = db.delete_stale_unverified_signup_users(inactivity_days=14)
-    if deleted_count:
-        logger.info(f"Deleted {deleted_count} stale self-registered user(s) with no login activity")
-    return deleted_count
+    """Delete self-registered users who never logged in within 14 days.
+
+    Best-effort housekeeping: never propagate errors to the caller, since this
+    runs on the login path and must not be able to break authentication.
+    """
+    try:
+        db = DatabaseRegistry.get_config_database()
+        deleted_count = db.delete_stale_unverified_signup_users(inactivity_days=14)
+        if deleted_count:
+            logger.info(f"Deleted {deleted_count} stale self-registered user(s) with no login activity")
+        return deleted_count
+    except Exception as exc:
+        logger.warning(f"Stale signup user cleanup failed (ignored): {exc}", exc_info=True)
+        return 0
 
 
 @router.get("/dashboard/profile-pic")
