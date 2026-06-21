@@ -858,7 +858,14 @@ class CodexProviderHandler(BaseProviderHandler):
                 )
             
             logger.info(f"CodexProviderHandler: Response received")
-            self.record_success()
+            # For streaming requests the response is a lazy async generator: the
+            # upstream HTTP request has not run yet, so we cannot know if it
+            # succeeded. Recording success here would prematurely reset the
+            # failure counter before priming surfaces an immediate provider error
+            # (e.g. 400/429), preventing the provider from ever being disabled.
+            # The caller records success after the stream is primed/consumed.
+            if not stream:
+                self.record_success()
             
             if AISBF_DEBUG:
                 logger.info(f"=== RAW CODEX RESPONSE ===")

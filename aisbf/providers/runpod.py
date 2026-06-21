@@ -86,7 +86,11 @@ class RunpodProviderHandler(BaseProviderHandler):
         await self._ensure_non_public_resource_ready()
         delegate = self._build_delegate_handler(self._wrapper_mode)
         response = await delegate.handle_request(model, messages, max_tokens=max_tokens, temperature=temperature, stream=stream, tools=tools, tool_choice=tool_choice)
-        self.record_success()
+        # For streaming the delegate returns a lazy iterator; recording success
+        # here would prematurely reset the failure counter before the stream is
+        # consumed. The caller records success after priming/consuming the stream.
+        if not stream:
+            self.record_success()
         return response
 
     async def get_models(self) -> List[Model]:

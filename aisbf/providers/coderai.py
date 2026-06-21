@@ -496,7 +496,11 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 raise RuntimeError(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed with broker_preferred=True")
 
             response = self.client.chat.completions.create(**payload)
-            self.record_success()
+            # Streaming returns a lazy iterator; recording success here would
+            # prematurely reset the failure counter before the stream is consumed.
+            # The caller records success after priming/consuming the stream.
+            if not stream:
+                self.record_success()
             return response
         except Exception:
             self.record_failure()

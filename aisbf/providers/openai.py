@@ -169,7 +169,11 @@ class OpenAIProviderHandler(BaseProviderHandler):
 
             response = self.client.chat.completions.create(**request_params)
             logging.info(f"OpenAIProviderHandler: Response received: {response}")
-            self.record_success()
+            # Streaming returns a lazy iterator; the upstream call has not been
+            # consumed yet, so recording success here would prematurely reset the
+            # failure counter. The caller records success after priming/consuming.
+            if not stream:
+                self.record_success()
             
             # Dump raw response if AISBF_DEBUG is enabled
             if AISBF_DEBUG:
