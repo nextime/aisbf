@@ -3849,6 +3849,48 @@ class DatabaseManager:
                 cursor.execute(f'DELETE FROM provider_disabled_state WHERE user_id = {placeholder} AND provider_id = {placeholder}', (user_id, provider_id))
             conn.commit()
 
+    def is_provider_manually_disabled(self, user_id, provider_id: str) -> bool:
+        """Return True if a provider was manually disabled (persists across reboot).
+
+        Kept in a dedicated table so it never auto-expires and never collides with
+        the usage/cooldown disabled state."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'SELECT 1 FROM provider_manual_disabled WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+            else:
+                cursor.execute(f'SELECT 1 FROM provider_manual_disabled WHERE user_id = {placeholder} AND provider_id = {placeholder}', (user_id, provider_id))
+            return cursor.fetchone() is not None
+
+    def set_provider_manually_disabled(self, user_id, provider_id: str):
+        """Persist a manual provider disable (idempotent)."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'DELETE FROM provider_manual_disabled WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+                cursor.execute(f'INSERT INTO provider_manual_disabled (user_id, provider_id) VALUES (NULL, {placeholder})', (provider_id,))
+            elif self.db_type == 'sqlite':
+                cursor.execute(f'INSERT OR REPLACE INTO provider_manual_disabled (user_id, provider_id) VALUES ({placeholder}, {placeholder})', (user_id, provider_id))
+            else:
+                cursor.execute(f'''
+                    INSERT INTO provider_manual_disabled (user_id, provider_id) VALUES ({placeholder}, {placeholder})
+                    ON DUPLICATE KEY UPDATE updated_at=CURRENT_TIMESTAMP
+                ''', (user_id, provider_id))
+            conn.commit()
+
+    def clear_provider_manually_disabled(self, user_id, provider_id: str):
+        """Remove a manual provider disable."""
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            if user_id is None:
+                cursor.execute(f'DELETE FROM provider_manual_disabled WHERE user_id IS NULL AND provider_id = {placeholder}', (provider_id,))
+            else:
+                cursor.execute(f'DELETE FROM provider_manual_disabled WHERE user_id = {placeholder} AND provider_id = {placeholder}', (user_id, provider_id))
+            conn.commit()
+
     # Sort order methods
 
     def get_sort_order(self, user_id, entity_type: str) -> Optional[List[str]]:
@@ -6796,6 +6838,40 @@ def DatabaseManager__run_config_migrations(self, cursor, auto_increment, timesta
                 logger.info("✅ Migration: Created provider_disabled_state table")
     except Exception as e:
         logger.warning(f"Migration check for provider_disabled_state table: {e}")
+
+    # Migration: Create provider_manual_disabled table if missing
+    try:
+        if self.db_type == 'sqlite':
+            cursor.execute("PRAGMA table_info(provider_manual_disabled)")
+            if not cursor.fetchall():
+                cursor.execute(f'''
+                    CREATE TABLE provider_manual_disabled (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created provider_manual_disabled table")
+        else:
+            cursor.execute("""
+                SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES
+                WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = 'provider_manual_disabled'
+            """)
+            if not cursor.fetchone():
+                cursor.execute(f'''
+                    CREATE TABLE provider_manual_disabled (
+                        id INTEGER PRIMARY KEY {auto_increment},
+                        user_id INTEGER,
+                        provider_id VARCHAR(255) NOT NULL,
+                        updated_at TIMESTAMP DEFAULT {timestamp_default},
+                        UNIQUE(user_id, provider_id)
+                    )
+                ''')
+                logger.info("✅ Migration: Created provider_manual_disabled table")
+    except Exception as e:
+        logger.warning(f"Migration check for provider_manual_disabled table: {e}")
 
     # Migration: Create runpod_provider_state table if missing
     try:

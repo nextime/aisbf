@@ -855,6 +855,9 @@ class BaseProviderHandler:
         self.adaptive_limiter = get_adaptive_rate_limiter(provider_id, adaptive_config, user_id)
         # Load rate-limit disabled state from cache (persists across restarts)
         self._load_disabled_until_from_cache()
+        # Load manual (admin/user-triggered) disable flag from cache
+        self._manual_disabled: bool = False
+        self._load_manual_disabled_from_cache()
         # Load usage-based disabled state from DB (persists across restarts)
         self._usage_disabled_until: Optional[float] = None
         try:
@@ -1284,10 +1287,102 @@ class BaseProviderHandler:
         except Exception:
             pass
 
+    def _manual_disabled_cache_key(self) -> str:
+        # User-scoped so a user's manual toggle never affects the global provider.
+        scope = self.user_id if self.user_id is not None else 'global'
+        return f"aisbf:provider_manual_disabled:{scope}:{self.provider_id}"
+
+    def _load_manual_disabled_from_cache(self):
+        """Restore the manual-disable flag on startup.
+
+        The cache is a fast path; the database is the source of truth so the state
+        survives reboots and cache flushes. On a cache miss we read the DB and warm
+        the cache (storing the boolean either way)."""
+        try:
+            from ..cache import get_cache_manager
+            cached = get_cache_manager().get(self._manual_disabled_cache_key())
+        except Exception:
+            cached = None
+        if cached is not None:
+            self._manual_disabled = bool(cached)
+            return
+        # Cache miss → authoritative database lookup
+        value = False
+        try:
+            db = DatabaseRegistry.get_config_database()
+            if db:
+                value = bool(db.is_provider_manually_disabled(self.user_id, self.provider_id))
+        except Exception:
+            value = False
+        self._manual_disabled = value
+        try:
+            from ..cache import get_cache_manager
+            get_cache_manager().set(self._manual_disabled_cache_key(), value, ttl=10 * 365 * 24 * 3600)
+        except Exception:
+            pass
+
+    def manual_disable(self):
+        """Manually disable this provider until it is manually re-enabled.
+
+        Unlike the failure cooldown this never auto-expires. It is persisted in the
+        database (source of truth, survives reboot) and mirrored to the cache."""
+        import logging
+        self._manual_disabled = True
+        try:
+            db = DatabaseRegistry.get_config_database()
+            if db:
+                db.set_provider_manually_disabled(self.user_id, self.provider_id)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to persist manual disable for {self.provider_id}: {e}")
+        try:
+            from ..cache import get_cache_manager
+            get_cache_manager().set(self._manual_disabled_cache_key(), True, ttl=10 * 365 * 24 * 3600)
+        except Exception:
+            pass
+        logging.getLogger(__name__).warning(f"Provider {self.provider_id} manually disabled (scope: {self.user_id if self.user_id is not None else 'global'})")
+
+    def manual_enable(self):
+        """Clear a manual disable AND any failure cooldown, restoring a fresh
+        failure budget so the provider is immediately available again. Persisted
+        to the database and mirrored to the cache."""
+        import logging
+        self._manual_disabled = False
+        try:
+            db = DatabaseRegistry.get_config_database()
+            if db:
+                db.clear_provider_manually_disabled(self.user_id, self.provider_id)
+        except Exception as e:
+            logging.getLogger(__name__).warning(f"Failed to persist manual enable for {self.provider_id}: {e}")
+        try:
+            from ..cache import get_cache_manager
+            get_cache_manager().set(self._manual_disabled_cache_key(), False, ttl=10 * 365 * 24 * 3600)
+        except Exception:
+            pass
+        # Also clear any auto-disable cooldown and reset the failure counter.
+        self._clear_disabled_until()
+        self.error_tracking['failures'] = 0
+        logging.getLogger(__name__).info(f"Provider {self.provider_id} manually re-enabled (scope: {self.user_id if self.user_id is not None else 'global'})")
+
+    def is_manually_disabled(self) -> bool:
+        return bool(getattr(self, '_manual_disabled', False))
+
     def is_rate_limited(self) -> bool:
-        disabled_until = self.error_tracking.get('disabled_until')
-        if disabled_until and disabled_until > time.time():
+        # Manual disable takes precedence and never auto-expires.
+        if getattr(self, '_manual_disabled', False):
             return True
+        disabled_until = self.error_tracking.get('disabled_until')
+        if disabled_until:
+            if disabled_until > time.time():
+                return True
+            # Cooldown has elapsed: this is a temporary measure, so reactivate the
+            # provider with a fresh failure budget instead of leaving it on a
+            # hair-trigger (failures still at 3) with a stale disabled_until.
+            import logging
+            logging.getLogger(__name__).info(
+                f"Provider {self.provider_id} cooldown elapsed — reactivating with a fresh failure budget"
+            )
+            self._clear_disabled_until()
+            self.error_tracking['failures'] = 0
         # Check usage-based disable (loaded from DB on init, persists across restarts)
         if self._usage_disabled_until and self._usage_disabled_until > time.time():
             return True

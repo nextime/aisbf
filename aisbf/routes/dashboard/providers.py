@@ -2127,6 +2127,73 @@ async def api_provider_delete(request: Request, provider_id: str):
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
 
+@router.get("/dashboard/api/providers/manual-status")
+async def api_providers_manual_status(request: Request):
+    """Return manual-disable / rate-limited status for every provider in scope,
+    so the rotations page can render the correct disable/enable button state."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+
+    current_user_id = request.session.get('user_id')
+    from aisbf.providers import get_provider_handler
+    from aisbf.config import config as global_config
+
+    if current_user_id is None:
+        provider_ids = list((global_config.providers or {}).keys())
+    else:
+        db = DatabaseRegistry.get_config_database()
+        provider_ids = [p['provider_id'] for p in db.get_user_providers(current_user_id)]
+
+    statuses = {}
+    for pid in provider_ids:
+        try:
+            handler = get_provider_handler(pid, user_id=current_user_id)
+            manual = handler.is_manually_disabled()
+            statuses[pid] = {
+                "manual_disabled": manual,
+                # rate_limited includes the manual flag; expose the cooldown-only state too
+                "rate_limited": handler.is_rate_limited(),
+            }
+        except Exception:
+            continue
+    return JSONResponse({"success": True, "statuses": statuses})
+
+
+@router.post("/dashboard/api/provider/{provider_id:path}/manual-disable")
+async def api_provider_manual_disable(request: Request, provider_id: str):
+    """Manually disable a provider (admin = global scope, user = their scope)."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+    current_user_id = request.session.get('user_id')
+    from aisbf.providers import get_provider_handler
+    try:
+        handler = get_provider_handler(provider_id, user_id=current_user_id)
+        handler.manual_disable()
+        return JSONResponse({"success": True, "manual_disabled": True})
+    except Exception as e:
+        logger.warning(f"manual_disable error for {provider_id}: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
+@router.post("/dashboard/api/provider/{provider_id:path}/manual-enable")
+async def api_provider_manual_enable(request: Request, provider_id: str):
+    """Manually re-enable a provider, clearing manual disable and any cooldown."""
+    auth_check = require_dashboard_auth(request)
+    if auth_check:
+        return JSONResponse({"success": False, "error": "Not authenticated"}, status_code=401)
+    current_user_id = request.session.get('user_id')
+    from aisbf.providers import get_provider_handler
+    try:
+        handler = get_provider_handler(provider_id, user_id=current_user_id)
+        handler.manual_enable()
+        return JSONResponse({"success": True, "manual_disabled": False})
+    except Exception as e:
+        logger.warning(f"manual_enable error for {provider_id}: {e}")
+        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+
+
 @router.get("/dashboard/api/provider/{provider_id:path}/usage")
 async def api_provider_usage(request: Request, provider_id: str):
     """Return cached usage data for a provider, refreshing from source if stale (>5 min)."""

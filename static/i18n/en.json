@@ -340,7 +340,9 @@
     "error_saving": "Error saving configuration",
     "forward_to": "Forward to",
     "target_name": "Target rotation / autoselect",
-    "target_placeholder": "rotation or autoselect name…"
+    "target_placeholder": "rotation or autoselect name…",
+    "disable": "Disable",
+    "enable": "Enable"
   },
   "autoselect": {
     "model_name": "Model Name",
