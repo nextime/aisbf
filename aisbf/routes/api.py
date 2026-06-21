@@ -112,7 +112,7 @@ async def favicon():
 async def health():
     return {"status": "ok"}
 
-@router.get("/api/v1/models/{model_id}")
+@router.get("/api/v1/models/{model_id:path}")
 async def v1_get_model(model_id: str, request: Request):
     all_models_response = await v1_list_all_models(request)
     all_models = all_models_response.get("data", [])
@@ -259,6 +259,72 @@ async def v1_chat_models_alias(request: Request):
 @router.get("/models")
 async def models_root_alias(request: Request):
     return await v1_list_all_models(request)
+
+# ---------------------------------------------------------------------------
+# llama.cpp / Ollama compatibility probes
+#
+# Several OpenAI-compatible clients (LM Studio, Ollama-style frontends,
+# llama.cpp UIs) probe capability endpoints on connect. Without these they get
+# 404/405 (the bare /api/version & /api/props otherwise match the generic
+# POST /api/{provider_id} route and return 405). We answer them with sensible
+# stubs so capability detection succeeds.
+# ---------------------------------------------------------------------------
+
+def _aisbf_version() -> str:
+    try:
+        import aisbf
+        return getattr(aisbf, "__version__", "0.0.0")
+    except Exception:
+        return "0.0.0"
+
+@router.get("/api/version")
+@router.get("/v1/version")
+@router.get("/version")
+async def compat_version():
+    """Ollama-style version probe."""
+    return {"version": _aisbf_version()}
+
+@router.get("/api/tags")
+async def compat_ollama_tags(request: Request):
+    """Ollama-style model list (/api/tags). Maps the OpenAI model list into the
+    Ollama tags schema so Ollama-compatible clients can enumerate models."""
+    model_list = await _build_model_list(request)
+    data = model_list.get("data", []) if isinstance(model_list, dict) else []
+    models = []
+    for m in data:
+        model_id = m.get("id", "")
+        models.append({
+            "name": model_id,
+            "model": model_id,
+            "modified_at": "1970-01-01T00:00:00Z",
+            "size": 0,
+            "digest": "",
+            "details": {
+                "parent_model": "",
+                "format": "gguf",
+                "family": m.get("owned_by", "aisbf"),
+                "families": [m.get("owned_by", "aisbf")],
+                "parameter_size": "",
+                "quantization_level": "",
+            },
+        })
+    return {"models": models}
+
+@router.get("/props")
+@router.get("/api/props")
+@router.get("/v1/props")
+async def compat_llamacpp_props():
+    """llama.cpp-style /props probe with minimal server properties."""
+    return {
+        "system_prompt": "",
+        "default_generation_settings": {
+            "n_ctx": 0,
+            "model": "aisbf",
+        },
+        "total_slots": 1,
+        "chat_template": "",
+        "model_path": "aisbf",
+    }
 
 @router.post("/api/v1/audio/transcriptions")
 async def v1_audio_transcriptions(request: Request):

@@ -172,7 +172,7 @@ async def user_list_models(request: Request, username: str):
             logger.warning(f"Error listing user autoselect {autoselect_id}: {e}")
     return {"object": "list", "data": all_models}
 
-@router.get("/api/u/{username}/models/{model_id}")
+@router.get("/api/u/{username}/models/{model_id:path}")
 async def user_get_model(model_id: str, request: Request, username: str):
     result = await user_list_models(request, username)
     for model in (result.get("data", []) if isinstance(result, dict) else []):
