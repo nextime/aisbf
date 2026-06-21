@@ -4261,13 +4261,16 @@ class RotationHandler:
     def _is_non_retryable_error(self, error) -> bool:
         """Return True when retrying the same provider for this error is pointless.
 
-        Client errors that reflect the request/credentials rather than a transient
-        condition (HTTP 400/401/403/404/405/422) will fail identically on retry, so
-        the rotation should fail over to the next provider immediately. Rate limits
-        (408/429) and server/network errors (5xx, timeouts) remain retryable.
-        Rate-limit handling has its own RateLimitError path and never reaches here.
+        Client errors that reflect the request/credentials/billing rather than a
+        transient condition (HTTP 400/401/402/403/404/405/422) will fail identically
+        on retry, so the rotation should fail over to the next provider immediately.
+        402 Payment Required (e.g. Kilo "usage_limit_exceeded"/out of credits) is
+        deterministic too: retrying the same provider only burns the failure budget
+        and needlessly disables it. Rate limits (408/429) and server/network errors
+        (5xx, timeouts) remain retryable. Rate-limit handling has its own
+        RateLimitError path and never reaches here.
         """
-        non_retryable_codes = {400, 401, 403, 404, 405, 422}
+        non_retryable_codes = {400, 401, 402, 403, 404, 405, 422}
 
         # Prefer the structured status code when the exception carries an HTTP
         # response (httpx.HTTPStatusError and similar).
