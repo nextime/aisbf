@@ -435,7 +435,15 @@ let providersData = {};
 const STUDIO_CAPABILITY_CHOICES = {{ studio_capability_choices | tojson }};
 const STUDIO_ADAPTER_CHOICES = {{ studio_adapter_choices | tojson }};
 const STUDIO_ADAPTER_PROFILE_CHOICES = {{ studio_adapter_profile_choices | tojson }};
-let expandedProviders = new Set();
+function _loadExpanded(storeKey) {
+    try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || '[]')); }
+    catch (e) { return new Set(); }
+}
+let expandedProviders = _loadExpanded('aisbf_expanded_providers');
+function _saveExpandedProviders() {
+    try { sessionStorage.setItem('aisbf_expanded_providers', JSON.stringify([...expandedProviders])); }
+    catch (e) { /* ignore */ }
+}
 let currentProviderPage = 0;
 const PROVIDERS_PAGE_SIZE = 10;
 let providerSearchFilter = '';
@@ -938,6 +946,7 @@ function toggleProvider(key) {
         const idx = filteredKeys.indexOf(key);
         if (idx >= 0) currentProviderPage = Math.floor(idx / PROVIDERS_PAGE_SIZE);
     }
+    _saveExpandedProviders();
     renderProvidersList();
 }
 
@@ -1779,11 +1788,11 @@ function renderProviderDetails(key) {
             </select>
         </div>
         
-        ${authFieldsHtml}
-        
-        <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
-            <h4 style="margin: 0 0 15px 0; color: var(--color-link);">${window.i18n.t('providers.pricing_section')}</h4>
-            
+        ${subPanel(`providers:${key}:auth`, window.i18n.t('providers.authentication') || 'Authentication', authFieldsHtml, {open: true})}
+
+        ${subPanel(`providers:${key}:pricing`, window.i18n.t('providers.pricing_section'), `
+        <div style="border-left: 3px solid #4a9eff; padding-left: 12px;">
+
             <div class="form-group">
                 <label>
                     <input type="checkbox" ${provider.is_subscription ? 'checked' : ''} onchange="updateProvider('${key}', 'is_subscription', this.checked); togglePricingFields('${key}')">
@@ -1874,7 +1883,9 @@ function renderProviderDetails(key) {
                 </div>
             </div>
         </div>
+        `)}
 
+        ${subPanel(`providers:${key}:limits`, window.i18n.t('providers.rate_limits_defaults') || 'Rate limits & defaults', `
         <div class="form-group">
             <label>${window.i18n.t('providers.rate_limit')}</label>
             <input type="number" value="${provider.rate_limit || 0}" onchange="updateProvider('${key}', 'rate_limit', parseFloat(this.value))" step="0.1">
@@ -1918,8 +1929,9 @@ function renderProviderDetails(key) {
             <label>${window.i18n.t('providers.default_condense_method')}</label>
             <input type="text" value="${Array.isArray(provider.default_condense_method) ? provider.default_condense_method.join(', ') : (provider.default_condense_method || '')}" onchange="updateProviderCondenseMethod('${key}', this.value)" placeholder="e.g., semantic, conversational">
         </div>
-        
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+        `)}
+
+        ${subPanel(`providers:${key}:features`, 'Feature Overrides', `
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">Per-provider tri-state overrides. Inherit follows the global default.</small>
         ${triStateSelect('Context Condensation', provider.enable_context_condensation, `updateProviderTriState('${key}', 'enable_context_condensation', this.value)`, 'Controls whether condensation is active for this provider.')}
         ${triStateSelect('Response Cache', provider.enable_response_cache, `updateProviderTriState('${key}', 'enable_response_cache', this.value)`, 'Overrides the global response-cache default for this provider.')}
@@ -1929,8 +1941,9 @@ function renderProviderDetails(key) {
         ${triStateSelect('Block High-Risk Prompts', provider.block_high_risk_prompts, `updateProviderTriState('${key}', 'block_high_risk_prompts', this.value)`, 'Rejects high-risk prompts locally before sending upstream.')}
         ${triStateSelect('NSFW Classification', provider.enable_nsfw_classification, `updateProviderTriState('${key}', 'enable_nsfw_classification', this.value)`, 'Controls NSFW classification checks for this provider.')}
         ${triStateSelect('Privacy Classification', provider.enable_privacy_classification, `updateProviderTriState('${key}', 'enable_privacy_classification', this.value)`, 'Controls privacy classification checks for this provider.')}
+        `)}
 
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.native_caching_section')}</h4>
+        ${subPanel(`providers:${key}:caching`, window.i18n.t('providers.native_caching_section'), `
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
             Provider-native caching features (Anthropic cache_control, Google Context Caching, OpenAI and Kilo-compatible APIs) for cost reduction.
         </small>
@@ -1960,8 +1973,9 @@ function renderProviderDetails(key) {
             <input type="text" value="${provider.prompt_cache_key || ''}" onchange="updateProvider('${key}', 'prompt_cache_key', this.value)" placeholder="Optional cache key for load balancer optimization">
             <small style="color: var(--color-muted); display: block; margin-top: 5px;">Optional cache key for OpenAI/Kilo load balancer routing optimization</small>
         </div>
+        `)}
 
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('providers.models_section')}</h4>
+        ${subPanel(`providers:${key}:models`, window.i18n.t('providers.models_section'), `
         <small style="color: var(--color-muted); display: block; margin-bottom: 15px;">
             Configure specific models for this provider, or leave empty to automatically fetch all available models from the provider's API.
         </small>
@@ -1983,6 +1997,7 @@ function renderProviderDetails(key) {
             <button type="button" class="btn btn-secondary" onclick="addModel('${key}')">${window.i18n.t('providers.add_model')}</button>
         </div>
         <div id="get-models-status-${key}" style="margin-top: 10px;"></div>
+        `, {open: true})}
 
         <div style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--color-border); display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
             <button type="button" class="btn" onclick="saveProvider('${safeKey}')" style="background: #22c55e;">${window.i18n.t('providers.save_this')}</button>
@@ -2021,7 +2036,7 @@ function renderModels(providerKey) {
         return;
     }
     
-    container.innerHTML = '';
+    let _modelsHtml = '';
     provider.models.forEach((model, index) => {
         const selectedStudioCaps = Array.isArray(model.studio_capabilities) ? model.studio_capabilities : [];
         const inferredCaps = Array.isArray(model.studio_capabilities) ? model.studio_capabilities : [];
@@ -2039,60 +2054,42 @@ function renderModels(providerKey) {
         const capabilityNotes = Array.isArray(model.studio_capability_notes) && model.studio_capability_notes.length
             ? `<div style="margin-top:6px;color:var(--color-muted);font-size:12px;">${model.studio_capability_notes.map(note => escHtmlAttr(note)).join(' | ')}</div>`
             : '';
-        const modelDiv = document.createElement('div');
-        modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
-        
-        modelDiv.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;">
-                <strong>${window.i18n.t('providers.model_label')} ${index + 1}</strong>
-                <button type="button" class="btn btn-secondary" onclick="removeModel('${providerKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('providers.remove')}</button>
-            </div>
-            
-            <div class="form-group">
-                <label>${window.i18n.t('providers.model_name')}</label>
-                <input type="text" value="${model.name}" onchange="updateModel('${providerKey}', ${index}, 'name', this.value)" required>
-            </div>
-            
-            <div class="form-group">
-                <label>${window.i18n.t('providers.rate_limit')}</label>
-                <input type="number" value="${model.rate_limit || 0}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit', parseFloat(this.value))" step="0.1">
-            </div>
-            
+        const advancedInner = `
             <div class="form-group">
                 <label>${window.i18n.t('providers.max_tokens')}</label>
                 <input type="number" value="${model.max_request_tokens || ''}" onchange="updateModel('${providerKey}', ${index}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.context_size')}</label>
                 <input type="number" value="${model.context_size || ''}" onchange="updateModel('${providerKey}', ${index}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.model_rate_limit_tpm')}</label>
                 <input type="number" value="${model.rate_limit_TPM || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPM', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.model_rate_limit_tph')}</label>
                 <input type="number" value="${model.rate_limit_TPH || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPH', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.model_rate_limit_tpd')}</label>
                 <input type="number" value="${model.rate_limit_TPD || ''}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit_TPD', this.value ? parseInt(this.value) : null)" placeholder="Optional">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.model_condense_context')}</label>
                 <input type="number" value="${model.condense_context || ''}" onchange="updateModel('${providerKey}', ${index}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="Optional (default: 80)">
             </div>
-            
+
             <div class="form-group">
                 <label>${window.i18n.t('providers.model_condense_method')}</label>
                 <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateModelCondenseMethod('${providerKey}', ${index}, this.value)" placeholder="e.g., semantic, conversational">
             </div>
-            
+
             <div style="margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--color-border);">
                 <h5 style="margin: 0 0 10px 0;">Feature Overrides</h5>
                 ${triStateSelect('Context Condensation', model.enable_context_condensation, `updateModelTriState('${providerKey}', ${index}, 'enable_context_condensation', this.value)`)}
@@ -2134,9 +2131,29 @@ function renderModels(providerKey) {
                 <div style="margin-top:6px;font-size:12px;color:var(--color-muted);">Effective profile: ${escHtmlAttr(effectiveAdapterProfile)}</div>
             </div>
         `;
-        
-        container.appendChild(modelDiv);
+
+        const modelBody = `
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 10px;">
+                <button type="button" class="btn btn-secondary" onclick="removeModel('${providerKey}', ${index})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('providers.remove')}</button>
+            </div>
+
+            <div class="form-group">
+                <label>${window.i18n.t('providers.model_name')}</label>
+                <input type="text" value="${model.name}" onchange="updateModel('${providerKey}', ${index}, 'name', this.value)" required>
+            </div>
+
+            <div class="form-group">
+                <label>${window.i18n.t('providers.rate_limit')}</label>
+                <input type="number" value="${model.rate_limit || 0}" onchange="updateModel('${providerKey}', ${index}, 'rate_limit', parseFloat(this.value))" step="0.1">
+            </div>
+
+            ${subPanel(`providers:${providerKey}:mdl:${index}:adv`, window.i18n.t('providers.advanced') || 'Advanced', advancedInner, {nested: true})}
+        `;
+
+        const mTitle = `${window.i18n.t('providers.model_label')} ${index + 1}${model.name ? ' — ' + escHtmlAttr(model.name) : ''}`;
+        _modelsHtml += subPanel(`providers:${providerKey}:mdl:${index}`, mTitle, modelBody, {nested: true});
     });
+    container.innerHTML = _modelsHtml;
 }
 
 function showAddProviderForm() {

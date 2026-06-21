@@ -64,7 +64,15 @@ let availableProviders = rotationsData.providers;
 // instead of a real provider. The model "name" then holds the target id.
 const META_PROVIDERS = ['rotations', 'autoselect'];
 const providersMeta = {{ providers_meta | default('{}') | safe }};
-let expandedRotations = new Set();
+function _loadExpanded(storeKey) {
+    try { return new Set(JSON.parse(sessionStorage.getItem(storeKey) || '[]')); }
+    catch (e) { return new Set(); }
+}
+let expandedRotations = _loadExpanded('aisbf_expanded_rotations');
+function _saveExpandedRotations() {
+    try { sessionStorage.setItem('aisbf_expanded_rotations', JSON.stringify([...expandedRotations])); }
+    catch (e) { /* ignore */ }
+}
 let rotationMasterOrder = Object.keys(rotationsConfig.rotations || {});
 let _rotationDS = null;
 
@@ -350,6 +358,7 @@ function toggleRotation(key) {
     } else {
         expandedRotations.add(key);
     }
+    _saveExpandedRotations();
     renderRotationsList();
 }
 
@@ -366,38 +375,18 @@ function renderRotationDetails(rotationKey) {
         ? `<div style="margin-top:8px;font-size:12px;color:var(--color-muted);">Partial across only some models: ${partialCaps.map(cap => escHtmlAttr(cap)).join(', ')}</div>`
         : '';
     
-    container.innerHTML = `
-        <div class="form-group">
-            <label>${window.i18n.t('rotations.model_name')}</label>
-            <input type="text" value="${rotation.model_name}" onchange="updateRotation('${rotationKey}', 'model_name', this.value)" required>
-        </div>
-        
-        <div class="form-group">
-            <label>
-                <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
-                ${window.i18n.t('rotations.notify_errors')} — ${window.i18n.t('rotations.notify_errors_desc')}
-            </label>
-        </div>
-        
-        <div class="form-group">
-            <label>${window.i18n.t('rotations.capabilities')}</label>
-            <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="${window.i18n.t('rotations.capabilities_placeholder')}">
-            <small style="color: var(--color-muted); display:block; margin-top:5px;">This field is auto-inherited from the capabilities shared by all models in the rotation when you save.</small>
-            <div style="margin-top:8px;">${inheritedCapsHtml}</div>
-            ${partialCapsHtml}
-        </div>
-        
+    const advancedInner = `
         <div class="form-group">
             <label>${window.i18n.t('rotations.default_rate_limit')}</label>
             <input type="number" value="${rotation.default_rate_limit || ''}" onchange="updateRotation('${rotationKey}', 'default_rate_limit', this.value ? parseFloat(this.value) : null)" step="0.1" placeholder="${window.i18n.t('rotations.optional')}">
         </div>
-        
+
         <div class="form-group">
             <label>${window.i18n.t('rotations.default_context_size')}</label>
             <input type="number" value="${rotation.default_context_size || ''}" onchange="updateRotation('${rotationKey}', 'default_context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}">
         </div>
-        
-        <h4 style="margin-top: 20px; margin-bottom: 10px;">Feature Overrides</h4>
+
+        <h4 style="margin-top: 14px; margin-bottom: 10px;">Feature Overrides</h4>
         ${triStateCompact('Context Condensation', rotation.enable_context_condensation, `updateRotationTriState('${rotationKey}', 'enable_context_condensation', this.value)`)}
         ${triStateCompact('Response Cache', rotation.enable_response_cache, `updateRotationTriState('${rotationKey}', 'enable_response_cache', this.value)`)}
         ${triStateCompact('Prompt Batching', rotation.enable_prompt_batching, `updateRotationTriState('${rotationKey}', 'enable_prompt_batching', this.value)`)}
@@ -406,7 +395,31 @@ function renderRotationDetails(rotationKey) {
         ${triStateCompact('Block High-Risk Prompts', rotation.block_high_risk_prompts, `updateRotationTriState('${rotationKey}', 'block_high_risk_prompts', this.value)`)}
         ${triStateCompact('NSFW Classification', rotation.enable_nsfw_classification, `updateRotationTriState('${rotationKey}', 'enable_nsfw_classification', this.value)`)}
         ${triStateCompact('Privacy Classification', rotation.enable_privacy_classification, `updateRotationTriState('${rotationKey}', 'enable_privacy_classification', this.value)`)}
-        
+    `;
+
+    container.innerHTML = `
+        <div class="form-group">
+            <label>${window.i18n.t('rotations.model_name')}</label>
+            <input type="text" value="${rotation.model_name}" onchange="updateRotation('${rotationKey}', 'model_name', this.value)" required>
+        </div>
+
+        <div class="form-group">
+            <label>
+                <input type="checkbox" ${rotation.notifyerrors ? 'checked' : ''} onchange="updateRotation('${rotationKey}', 'notifyerrors', this.checked)">
+                ${window.i18n.t('rotations.notify_errors')} — ${window.i18n.t('rotations.notify_errors_desc')}
+            </label>
+        </div>
+
+        <div class="form-group">
+            <label>${window.i18n.t('rotations.capabilities')}</label>
+            <input type="text" value="${rotation.capabilities ? rotation.capabilities.join(', ') : ''}" onchange="updateRotationCapabilities('${rotationKey}', this.value)" placeholder="${window.i18n.t('rotations.capabilities_placeholder')}">
+            <small style="color: var(--color-muted); display:block; margin-top:5px;">This field is auto-inherited from the capabilities shared by all models in the rotation when you save.</small>
+            <div style="margin-top:8px;">${inheritedCapsHtml}</div>
+            ${partialCapsHtml}
+        </div>
+
+        ${subPanel(`rot:${rotationKey}:advanced`, 'Advanced configuration', advancedInner)}
+
         <h4 style="margin-top: 20px; margin-bottom: 10px;">${window.i18n.t('rotations.providers_section')}</h4>
         <div id="providers-${rotationKey}"></div>
         <button type="button" class="btn btn-secondary" onclick="addRotationProvider('${safeRKey}')" style="margin-top: 10px;">${window.i18n.t('rotations.add_provider')}</button>
@@ -429,28 +442,21 @@ function renderRotationProviders(rotationKey) {
         return;
     }
     
-    container.innerHTML = '';
+    const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
+    let html = '';
     rotation.providers.forEach((provider, providerIndex) => {
-        const providerDiv = document.createElement('div');
-        providerDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 15px; margin-bottom: 10px; border-radius: 3px; background: var(--bg-page);';
-        const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const provSelUid = `prov-sel-${rotationKey}-${providerIndex}`;
 
         const _pid = provider.provider_id || '';
         const _usageBadge = _providerSupportsUsage(_pid)
             ? `<span data-usage-pid="${escHtmlAttr(_pid)}" style="margin-left:6px;">${_usageCache[_pid] && _usageCache[_pid].data ? _renderUsageCompact(_usageCache[_pid].data) : ''}</span>`
             : '';
+        const modelCount = provider.models ? provider.models.length : 0;
 
-        providerDiv.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px; flex-wrap: wrap; gap: 6px;">
-                <div style="display:flex;align-items:center;flex-wrap:wrap;gap:6px;">
-                    <strong>${window.i18n.t('rotations.provider_label')} ${providerIndex + 1}</strong>
-                    ${_usageBadge}
-                </div>
-                <div style="display:flex;align-items:center;gap:6px;">
-                    ${(_pid && !META_PROVIDERS.includes(_pid)) ? `<button type="button" class="btn btn-secondary provider-toggle-btn" data-provider="${escHtmlAttr(_pid)}" onclick="toggleProviderDisabled(this)" style="padding:5px 10px;font-size:12px;">${window.i18n.t('rotations.disable') || 'Disable'}</button>` : ''}
-                    <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('rotations.remove')}</button>
-                </div>
+        const body = `
+            <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
+                ${(_pid && !META_PROVIDERS.includes(_pid)) ? `<button type="button" class="btn btn-secondary provider-toggle-btn" data-provider="${escHtmlAttr(_pid)}" onclick="toggleProviderDisabled(this)" style="padding:5px 10px;font-size:12px;">${window.i18n.t('rotations.disable') || 'Disable'}</button>` : ''}
+                <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
             <div class="form-group">
@@ -470,9 +476,12 @@ function renderRotationProviders(rotationKey) {
             <p style="font-size: 12px; color: var(--color-muted); margin-top: 5px;">${window.i18n.t('rotations.leave_empty')}</p>
         `;
 
-        container.appendChild(providerDiv);
-        renderRotationModels(rotationKey, providerIndex);
+        const titleLabel = `${window.i18n.t('rotations.provider_label')} ${providerIndex + 1}${_pid ? ' — ' + escHtmlAttr(_pid) : ''}`;
+        const badge = `${modelCount} ${modelCount !== 1 ? 'models' : 'model'}${_usageBadge}`;
+        html += subPanel(`rot:${rotationKey}:prov:${providerIndex}`, titleLabel, body, {badge});
     });
+    container.innerHTML = html;
+    rotation.providers.forEach((provider, providerIndex) => renderRotationModels(rotationKey, providerIndex));
     applyProviderToggleStates();
 }
 
@@ -544,10 +553,8 @@ function renderRotationModels(rotationKey, providerIndex) {
         return;
     }
 
-    container.innerHTML = '';
+    let html = '';
     provider.models.forEach((model, modelIndex) => {
-        const modelDiv = document.createElement('div');
-        modelDiv.style.cssText = 'border: 1px solid var(--color-border); padding: 10px; margin-bottom: 8px; border-radius: 3px; background: var(--bg-panel);';
         const safeKey = rotationKey.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
         const inputId = `mdl-inp-${rotationKey}-${providerIndex}-${modelIndex}`;
         const providerId = provider.provider_id || '';
@@ -570,9 +577,41 @@ function renderRotationModels(rotationKey, providerIndex) {
                     onclick="msOpenProviderForInput(this)"
                     style="padding:4px 8px;font-size:11px;white-space:nowrap;">${window.i18n.t('rotations.search')}</button>`;
 
-        modelDiv.innerHTML = `
-            <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                <strong style="font-size: 13px;">${window.i18n.t('rotations.model_label')} ${modelIndex + 1}</strong>
+        const advancedInner = `
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.max_request_tokens')}</label>
+                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.context_size')}</label>
+                <input type="number" value="${model.context_size || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_context_pct')}</label>
+                <input type="number" value="${model.condense_context || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')} (default: 80)" style="font-size: 12px; padding: 5px;">
+            </div>
+
+            <div class="form-group" style="margin-bottom: 8px;">
+                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_method')}</label>
+                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="${window.i18n.t('rotations.condense_method_placeholder')}" style="font-size: 12px; padding: 5px;">
+            </div>
+
+            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);">
+                ${triStateCompact('Context Condensation', model.enable_context_condensation, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_condensation', this.value)`)}
+                ${triStateCompact('Response Cache', model.enable_response_cache, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_response_cache', this.value)`)}
+                ${triStateCompact('Prompt Batching', model.enable_prompt_batching, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_batching', this.value)`)}
+                ${triStateCompact('Prompt Security', model.enable_prompt_security, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_security', this.value)`)}
+                ${triStateCompact('Context Lens Analytics', model.enable_context_lens, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_lens', this.value)`)}
+                ${triStateCompact('Block High-Risk Prompts', model.block_high_risk_prompts, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'block_high_risk_prompts', this.value)`)}
+                ${triStateCompact('NSFW Classification', model.enable_nsfw_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_nsfw_classification', this.value)`)}
+                ${triStateCompact('Privacy Classification', model.enable_privacy_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_privacy_classification', this.value)`)}
+            </div>
+        `;
+
+        const modelBody = `
+            <div style="display: flex; justify-content: flex-end; align-items: center; margin-bottom: 8px;">
                 <button type="button" onclick="removeRotationModel('${safeKey}', ${providerIndex}, ${modelIndex})" style="background: #dc3545; color: white; border: none; padding: 3px 8px; border-radius: 3px; cursor: pointer; font-size: 11px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
@@ -593,46 +632,19 @@ function renderRotationModels(rotationKey, providerIndex) {
                 <label style="font-size: 12px;">${window.i18n.t('rotations.weight')}</label>
                 <input type="number" value="${model.weight || 1}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'weight', parseInt(this.value))" style="font-size: 12px; padding: 5px;">
             </div>
-            
+
             <div class="form-group" style="margin-bottom: 8px;">
                 <label style="font-size: 12px;">${window.i18n.t('rotations.rate_limit')}</label>
                 <input type="number" value="${model.rate_limit || 0}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'rate_limit', parseFloat(this.value))" step="0.1" style="font-size: 12px; padding: 5px;">
             </div>
-            
-            <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">${window.i18n.t('rotations.max_request_tokens')}</label>
-                <input type="number" value="${model.max_request_tokens || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'max_request_tokens', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">${window.i18n.t('rotations.context_size')}</label>
-                <input type="number" value="${model.context_size || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'context_size', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')}" style="font-size: 12px; padding: 5px;">
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_context_pct')}</label>
-                <input type="number" value="${model.condense_context || ''}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'condense_context', this.value ? parseInt(this.value) : null)" placeholder="${window.i18n.t('rotations.optional')} (default: 80)" style="font-size: 12px; padding: 5px;">
-            </div>
-            
-            <div class="form-group" style="margin-bottom: 0;">
-                <label style="font-size: 12px;">${window.i18n.t('rotations.condense_method')}</label>
-                <input type="text" value="${Array.isArray(model.condense_method) ? model.condense_method.join(', ') : (model.condense_method || '')}" onchange="updateRotationModelCondenseMethod('${rotationKey}', ${providerIndex}, ${modelIndex}, this.value)" placeholder="${window.i18n.t('rotations.condense_method_placeholder')}" style="font-size: 12px; padding: 5px;">
-            </div>
 
-            <div style="margin-top:10px;padding-top:10px;border-top:1px solid var(--color-border);">
-                ${triStateCompact('Context Condensation', model.enable_context_condensation, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_condensation', this.value)`)}
-                ${triStateCompact('Response Cache', model.enable_response_cache, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_response_cache', this.value)`)}
-                ${triStateCompact('Prompt Batching', model.enable_prompt_batching, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_batching', this.value)`)}
-                ${triStateCompact('Prompt Security', model.enable_prompt_security, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_prompt_security', this.value)`)}
-                ${triStateCompact('Context Lens Analytics', model.enable_context_lens, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_context_lens', this.value)`)}
-                ${triStateCompact('Block High-Risk Prompts', model.block_high_risk_prompts, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'block_high_risk_prompts', this.value)`)}
-                ${triStateCompact('NSFW Classification', model.enable_nsfw_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_nsfw_classification', this.value)`)}
-                ${triStateCompact('Privacy Classification', model.enable_privacy_classification, `updateRotationModelTriState('${rotationKey}', ${providerIndex}, ${modelIndex}, 'enable_privacy_classification', this.value)`)}
-            </div>
+            ${subPanel(`rot:${rotationKey}:prov:${providerIndex}:mdl:${modelIndex}:adv`, window.i18n.t('rotations.advanced') || 'Advanced', advancedInner, {nested: true})}
         `;
-        
-        container.appendChild(modelDiv);
+
+        const mTitle = `${window.i18n.t('rotations.model_label')} ${modelIndex + 1}${model.name ? ' — ' + escHtmlAttr(model.name) : ''}`;
+        html += subPanel(`rot:${rotationKey}:prov:${providerIndex}:mdl:${modelIndex}`, mTitle, modelBody, {nested: true});
     });
+    container.innerHTML = html;
 }
 
 function updateGlobalNotify(value) {

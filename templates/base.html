@@ -898,6 +898,97 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     </div>
     {% endif %}
     
+    <!-- Shared collapsible sub-panel helper (used by providers/rotations/autoselect config forms).
+         Defined before the content block so page scripts can call subPanel() during initial render. -->
+    <style>
+    .sub-panel {
+        border: 1px solid var(--color-border);
+        border-radius: 4px;
+        margin-bottom: 12px;
+        background: var(--bg-page);
+        overflow: hidden;
+    }
+    .sub-panel-header {
+        padding: 10px 12px;
+        cursor: pointer;
+        user-select: none;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        background: var(--bg-accent);
+        font-weight: 600;
+        font-size: 14px;
+        color: var(--color-text);
+    }
+    .sub-panel-header:hover { filter: brightness(1.08); }
+    .sub-panel-header .sp-chevron { font-size: 12px; width: 14px; display: inline-block; color: var(--color-muted); }
+    .sub-panel-header .sp-title { flex: 1; }
+    .sub-panel-header .sp-badge { font-weight: 400; font-size: 12px; color: var(--color-muted); }
+    .sub-panel-body { padding: 14px 12px; border-top: 1px solid var(--color-border); }
+    .sub-panel.sp-nested { background: var(--bg-panel); }
+    </style>
+    <script>
+    (function(){
+        // Tracks which sub-panels are open, keyed by a stable string. State
+        // survives re-renders of a detail form so panels don't snap shut when
+        // an unrelated field re-renders the list, and is persisted to
+        // sessionStorage so open/close state is remembered while navigating
+        // between dashboard pages within the same browser session.
+        const _SP_STORE = 'aisbf_open_subpanels';
+        function _spLoad() {
+            try { return new Set(JSON.parse(sessionStorage.getItem(_SP_STORE) || '[]')); }
+            catch (e) { return new Set(); }
+        }
+        function _spSave() {
+            try { sessionStorage.setItem(_SP_STORE, JSON.stringify([...window._openSubPanels])); }
+            catch (e) { /* sessionStorage unavailable — keep in-memory only */ }
+        }
+        window._openSubPanels = window._openSubPanels || _spLoad();
+
+        function _spEsc(s) {
+            return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;').replace(/'/g,'&#39;');
+        }
+
+        // Build a collapsible sub-panel. `key` must be unique per logical panel.
+        // opts: {badge, nested, open} — `open:true` makes it default-expanded the
+        // first time it is seen (afterwards user state in _openSubPanels wins).
+        window.subPanel = function(key, title, innerHtml, opts) {
+            opts = opts || {};
+            if (opts.open && !window._openSubPanels.has('__seen__' + key)) {
+                window._openSubPanels.add('__seen__' + key);
+                window._openSubPanels.add(key);
+                _spSave();
+            }
+            const isOpen = window._openSubPanels.has(key);
+            const safe = _spEsc(key);
+            const chev = isOpen ? '▼' : '▶';
+            const disp = isOpen ? 'block' : 'none';
+            const badge = opts.badge ? `<span class="sp-badge">${opts.badge}</span>` : '';
+            const nestedCls = opts.nested ? ' sp-nested' : '';
+            return `
+              <div class="sub-panel${nestedCls}">
+                <div class="sub-panel-header" onclick="toggleSubPanel('${safe}', this)">
+                  <span class="sp-chevron">${chev}</span>
+                  <span class="sp-title">${title}</span>
+                  ${badge}
+                </div>
+                <div class="sub-panel-body" style="display:${disp};">${innerHtml}</div>
+              </div>`;
+        };
+
+        window.toggleSubPanel = function(key, headerEl) {
+            const body = headerEl.parentElement.querySelector('.sub-panel-body');
+            if (!body) return;
+            const willOpen = !window._openSubPanels.has(key);
+            if (willOpen) window._openSubPanels.add(key); else window._openSubPanels.delete(key);
+            _spSave();
+            body.style.display = willOpen ? 'block' : 'none';
+            const chev = headerEl.querySelector('.sp-chevron');
+            if (chev) chev.textContent = willOpen ? '▼' : '▶';
+        };
+    })();
+    </script>
+
     <div class="container{% if studio_body_mode == 'wide' %} container-wide{% endif %}">
         <div class="content{% if studio_body_mode == 'wide' %} content-wide{% endif %}">
             {% block content %}{% endblock %}
