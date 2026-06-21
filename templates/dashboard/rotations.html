@@ -60,6 +60,9 @@ const rotationsData = {
 };
 let rotationsConfig = rotationsData.config;
 let availableProviders = rotationsData.providers;
+// Meta-providers: a rotation entry can forward to a named rotation/autoselect
+// instead of a real provider. The model "name" then holds the target id.
+const META_PROVIDERS = ['rotations', 'autoselect'];
 const providersMeta = {{ providers_meta | default('{}') | safe }};
 let expandedRotations = new Set();
 let rotationMasterOrder = Object.keys(rotationsConfig.rotations || {});
@@ -250,14 +253,18 @@ function msOpenProviderForInput(btn) {
 
 // Provider select widget: <select> for ≤25, datalist input for >25
 function buildProviderSelectHtml(uid, currentValue, onChangeFn) {
+    const metaOpts = META_PROVIDERS.map(p =>
+        `<option value="${escHtmlAttr(p)}" ${currentValue === p ? 'selected' : ''}>${escHtmlAttr(p)}</option>`
+    ).join('');
     if (availableProviders.length <= 25) {
         const opts = availableProviders.map(p =>
             `<option value="${escHtmlAttr(p)}" ${currentValue === p ? 'selected' : ''}>${escHtmlAttr(p)}</option>`
         ).join('');
         return `<select id="${uid}" onchange="(${onChangeFn})(this.value)" required>
-            <option value="">${window.i18n.t('rotations.select_provider')}</option>${opts}</select>`;
+            <option value="">${window.i18n.t('rotations.select_provider')}</option>
+            <optgroup label="${window.i18n.t('rotations.forward_to') || 'Forward to'}">${metaOpts}</optgroup>${opts}</select>`;
     } else {
-        const dlOpts = availableProviders.map(p => `<option value="${escHtmlAttr(p)}">`).join('');
+        const dlOpts = (META_PROVIDERS.concat(availableProviders)).map(p => `<option value="${escHtmlAttr(p)}">`).join('');
         return `<div style="position:relative;">
             <input type="text" id="${uid}" value="${escHtmlAttr(currentValue)}" list="${uid}-dl"
                    placeholder="${window.i18n.t('rotations.type_search_provider')}"
@@ -270,7 +277,7 @@ function buildProviderSelectHtml(uid, currentValue, onChangeFn) {
 }
 
 function handleProviderInput(uid, value, callback) {
-    if (availableProviders.includes(value) || value === '') {
+    if (availableProviders.includes(value) || META_PROVIDERS.includes(value) || value === '') {
         callback(value);
     }
 }
@@ -482,6 +489,24 @@ function renderRotationModels(rotationKey, providerIndex) {
         const inputId = `mdl-inp-${rotationKey}-${providerIndex}-${modelIndex}`;
         const providerId = provider.provider_id || '';
 
+        // Meta-providers forward to a named rotation/autoselect: the "model name"
+        // is the target id, so swap the model-search button for a datalist of
+        // known rotation names and relabel the field.
+        const isMeta = META_PROVIDERS.includes(providerId);
+        const metaDlId = `mdl-meta-dl-${rotationKey}-${providerIndex}-${modelIndex}`;
+        const metaDatalist = isMeta
+            ? `<datalist id="${escHtmlAttr(metaDlId)}">${Object.keys(rotationsConfig.rotations || {}).map(rn => `<option value="${escHtmlAttr(rn)}">`).join('')}</datalist>`
+            : '';
+        const nameLabel = isMeta ? (window.i18n.t('rotations.target_name') || 'Target rotation/autoselect') : window.i18n.t('rotations.model_name');
+        const namePlaceholder = isMeta ? (window.i18n.t('rotations.target_placeholder') || 'rotation or autoselect name…') : 'Model name…';
+        const nameTrailing = isMeta
+            ? metaDatalist
+            : `<button type="button" class="btn btn-secondary"
+                    data-provider="${escHtmlAttr(providerId)}"
+                    data-input-id="${escHtmlAttr(inputId)}"
+                    onclick="msOpenProviderForInput(this)"
+                    style="padding:4px 8px;font-size:11px;white-space:nowrap;">${window.i18n.t('rotations.search')}</button>`;
+
         modelDiv.innerHTML = `
             <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
                 <strong style="font-size: 13px;">${window.i18n.t('rotations.model_label')} ${modelIndex + 1}</strong>
@@ -489,21 +514,18 @@ function renderRotationModels(rotationKey, providerIndex) {
             </div>
 
             <div class="form-group" style="margin-bottom: 8px;">
-                <label style="font-size: 12px;">${window.i18n.t('rotations.model_name')}</label>
+                <label style="font-size: 12px;">${nameLabel}</label>
                 <div style="display:flex;gap:5px;align-items:center;">
                     <input type="text" id="${escHtmlAttr(inputId)}" value="${escHtmlAttr(model.name)}"
+                        ${isMeta ? `list="${escHtmlAttr(metaDlId)}"` : ''}
                         oninput="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
                         onchange="updateRotationModel('${safeKey}',${providerIndex},${modelIndex},'name',this.value)"
-                        placeholder="Model name…"
+                        placeholder="${escHtmlAttr(namePlaceholder)}"
                         required style="flex:1;font-size:12px;padding:5px;">
-                    <button type="button" class="btn btn-secondary"
-                        data-provider="${escHtmlAttr(providerId)}"
-                        data-input-id="${escHtmlAttr(inputId)}"
-                        onclick="msOpenProviderForInput(this)"
-                        style="padding:4px 8px;font-size:11px;white-space:nowrap;">${window.i18n.t('rotations.search')}</button>
+                    ${nameTrailing}
                 </div>
             </div>
-            
+
             <div class="form-group" style="margin-bottom: 8px;">
                 <label style="font-size: 12px;">${window.i18n.t('rotations.weight')}</label>
                 <input type="number" value="${model.weight || 1}" onchange="updateRotationModel('${rotationKey}', ${providerIndex}, ${modelIndex}, 'weight', parseInt(this.value))" style="font-size: 12px; padding: 5px;">

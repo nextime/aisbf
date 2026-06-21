@@ -2966,6 +2966,20 @@ class RotationHandler:
         stream = request_data.get('stream', False)
         logger.info(f"Request stream mode: {stream}")
 
+        # Delegation loop protection: a rotation entry may forward to another
+        # rotation/autoselect. Track the chain of meta-targets already traversed in
+        # this request so nothing can recurse into itself (A -> B -> A) or nest too
+        # deeply. The chain rides on request_data and is copied into child requests.
+        MAX_DELEGATION_DEPTH = 8
+        delegation_chain = list(request_data.get('_delegation_chain') or [])
+        self_delegation_key = f"rotation:{rotation_id}"
+        if self_delegation_key in delegation_chain:
+            logger.error(f"Delegation loop detected: '{self_delegation_key}' already in chain {delegation_chain}")
+            raise HTTPException(status_code=508, detail=f"Rotation delegation loop detected for '{rotation_id}' (chain: {' -> '.join(delegation_chain)})")
+        delegation_chain = delegation_chain + [self_delegation_key]
+        request_data['_delegation_chain'] = delegation_chain
+        logger.info(f"Delegation chain: {delegation_chain}")
+
         logger.info(f"Rotation config loaded successfully")
         providers = rotation_config.providers
         logger.info(f"Number of providers in rotation: {len(providers)}")
@@ -2982,7 +2996,43 @@ class RotationHandler:
             provider_id = provider['provider_id']
             logger.info(f"")
             logger.info(f"--- Processing provider: {provider_id} ---")
-            
+
+            # Meta-provider: this entry forwards to another rotation/autoselect.
+            # Each model 'name' is the id of the target rotation/autoselect.
+            delegate_kind = self._delegation_kind(provider_id)
+            if delegate_kind:
+                provider_weight = provider.get('weight', 1)
+                targets = provider.get('models') or []
+                if not targets:
+                    logger.warning(f"  [SKIPPED] Meta-provider '{provider_id}' lists no target {delegate_kind}(s) in models")
+                    skipped_providers.append(provider_id)
+                    continue
+                for tmodel in targets:
+                    tname = (tmodel.get('name') or '').strip()
+                    if not tname:
+                        continue
+                    target_key = f"{delegate_kind}:{tname}"
+                    # Pre-filter targets that would loop or exceed the depth limit so
+                    # they are never selected (the retry loop guards again at runtime).
+                    if target_key in delegation_chain:
+                        logger.warning(f"  [SKIPPED] Delegation target '{target_key}' would create a loop (chain: {delegation_chain})")
+                        continue
+                    if len(delegation_chain) >= MAX_DELEGATION_DEPTH:
+                        logger.warning(f"  [SKIPPED] Delegation depth limit ({MAX_DELEGATION_DEPTH}) reached; skipping '{target_key}'")
+                        continue
+                    target_weight = tmodel.get('weight', provider_weight)
+                    available_models.append({
+                        'name': tname,
+                        'weight': target_weight,
+                        'provider_id': provider_id,
+                        'api_key': None,
+                        '_delegate_kind': delegate_kind,
+                        '_delegate_target': tname,
+                    })
+                    total_models_considered += 1
+                    logger.info(f"  [DELEGATION] -> {delegate_kind} '{tname}' (weight {target_weight})")
+                continue
+
             # Check if provider exists in configuration (user-specific first, then global)
             if self.user_id and provider_id in self.user_providers:
                 provider_config = self.user_providers[provider_id]
@@ -3357,7 +3407,45 @@ class RotationHandler:
             provider_id = current_model['provider_id']
             api_key = current_model.get('api_key')
             model_name = current_model['name']
-            
+
+            # If this entry delegates to another rotation/autoselect, forward the
+            # whole request there (with loop protection) instead of treating it as a
+            # real provider. The downstream handler returns a final response object
+            # (dict / StreamingResponse) which we pass straight back to the client;
+            # a downstream total failure makes us fail over to the next entry.
+            if current_model.get('_delegate_kind'):
+                delegate_kind = current_model['_delegate_kind']
+                target = current_model['_delegate_target']
+                target_key = f"{delegate_kind}:{target}"
+                try:
+                    if target_key in delegation_chain:
+                        raise RuntimeError(f"delegation loop: {target_key} already in {delegation_chain}")
+                    if len(delegation_chain) >= MAX_DELEGATION_DEPTH:
+                        raise RuntimeError(f"delegation depth limit ({MAX_DELEGATION_DEPTH}) reached")
+                    logger.info(f"=== DELEGATING rotation '{rotation_id}' -> {delegate_kind} '{target}' (chain: {delegation_chain}) ===")
+                    # Child request carries the (already-extended) delegation chain.
+                    child_request = dict(request_data)
+                    if delegate_kind == 'rotation':
+                        result = await RotationHandler(user_id=self.user_id).handle_rotation_request(
+                            target, child_request, user_id, token_id
+                        )
+                    else:
+                        autoselect_handler = AutoselectHandler(user_id=self.user_id)
+                        if request_data.get('stream', False):
+                            result = await autoselect_handler.handle_autoselect_streaming_request(target, child_request)
+                        else:
+                            result = await autoselect_handler.handle_autoselect_request(target, child_request, user_id, token_id)
+                    if self._is_failed_delegation_result(result):
+                        raise RuntimeError(f"delegated {target_key} returned a failure result")
+                    logger.info(f"=== DELEGATION to {target_key} succeeded ===")
+                    return result
+                except Exception as delegation_error:
+                    last_error = str(delegation_error)
+                    logger.error(f"Delegation to {target_key} failed: {delegation_error}")
+                    model_retry_counts[model_key] = retry_count + 1
+                    tried_models.append(current_model)
+                    continue
+
             logger.info(f"Getting provider handler for {provider_id}")
             handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
             logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
@@ -4033,6 +4121,32 @@ class RotationHandler:
             logging.getLogger(__name__).warning(f"Failed to inject failover banner: {inject_error}")
         return response
 
+    def _delegation_kind(self, provider_id):
+        """Return 'rotation' or 'autoselect' when a rotation provider entry is a
+        meta-provider that forwards to a named rotation/autoselect, else None."""
+        pid = (provider_id or '').strip().lower()
+        if pid in ('rotation', 'rotations'):
+            return 'rotation'
+        if pid in ('autoselect', 'autoselects', 'autoselection', 'autoselections'):
+            return 'autoselect'
+        return None
+
+    def _is_failed_delegation_result(self, result) -> bool:
+        """Return True when a delegated rotation/autoselect result represents a
+        total failure, so the parent rotation can fail over to the next entry."""
+        if result is None:
+            return True
+        # Error responses tagged by the rotation/autoselect error paths
+        if isinstance(result, dict) and result.get('aisbf_error'):
+            return True
+        if getattr(result, 'aisbf_error', False):
+            return True
+        # JSONResponse / Response carrying an error status code
+        status_code = getattr(result, 'status_code', None)
+        if isinstance(status_code, int) and status_code >= 400:
+            return True
+        return False
+
     def _is_non_retryable_error(self, error) -> bool:
         """Return True when retrying the same provider for this error is pointless.
 
@@ -4682,8 +4796,12 @@ class RotationHandler:
         all_models = []
         for provider in rotation_config.providers:
             provider_id = provider['provider_id']
+            # Meta-providers forward to a named rotation/autoselect; they don't
+            # expose concrete provider models, so skip them in the model listing.
+            if self._delegation_kind(provider_id):
+                continue
             provider_config = self.config.get_provider(provider_id)
-            
+
             for model in provider['models']:
                 model_name = model['name']
                 model_dict = {
@@ -4801,6 +4919,22 @@ class AutoselectHandler:
             self.user_rotations = {}
             self.user_autoselects = {}
             self.autoselects = self.config.autoselect if hasattr(self.config, 'autoselect') else {}
+
+    def _register_delegation(self, request_data: Dict, key: str, max_depth: int = 8):
+        """Register this rotation/autoselect in the shared delegation chain for
+        loop protection. Raises HTTP 508 if the key is already present (loop) or
+        the depth limit is exceeded. Stores the extended chain on request_data
+        (carried into child requests) and on the instance (for selection requests).
+        """
+        chain = list(request_data.get('_delegation_chain') or [])
+        if key in chain:
+            raise HTTPException(status_code=508, detail=f"Delegation loop detected for '{key}' (chain: {' -> '.join(chain)})")
+        if len(chain) >= max_depth:
+            raise HTTPException(status_code=508, detail=f"Delegation depth limit ({max_depth}) reached (chain: {' -> '.join(chain)})")
+        chain = chain + [key]
+        request_data['_delegation_chain'] = chain
+        self._delegation_chain = chain
+        return chain
 
     def _get_market_source_details(self, provider_id: str):
         provider_config = None
@@ -5529,7 +5663,9 @@ class AutoselectHandler:
             "temperature": 0,
             "max_tokens": 100,
             "stream": False,
-            "stop": ["</aisbf_model_autoselection>"]
+            "stop": ["</aisbf_model_autoselection>"],
+            # Carry the delegation chain so a selection-model rotation cannot loop back.
+            "_delegation_chain": list(getattr(self, '_delegation_chain', []) or []),
         }
 
         selection_model = (getattr(autoselect_config, 'selection_model', None) or '').strip() or 'internal'
@@ -5621,6 +5757,10 @@ class AutoselectHandler:
         logger.info(f"=== AUTOSELECT REQUEST START ===")
         logger.info(f"Autoselect ID: {autoselect_id}")
         logger.info(f"User ID: {self.user_id}")
+
+        # Delegation loop protection (shared with rotations): register this
+        # autoselect in the chain so a rotation/autoselect cannot recurse into it.
+        self._register_delegation(request_data, f"autoselect:{autoselect_id}")
 
         # Check response cache for non-streaming requests
         stream = request_data.get('stream', False)
@@ -5873,7 +6013,10 @@ class AutoselectHandler:
         logger = logging.getLogger(__name__)
         logger.info(f"=== AUTOSELECT STREAMING REQUEST START ===")
         logger.info(f"Autoselect ID: {autoselect_id}")
-        
+
+        # Delegation loop protection (shared with rotations).
+        self._register_delegation(request_data, f"autoselect:{autoselect_id}")
+
         autoselect_config = self.config.get_autoselect(autoselect_id)
         if not autoselect_config:
             logger.error(f"Autoselect {autoselect_id} not found")

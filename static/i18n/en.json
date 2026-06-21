@@ -337,7 +337,10 @@
     "remove_provider_title": "Remove Provider",
     "remove_model_confirm": "Remove this model?",
     "remove_model_title": "Remove Model",
-    "error_saving": "Error saving configuration"
+    "error_saving": "Error saving configuration",
+    "forward_to": "Forward to",
+    "target_name": "Target rotation / autoselect",
+    "target_placeholder": "rotation or autoselect name…"
   },
   "autoselect": {
     "model_name": "Model Name",
