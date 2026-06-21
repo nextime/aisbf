@@ -61,7 +61,16 @@ class ContextManager:
         self._internal_tokenizer = None
         self._internal_model_lock = None
         self._use_internal_model = False
-        
+
+        # Global override: a rotation/autoselect to use for condensation instead of
+        # the local model (falls back to the local model when empty or on failure).
+        try:
+            _aisbf = config.get_aisbf_config()
+            self._condensation_override = ((_aisbf.internal_model or {}).get('condensation_override') or '').strip() if _aisbf else ''
+        except Exception:
+            self._condensation_override = ''
+
+
         # Get max_context for condensation model
         self.condensation_max_context = None
         if self.condensation_config and hasattr(self.condensation_config, 'max_context'):
@@ -328,6 +337,21 @@ class ContextManager:
                 summary_block = summary_block[: avail * 4 - 5] + "...]\n"
 
         return head_text + summary_block + tail_text
+
+    async def _run_local_or_override_condensation(self, messages: list, max_tokens: int, temperature: float) -> str:
+        """Run condensation via the global rotation/autoselect override when set,
+        falling back to the local internal model on empty/failed override."""
+        if self._condensation_override:
+            import logging
+            logger = logging.getLogger(__name__)
+            from .handlers import run_meta_target
+            content = await run_meta_target(
+                self._condensation_override, messages, max_tokens=max_tokens, temperature=temperature
+            )
+            if content:
+                return content
+            logger.warning(f"Condensation override '{self._condensation_override}' unavailable; falling back to local model")
+        return await self._run_internal_model_condensation(messages)
 
     async def _run_internal_model_condensation(self, messages: list) -> str:
         """Run the internal model for condensation in a separate thread"""
@@ -629,8 +653,10 @@ class ContextManager:
             summary_content = None
 
             if self._use_internal_model:
-                logger.info("Using internal model for conversational summarization")
-                summary_content = await self._run_internal_model_condensation(condensation_messages)
+                logger.info("Using internal model (or override) for conversational summarization")
+                summary_content = await self._run_local_or_override_condensation(
+                    condensation_messages, self._get_condensation_max_tokens(), 0.3
+                )
             elif self._rotation_handler and not self.condensation_model:
                 # Use rotation handler
                 condensation_request = {
@@ -733,8 +759,10 @@ class ContextManager:
             pruned_content = None
 
             if self._use_internal_model:
-                logger.info("Using internal model for semantic pruning")
-                pruned_content = await self._run_internal_model_condensation(condensation_messages)
+                logger.info("Using internal model (or override) for semantic pruning")
+                pruned_content = await self._run_local_or_override_condensation(
+                    condensation_messages, 2000, 0.2
+                )
             elif self._rotation_handler and not self.condensation_model:
                 # Use rotation handler
                 condensation_request = {

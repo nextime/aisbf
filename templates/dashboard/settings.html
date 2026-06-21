@@ -177,6 +177,10 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
     <div class="settings-section" id="tab-models">
     <div class="section-title"><i class="fas fa-brain"></i> <span data-i18n="settings_page.section_models">Internal Models</span></div>
 
+    <datalist id="meta-targets-dl">
+        {% for t in meta_targets or [] %}<option value="{{ t }}">{% endfor %}
+    </datalist>
+
     <div class="form-group">
         <label for="condensation_model_id" data-i18n="settings_page.lbl_condensation_model">Condensation Model ID</label>
         <div style="display:flex; gap:8px; align-items:center;">
@@ -184,6 +188,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('condensation_model_id').value, 'condensation', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
         </div>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Used when condensation model is set to "internal"</small>
+        <label for="condensation_override" style="margin-top:8px;">↳ Rotation/Autoselect override <span style="color:var(--color-subtle);font-weight:normal;">(optional — overrides the local model above)</span></label>
+        <input type="text" id="condensation_override" name="condensation_override" list="meta-targets-dl" value="{{ config.internal_model.condensation_override or '' }}" placeholder="rotation or autoselect name (leave empty to use local model)" style="width:100%;">
     </div>
 
     <div class="form-group">
@@ -199,6 +205,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('autoselect_model_id').value, 'autoselect', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
         </div>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Used when autoselect selection_model is set to "internal"</small>
+        <label for="autoselect_override" style="margin-top:8px;">↳ Rotation/Autoselect override <span style="color:var(--color-subtle);font-weight:normal;">(optional — overrides the local model above)</span></label>
+        <input type="text" id="autoselect_override" name="autoselect_override" list="meta-targets-dl" value="{{ config.internal_model.autoselect_override or '' }}" placeholder="rotation or autoselect name (leave empty to use local model)" style="width:100%;">
     </div>
 
     <div class="form-group">
@@ -214,6 +222,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('nsfw_classifier').value, 'nsfw', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
         </div>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Model used for NSFW content detection</small>
+        <label for="nsfw_classifier_override" style="margin-top:8px;">↳ Rotation/Autoselect override <span style="color:var(--color-subtle);font-weight:normal;">(optional — prompts a chat model for YES/NO, falls back to local)</span></label>
+        <input type="text" id="nsfw_classifier_override" name="nsfw_classifier_override" list="meta-targets-dl" value="{{ config.internal_model.nsfw_classifier_override or '' }}" placeholder="rotation or autoselect name (leave empty to use local classifier)" style="width:100%;">
     </div>
 
     <div class="form-group">
@@ -223,6 +233,8 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
             <button type="button" class="btn btn-secondary" style="white-space:nowrap; padding:6px 12px; font-size:.85em;" onclick="clearModelCache(document.getElementById('privacy_classifier').value, 'privacy', this)"><i class="fas fa-trash-alt"></i> Clear Cache</button>
         </div>
         <small style="color: var(--color-subtle); display: block; margin-top: 5px;">Model used for privacy-sensitive information detection</small>
+        <label for="privacy_classifier_override" style="margin-top:8px;">↳ Rotation/Autoselect override <span style="color:var(--color-subtle);font-weight:normal;">(optional — prompts a chat model for YES/NO, falls back to local)</span></label>
+        <input type="text" id="privacy_classifier_override" name="privacy_classifier_override" list="meta-targets-dl" value="{{ config.internal_model.privacy_classifier_override or '' }}" placeholder="rotation or autoselect name (leave empty to use local classifier)" style="width:100%;">
     </div>
 
     <div class="form-group">

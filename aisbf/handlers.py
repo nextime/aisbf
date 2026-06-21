@@ -2442,6 +2442,121 @@ _rotation_round_robin: Dict[str, int] = {}
 _rotation_round_robin_lock = threading.Lock()
 
 
+async def run_meta_target(target_id, messages, max_tokens=None, temperature=0.0, stop=None):
+    """Run a GLOBAL rotation or autoselect as an override for an internal/local model.
+
+    Used by the internal-model overrides (compaction, classification, autoselect
+    selection). Resolves ``target_id`` against the global rotations/autoselects,
+    forwards a non-streaming chat request, and returns the assistant message
+    content string — or ``None`` on any failure so callers can fall back to their
+    local model.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+    target_id = (target_id or '').strip()
+    if not target_id:
+        return None
+    is_rotation = bool(getattr(config, 'rotations', None)) and target_id in config.rotations
+    is_autoselect = bool(getattr(config, 'autoselect', None)) and target_id in config.autoselect
+    if not is_rotation and not is_autoselect:
+        logger.warning(f"Internal-model override target '{target_id}' is neither a rotation nor an autoselect; using local model")
+        return None
+    request_data = {
+        'model': target_id,
+        'messages': messages,
+        'stream': False,
+        'temperature': temperature,
+    }
+    if max_tokens:
+        request_data['max_tokens'] = max_tokens
+    if stop:
+        request_data['stop'] = stop
+    try:
+        if is_rotation:
+            result = await RotationHandler().handle_rotation_request(target_id, request_data)
+        else:
+            result = await AutoselectHandler().handle_autoselect_request(target_id, request_data)
+    except Exception as e:
+        logger.warning(f"Internal-model override '{target_id}' failed: {e}")
+        return None
+    if not isinstance(result, dict) or result.get('aisbf_error'):
+        logger.warning(f"Internal-model override '{target_id}' returned no usable response")
+        return None
+    try:
+        return result['choices'][0]['message']['content']
+    except Exception:
+        return None
+
+
+async def classify_with_override(target_id, text, kind):
+    """Classify ``text`` with a chat rotation/autoselect override.
+
+    ``kind`` is 'nsfw' or 'privacy'. Returns True if the content is FLAGGED
+    (unsafe), False if safe, or None when the override is unavailable/unparseable
+    so the caller can fall back to the local classifier pipeline.
+    """
+    target_id = (target_id or '').strip()
+    if not target_id:
+        return None
+    text_to_check = text[:512] if len(text) > 512 else text
+    if kind == 'nsfw':
+        question = "Does the following text contain NSFW content (sexual, explicit, or adult material)?"
+    else:
+        question = ("Does the following text contain privacy-sensitive personal information (PII) such as "
+                    "real names, addresses, emails, phone numbers, or financial/identity data?")
+    messages = [
+        {"role": "system", "content": "You are a strict binary content classifier. Reply with exactly one word: YES or NO. Do not explain."},
+        {"role": "user", "content": f"{question}\n\nTEXT:\n{text_to_check}\n\nAnswer YES or NO."},
+    ]
+    content = await run_meta_target(target_id, messages, max_tokens=5, temperature=0.0)
+    if not content:
+        return None
+    ans = content.strip().upper()
+    if ans.startswith('YES'):
+        return True
+    if ans.startswith('NO'):
+        return False
+    has_yes, has_no = ('YES' in ans), ('NO' in ans)
+    if has_yes and not has_no:
+        return True
+    if has_no and not has_yes:
+        return False
+    return None  # unparseable → fall back to local classifier
+
+
+async def classify_content_with_overrides(text, check_nsfw, check_privacy, aisbf_config):
+    """Run NSFW/privacy checks, preferring per-functionality rotation/autoselect
+    overrides and falling back to the local classifier pipelines. Returns
+    (is_safe, message), matching ContentClassifier.check_content."""
+    internal_model = (aisbf_config.internal_model or {}) if aisbf_config else {}
+    nsfw_override = internal_model.get('nsfw_classifier_override')
+    privacy_override = internal_model.get('privacy_classifier_override')
+
+    # Ensure local pipelines are available as a fallback for enabled checks.
+    if (check_nsfw or check_privacy):
+        content_classifier.initialize(internal_model.get('nsfw_classifier'), internal_model.get('privacy_classifier'))
+
+    if check_nsfw:
+        flagged = await classify_with_override(nsfw_override, text, 'nsfw') if nsfw_override else None
+        if flagged is None:
+            is_safe, message = content_classifier.check_nsfw(text)
+            if not is_safe:
+                return False, f"NSFW: {message}"
+        elif flagged:
+            return False, "NSFW: flagged by override classifier"
+
+    if check_privacy:
+        flagged = await classify_with_override(privacy_override, text, 'privacy') if privacy_override else None
+        if flagged is None:
+            is_safe, message = content_classifier.check_privacy(text)
+            if not is_safe:
+                return False, f"Privacy: {message}"
+        elif flagged:
+            return False, "Privacy: flagged by override classifier"
+
+    return True, "All content is safe"
+
+
 class RotationHandler:
     def __init__(self, user_id=None):
         self.user_id = user_id
@@ -3166,20 +3281,16 @@ class RotationHandler:
             check_privacy = aisbf_config.classify_privacy
             
             if check_nsfw or check_privacy:
-                # Initialize classifier with models from config
-                internal_model_config = aisbf_config.internal_model or {}
-                nsfw_model = internal_model_config.get('nsfw_classifier')
-                privacy_model = internal_model_config.get('privacy_classifier')
-                
-                content_classifier.initialize(nsfw_model, privacy_model)
-                
-                # Check user prompt for NSFW/privacy content
-                is_safe, message = content_classifier.check_content(
-                    user_prompt, 
-                    check_nsfw=check_nsfw, 
-                    check_privacy=check_privacy
+                # Classify, preferring per-functionality rotation/autoselect overrides
+                # (internal_model.nsfw_classifier_override / privacy_classifier_override)
+                # and falling back to the local classifier pipelines.
+                is_safe, message = await classify_content_with_overrides(
+                    user_prompt,
+                    check_nsfw=check_nsfw,
+                    check_privacy=check_privacy,
+                    aisbf_config=aisbf_config,
                 )
-                
+
                 logger.info(f"Content classification result: {message}")
                 
                 if not is_safe:
@@ -5673,6 +5784,26 @@ class AutoselectHandler:
         try:
             if selection_model == "internal":
                 aisbf_conf = self.config.get_aisbf_config()
+                # Global override: route the selection step through a rotation/autoselect
+                # instead of the local model, falling back to local on any failure.
+                autoselect_override = (
+                    (aisbf_conf.internal_model or {}).get('autoselect_override', '')
+                    if aisbf_conf else ''
+                )
+                if (autoselect_override or '').strip():
+                    logger.info(f"Autoselect selection using override target '{autoselect_override}'")
+                    override_content = await run_meta_target(
+                        autoselect_override, messages, max_tokens=100, temperature=0.0,
+                        stop=["</aisbf_model_autoselection>"]
+                    )
+                    if override_content:
+                        model_id = self._extract_model_selection(override_content)
+                        if model_id:
+                            logger.info(f"=== AUTOSELECT SUCCESS (override) === {model_id}")
+                            return model_id
+                        logger.warning("Could not extract model ID from override response; falling back to local model")
+                    else:
+                        logger.warning(f"Autoselect override '{autoselect_override}' unavailable; falling back to local model")
                 internal_model_id = (
                     (aisbf_conf.internal_model or {}).get('autoselect_model_id', '')
                     if aisbf_conf else ''

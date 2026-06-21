@@ -377,6 +377,12 @@ async def dashboard_settings(request: Request):
         }
     
     warning = request.query_params.get('warning')
+    # Available rotations/autoselects for the internal-model override pickers
+    try:
+        from aisbf.config import config as _runtime_config
+        meta_targets = sorted(list((_runtime_config.rotations or {}).keys()) + list((_runtime_config.autoselect or {}).keys()))
+    except Exception:
+        meta_targets = []
     return _templates.TemplateResponse(
         request=request,
         name="dashboard/settings.html",
@@ -385,6 +391,7 @@ async def dashboard_settings(request: Request):
         "session": request.session,
         "__version__": __version__,
         "config": aisbf_config,
+        "meta_targets": meta_targets,
         "os": os,
         "warning": warning,
     }
@@ -407,6 +414,10 @@ async def dashboard_settings_save(
    nsfw_classifier: str = Form("michelleli99/NSFW_text_classifier"),
    privacy_classifier: str = Form("iiiorg/piiranha-v1-detect-personal-information"),
    semantic_vectorization: str = Form("sentence-transformers/all-MiniLM-L6-v2"),
+   condensation_override: str = Form(""),
+   autoselect_override: str = Form(""),
+   nsfw_classifier_override: str = Form(""),
+   privacy_classifier_override: str = Form(""),
    classify_nsfw: bool = Form(False),
    classify_privacy: bool = Form(False),
    classify_semantic: bool = Form(False),
@@ -715,6 +726,11 @@ async def dashboard_settings_save(
     aisbf_config['internal_model']['nsfw_classifier'] = nsfw_classifier
     aisbf_config['internal_model']['privacy_classifier'] = privacy_classifier
     aisbf_config['internal_model']['semantic_vectorization'] = semantic_vectorization
+    # Optional rotation/autoselect overrides (empty = use the local model above)
+    aisbf_config['internal_model']['condensation_override'] = (condensation_override or '').strip()
+    aisbf_config['internal_model']['autoselect_override'] = (autoselect_override or '').strip()
+    aisbf_config['internal_model']['nsfw_classifier_override'] = (nsfw_classifier_override or '').strip()
+    aisbf_config['internal_model']['privacy_classifier_override'] = (privacy_classifier_override or '').strip()
 
     # Update batching config
     if 'batching' not in aisbf_config:
