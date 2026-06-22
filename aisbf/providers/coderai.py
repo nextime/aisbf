@@ -290,40 +290,47 @@ class CoderAIProviderHandler(BaseProviderHandler):
 
     async def _iter_broker_stream_chunks(self, initial_message: Dict[str, Any], timeout: float) -> AsyncIterator[bytes]:
         message = initial_message
-        while True:
-            status = message.get("status") or "ok"
-            if status == "error":
-                raise Exception(message.get("error") or "CoderAI broker bridge error")
+        request_id = message.get("request_id")
+        try:
+            while True:
+                status = message.get("status") or "ok"
+                if status == "error":
+                    raise Exception(message.get("error") or "CoderAI broker bridge error")
 
-            event = message.get("event")
-            payload_data = message.get("payload") or {}
+                event = message.get("event")
+                payload_data = message.get("payload") or {}
 
-            # Broker HTTP envelope (ASGI bridge buffered the full response into payload.body).
-            # Yield the body as raw bytes — SSE or JSON — then stop.
-            if "status_code" in payload_data and "body" in payload_data:
-                body = payload_data.get("body")
-                if isinstance(body, str):
-                    yield body.encode("utf-8")
-                elif isinstance(body, bytes):
-                    yield body
-                elif isinstance(body, (dict, list)):
-                    yield json.dumps(body, separators=(",", ":")).encode("utf-8")
-                return
+                # Broker HTTP envelope (ASGI bridge buffered the full response into
+                # payload.body). Yield the body as raw bytes — SSE or JSON — then stop.
+                if "status_code" in payload_data and "body" in payload_data:
+                    body = payload_data.get("body")
+                    if isinstance(body, str):
+                        yield body.encode("utf-8")
+                    elif isinstance(body, bytes):
+                        yield body
+                    elif isinstance(body, (dict, list)):
+                        yield json.dumps(body, separators=(",", ":")).encode("utf-8")
+                    return
 
-            if event in {"chunk", "progress", "output", "log", "data"}:
-                chunk = payload_data.get("chunk", payload_data)
-                yield self._decode_broker_chunk(chunk)
-            elif isinstance(payload_data.get("chunks"), list):
-                for item in payload_data.get("chunks", []):
-                    yield self._decode_broker_chunk(item)
+                if event in {"chunk", "progress", "output", "log", "data"}:
+                    chunk = payload_data.get("chunk", payload_data)
+                    yield self._decode_broker_chunk(chunk)
+                elif isinstance(payload_data.get("chunks"), list):
+                    for item in payload_data.get("chunks", []):
+                        yield self._decode_broker_chunk(item)
 
-            if event in {None, "done", "completed"}:
-                return
+                # stream_start (event="stream_start") carries no data and isn't in
+                # this set, so we keep waiting for the first real chunk; done/None end it.
+                if event in {None, "done", "completed"}:
+                    return
 
-            next_request_id = message.get("request_id")
-            if not next_request_id:
-                return
-            message = await coderai_broker.wait_for_stream_event(next_request_id, timeout=timeout)
+                next_request_id = message.get("request_id") or request_id
+                if not next_request_id:
+                    return
+                message = await coderai_broker.wait_for_stream_event(next_request_id, timeout=timeout)
+        finally:
+            if request_id:
+                await coderai_broker.finish_stream(request_id)
 
     def validate_credentials(self) -> bool:
         if self._broker_mode:

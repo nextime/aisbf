@@ -596,6 +596,14 @@ class CoderAIBroker:
                     op, provider_id, target_node_id, request_id,
                 )
 
+            if stream_queue is not None:
+                # Streaming: hand control to the consumer immediately instead of
+                # waiting for the terminal event. _iter_broker_stream_chunks() drains
+                # chunks via wait_for_stream_event() and calls finish_stream() to
+                # remove _pending when the stream ends — so we must NOT pop it here.
+                return {"v": 1, "status": "ok", "event": "stream_start",
+                        "request_id": request_id, "payload": {}}
+
             async def wait_reply() -> Dict[str, Any]:
                 if use_local_fast_path:
                     # Poll with short intervals so keepalive messages can extend the deadline.
@@ -666,9 +674,16 @@ class CoderAIBroker:
             if not future.done():
                 future.set_result(result)
             return result
-        finally:
+        except Exception:
             async with self._lock:
                 self._pending.pop(request_id, None)
+            raise
+        finally:
+            # Non-streaming requests are done here; streaming requests keep _pending
+            # alive until the consumer calls finish_stream().
+            if stream_queue is None:
+                async with self._lock:
+                    self._pending.pop(request_id, None)
 
     async def consume_request(self, session_id: str, timeout: int = HEARTBEAT_POLL_SECONDS) -> Optional[Dict[str, Any]]:
         """Block-pop the next request for this session from the shared queue."""
@@ -716,27 +731,29 @@ class CoderAIBroker:
             queue = pending.stream_queue if pending else None
 
         if queue is not None:
-            # Fast path: local asyncio.Queue for this instance's pending request.
-            pending.event_log.append(message)
-            if message.get("event") in {"done", "completed"} and not pending.future.done():
+            # Fast path: local asyncio.Queue. Queue EVERY event (chunks AND the
+            # terminal done/completed) so the consumer's loop receives the end
+            # marker and stops; also resolve the future for any non-stream waiter.
+            if message.get("event") in {"done", "completed"}:
                 await self._record_request_metric(request_id, message)
-                pending.future.set_result(message)
-            else:
-                await queue.put(message)
+                if not pending.future.done():
+                    pending.future.set_result(message)
+            await queue.put(message)
             return
 
         # Slow path: push chunk to the shared cache list for the remote requester.
         self._cache.broker_push(self._reply_key(request_id), message, ttl=REPLY_TTL_SECONDS)
 
+    async def finish_stream(self, request_id: str) -> None:
+        """Remove a streaming request's pending state once the consumer has drained
+        it (called by the relay's stream iterator on completion/error)."""
+        async with self._lock:
+            self._pending.pop(request_id, None)
+
     async def wait_for_stream_event(self, request_id: str, timeout: float = 300.0) -> Dict[str, Any]:
         async with self._lock:
             pending = self._pending.get(request_id)
             queue = pending.stream_queue if pending else None
-            if pending and pending.event_log:
-                for idx, event in enumerate(pending.event_log):
-                    if event.get("event") not in {"done", "completed"}:
-                        pending.event_log.pop(idx)
-                        return event
 
         if queue is not None:
             return await asyncio.wait_for(queue.get(), timeout=timeout)
