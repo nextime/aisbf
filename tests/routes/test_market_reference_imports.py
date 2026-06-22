@@ -1,4 +1,5 @@
 import json
+import re
 import sys
 from base64 import b64encode
 from pathlib import Path
@@ -11,6 +12,7 @@ from jinja2 import Environment, FileSystemLoader, select_autoescape
 from aisbf.models import ChatCompletionRequest
 
 from aisbf.routes.dashboard import market as dashboard_market
+from aisbf.routes.dashboard import providers as dashboard_providers
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from main import app
@@ -46,6 +48,7 @@ class MarketReferenceImportDbStub:
         self.saved_user_rotations = []
         self.saved_user_autoselects = []
         self.recorded_imports = []
+        self.recorded_events = []
         self.created_references = []
         self.reference_rows = []
         self.user_providers = []
@@ -233,6 +236,10 @@ class MarketReferenceImportDbStub:
             }
         )
         return len(self.recorded_imports)
+
+    def record_dashboard_event(self, **kwargs):
+        self.recorded_events.append(kwargs)
+        return len(self.recorded_events)
 
     def get_user_providers(self, user_id):
         return [dict(row) for row in self.user_providers]
@@ -636,6 +643,9 @@ def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
             "session": {},
             "__version__": "test",
             "providers_data": providers_payload,
+            # The page now bootstraps providers from a JSON <script> element built
+            # by the route's escaping helper, not an inline JS object literal.
+            "providers_bootstrap_json": dashboard_providers._json_parse_bootstrap(providers_payload),
             "studio_capability_choices": [],
             "studio_adapter_choices": [],
             "studio_adapter_profile_choices": [],
@@ -648,11 +658,21 @@ def test_dashboard_admin_providers_bootstrap_uses_json_parse(monkeypatch):
     response_text = response.body.decode()
 
     assert response.status_code == 200
-    assert "let providersData = {" in response_text
-    bootstrap_fragment = response_text.split("let providersData = ", 1)[1].split(";\n", 1)[0]
-    providers_bootstrap = json.loads(bootstrap_fragment)
+    # Providers are parsed via JSON.parse of a dedicated <script> element rather
+    # than being inlined as an executable JS object literal.
+    assert "JSON.parse(document.getElementById('providers-bootstrap').textContent)" in response_text
+    match = re.search(
+        r'<script id="providers-bootstrap"[^>]*>(.*?)</script>',
+        response_text,
+        re.S,
+    )
+    assert match, "providers-bootstrap script element not found"
+    bootstrap_fragment = match.group(1)
+    # Dangerous markup must be escaped, never emitted raw (no </script> breakout).
     assert '</script><script>alert(2)</script>' not in bootstrap_fragment
     assert '\\u003c/script\\u003e\\u003cscript\\u003ealert(2)\\u003c/script\\u003e' in bootstrap_fragment
+    # The fragment is a JSON-encoded string wrapping the JSON payload; decode twice.
+    providers_bootstrap = json.loads(json.loads(bootstrap_fragment))
     assert providers_bootstrap["danger-provider"]["name"] == 'Admin "Provider" </script><script>alert(2)</script>'
     assert providers_bootstrap["danger-provider"]["endpoint"] == "https://danger.example/v1</script>"
 

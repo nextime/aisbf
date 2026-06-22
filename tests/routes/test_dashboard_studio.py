@@ -17,6 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
+import asyncio
 import inspect
 import json
 from pathlib import Path
@@ -25,6 +26,14 @@ from base64 import b64encode
 from uuid import uuid4
 
 import pytest
+
+
+def _async_catalog_stub(fn):
+    """Wrap a sync catalog factory so it can stand in for the now-async
+    build_studio_catalog coroutine (the route handler awaits it)."""
+    async def _wrapped(**kwargs):
+        return fn(**kwargs)
+    return _wrapped
 from fastapi.testclient import TestClient
 from itsdangerous import TimestampSigner
 
@@ -111,7 +120,7 @@ def test_dashboard_studio_bootstraps_initial_catalog_data(monkeypatch):
     monkeypatch.setattr(
         dashboard_providers,
         "build_studio_catalog",
-        lambda **kwargs: {
+        _async_catalog_stub(lambda **kwargs: {
             "scope": kwargs["scope"],
             "owner_id": kwargs["owner_id"],
             "entries": [
@@ -123,7 +132,7 @@ def test_dashboard_studio_bootstraps_initial_catalog_data(monkeypatch):
                     "partial_capabilities": ["vision"],
                 }
             ],
-        },
+        }),
     )
 
     response = client.get("/dashboard/studio")
@@ -140,11 +149,11 @@ def test_dashboard_studio_catalog_returns_global_resources_for_admin(monkeypatch
     monkeypatch.setattr(
         dashboard_providers,
         "build_studio_catalog",
-        lambda **kwargs: {
+        _async_catalog_stub(lambda **kwargs: {
             "scope": kwargs["scope"],
             "owner_id": kwargs["owner_id"],
             "entries": [{"id": "provider/openai/gpt-4o", "owner_scope": "admin"}],
-        },
+        }),
     )
 
     response = client.get("/dashboard/studio/catalog")
@@ -184,11 +193,11 @@ def test_dashboard_studio_catalog_returns_user_resources_for_user(monkeypatch):
     monkeypatch.setattr(
         dashboard_providers,
         "build_studio_catalog",
-        lambda **kwargs: {
+        _async_catalog_stub(lambda **kwargs: {
             "scope": kwargs["scope"],
             "owner_id": kwargs["owner_id"],
             "entries": [{"id": "provider/demo/gpt-4o-mini", "owner_scope": "user"}],
-        },
+        }),
     )
 
     response = client.get("/dashboard/studio/catalog")
@@ -217,11 +226,11 @@ def test_dashboard_studio_catalog_does_not_treat_user_role_without_user_id_as_ad
     monkeypatch.setattr(
         dashboard_providers,
         "build_studio_catalog",
-        lambda **kwargs: {
+        _async_catalog_stub(lambda **kwargs: {
             "scope": kwargs["scope"],
             "owner_id": kwargs["owner_id"],
             "entries": [],
-        },
+        }),
     )
 
     response = client.get("/dashboard/studio/catalog")
@@ -270,7 +279,7 @@ def test_build_studio_catalog_uses_global_config_for_admin_scope():
             }
         }
 
-    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+    catalog = asyncio.run(build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub()))
 
     assert catalog["scope"] == "admin"
     assert catalog["owner_id"] is None
@@ -292,7 +301,7 @@ def test_build_studio_catalog_falls_back_to_dashboard_global_provider_source(mon
         },
     )
 
-    catalog = build_studio_catalog(scope="admin", owner_id=None, config=None)
+    catalog = asyncio.run(build_studio_catalog(scope="admin", owner_id=None, config=None))
 
     assert catalog["scope"] == "admin"
     provider_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "provider_model")
@@ -321,7 +330,7 @@ def test_build_studio_catalog_reuses_catalog_entry_contract_for_non_provider_res
             }
         }
 
-    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+    catalog = asyncio.run(build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub()))
 
     rotation_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "rotation")
     autoselect_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "autoselect")
@@ -365,7 +374,7 @@ def test_build_studio_catalog_uses_user_owned_resources_for_user_scope():
                 },
             }]
 
-    catalog = build_studio_catalog(scope="user", owner_id=17, db=DbStub())
+    catalog = asyncio.run(build_studio_catalog(scope="user", owner_id=17, db=DbStub()))
 
     assert catalog["scope"] == "user"
     assert catalog["owner_id"] == 17
@@ -466,7 +475,7 @@ def test_build_studio_catalog_prefers_persisted_studio_capabilities_over_legacy_
         rotations = {}
         autoselect = {}
 
-    catalog = build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub())
+    catalog = asyncio.run(build_studio_catalog(scope="admin", owner_id=None, config=ConfigStub()))
 
     provider_entry = next(entry for entry in catalog["entries"] if entry["kind"] == "provider_model")
     assert provider_entry["capabilities"] == ["audio_input", "transcription"]
