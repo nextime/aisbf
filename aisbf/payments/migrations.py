@@ -56,11 +56,15 @@ class PaymentMigrations:
             self._create_crypto_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_payment_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_subscription_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
+            # Drop legacy-shaped transient queue tables so _create_job_tables can
+            # recreate them with the current schema (transient data only).
+            self._migrate_legacy_queue_tables(cursor)
             self._create_job_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_config_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_notification_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._create_wallet_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._add_stripe_customer_id_column(cursor)
+            self._add_payment_method_gateway_column(cursor)
             self._migrate_per_payment_addresses(cursor)
             self._insert_default_data(cursor)
             
@@ -315,42 +319,54 @@ class PaymentMigrations:
                 expires_at TIMESTAMP NOT NULL
             )
         ''')
-        
-        # Crypto consolidation queue
+
+        # Distributed locks (used by PaymentScheduler._acquire_lock / _release_lock)
+        cursor.execute(f'''
+            CREATE TABLE IF NOT EXISTS distributed_locks (
+                id INTEGER PRIMARY KEY {auto_increment},
+                lock_name VARCHAR(100) NOT NULL UNIQUE,
+                locked_at TIMESTAMP DEFAULT {timestamp_default},
+                locked_by VARCHAR(255) NOT NULL
+            )
+        ''')
+
+        # Crypto consolidation queue (schema matches WalletConsolidator: per-user
+        # source/destination address and amount).
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS crypto_consolidation_queue (
                 id INTEGER PRIMARY KEY {auto_increment},
+                user_id INTEGER NOT NULL,
                 crypto_type VARCHAR(20) NOT NULL,
-                total_balance {decimal_type} NOT NULL,
-                address_count INTEGER NOT NULL,
+                from_address VARCHAR(255) NOT NULL,
+                to_address VARCHAR(255) NOT NULL,
+                amount {decimal_type} NOT NULL,
                 status VARCHAR(20) DEFAULT 'pending',
                 tx_hash VARCHAR(255),
                 error_message {text_type},
                 created_at TIMESTAMP DEFAULT {timestamp_default},
-                processed_at TIMESTAMP NULL
+                processed_at TIMESTAMP NULL,
+                FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
-        
-        # Email notification queue
+
+        # Email notification queue (schema matches NotificationService: a JSON
+        # render context and a retry counter).
         cursor.execute(f'''
             CREATE TABLE IF NOT EXISTS email_notification_queue (
                 id INTEGER PRIMARY KEY {auto_increment},
                 user_id INTEGER NOT NULL,
                 notification_type VARCHAR(50) NOT NULL,
-                recipient_email VARCHAR(255) NOT NULL,
-                subject VARCHAR(255) NOT NULL,
-                body {text_type} NOT NULL,
-                attempt_count INTEGER DEFAULT 0,
-                max_attempts INTEGER DEFAULT 3,
-                next_retry_at TIMESTAMP NULL,
+                context_json {text_type},
                 status VARCHAR(20) DEFAULT 'pending',
                 error_message {text_type},
+                retry_count INTEGER DEFAULT 0,
+                next_retry_at TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT {timestamp_default},
                 sent_at TIMESTAMP NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
         ''')
-        
+
         # Create indexes
         try:
             cursor.execute('CREATE INDEX IF NOT EXISTS idx_job_locks_expires ON job_locks(expires_at)')
@@ -534,6 +550,73 @@ class PaymentMigrations:
                         pass
         except Exception as e:
             logger.warning(f"Migration per-payment addresses: {e}")
+
+    def _table_exists(self, cursor, table: str) -> bool:
+        """Cross-DB check whether a table exists."""
+        try:
+            if self.db_type == 'sqlite':
+                cursor.execute(
+                    "SELECT name FROM sqlite_master WHERE type='table' AND name=?",
+                    (table,),
+                )
+            else:  # mysql
+                cursor.execute(
+                    "SELECT TABLE_NAME FROM INFORMATION_SCHEMA.TABLES "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s",
+                    (table,),
+                )
+            return cursor.fetchone() is not None
+        except Exception:
+            return False
+
+    def _column_exists(self, cursor, table: str, column: str) -> bool:
+        """Cross-DB check whether a column exists on a table."""
+        try:
+            if self.db_type == 'sqlite':
+                cursor.execute(f"PRAGMA table_info({table})")
+                return any(row[1] == column for row in cursor.fetchall())
+            else:  # mysql
+                cursor.execute(
+                    "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS "
+                    "WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s",
+                    (table, column),
+                )
+                return cursor.fetchone() is not None
+        except Exception:
+            return False
+
+    def _migrate_legacy_queue_tables(self, cursor):
+        """Drop transient queue tables that still use a superseded schema.
+
+        Both tables hold only transient, regenerable rows (pending consolidations
+        and email retries), so recreating them with the current schema is safe and
+        avoids fragile column-by-column ALTERs across SQLite and MySQL.
+        """
+        try:
+            if (self._table_exists(cursor, 'crypto_consolidation_queue')
+                    and not self._column_exists(cursor, 'crypto_consolidation_queue', 'user_id')):
+                cursor.execute("DROP TABLE crypto_consolidation_queue")
+                logger.info("Recreating crypto_consolidation_queue with current schema")
+            if (self._table_exists(cursor, 'email_notification_queue')
+                    and not self._column_exists(cursor, 'email_notification_queue', 'context_json')):
+                cursor.execute("DROP TABLE email_notification_queue")
+                logger.info("Recreating email_notification_queue with current schema")
+        except Exception as e:
+            logger.warning(f"Legacy queue table migration check: {e}")
+
+    def _add_payment_method_gateway_column(self, cursor):
+        """Ensure payment_methods has a gateway column.
+
+        The base DatabaseManager schema creates payment_methods without a gateway
+        column, so the migration's CREATE TABLE IF NOT EXISTS is a no-op and the
+        column (read by the renewal processor) would otherwise be missing.
+        """
+        try:
+            if not self._column_exists(cursor, 'payment_methods', 'gateway'):
+                cursor.execute("ALTER TABLE payment_methods ADD COLUMN gateway VARCHAR(50)")
+                logger.info("✅ Added gateway column to payment_methods table")
+        except Exception as e:
+            logger.warning(f"Migration check for payment_methods.gateway column: {e}")
 
     def _add_stripe_customer_id_column(self, cursor):
         """Add Stripe customer ID column to users table"""
