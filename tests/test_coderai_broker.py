@@ -1,13 +1,19 @@
 import asyncio
 import json
 import sys
+import time
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 from fastapi.testclient import TestClient
 
-from aisbf.coderai_broker import broker, CoderAIBroker
+from aisbf.coderai_broker import (
+    broker,
+    CoderAIBroker,
+    CoderAISession,
+    BrokerPlaceholderWebSocket,
+    SESSION_TTL_SECONDS,
+)
 from aisbf.config import ProviderConfig, config
 from aisbf.database import DatabaseRegistry
 
@@ -45,10 +51,8 @@ async def _clear_broker_sessions():
 def test_broker_registers_websocket_session_and_reports_status():
     with TestClient(app) as client:
         with client.websocket_connect("/api/coderai/wss?provider_id=coderai&client_id=nat-client&registration_token=global-token&username=global") as websocket:
-            registered = websocket.receive_json()
-            assert registered["event"] == "registered"
-            assert registered["scope_name"] == "global"
-
+            # New handshake: the client speaks first with op=register (carrying
+            # hardware/capabilities); the server then replies event=registered.
             websocket.send_json({
                 "op": "register",
                 "request_id": "reg-1",
@@ -68,8 +72,10 @@ def test_broker_registers_websocket_session_and_reports_status():
                     "capabilities": {"studio": {"enabled": True}},
                 },
             })
-            ack = websocket.receive_json()
-            assert ack["status"] == "ok"
+            registered = websocket.receive_json()
+            assert registered["event"] == "registered"
+            assert registered["status"] == "ok"
+            assert registered["scope_name"] == "global"
 
             response = client.get("/api/coderai/broker/providers/coderai/status", params={"client_id": "nat-client"})
             assert response.status_code == 200
@@ -124,16 +130,35 @@ def test_broker_routes_request_to_registered_session():
 
 def test_broker_uses_queue_for_remote_node_session():
     async def scenario():
-        class StubWebSocket:
-            async def send_text(self, payload: str):
-                raise AssertionError("Remote-node session should not use direct websocket fast path")
+        # A session owned by a DIFFERENT cluster node is represented purely in the
+        # shared cache (with a foreign broker_node_id) and has no local WebSocket on
+        # this instance. send_request() must therefore use the shared queue slow path,
+        # never a direct websocket send.
+        provider_id, client_id = "coderai", "remote-client"
+        session_id = "coderai_remote_node_test"
+        meta_key = broker._session_meta_key(provider_id, client_id)
+        broker._cache.broker_set(meta_key, {
+            "session_id": session_id,
+            "provider_id": provider_id,
+            "client_id": client_id,
+            "connected_at": time.time(),
+            "last_seen": time.time(),
+            "closed": False,
+            "metadata": {
+                "owner_user_id": None,
+                "broker_node_id": "remote-node",
+                "connection_state": "connected",
+            },
+            "capabilities": {},
+        }, ttl=SESSION_TTL_SECONDS)
+        index = broker._cache.broker_get(broker._session_index_key()) or []
+        if meta_key not in index:
+            index.append(meta_key)
+            broker._cache.broker_set(broker._session_index_key(), index, ttl=SESSION_TTL_SECONDS * 10)
 
-        websocket = StubWebSocket()
-        session = await broker.register(websocket, "coderai", "remote-client", metadata={"owner_user_id": None})
-        await broker.touch(session.session_id, metadata={"broker_node_id": "remote-node"})
         try:
             async def responder():
-                message = await broker.consume_request(session.session_id, timeout=1)
+                message = await broker.consume_request(session_id, timeout=2)
                 assert message is not None
                 await asyncio.sleep(0)
                 await broker.publish_response({
@@ -148,7 +173,8 @@ def test_broker_uses_queue_for_remote_node_session():
             )
             assert response["payload"]["data"][0]["id"] == "queue-model"
         finally:
-            await broker.unregister(session.session_id)
+            broker._cache.broker_delete(meta_key)
+            broker._remove_session_from_index(provider_id, client_id)
 
     asyncio.run(scenario())
 
@@ -222,7 +248,18 @@ def test_user_scoped_broker_websocket_path_registers_username():
     try:
         with TestClient(app) as client:
             with client.websocket_connect("/api/u/alice/coderai/wss?provider_id=coderai-user&client_id=user-client&registration_token=user-token&username=alice") as websocket:
+                # New handshake: the client sends op=register first.
+                websocket.send_json({
+                    "op": "register",
+                    "request_id": "reg-user-1",
+                    "payload": {
+                        "endpoint": "ws://local-tunnel",
+                        "transport": "websocket",
+                        "registration_token": "user-token",
+                    },
+                })
                 registered = websocket.receive_json()
+                assert registered["event"] == "registered"
                 assert registered["username"] == "alice"
                 assert registered["scope_name"] == "alice"
     finally:
@@ -333,32 +370,64 @@ def test_user_registration_rejects_global_provider_token(monkeypatch):
             config.providers["coderai-global-only"] = original_provider
 
 
-def test_load_persisted_sessions_quarantines_corrupt_state_file(tmp_path):
-    broker_instance = CoderAIBroker()
-    broker_instance._state_path = tmp_path / "coderai_broker_sessions.json"
-    broker_instance._state_path.write_text('{"sessions": [invalid]}', encoding="utf-8")
-    broker_instance._cache = SimpleNamespace(
-        broker_node_id=lambda: "node-test",
-        broker_set=lambda *args, **kwargs: None,
-        broker_get=lambda *args, **kwargs: None,
-        broker_delete=lambda *args, **kwargs: None,
-    )
+def test_store_session_cache_is_visible_to_other_cluster_nodes():
+    """Sessions persist through the shared cache, so a separate broker instance
+    (i.e. another cluster node) can see a session it never registered locally."""
+    async def scenario():
+        provider_id, client_id = "coderai", "persist-client"
+        session_id = "coderai_persist_test"
 
-    broker_instance._load_persisted_sessions()
+        # "Node A" owns the WebSocket and writes the session to the shared cache.
+        node_a = CoderAIBroker()
+        session = CoderAISession(
+            session_id=session_id,
+            provider_id=provider_id,
+            client_id=client_id,
+            websocket=BrokerPlaceholderWebSocket(),
+            metadata={"owner_user_id": None},
+        )
+        node_a._store_session_cache(session)
+        try:
+            # "Node B" is a different instance sharing the same cache backend.
+            node_b = CoderAIBroker()
+            snapshot = await node_b.get_session_snapshot(provider_id, client_id)
+            assert snapshot is not None
+            assert snapshot["connected"] is True
+            assert snapshot["session_id"] == session_id
 
-    assert not broker_instance._state_path.exists()
-    quarantined = list(tmp_path.glob("coderai_broker_sessions.json.corrupt.*"))
-    assert len(quarantined) == 1
+            sessions = await node_b.list_sessions()
+            assert any(s["session_id"] == session_id for s in sessions)
+        finally:
+            node_a._cache.broker_delete(node_a._session_meta_key(provider_id, client_id))
+            node_a._remove_session_from_index(provider_id, client_id)
+
+    asyncio.run(scenario())
 
 
-def test_persist_sessions_locked_writes_state_atomically(tmp_path):
-    broker_instance = CoderAIBroker()
-    broker_instance._state_path = tmp_path / "coderai_broker_sessions.json"
-    broker_instance._sessions_by_id = {}
+def test_offline_tombstone_marks_session_disconnected_cluster_wide():
+    """Marking a session offline writes a closed tombstone other nodes observe."""
+    async def scenario():
+        provider_id, client_id = "coderai", "tombstone-client"
+        node_a = CoderAIBroker()
+        session = CoderAISession(
+            session_id="coderai_tombstone_test",
+            provider_id=provider_id,
+            client_id=client_id,
+            websocket=BrokerPlaceholderWebSocket(),
+            metadata={"owner_user_id": None},
+        )
+        node_a._store_session_cache(session)
+        try:
+            node_b = CoderAIBroker()
+            assert (await node_b.get_session_snapshot(provider_id, client_id))["connected"] is True
 
-    broker_instance._persist_sessions_locked()
+            node_a._mark_session_offline_cache(provider_id, client_id)
 
-    assert broker_instance._state_path.exists()
-    assert not (tmp_path / "coderai_broker_sessions.json.tmp").exists()
-    payload = json.loads(broker_instance._state_path.read_text(encoding="utf-8"))
-    assert payload["sessions"] == []
+            offline = await node_b.get_session_snapshot(provider_id, client_id)
+            assert offline is not None
+            assert offline["connected"] is False
+        finally:
+            node_a._cache.broker_delete(node_a._session_meta_key(provider_id, client_id))
+            node_a._remove_session_from_index(provider_id, client_id)
+
+    asyncio.run(scenario())
