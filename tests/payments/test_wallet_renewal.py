@@ -19,7 +19,16 @@ def mock_db():
 
 @pytest.fixture
 def renewal_processor(mock_db):
-    return SubscriptionRenewalProcessor(mock_db)
+    # The processor now takes its payment collaborators explicitly; the renewal
+    # tests patch WalletManager methods and _charge_payment, so plain mocks for
+    # the gateway/price collaborators are sufficient here.
+    return SubscriptionRenewalProcessor(
+        mock_db,
+        stripe_handler=MagicMock(),
+        paypal_handler=MagicMock(),
+        crypto_wallet_manager=MagicMock(),
+        price_service=MagicMock(),
+    )
 
 
 @pytest.fixture
@@ -79,7 +88,7 @@ class TestSubscriptionRenewalWalletIntegration:
         with patch.object(WalletManager, 'get_wallet') as mock_get_wallet, \
              patch.object(WalletManager, 'has_sufficient_balance') as mock_has_balance, \
              patch.object(WalletManager, 'should_trigger_auto_topup') as mock_should_trigger, \
-             patch('aisbf.payments.subscription.renewal.trigger_auto_topup') as mock_trigger_topup, \
+             patch('aisbf.payments.scheduler.trigger_auto_topup') as mock_trigger_topup, \
              patch.object(WalletManager, 'debit_wallet') as mock_debit_wallet, \
              patch.object(renewal_processor, '_charge_payment') as mock_charge_payment:
             
@@ -112,7 +121,7 @@ class TestSubscriptionRenewalWalletIntegration:
         with patch.object(WalletManager, 'get_wallet') as mock_get_wallet, \
              patch.object(WalletManager, 'has_sufficient_balance') as mock_has_balance, \
              patch.object(WalletManager, 'should_trigger_auto_topup') as mock_should_trigger, \
-             patch('aisbf.payments.subscription.renewal.trigger_auto_topup') as mock_trigger_topup, \
+             patch('aisbf.payments.scheduler.trigger_auto_topup') as mock_trigger_topup, \
              patch.object(renewal_processor, '_charge_payment') as mock_charge_payment:
             
             mock_get_wallet.return_value = {
@@ -131,7 +140,7 @@ class TestSubscriptionRenewalWalletIntegration:
             mock_charge_payment.return_value = {'success': True}
             
             # Mock payment method lookup
-            mock_cursor = AsyncMock()
+            mock_cursor = MagicMock()  # renewal DB cursor access is synchronous
             mock_cursor.fetchone.return_value = (789, 456, 'card', 'stripe', 'pm_123', '{}')
             
             mock_conn = MagicMock()
@@ -165,7 +174,7 @@ class TestSubscriptionRenewalWalletIntegration:
             mock_debit_wallet.return_value = {'success': True}
             
             # Mock tier lookup
-            mock_cursor = AsyncMock()
+            mock_cursor = MagicMock()  # renewal DB cursor access is synchronous
             mock_cursor.fetchone.return_value = (Decimal('29.99'), Decimal('299.99'), 'Business')
             
             mock_conn = MagicMock()

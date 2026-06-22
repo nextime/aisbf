@@ -73,20 +73,26 @@ def test_derive_ethereum_address(db_manager, encryption_key):
 
 @pytest.mark.anyio
 async def test_get_or_create_user_address(db_manager, encryption_key):
-    """Test user address creation"""
+    """Test user address creation.
+
+    The legacy ``get_or_create_user_address`` helper now allocates a fresh
+    payment address on every call (each with a unique payment_id), so repeated
+    calls return distinct addresses rather than reusing one per user.
+    """
     wallet_manager = CryptoWalletManager(db_manager, encryption_key)
-    
-    # Create address for user 1
+
+    # Each call creates a new payment address.
     address1 = await wallet_manager.get_or_create_user_address(1, 'btc')
     assert address1.startswith('bc1')
-    
-    # Getting again should return same address
+
     address2 = await wallet_manager.get_or_create_user_address(1, 'btc')
-    assert address1 == address2
-    
-    # Different user should get different address
+    assert address2.startswith('bc1')
+    assert address2 != address1
+
+    # Different user should also get a distinct address.
     address3 = await wallet_manager.get_or_create_user_address(2, 'btc')
     assert address3 != address1
+    assert address3 != address2
 
 
 @pytest.mark.anyio
@@ -152,6 +158,8 @@ async def test_wallet_manager_credit_wallet():
     from aisbf.payments.wallet.manager import WalletManager
 
     mock_session = AsyncMock()
+    # self.db.begin() must return an async context manager, not a coroutine.
+    mock_session.begin = MagicMock(return_value=MagicMock())
     manager = WalletManager(mock_session)
 
     manager.get_wallet = AsyncMock(return_value={
@@ -183,6 +191,8 @@ async def test_wallet_manager_debit_wallet_sufficient_funds():
     from aisbf.payments.wallet.manager import WalletManager
 
     mock_session = AsyncMock()
+    # self.db.begin() must return an async context manager, not a coroutine.
+    mock_session.begin = MagicMock(return_value=MagicMock())
     manager = WalletManager(mock_session)
 
     manager.get_wallet = AsyncMock(return_value={
@@ -207,12 +217,14 @@ async def test_wallet_manager_debit_wallet_sufficient_funds():
 @pytest.mark.asyncio
 async def test_wallet_manager_debit_wallet_insufficient_funds():
     """Test WalletManager debit fails when balance is insufficient"""
-    from unittest.mock import AsyncMock
+    from unittest.mock import AsyncMock, MagicMock
     from decimal import Decimal
     from aisbf.payments.wallet.manager import WalletManager
     import pytest
 
     mock_session = AsyncMock()
+    # self.db.begin() must return an async context manager, not a coroutine.
+    mock_session.begin = MagicMock(return_value=MagicMock())
     manager = WalletManager(mock_session)
 
     manager.get_wallet = AsyncMock(return_value={

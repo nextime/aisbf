@@ -5,15 +5,20 @@ import pytest
 from decimal import Decimal
 from unittest.mock import Mock, patch, AsyncMock
 
+from cryptography.fernet import Fernet
+
 from aisbf.payments.service import PaymentService
 from aisbf.payments.wallet.manager import WalletManager
+
+# PaymentService validates the encryption key as a real Fernet key.
+_TEST_ENCRYPTION_KEY = Fernet.generate_key().decode()
 
 
 @pytest.mark.asyncio
 async def test_topup_amount_configuration():
     """Test that supported top up amounts are properly configured"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     service = PaymentService(db, config)
     
@@ -33,7 +38,7 @@ async def test_topup_amount_configuration():
 async def test_initiate_stripe_topup():
     """Test initiating a Stripe top up payment"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     service = PaymentService(db, config)
     service.stripe_handler.create_payment_intent = AsyncMock(return_value={
@@ -60,7 +65,7 @@ async def test_initiate_stripe_topup():
 async def test_initiate_paypal_topup():
     """Test initiating a PayPal top up payment"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     service = PaymentService(db, config)
     service.paypal_handler.create_order = AsyncMock(return_value={
@@ -85,7 +90,7 @@ async def test_initiate_paypal_topup():
 async def test_stripe_webhook_credits_wallet():
     """Test that successful Stripe payment webhook credits user wallet"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     with patch('aisbf.payments.wallet.manager.WalletManager.credit_wallet', new_callable=AsyncMock) as mock_credit:
         service = PaymentService(db, config)
@@ -122,7 +127,7 @@ async def test_stripe_webhook_credits_wallet():
 async def test_crypto_payment_credits_wallet():
     """Test that confirmed crypto payment credits user wallet"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     with patch('aisbf.payments.wallet.manager.WalletManager.credit_wallet', new_callable=AsyncMock) as mock_credit:
         service = PaymentService(db, config)
@@ -146,7 +151,7 @@ async def test_crypto_payment_credits_wallet():
 async def test_invalid_topup_amount():
     """Test that invalid top up amounts are rejected"""
     db = Mock()
-    config = {'encryption_key': 'test_key', 'base_url': 'http://localhost'}
+    config = {'encryption_key': _TEST_ENCRYPTION_KEY, 'base_url': 'http://localhost'}
     
     service = PaymentService(db, config)
     

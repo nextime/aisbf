@@ -9,21 +9,29 @@ Tests complete payment flows including:
 - Email notifications
 """
 import pytest
+import pytest_asyncio
 import asyncio
 from decimal import Decimal
 from datetime import datetime, timedelta
 from unittest.mock import Mock, patch, AsyncMock
 from pathlib import Path
 
+from cryptography.fernet import Fernet
+
 
 @pytest.fixture
-def db_manager():
+def db_manager(tmp_path):
     """Create test database manager"""
     from aisbf.database import DatabaseManager
-    
-    # Use in-memory SQLite for tests
-    db = DatabaseManager(db_type='sqlite', db_path=':memory:')
-    
+
+    # File-backed SQLite so every connection sees the same schema/data
+    # (DatabaseManager now takes a config dict, not db_type/db_path kwargs).
+    db_path = Path(tmp_path) / "payment_integration_test.db"
+    db = DatabaseManager({
+        'type': 'sqlite',
+        'sqlite_path': str(db_path),
+    })
+
     # Run migrations
     from aisbf.payments.migrations import PaymentMigrations
     migrations = PaymentMigrations(db)
@@ -124,7 +132,7 @@ def market_db_manager(tmp_path):
 def payment_config():
     """Payment service configuration"""
     return {
-        'encryption_key': 'test_key_32_bytes_long_exactly!!',
+        'encryption_key': Fernet.generate_key().decode(),
         'currency_code': 'USD',
         'btc_confirmations': 3,
         'eth_confirmations': 12,
@@ -134,7 +142,7 @@ def payment_config():
     }
 
 
-@pytest.fixture
+@pytest_asyncio.fixture
 async def payment_service(db_manager, payment_config):
     """Create payment service instance"""
     from aisbf.payments.service import PaymentService
