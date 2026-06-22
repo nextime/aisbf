@@ -150,20 +150,23 @@ async def test_max_retries_downgrades_to_free(db_manager):
     
     processor = PaymentRetryProcessor(db_manager, MockSubscriptionManager())
     
-    # Get free tier ID
+    # Get the tier the downgrade will pick (same selection logic as the code).
     with db_manager._get_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT id FROM account_tiers WHERE name = 'Free' LIMIT 1")
+        cursor.execute("SELECT id FROM account_tiers WHERE is_default = 1 OR name = 'Free' LIMIT 1")
         free_tier_id = cursor.fetchone()[0]
     
-    # Add retry with max attempts already reached
+    # The fixture already creates subscription #1 (on the Pro tier) and a payment
+    # method. Queue a retry already at the last attempt. Use a gateway type so the
+    # early crypto-skip is bypassed and the failing charge drives the attempt
+    # count to the max, triggering the downgrade.
     with db_manager._get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute("""
             INSERT INTO payment_retry_queue
-            (subscription_id, user_id, payment_method_type, amount, 
+            (subscription_id, user_id, payment_method_type, amount,
              attempt_count, max_attempts, next_retry_at, status)
-            VALUES (1, 1, 'crypto', 100.00, 2, 3, datetime('now'), 'pending')
+            VALUES (1, 1, 'stripe', 100.00, 2, 3, datetime('now'), 'pending')
         """)
         conn.commit()
     
@@ -195,19 +198,22 @@ async def test_retry_increments_attempt_count(db_manager):
     
     processor = PaymentRetryProcessor(db_manager, MockSubscriptionManager())
     
-    # Add retry to queue with future next_retry_at so it gets processed
+    # Add retry to queue with due next_retry_at so it gets processed. Use a
+    # gateway type (not crypto): crypto retries are skipped without incrementing
+    # while the wallet is unfunded, whereas a gateway charge that fails increments
+    # the attempt counter.
     now = datetime.utcnow().isoformat()
     with db_manager._get_connection() as conn:
         cursor = conn.cursor()
         cursor.execute(f"""
             INSERT INTO payment_retry_queue
-            (subscription_id, user_id, payment_method_type, amount, 
+            (subscription_id, user_id, payment_method_type, amount,
              attempt_count, max_attempts, next_retry_at, status)
-            VALUES (1, 1, 'crypto', 100.00, 0, 3, '{now}', 'pending')
+            VALUES (1, 1, 'stripe', 100.00, 0, 3, '{now}', 'pending')
         """)
         conn.commit()
-    
-    # Process retries (will fail due to insufficient balance)
+
+    # Process retries (gateway charge fails -> attempt count increments)
     await processor.process_retries()
     
     # Check attempt count was incremented

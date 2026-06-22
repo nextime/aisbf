@@ -276,7 +276,7 @@ class PaymentRetryProcessor:
             # Get free tier ID
             with self.db._get_connection() as conn:
                 cursor = conn.cursor()
-                cursor.execute("SELECT id FROM tiers WHERE is_default = TRUE OR name = 'Free' LIMIT 1")
+                cursor.execute("SELECT id FROM account_tiers WHERE is_default = 1 OR name = 'Free' LIMIT 1")
                 free_tier = cursor.fetchone()
             
             if free_tier:

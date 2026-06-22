@@ -65,6 +65,8 @@ class PaymentMigrations:
             self._create_wallet_tables(cursor, auto_increment, timestamp_default, boolean_type, text_type, decimal_type)
             self._add_stripe_customer_id_column(cursor)
             self._add_payment_method_gateway_column(cursor)
+            self._add_payment_retry_last_attempt_column(cursor)
+            self._add_subscription_cancelled_at_column(cursor)
             self._migrate_per_payment_addresses(cursor)
             self._insert_default_data(cursor)
             
@@ -244,6 +246,7 @@ class PaymentMigrations:
                 last_error {text_type},
                 status VARCHAR(20) DEFAULT 'pending',
                 created_at TIMESTAMP DEFAULT {timestamp_default},
+                last_attempt_at TIMESTAMP NULL,
                 completed_at TIMESTAMP NULL,
                 FOREIGN KEY (user_id) REFERENCES users(id)
             )
@@ -289,6 +292,7 @@ class PaymentMigrations:
                 current_period_end TIMESTAMP NOT NULL,
                 cancel_at_period_end {boolean_type} DEFAULT 0,
                 pending_tier_id INTEGER,
+                cancelled_at TIMESTAMP NULL,
                 created_at TIMESTAMP DEFAULT {timestamp_default},
                 updated_at TIMESTAMP DEFAULT {timestamp_default},
                 FOREIGN KEY (user_id) REFERENCES users(id),
@@ -603,6 +607,28 @@ class PaymentMigrations:
                 logger.info("Recreating email_notification_queue with current schema")
         except Exception as e:
             logger.warning(f"Legacy queue table migration check: {e}")
+
+    def _add_subscription_cancelled_at_column(self, cursor):
+        """Ensure subscriptions has a cancelled_at column (written when a renewal
+        exhausts its retries and the subscription is cancelled)."""
+        try:
+            if (self._table_exists(cursor, 'subscriptions')
+                    and not self._column_exists(cursor, 'subscriptions', 'cancelled_at')):
+                cursor.execute("ALTER TABLE subscriptions ADD COLUMN cancelled_at TIMESTAMP NULL")
+                logger.info("✅ Added cancelled_at column to subscriptions table")
+        except Exception as e:
+            logger.warning(f"Migration check for subscriptions.cancelled_at column: {e}")
+
+    def _add_payment_retry_last_attempt_column(self, cursor):
+        """Ensure payment_retry_queue has a last_attempt_at column (written by the
+        retry processor when scheduling the next attempt)."""
+        try:
+            if (self._table_exists(cursor, 'payment_retry_queue')
+                    and not self._column_exists(cursor, 'payment_retry_queue', 'last_attempt_at')):
+                cursor.execute("ALTER TABLE payment_retry_queue ADD COLUMN last_attempt_at TIMESTAMP NULL")
+                logger.info("✅ Added last_attempt_at column to payment_retry_queue table")
+        except Exception as e:
+            logger.warning(f"Migration check for payment_retry_queue.last_attempt_at column: {e}")
 
     def _add_payment_method_gateway_column(self, cursor):
         """Ensure payment_methods has a gateway column.
