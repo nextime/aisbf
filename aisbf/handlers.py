@@ -65,13 +65,16 @@ from .prompt_analysis import analyze_prompt_payload
 _autoselect_result_cache: dict = {}
 _autoselect_result_cache_ttl: int = 3600  # seconds
 
-# CoderAI providers often run on small/edge hardware that drops its broker session
-# while cooling down. Treat a missing broker session as a transient "warming up"
-# state: wait CODERAI_WARMUP_WAIT_SECONDS and retry the same provider, up to
-# CODERAI_MAX_WARMUP_WAITS times, instead of recording a failure (which would
-# disable the provider for a long cooldown).
-CODERAI_WARMUP_WAIT_SECONDS: float = 10.0
-CODERAI_MAX_WARMUP_WAITS: int = 3
+
+def _is_coderai_warmup_error(error) -> bool:
+    """True when the error is just a missing CoderAI broker session (worker warming up).
+
+    CoderAI workers often run on small/edge hardware that drops the broker session
+    while cooling down. That is transient, not a provider fault: callers must not
+    record a failure for it (which would disable the provider for a long cooldown).
+    The marker string is CoderAI-specific, so this is safe to check on any path.
+    """
+    return 'No active CoderAI broker session' in str(error or '')
 
 # Registry for proxied content — shared across all RequestHandler instances.
 # Values: {"type": "broker", "provider_id": str, "path": str}
@@ -942,8 +945,10 @@ class RequestHandler:
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
             return response
         except Exception as e:
-            handler.record_failure()
-            
+            # CoderAI warm-up (no broker session) is transient — don't disable it.
+            if not _is_coderai_warmup_error(e):
+                handler.record_failure()
+
             # Record failed request analytics
             try:
                 analytics = get_analytics()
@@ -1666,8 +1671,10 @@ class RequestHandler:
                     logger.warning(f"Analytics recording for streaming request failed: {analytics_error}")
                 
             except Exception as e:
-                handler.record_failure()
-                
+                # CoderAI warm-up (no broker session) is transient — don't disable it.
+                if not _is_coderai_warmup_error(e):
+                    handler.record_failure()
+
                 # Record analytics for failed streaming request
                 try:
                     analytics = get_analytics()
@@ -2162,7 +2169,8 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for audio transcription {provider_id}: {market_error}")
             return result
         except Exception as e:
-            handler.record_failure()
+            if not _is_coderai_warmup_error(e):
+                handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
     async def handle_text_to_speech(self, request: Request, provider_id: str, request_data: Dict) -> StreamingResponse:
@@ -2196,7 +2204,8 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for text to speech {provider_id}: {market_error}")
             return result
         except Exception as e:
-            handler.record_failure()
+            if not _is_coderai_warmup_error(e):
+                handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
     async def handle_image_generation(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
@@ -2240,7 +2249,8 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for image generation {provider_id}: {market_error}")
             return result
         except Exception as e:
-            handler.record_failure()
+            if not _is_coderai_warmup_error(e):
+                handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
     async def handle_embeddings(self, request: Request, provider_id: str, request_data: Dict) -> Dict:
@@ -2274,7 +2284,8 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for embeddings {provider_id}: {market_error}")
             return result
         except Exception as e:
-            handler.record_failure()
+            if not _is_coderai_warmup_error(e):
+                handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
     def _rewrite_coderai_file_urls(self, body_str: str, provider_id: str, request: Request, *, via_broker: bool) -> str:
@@ -3489,7 +3500,6 @@ class RotationHandler:
         max_retries = 5
         tried_models = []  # Track which models have been tried
         model_retry_counts = {}  # Track retry count per model
-        coderai_warmup_counts = {}  # Track CoderAI "warming up" waits per model
         last_error = None
         successful_model = None
         successful_handler = None
@@ -3909,26 +3919,15 @@ class RotationHandler:
                 last_error = str(e)
 
                 # CoderAI "warming up": the broker session is temporarily gone while
-                # the (often small/edge) worker cools down. This is NOT a provider
-                # fault — do not record a failure (which would disable the provider for
-                # a long cooldown). Instead wait a few seconds and retry the same
-                # provider, up to a bounded number of times, fully transparent to the
-                # client.
+                # the (often small/edge) worker cools down. The provider handler
+                # already waited and retried internally; if it still failed, this is
+                # NOT a provider fault — do not record a failure (which would disable
+                # the provider for a long cooldown), just fail over to the next
+                # provider, fully transparent to the client.
                 if self._is_coderai_warming_error(e, provider_id):
-                    warmup_count = coderai_warmup_counts.get(model_key, 0)
-                    if warmup_count < CODERAI_MAX_WARMUP_WAITS:
-                        coderai_warmup_counts[model_key] = warmup_count + 1
-                        logger.warning(
-                            f"CoderAI provider {provider_id} is warming up (no broker session); "
-                            f"waiting {CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying "
-                            f"(warmup {warmup_count + 1}/{CODERAI_MAX_WARMUP_WAITS}) — not recorded as a failure"
-                        )
-                        await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
-                        continue
                     logger.warning(
-                        f"CoderAI provider {provider_id} still warming up after "
-                        f"{warmup_count} wait(s); failing over to the next provider "
-                        f"(still not recorded as a failure)"
+                        f"CoderAI provider {provider_id} still warming up after internal retries; "
+                        f"failing over to the next provider (not recorded as a failure)"
                     )
                     tried_models.append(current_model)
                     continue
@@ -5028,7 +5027,9 @@ class RotationHandler:
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
             except Exception as e:
-                handler.record_failure()
+                # CoderAI warm-up (no broker session) is transient — don't disable it.
+                if not _is_coderai_warmup_error(e):
+                    handler.record_failure()
                 latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                 self._record_dashboard_proxy_event(
                     None,

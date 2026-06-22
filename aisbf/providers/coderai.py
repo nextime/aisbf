@@ -43,6 +43,24 @@ from .base import AISBF_DEBUG, BaseProviderHandler
 
 logger = logging.getLogger(__name__)
 
+# CoderAI workers often run on small/edge hardware that drops its broker session
+# while cooling down to avoid overheating. A missing broker session is therefore a
+# transient "warming up" condition, not a provider fault: wait and retry the request
+# a bounded number of times instead of failing. This is applied for ALL request
+# paths (rotation, autoselect and direct) and ONLY for the broker-session error.
+CODERAI_WARMUP_WAIT_SECONDS: float = 10.0
+CODERAI_MAX_WARMUP_WAITS: int = 3
+_CODERAI_WARMUP_MARKER = "No active CoderAI broker session"
+
+# CoderAI requests can be very long-running on modest hardware, so default to a
+# multi-hour request timeout (overridable via coderai_config.request_timeout).
+CODERAI_DEFAULT_REQUEST_TIMEOUT: float = 10800.0  # 3 hours
+
+
+def _is_coderai_warmup_error(error) -> bool:
+    """True when the error is just a missing CoderAI broker session (warming up)."""
+    return _CODERAI_WARMUP_MARKER in str(error or "")
+
 
 class CoderAIProviderHandler(BaseProviderHandler):
     """Provider for CoderAI local servers over HTTP or WebSocket bridge."""
@@ -58,7 +76,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
         self._bridge_path = str(self._coderai_config.get("bridge_path") or "/coderai/ws").strip() or "/coderai/ws"
         self._registration_path = str(self._coderai_config.get("registration_path") or "/coderai/register").strip() or "/coderai/register"
         self._broker_ws_path = str(self._coderai_config.get("broker_ws_path") or "/api/coderai/wss").strip() or "/api/coderai/wss"
-        self._request_timeout = float(self._coderai_config.get("request_timeout") or 300.0)
+        self._request_timeout = float(self._coderai_config.get("request_timeout") or CODERAI_DEFAULT_REQUEST_TIMEOUT)
         self._model_timeout = float(self._coderai_config.get("model_timeout") or 30.0)
         self._websocket_enabled = bool(self._coderai_config.get("websocket_enabled", True))
         self._http_enabled = bool(self._coderai_config.get("http_enabled", True))
@@ -73,7 +91,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
         self._base_endpoint = self._normalize_http_base(self._raw_endpoint)
         self._ws_endpoint = self._normalize_ws_endpoint(self._raw_endpoint)
         self._apply_provider_defaults()
-        self.client = OpenAI(base_url=f"{self._base_endpoint}/v1", api_key=self._effective_api_key())
+        self.client = OpenAI(base_url=f"{self._base_endpoint}/v1", api_key=self._effective_api_key(), timeout=self._request_timeout)
 
     def _get_provider_value(self, key: str, default: Any = None) -> Any:
         if isinstance(self.provider_config, dict):
@@ -224,8 +242,30 @@ class CoderAIProviderHandler(BaseProviderHandler):
             extra=extra,
         )
 
+    async def _broker_request_with_warmup(self, op: str, payload: Dict[str, Any], timeout: float) -> Dict[str, Any]:
+        """Like _broker_request, but tolerant of a CoderAI worker that is warming up.
+
+        A missing broker session means the (often small/edge) worker is cooling down;
+        wait CODERAI_WARMUP_WAIT_SECONDS and retry, up to CODERAI_MAX_WARMUP_WAITS
+        times, instead of surfacing the error. Used for chat requests on every path.
+        """
+        attempt = 0
+        while True:
+            try:
+                return await self._broker_request(op, payload, timeout=timeout)
+            except Exception as e:
+                if _is_coderai_warmup_error(e) and attempt < CODERAI_MAX_WARMUP_WAITS:
+                    attempt += 1
+                    logger.warning(
+                        f"[{self.provider_id}] CoderAI broker warming up (no session); waiting "
+                        f"{CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying ({attempt}/{CODERAI_MAX_WARMUP_WAITS})"
+                    )
+                    await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
+                    continue
+                raise
+
     async def _broker_stream(self, op: str, payload: Dict[str, Any], timeout: float) -> AsyncIterator[bytes]:
-        message = await self._broker_request(op, payload, timeout=timeout)
+        message = await self._broker_request_with_warmup(op, payload, timeout=timeout)
         status = message.get("status") or "ok"
         if status == "error":
             raise Exception(message.get("error") or "CoderAI broker bridge error")
@@ -475,42 +515,58 @@ class CoderAIProviderHandler(BaseProviderHandler):
         await self.apply_rate_limit()
         payload = self._build_chat_payload(model, messages, max_tokens, temperature, stream, tools, tool_choice)
 
-        try:
-            if await self._use_broker():
-                if stream:
-                    return self._broker_stream("chat.completions", payload, timeout=self._request_timeout)
-                message = await self._broker_request("chat.completions", payload, timeout=self._request_timeout)
-                if (message.get("status") or "ok") == "error":
-                    raise Exception(message.get("error") or "CoderAI broker request failed")
-                self.record_success()
-                return self._unwrap_broker_body(message.get("payload") or {})
-            if self._is_direct_websocket_mode():
-                if stream:
-                    return self._ws_stream("chat.completions", payload, timeout=self._request_timeout)
-                message = await self._ws_roundtrip("chat.completions", payload, timeout=self._request_timeout)
-                if (message.get("status") or "ok") == "error":
-                    raise Exception(message.get("error") or "CoderAI WebSocket request failed")
-                self.record_success()
-                return message.get("payload") or {}
-            if self._broker_preferred:
-                raise RuntimeError(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed with broker_preferred=True")
+        # Warm-up retry loop: a missing broker session means the CoderAI worker
+        # (often small/edge hardware) is cooling down to avoid overheating. That is
+        # a transient condition, not a provider fault, so we wait and retry the same
+        # provider a bounded number of times instead of failing. This applies on
+        # every request path (rotation, autoselect and direct) and only for the
+        # broker-session error. For streaming the broker call is lazy, so its warm-up
+        # retry lives inside _broker_stream (via _broker_request_with_warmup).
+        warmup_attempts = 0
+        while True:
+            try:
+                if await self._use_broker():
+                    if stream:
+                        return self._broker_stream("chat.completions", payload, timeout=self._request_timeout)
+                    message = await self._broker_request("chat.completions", payload, timeout=self._request_timeout)
+                    if (message.get("status") or "ok") == "error":
+                        raise Exception(message.get("error") or "CoderAI broker request failed")
+                    self.record_success()
+                    return self._unwrap_broker_body(message.get("payload") or {})
+                if self._is_direct_websocket_mode():
+                    if stream:
+                        return self._ws_stream("chat.completions", payload, timeout=self._request_timeout)
+                    message = await self._ws_roundtrip("chat.completions", payload, timeout=self._request_timeout)
+                    if (message.get("status") or "ok") == "error":
+                        raise Exception(message.get("error") or "CoderAI WebSocket request failed")
+                    self.record_success()
+                    return message.get("payload") or {}
+                if self._broker_preferred:
+                    raise RuntimeError(f"[{self.provider_id}] No active CoderAI broker session; direct fallback not allowed with broker_preferred=True")
 
-            response = self.client.chat.completions.create(**payload)
-            # Streaming returns a lazy iterator; recording success here would
-            # prematurely reset the failure counter before the stream is consumed.
-            # The caller records success after priming/consuming the stream.
-            if not stream:
-                self.record_success()
-            return response
-        except Exception as e:
-            # A missing broker session means the CoderAI worker (often small/edge
-            # hardware) is warming up / cooling down to avoid overheating — a
-            # transient condition, not a provider fault. Don't record a failure for
-            # it (that would count toward disabling the provider for a long
-            # cooldown); the rotation handler waits a few seconds and retries.
-            if 'No active CoderAI broker session' not in str(e):
+                response = self.client.chat.completions.create(**payload)
+                # Streaming returns a lazy iterator; recording success here would
+                # prematurely reset the failure counter before the stream is consumed.
+                # The caller records success after priming/consuming the stream.
+                if not stream:
+                    self.record_success()
+                return response
+            except Exception as e:
+                if _is_coderai_warmup_error(e):
+                    if warmup_attempts < CODERAI_MAX_WARMUP_WAITS:
+                        warmup_attempts += 1
+                        logger.warning(
+                            f"[{self.provider_id}] CoderAI broker warming up (no session); waiting "
+                            f"{CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying ({warmup_attempts}/{CODERAI_MAX_WARMUP_WAITS})"
+                        )
+                        await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
+                        continue
+                    # Still warming up after all waits — surface the error WITHOUT
+                    # recording a failure (don't disable the provider for a cooldown).
+                    raise
+                # Any other error is a genuine provider fault.
                 self.record_failure()
-            raise
+                raise
 
     async def get_models(self) -> List[Model]:
         await self.apply_rate_limit()
@@ -606,7 +662,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 async for chunk in self._broker_stream("proxy", payload, timeout=self._request_timeout):
                     chunks.append(chunk)
                 return 200, {"stream_chunks": [base64.b64encode(chunk).decode("ascii") for chunk in chunks], "stream_encoding": "base64"}
-            message = await self._broker_request("proxy", payload, timeout=self._request_timeout)
+            message = await self._broker_request_with_warmup("proxy", payload, timeout=self._request_timeout)
             if (message.get("status") or "ok") == "error":
                 raise Exception(message.get("error") or "CoderAI broker proxy request failed")
             envelope = message.get("payload") or {}
