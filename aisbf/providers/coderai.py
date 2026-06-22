@@ -502,8 +502,14 @@ class CoderAIProviderHandler(BaseProviderHandler):
             if not stream:
                 self.record_success()
             return response
-        except Exception:
-            self.record_failure()
+        except Exception as e:
+            # A missing broker session means the CoderAI worker (often small/edge
+            # hardware) is warming up / cooling down to avoid overheating — a
+            # transient condition, not a provider fault. Don't record a failure for
+            # it (that would count toward disabling the provider for a long
+            # cooldown); the rotation handler waits a few seconds and retries.
+            if 'No active CoderAI broker session' not in str(e):
+                self.record_failure()
             raise
 
     async def get_models(self) -> List[Model]:

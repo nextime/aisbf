@@ -65,6 +65,14 @@ from .prompt_analysis import analyze_prompt_payload
 _autoselect_result_cache: dict = {}
 _autoselect_result_cache_ttl: int = 3600  # seconds
 
+# CoderAI providers often run on small/edge hardware that drops its broker session
+# while cooling down. Treat a missing broker session as a transient "warming up"
+# state: wait CODERAI_WARMUP_WAIT_SECONDS and retry the same provider, up to
+# CODERAI_MAX_WARMUP_WAITS times, instead of recording a failure (which would
+# disable the provider for a long cooldown).
+CODERAI_WARMUP_WAIT_SECONDS: float = 10.0
+CODERAI_MAX_WARMUP_WAITS: int = 3
+
 # Registry for proxied content — shared across all RequestHandler instances.
 # Values: {"type": "broker", "provider_id": str, "path": str}
 #      or {"type": "http",   "url": str}
@@ -3481,6 +3489,7 @@ class RotationHandler:
         max_retries = 5
         tried_models = []  # Track which models have been tried
         model_retry_counts = {}  # Track retry count per model
+        coderai_warmup_counts = {}  # Track CoderAI "warming up" waits per model
         last_error = None
         successful_model = None
         successful_handler = None
@@ -3898,6 +3907,32 @@ class RotationHandler:
 
             except Exception as e:
                 last_error = str(e)
+
+                # CoderAI "warming up": the broker session is temporarily gone while
+                # the (often small/edge) worker cools down. This is NOT a provider
+                # fault — do not record a failure (which would disable the provider for
+                # a long cooldown). Instead wait a few seconds and retry the same
+                # provider, up to a bounded number of times, fully transparent to the
+                # client.
+                if self._is_coderai_warming_error(e, provider_id):
+                    warmup_count = coderai_warmup_counts.get(model_key, 0)
+                    if warmup_count < CODERAI_MAX_WARMUP_WAITS:
+                        coderai_warmup_counts[model_key] = warmup_count + 1
+                        logger.warning(
+                            f"CoderAI provider {provider_id} is warming up (no broker session); "
+                            f"waiting {CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying "
+                            f"(warmup {warmup_count + 1}/{CODERAI_MAX_WARMUP_WAITS}) — not recorded as a failure"
+                        )
+                        await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
+                        continue
+                    logger.warning(
+                        f"CoderAI provider {provider_id} still warming up after "
+                        f"{warmup_count} wait(s); failing over to the next provider "
+                        f"(still not recorded as a failure)"
+                    )
+                    tried_models.append(current_model)
+                    continue
+
                 handler.record_failure()
 
                 # Increment retry count for this model
@@ -4294,6 +4329,28 @@ class RotationHandler:
             if code in non_retryable_codes:
                 return True
         return False
+
+    def _is_coderai_warming_error(self, error, provider_id) -> bool:
+        """Return True when the error is a CoderAI provider that is merely 'warming up'.
+
+        CoderAI workers often run on small/edge hardware that disconnects its broker
+        session while cooling down (to avoid overheating). A missing broker session is
+        therefore a transient condition, not a provider fault: instead of recording a
+        failure (which would count toward disabling the provider for a long cooldown),
+        the rotation should wait a few seconds and retry the same provider.
+        """
+        msg = str(error or '')
+        if 'No active CoderAI broker session' not in msg:
+            return False
+        # The message is already CoderAI-specific; confirm the provider type when we
+        # can, but don't require it (the snapshot lookup may be unavailable).
+        try:
+            ptype = (self._get_provider_type(provider_id) or '').lower()
+            if ptype and ptype != 'coderai':
+                return False
+        except Exception:
+            pass
+        return True
 
     async def _prime_stream(self, response):
         """Pull the first chunk of a streaming response so that immediate provider
