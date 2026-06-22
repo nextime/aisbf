@@ -182,17 +182,17 @@ class TestCryptoPaymentFlow:
         """Test detecting incoming crypto payment"""
         # Create address
         address = await payment_service.wallet_manager.get_or_create_user_address(1, 'btc')
-        
-        # Simulate incoming transaction
+
+        # Ensure a crypto wallet row exists so the confirmed credit can update it
+        # (process_transaction records the crypto_transactions row itself).
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO crypto_transactions
-                (user_id, crypto_type, tx_hash, from_address, to_address, amount_crypto, confirmations, status)
-                VALUES (1, 'btc', 'test_tx_hash', 'sender_addr', ?, 0.001, 3, 'pending')
-            """, (address,))
+                INSERT OR IGNORE INTO user_crypto_wallets (user_id, crypto_type, balance_crypto, balance_fiat)
+                VALUES (1, 'btc', 0, 0)
+            """)
             conn.commit()
-        
+
         # Process transaction (simulate blockchain monitor)
         await payment_service.blockchain_monitor.process_transaction(
             user_id=1,
@@ -200,7 +200,7 @@ class TestCryptoPaymentFlow:
             tx_hash='test_tx_hash',
             from_address='sender_addr',
             to_address=address,
-            amount=Decimal('0.001'),
+            amount=0.001,
             confirmations=3
         )
         
@@ -223,17 +223,20 @@ class TestSubscriptionFlow:
     @pytest.mark.asyncio
     async def test_create_subscription(self, payment_service, db_manager):
         """Test creating a subscription"""
-        # Create tier
+        # Create tier (account_tiers) and a card payment method for the user.
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO subscription_tiers
-                (name, price_monthly, price_yearly, features_json, is_active)
-                VALUES ('Pro', 10.00, 100.00, '{}', 1)
+                INSERT INTO account_tiers (name, price_monthly, price_yearly, is_active)
+                VALUES ('Pro', 10.00, 100.00, 1)
+            """)
+            tier_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO payment_methods (id, user_id, type, identifier, is_default, is_active)
+                VALUES (1, 1, 'card', 'tok_visa', 1, 1)
             """)
             conn.commit()
-            tier_id = cursor.lastrowid
-        
+
         # Create subscription
         result = await payment_service.subscription_manager.create_subscription(
             user_id=1,
@@ -241,56 +244,48 @@ class TestSubscriptionFlow:
             billing_cycle='monthly',
             payment_method_id=1
         )
-        
+
         assert result['success'] is True
         assert 'subscription_id' in result
-        
-        # Verify subscription in database
+
+        # Verify subscription in database (subscriptions, not user_subscriptions)
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT status FROM user_subscriptions
-                WHERE user_id = 1
-            """)
+            cursor.execute("SELECT status FROM subscriptions WHERE user_id = 1")
             row = cursor.fetchone()
-        
+
         assert row is not None
         assert row[0] == 'active'
-    
+
     @pytest.mark.asyncio
     async def test_subscription_renewal(self, payment_service, db_manager):
         """Test subscription renewal process"""
-        # Create tier and subscription
+        # Create tier, payment method, and a subscription that is already due.
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO subscription_tiers
-                (name, price_monthly, price_yearly, features_json, is_active)
-                VALUES ('Pro', 10.00, 100.00, '{}', 1)
+                INSERT INTO account_tiers (name, price_monthly, price_yearly, is_active)
+                VALUES ('Pro', 10.00, 100.00, 1)
             """)
             tier_id = cursor.lastrowid
-            
-            # Create subscription expiring soon
             cursor.execute("""
-                INSERT INTO user_subscriptions
-                (user_id, tier_id, status, billing_cycle, next_billing_date, payment_method_id)
-                VALUES (1, ?, 'active', 'monthly', date('now', '+1 day'), 1)
+                INSERT INTO payment_methods (id, user_id, type, identifier, gateway, is_default, is_active)
+                VALUES (1, 1, 'card', 'tok_visa', 'stripe', 1, 1)
+            """)
+            # current_period_end in the past so the renewal is due
+            cursor.execute("""
+                INSERT INTO subscriptions
+                (user_id, tier_id, payment_method_id, status, billing_cycle,
+                 current_period_start, current_period_end)
+                VALUES (1, ?, 1, 'active', 'monthly', datetime('now', '-31 days'), datetime('now', '-1 day'))
             """, (tier_id,))
             conn.commit()
-        
+
         # Process renewals
-        await payment_service.renewal_processor.process_renewals()
-        
-        # Verify renewal was attempted
-        with db_manager._get_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("""
-                SELECT COUNT(*) FROM subscription_billing_history
-                WHERE user_id = 1
-            """)
-            count = cursor.fetchone()[0]
-        
-        assert count > 0
+        result = await payment_service.renewal_processor.process_renewals()
+
+        # The due subscription should have been picked up and processed.
+        assert result['processed'] >= 1
 
 
 class TestWalletConsolidation:
@@ -309,21 +304,32 @@ class TestWalletConsolidation:
         # Create user wallet with balance above threshold
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
-            
+
+            # Enable consolidation for btc with a threshold below the balance
+            cursor.execute("""
+                INSERT INTO crypto_consolidation_settings
+                (crypto_type, threshold_amount, admin_address, is_enabled)
+                VALUES ('btc', 1.0, 'admin_btc_address', 1)
+            """)
+
             # Create address
             cursor.execute("""
-                INSERT INTO user_crypto_addresses
+                INSERT OR IGNORE INTO user_crypto_addresses
                 (user_id, crypto_type, address, derivation_path, derivation_index)
                 VALUES (1, 'btc', 'user_btc_address', 'm/44/0/0/0/0', 0)
             """)
-            
+
             # Create wallet with high balance
             cursor.execute("""
-                INSERT INTO user_crypto_wallets
+                INSERT OR IGNORE INTO user_crypto_wallets
                 (user_id, crypto_type, balance_crypto, balance_fiat)
                 VALUES (1, 'btc', 1.5, 50000.00)
             """)
-            
+            cursor.execute("""
+                UPDATE user_crypto_wallets SET balance_crypto = 1.5, balance_fiat = 50000.00
+                WHERE user_id = 1 AND crypto_type = 'btc'
+            """)
+
             conn.commit()
         
         # Run consolidation
@@ -351,13 +357,21 @@ class TestEmailNotifications:
         
         email_service = EmailNotificationService(db_manager)
         
-        # Configure SMTP (mock)
+        # Configure SMTP plus enable the notification type and provide a template.
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
                 INSERT INTO email_config
                 (smtp_host, smtp_port, smtp_username, smtp_password, from_email, from_name, use_tls)
                 VALUES ('smtp.test.com', 587, 'test', 'pass', 'noreply@test.com', 'Test', 1)
+            """)
+            cursor.execute("""
+                INSERT INTO email_notification_settings (notification_type, is_enabled, subject_template)
+                VALUES ('payment_success', 1, 'Payment received')
+            """)
+            cursor.execute("""
+                INSERT INTO email_templates (notification_type, template_html, template_text)
+                VALUES ('payment_success', '<p>Thank you for your payment.</p>', 'Thank you for your payment.')
             """)
             conn.commit()
         
@@ -461,35 +475,30 @@ class TestEndToEndFlow:
         address = await payment_service.wallet_manager.get_or_create_user_address(1, 'btc')
         assert address is not None
         
-        # 2. Simulate incoming payment
+        # 2. Simulate a confirmed crypto deposit crediting the wallet
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO crypto_transactions
-                (user_id, crypto_type, tx_hash, from_address, to_address, amount_crypto, confirmations, status)
-                VALUES (1, 'btc', 'tx_001', 'sender', ?, 0.01, 3, 'confirmed')
-            """, (address,))
-            
-            # Credit wallet
-            cursor.execute("""
-                INSERT INTO user_crypto_wallets
+                INSERT OR IGNORE INTO user_crypto_wallets
                 (user_id, crypto_type, balance_crypto, balance_fiat)
                 VALUES (1, 'btc', 0.01, 500.00)
             """)
-            
             conn.commit()
-        
-        # 3. Create subscription tier
+
+        # 3. Create subscription tier and a card payment method
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
             cursor.execute("""
-                INSERT INTO subscription_tiers
-                (name, price_monthly, price_yearly, features_json, is_active)
-                VALUES ('Pro', 10.00, 100.00, '{}', 1)
+                INSERT INTO account_tiers (name, price_monthly, price_yearly, is_active)
+                VALUES ('Pro', 10.00, 100.00, 1)
             """)
             tier_id = cursor.lastrowid
+            cursor.execute("""
+                INSERT INTO payment_methods (id, user_id, type, identifier, is_default, is_active)
+                VALUES (1, 1, 'card', 'tok_visa', 1, 1)
+            """)
             conn.commit()
-        
+
         # 4. Create subscription
         result = await payment_service.subscription_manager.create_subscription(
             user_id=1,
@@ -497,17 +506,15 @@ class TestEndToEndFlow:
             billing_cycle='monthly',
             payment_method_id=1
         )
-        
+
         assert result['success'] is True
-        
+
         # 5. Verify subscription active
         with db_manager._get_connection() as conn:
             cursor = conn.cursor()
-            cursor.execute("""
-                SELECT status FROM user_subscriptions WHERE user_id = 1
-            """)
+            cursor.execute("SELECT status FROM subscriptions WHERE user_id = 1")
             status = cursor.fetchone()[0]
-        
+
         assert status == 'active'
 
 
