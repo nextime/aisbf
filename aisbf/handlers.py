@@ -714,6 +714,10 @@ class RequestHandler:
                     provider_config=provider_config,
                     rotation_model_config=None,
                 )
+                # Lowest-priority fallback: autoselect default threaded in when this
+                # request is dispatched directly from an autoselect (provider/model).
+                if not default_max_tokens:
+                    default_max_tokens = request_data.get('_autoselect_default_max_tokens')
                 if default_max_tokens:
                     request_data['max_tokens'] = default_max_tokens
                     logger.info(f"Applied provider default max_tokens: {default_max_tokens}")
@@ -1064,6 +1068,10 @@ class RequestHandler:
                 provider_config=provider_config,
                 rotation_model_config=None,
             )
+            # Lowest-priority fallback: autoselect default threaded in when this
+            # request is dispatched directly from an autoselect (provider/model).
+            if not default_max_tokens:
+                default_max_tokens = request_data.get('_autoselect_default_max_tokens')
             if default_max_tokens:
                 request_data['max_tokens'] = default_max_tokens
 
@@ -2633,6 +2641,23 @@ class RotationHandler:
         self.user_rotations = db.get_user_rotations(self.user_id)
         self.user_autoselects = db.get_user_autoselects(self.user_id)
 
+    def _get_provider_config(self, provider_id: str):
+        """Resolve a provider config, preferring user-specific providers.
+
+        In RotationHandler, user_providers is a list of {'provider_id', 'config'}
+        dicts (unlike RequestHandler where it is a dict), so handle both forms.
+        """
+        up = getattr(self, 'user_providers', None)
+        if self.user_id and up:
+            if isinstance(up, dict):
+                if provider_id in up:
+                    return up[provider_id]
+            else:
+                for p in up:
+                    if p.get('provider_id') == provider_id:
+                        return p.get('config')
+        return self.config.get_provider(provider_id, warn=False)
+
     def reload_user_configs(self):
         """Reload user-specific configurations from database"""
         if self.user_id:
@@ -3666,17 +3691,25 @@ class RotationHandler:
                     # Update request_data with condensed messages
                     request_data['messages'] = messages
                 
-                # Apply rotation-level default max output tokens when the client didn't set one
+                # Apply default max output tokens when the client didn't set one.
+                # Consult the selected provider's config so a provider-level
+                # default_max_tokens (or per-model max_tokens) applies even though
+                # rotations cannot configure max_tokens themselves.
                 if request_data.get('max_tokens') is None:
+                    selected_provider_config = self._get_provider_config(provider_id)
                     default_max_tokens = get_max_completion_tokens_for_model(
                         model_name=model_name,
-                        provider_config=None,
+                        provider_config=selected_provider_config,
                         rotation_model_config=current_model,
                         rotation_config=rotation_config,
                     )
+                    # Lowest-priority fallback: autoselect-level default threaded
+                    # in by the autoselect handler (below provider/rotation defaults).
+                    if not default_max_tokens:
+                        default_max_tokens = request_data.get('_autoselect_default_max_tokens')
                     if default_max_tokens:
                         request_data['max_tokens'] = default_max_tokens
-                        logger.info(f"Applied rotation default max_tokens: {default_max_tokens}")
+                        logger.info(f"Applied default max_tokens: {default_max_tokens} (provider {provider_id})")
 
                 # Check for max_request_tokens in rotation model config
                 max_request_tokens = current_model.get('max_request_tokens')
@@ -6080,6 +6113,27 @@ class AutoselectHandler:
             logger.error(f"=== AUTOSELECT SELECTION ERROR === {e}")
             return None
 
+    def _apply_autoselect_max_tokens(self, proxied_request_data: Dict, autoselect_config, selected_model_id: str, available_models) -> None:
+        """Apply autoselect-level max output token settings to a proxied request.
+
+        Only acts when the client did not specify max_tokens. Priority:
+        - per-model max_tokens on the selected available_model (highest) -> set directly
+        - autoselect default_max_tokens -> threaded as a lowest-priority fallback
+          (``_autoselect_default_max_tokens``) so the downstream rotation/provider
+          resolution (rotation per-model, provider per-model, provider default,
+          rotation default) still wins over it.
+        """
+        if proxied_request_data.get('max_tokens') is not None:
+            return
+        model_info = next((m for m in (available_models or []) if getattr(m, 'model_id', None) == selected_model_id), None)
+        per_model = getattr(model_info, 'max_tokens', None) if model_info else None
+        if per_model:
+            proxied_request_data['max_tokens'] = per_model
+            return
+        autoselect_default = getattr(autoselect_config, 'default_max_tokens', None)
+        if autoselect_default:
+            proxied_request_data['_autoselect_default_max_tokens'] = autoselect_default
+
     async def handle_autoselect_request(self, autoselect_id: str, request_data: Dict, user_id: Optional[int] = None, token_id: Optional[int] = None) -> Dict:
         """Handle an autoselect request"""
         import logging
@@ -6221,6 +6275,7 @@ class AutoselectHandler:
             try:
                 proxied_request_data = dict(request_data)
                 proxied_request_data['_autoselect_id'] = autoselect_id
+                self._apply_autoselect_max_tokens(proxied_request_data, autoselect_config, selected_model_id, available_models_ordered)
                 response = await rotation_handler.handle_rotation_request(selected_model_id, proxied_request_data, user_id, token_id)
             except Exception as e:
                 logger.warning(f"Model '{selected_model_id}' raised exception: {e} — escalating")
@@ -6438,6 +6493,7 @@ class AutoselectHandler:
             try:
                 proxied_request_data = dict(request_data)
                 proxied_request_data['_autoselect_id'] = autoselect_id
+                self._apply_autoselect_max_tokens(proxied_request_data, autoselect_config, selected_model_id, available_models_ordered)
                 # Check if it's a rotation first
                 if (self.user_id and selected_model_id in self.rotations) or selected_model_id in self.config.rotations:
                     rotation_handler = RotationHandler(user_id=self.user_id)

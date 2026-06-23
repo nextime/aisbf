@@ -201,6 +201,7 @@ class AutoselectModelInfo(BaseModel):
     nsfw: bool = False  # Model can handle NSFW content
     privacy: bool = False  # Model can handle privacy-sensitive content
     priority: int = 0  # Escalation tier: higher = more capable, used last
+    max_tokens: Optional[int] = None  # Per-model override of max output tokens for this autoselect entry
 
     @field_validator('model_id')
     @classmethod
