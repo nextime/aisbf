@@ -44,7 +44,8 @@ from .studio_adapters import effective_studio_adapter, infer_studio_adapter_prof
 from .utils import (
     count_messages_tokens,
     split_messages_into_chunks,
-    get_max_request_tokens_for_model
+    get_max_request_tokens_for_model,
+    get_max_completion_tokens_for_model
 )
 from .context import ContextManager, get_context_config_for_model
 from .classifier import content_classifier
@@ -705,7 +706,18 @@ class RequestHandler:
                 provider_config=provider_config,
                 rotation_model_config=None
             )
-            
+
+            # Apply provider-level default max output tokens when the client didn't set one
+            if request_data.get('max_tokens') is None:
+                default_max_tokens = get_max_completion_tokens_for_model(
+                    model_name=model,
+                    provider_config=provider_config,
+                    rotation_model_config=None,
+                )
+                if default_max_tokens:
+                    request_data['max_tokens'] = default_max_tokens
+                    logger.info(f"Applied provider default max_tokens: {default_max_tokens}")
+
             # Calculate effective context (total tokens used)
             effective_context = count_messages_tokens(messages, model)
             logger.info(f"Effective context: {effective_context} tokens")
@@ -1044,7 +1056,17 @@ class RequestHandler:
             rotation_config=None,
             autoselect_config=None,
         )
-        
+
+        # Apply provider-level default max output tokens when the client didn't set one
+        if request_data.get('max_tokens') is None:
+            default_max_tokens = get_max_completion_tokens_for_model(
+                model_name=model,
+                provider_config=provider_config,
+                rotation_model_config=None,
+            )
+            if default_max_tokens:
+                request_data['max_tokens'] = default_max_tokens
+
         effective_context = count_messages_tokens(messages, model)
 
         prompt_analysis = self._run_prompt_analysis(
@@ -1814,15 +1836,20 @@ class RequestHandler:
                         elif model_dict.get('context_size'):
                             # Dynamically fetched from provider - use this value
                             model_dict['context_window'] = model_dict['context_size']
+                        elif getattr(provider_config, 'default_context_size', None):
+                            # Provider-level default (applies when no per-model config exists)
+                            model_dict['context_window'] = provider_config.default_context_size
                         else:
                             # Fall back to inference
                             model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
-                        
+
                         # Add context_length for compatibility - same priority order as context_window
                         if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
                             model_dict['context_length'] = model_config.context_size
                         elif model_dict.get('context_size'):
                             model_dict['context_length'] = model_dict['context_size']
+                        elif getattr(provider_config, 'default_context_size', None):
+                            model_dict['context_length'] = provider_config.default_context_size
                         elif model_dict.get('context_length'):
                             model_dict['context_length'] = model_dict['context_length']
                         
@@ -1914,15 +1941,20 @@ class RequestHandler:
                 elif model_dict.get('context_size'):
                     # Dynamically fetched from provider - use this value
                     model_dict['context_window'] = model_dict['context_size']
+                elif getattr(provider_config, 'default_context_size', None):
+                    # Provider-level default (applies when no per-model config exists)
+                    model_dict['context_window'] = provider_config.default_context_size
                 else:
                     # Fall back to inference
                     model_dict['context_window'] = self._infer_context_window(model_name, provider_config.type)
-                
+
                 # Add context_length for compatibility - same priority order as context_window
                 if model_config and hasattr(model_config, 'context_size') and model_config.context_size:
                     model_dict['context_length'] = model_config.context_size
                 elif model_dict.get('context_size'):
                     model_dict['context_length'] = model_dict['context_size']
+                elif getattr(provider_config, 'default_context_size', None):
+                    model_dict['context_length'] = provider_config.default_context_size
                 elif model_dict.get('context_length'):
                     model_dict['context_length'] = model_dict['context_length']
                 
@@ -3634,6 +3666,18 @@ class RotationHandler:
                     # Update request_data with condensed messages
                     request_data['messages'] = messages
                 
+                # Apply rotation-level default max output tokens when the client didn't set one
+                if request_data.get('max_tokens') is None:
+                    default_max_tokens = get_max_completion_tokens_for_model(
+                        model_name=model_name,
+                        provider_config=None,
+                        rotation_model_config=current_model,
+                        rotation_config=rotation_config,
+                    )
+                    if default_max_tokens:
+                        request_data['max_tokens'] = default_max_tokens
+                        logger.info(f"Applied rotation default max_tokens: {default_max_tokens}")
+
                 # Check for max_request_tokens in rotation model config
                 max_request_tokens = current_model.get('max_request_tokens')
                 if max_request_tokens:
@@ -5087,8 +5131,12 @@ class RotationHandler:
                             found_in_provider = True
                             break
                     if not found_in_provider:
+                        provider_default = getattr(provider_config, 'default_context_size', None)
+                        if provider_default:
+                            # Provider-level default takes precedence over heuristic auto-derivation
+                            model_dict['context_window'] = provider_default
                         # Auto-derive from first model in provider (which has context_size from dynamic fetch)
-                        if getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
+                        elif getattr(provider_config, "models", []) and len(getattr(provider_config, "models", [])) > 0:
                             first_model = getattr(provider_config, "models", [])[0]
                             if hasattr(first_model, 'context_size') and first_model.context_size:
                                 model_dict['context_window'] = first_model.context_size

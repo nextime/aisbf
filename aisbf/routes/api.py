@@ -7,6 +7,7 @@ from aisbf.models import ChatCompletionRequest
 from aisbf.database import DatabaseRegistry
 from aisbf.app.model_cache import get_provider_models, _refresh_provider_usage_if_stale, _background_tasks
 from aisbf.studio_services import studio_service
+from aisbf.context import get_context_config_for_model
 
 router = APIRouter()
 _config = None
@@ -205,6 +206,70 @@ async def v1_chat_completions(request: Request, body: ChatCompletionRequest):
     else:
         return await handler.handle_chat_completion(request, provider_id, body_dict)
 
+def _resolve_rotation_context(rotation_config) -> Optional[int]:
+    """Resolve the advertised context window for a rotation.
+
+    Priority: explicit rotation context_length > rotation default_context_size >
+    the largest context window resolvable across the rotation's member models
+    (which honors each provider's per-model and default_context_size). Returns
+    None only if nothing can be resolved.
+    """
+    explicit = getattr(rotation_config, 'context_length', None) or getattr(rotation_config, 'default_context_size', None)
+    if explicit:
+        return explicit
+    best = None
+    for provider in getattr(rotation_config, 'providers', None) or []:
+        try:
+            provider_id = provider.get('provider_id')
+            provider_config = _config.get_provider(provider_id) if provider_id else None
+            for member in provider.get('models', []) or []:
+                ctx = get_context_config_for_model(
+                    model_name=member.get('name'),
+                    provider_config=provider_config,
+                    rotation_model_config=member,
+                    rotation_config=rotation_config,
+                ).get('context_size')
+                if ctx and (best is None or ctx > best):
+                    best = ctx
+        except Exception as e:
+            logger.debug(f"Could not resolve context for rotation member: {e}")
+    return best
+
+
+def _resolve_autoselect_context(autoselect_config) -> Optional[int]:
+    """Resolve the advertised context window for an autoselect.
+
+    Priority: explicit context_length > default_context_size > the largest
+    context window across its available models (resolving rotation or
+    provider/model references). Returns None if nothing can be resolved.
+    """
+    explicit = getattr(autoselect_config, 'context_length', None) or getattr(autoselect_config, 'default_context_size', None)
+    if explicit:
+        return explicit
+    best = None
+    for member in getattr(autoselect_config, 'available_models', None) or []:
+        try:
+            model_id = getattr(member, 'model_id', None) or getattr(member, 'model_name', None)
+            if not model_id:
+                continue
+            ctx = None
+            if model_id in _config.rotations:
+                ctx = _resolve_rotation_context(_config.rotations[model_id])
+            elif '/' in model_id:
+                provider_id, _, model_name = model_id.partition('/')
+                provider_config = _config.get_provider(provider_id)
+                if provider_config:
+                    ctx = get_context_config_for_model(
+                        model_name=model_name,
+                        provider_config=provider_config,
+                    ).get('context_size')
+            if ctx and (best is None or ctx > best):
+                best = ctx
+        except Exception as e:
+            logger.debug(f"Could not resolve context for autoselect member: {e}")
+    return best
+
+
 async def _build_model_list(request: Request) -> dict:
     """Shared model listing logic used by all /models endpoints."""
     all_models = []
@@ -227,12 +292,22 @@ async def _build_model_list(request: Request) -> dict:
             logger.warning(f"Error listing models for provider {provider_id}: {e}")
     for rotation_id, rotation_config in _config.rotations.items():
         try:
-            all_models.append({'id': f"rotation/{rotation_id}", 'object': 'model', 'created': int(time.time()), 'owned_by': 'aisbf-rotation', 'type': 'rotation', 'rotation_id': rotation_id, 'model_name': rotation_config.model_name, 'capabilities': getattr(rotation_config, 'capabilities', [])})
+            entry = {'id': f"rotation/{rotation_id}", 'object': 'model', 'created': int(time.time()), 'owned_by': 'aisbf-rotation', 'type': 'rotation', 'rotation_id': rotation_id, 'model_name': rotation_config.model_name, 'capabilities': getattr(rotation_config, 'capabilities', [])}
+            rotation_ctx = _resolve_rotation_context(rotation_config)
+            if rotation_ctx:
+                entry['context_window'] = rotation_ctx
+                entry['context_length'] = rotation_ctx
+            all_models.append(entry)
         except Exception as e:
             logger.warning(f"Error listing rotation {rotation_id}: {e}")
     for autoselect_id, autoselect_config in _config.autoselect.items():
         try:
-            all_models.append({'id': f"autoselect/{autoselect_id}", 'object': 'model', 'created': int(time.time()), 'owned_by': 'aisbf-autoselect', 'type': 'autoselect', 'autoselect_id': autoselect_id, 'model_name': autoselect_config.model_name, 'description': autoselect_config.description, 'capabilities': getattr(autoselect_config, 'capabilities', [])})
+            entry = {'id': f"autoselect/{autoselect_id}", 'object': 'model', 'created': int(time.time()), 'owned_by': 'aisbf-autoselect', 'type': 'autoselect', 'autoselect_id': autoselect_id, 'model_name': autoselect_config.model_name, 'description': autoselect_config.description, 'capabilities': getattr(autoselect_config, 'capabilities', [])}
+            autoselect_ctx = _resolve_autoselect_context(autoselect_config)
+            if autoselect_ctx:
+                entry['context_window'] = autoselect_ctx
+                entry['context_length'] = autoselect_ctx
+            all_models.append(entry)
         except Exception as e:
             logger.warning(f"Error listing autoselect {autoselect_id}: {e}")
     logger.info(f"Returning {len(all_models)} total models")

@@ -149,7 +149,8 @@ def get_max_request_tokens_for_model(
     Priority order:
     1. Check rotation model config (if provided)
     2. Check provider models config
-    
+    3. Fall back to provider-level default_max_request_tokens
+
     Args:
         model_name: The model name to look up
         provider_config: The provider configuration
@@ -183,11 +184,86 @@ def get_max_request_tokens_for_model(
                 if max_tokens:
                     logger.info(f"Found max_request_tokens in provider model config: {max_tokens}")
                     return max_tokens
-                if max_tokens:
-                    logger.info(f"Found max_request_tokens in provider model config: {max_tokens}")
-                    return max_tokens
-    
+
+    # Finally fall back to the provider-level default (applies when no per-model config exists)
+    if isinstance(provider_config, dict):
+        default_max_tokens = provider_config.get('default_max_request_tokens')
+    else:
+        default_max_tokens = getattr(provider_config, 'default_max_request_tokens', None)
+    if default_max_tokens:
+        logger.info(f"Using provider default_max_request_tokens: {default_max_tokens}")
+        return default_max_tokens
+
     logger.debug(f"No max_request_tokens configured for model {model_name}")
+    return None
+
+
+def get_max_completion_tokens_for_model(
+    model_name: str,
+    provider_config=None,
+    rotation_model_config: Optional[Dict] = None,
+    rotation_config=None,
+    autoselect_config=None,
+) -> Optional[int]:
+    """
+    Get the max output/completion tokens (max_tokens) for a model from configuration.
+
+    This is the upper bound on generated output, distinct from max_request_tokens
+    (the input budget). Used as a fallback when the client request does not specify
+    max_tokens.
+
+    Priority order:
+    1. Rotation model config 'max_tokens' (if provided)
+    2. Provider per-model config max_tokens
+    3. Provider-level default_max_tokens
+    4. Rotation/autoselect default_max_tokens
+
+    Returns:
+        The max_tokens value, or None if not configured.
+    """
+    import logging
+    logger = logging.getLogger(__name__)
+
+    def _get(cfg, key):
+        if cfg is None:
+            return None
+        if isinstance(cfg, dict):
+            return cfg.get(key)
+        return getattr(cfg, key, None)
+
+    # 1. Rotation model config (highest priority)
+    if rotation_model_config:
+        max_tokens = _get(rotation_model_config, 'max_tokens')
+        if max_tokens:
+            logger.info(f"Found max_tokens in rotation model config: {max_tokens}")
+            return max_tokens
+
+    # 2. Provider per-model config
+    if isinstance(provider_config, dict):
+        models = provider_config.get('models', [])
+    else:
+        models = getattr(provider_config, 'models', None) or []
+    if models:
+        for model in models:
+            model_name_value = model.name if hasattr(model, 'name') else model.get('name')
+            if model_name_value == model_name:
+                max_tokens = _get(model, 'max_tokens')
+                if max_tokens:
+                    logger.info(f"Found max_tokens in provider model config: {max_tokens}")
+                    return max_tokens
+
+    # 3. Provider-level default, then 4. rotation/autoselect default
+    for cfg, label in (
+        (provider_config, 'provider'),
+        (rotation_config, 'rotation'),
+        (autoselect_config, 'autoselect'),
+    ):
+        default_max_tokens = _get(cfg, 'default_max_tokens')
+        if default_max_tokens:
+            logger.info(f"Using {label} default_max_tokens: {default_max_tokens}")
+            return default_max_tokens
+
+    logger.debug(f"No max_tokens configured for model {model_name}")
     return None
 
 

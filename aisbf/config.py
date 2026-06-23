@@ -34,6 +34,7 @@ class ProviderModelConfig(BaseModel):
     name: str
     rate_limit: Optional[float] = None
     max_request_tokens: Optional[int] = None
+    max_tokens: Optional[int] = None  # Upper bound on generated output tokens (max completion tokens)
     error_cooldown: Optional[int] = None  # Cooldown period in seconds after 3 consecutive failures
     # OpenRouter-style extended fields
     description: Optional[str] = None
@@ -121,6 +122,7 @@ class ProviderConfig(BaseModel):
     # Default settings for models in this provider
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
+    default_max_tokens: Optional[int] = None  # Default upper bound on generated output tokens (max completion tokens)
     default_rate_limit_TPM: Optional[int] = None
     default_rate_limit_TPH: Optional[int] = None
     default_rate_limit_TPD: Optional[int] = None
@@ -174,6 +176,7 @@ class RotationConfig(BaseModel):
     # Default settings for models in this rotation
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
+    default_max_tokens: Optional[int] = None  # Default upper bound on generated output tokens (max completion tokens)
     default_rate_limit_TPM: Optional[int] = None
     default_rate_limit_TPH: Optional[int] = None
     default_rate_limit_TPD: Optional[int] = None
@@ -228,6 +231,7 @@ class AutoselectConfig(BaseModel):
     # Default settings for models in this autoselect
     default_rate_limit: Optional[float] = None
     default_max_request_tokens: Optional[int] = None
+    default_max_tokens: Optional[int] = None  # Default upper bound on generated output tokens (max completion tokens)
     default_rate_limit_TPM: Optional[int] = None
     default_rate_limit_TPH: Optional[int] = None
     default_rate_limit_TPD: Optional[int] = None

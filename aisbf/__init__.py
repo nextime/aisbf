@@ -53,9 +53,9 @@ from .auth.claude import ClaudeAuth
 from .auth.kilo import KiloOAuth2
 from .auth.qwen import QwenOAuth2
 from .handlers import RequestHandler, RotationHandler, AutoselectHandler
-from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model
+from .utils import count_messages_tokens, split_messages_into_chunks, get_max_request_tokens_for_model, get_max_completion_tokens_for_model
 
-__version__ = "0.99.79"
+__version__ = "0.99.81"
 __all__ = [
     # Config
     "config",
@@ -101,4 +101,5 @@ __all__ = [
     "count_messages_tokens",
     "split_messages_into_chunks",
     "get_max_request_tokens_for_model",
+    "get_max_completion_tokens_for_model",
 ]
