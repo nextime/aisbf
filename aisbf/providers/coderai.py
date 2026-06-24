@@ -26,6 +26,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import math
 import time
 from typing import Any, AsyncIterator, Dict, List, Optional, Tuple, Union
 import base64
@@ -45,9 +46,18 @@ logger = logging.getLogger(__name__)
 
 # CoderAI workers often run on small/edge hardware that drops its broker session
 # while cooling down to avoid overheating. A missing broker session is therefore a
-# transient "warming up" condition, not a provider fault: wait and retry the request
-# a bounded number of times instead of failing. This is applied for ALL request
-# paths (rotation, autoselect and direct) and ONLY for the broker-session error.
+# transient "warming up" condition, not a provider fault: hold the request and retry
+# while the worker is offline instead of failing immediately. This is applied for ALL
+# request paths (rotation, autoselect and direct) and ONLY for the broker-session error.
+#
+# The hold window is bounded so a request can't queue forever. Both the poll interval
+# and the total hold time are configurable per provider via coderai_config:
+#   - broker_warmup_wait_seconds:   seconds between retries (default below)
+#   - broker_queue_timeout_seconds: total time to hold a request while the worker is
+#                                   offline; 0 disables holding (fail immediately).
+#                                   When set, it derives the retry count from the
+#                                   poll interval. Takes precedence over the count.
+#   - broker_max_warmup_waits:      explicit retry count (used when no queue timeout)
 CODERAI_WARMUP_WAIT_SECONDS: float = 10.0
 CODERAI_MAX_WARMUP_WAITS: int = 3
 _CODERAI_WARMUP_MARKER = "No active CoderAI broker session"
@@ -86,6 +96,7 @@ class CoderAIProviderHandler(BaseProviderHandler):
         self._broker_enabled = bool(self._coderai_config.get("broker_enabled", True))
         self._broker_mode = bool(self._coderai_config.get("broker_mode", False))
         self._broker_preferred = bool(self._coderai_config.get("broker_preferred", False))
+        self._broker_warmup_wait, self._broker_max_warmup_waits = self._resolve_warmup_limits()
         if self._broker_mode:
             self._transport = "broker"
         self._base_endpoint = self._normalize_http_base(self._raw_endpoint)
@@ -130,6 +141,40 @@ class CoderAIProviderHandler(BaseProviderHandler):
     @property
     def _usage_cache_key(self) -> str:
         return f"coderai:{self.provider_id}"
+
+    def _resolve_warmup_limits(self) -> Tuple[float, int]:
+        """Resolve the broker warm-up poll interval and max retry count.
+
+        When ``broker_queue_timeout_seconds`` is configured it defines the total
+        time a request may be held while the worker is offline, and the retry count
+        is derived from it (timeout / poll interval). Otherwise the explicit
+        ``broker_max_warmup_waits`` count is used. Both fall back to module defaults.
+        """
+        cfg = self._coderai_config
+
+        def _as_float(value, default):
+            try:
+                if value is None:
+                    return default
+                return float(value)
+            except (TypeError, ValueError):
+                return default
+
+        wait = _as_float(cfg.get("broker_warmup_wait_seconds"), CODERAI_WARMUP_WAIT_SECONDS)
+        if wait <= 0:
+            wait = CODERAI_WARMUP_WAIT_SECONDS
+
+        if cfg.get("broker_queue_timeout_seconds") is not None:
+            timeout = _as_float(cfg.get("broker_queue_timeout_seconds"), 0.0)
+            max_waits = max(0, math.ceil(timeout / wait)) if timeout > 0 else 0
+        else:
+            try:
+                max_waits = int(cfg.get("broker_max_warmup_waits"))
+            except (TypeError, ValueError):
+                max_waits = CODERAI_MAX_WARMUP_WAITS
+            max_waits = max(0, max_waits)
+
+        return wait, max_waits
 
     def _resolve_coderai_config(self) -> Dict[str, Any]:
         if isinstance(self.provider_config, dict):
@@ -246,21 +291,22 @@ class CoderAIProviderHandler(BaseProviderHandler):
         """Like _broker_request, but tolerant of a CoderAI worker that is warming up.
 
         A missing broker session means the (often small/edge) worker is cooling down;
-        wait CODERAI_WARMUP_WAIT_SECONDS and retry, up to CODERAI_MAX_WARMUP_WAITS
-        times, instead of surfacing the error. Used for chat requests on every path.
+        hold the request and retry while it is offline, up to the configured queue
+        time limit (see _resolve_warmup_limits), instead of surfacing the error.
+        Used for chat requests on every path.
         """
         attempt = 0
         while True:
             try:
                 return await self._broker_request(op, payload, timeout=timeout)
             except Exception as e:
-                if _is_coderai_warmup_error(e) and attempt < CODERAI_MAX_WARMUP_WAITS:
+                if _is_coderai_warmup_error(e) and attempt < self._broker_max_warmup_waits:
                     attempt += 1
                     logger.warning(
                         f"[{self.provider_id}] CoderAI broker warming up (no session); waiting "
-                        f"{CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying ({attempt}/{CODERAI_MAX_WARMUP_WAITS})"
+                        f"{self._broker_warmup_wait:.0f}s and retrying ({attempt}/{self._broker_max_warmup_waits})"
                     )
-                    await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
+                    await asyncio.sleep(self._broker_warmup_wait)
                     continue
                 raise
 
@@ -560,13 +606,13 @@ class CoderAIProviderHandler(BaseProviderHandler):
                 return response
             except Exception as e:
                 if _is_coderai_warmup_error(e):
-                    if warmup_attempts < CODERAI_MAX_WARMUP_WAITS:
+                    if warmup_attempts < self._broker_max_warmup_waits:
                         warmup_attempts += 1
                         logger.warning(
                             f"[{self.provider_id}] CoderAI broker warming up (no session); waiting "
-                            f"{CODERAI_WARMUP_WAIT_SECONDS:.0f}s and retrying ({warmup_attempts}/{CODERAI_MAX_WARMUP_WAITS})"
+                            f"{self._broker_warmup_wait:.0f}s and retrying ({warmup_attempts}/{self._broker_max_warmup_waits})"
                         )
-                        await asyncio.sleep(CODERAI_WARMUP_WAIT_SECONDS)
+                        await asyncio.sleep(self._broker_warmup_wait)
                         continue
                     # Still warming up after all waits — surface the error WITHOUT
                     # recording a failure (don't disable the provider for a cooldown).
