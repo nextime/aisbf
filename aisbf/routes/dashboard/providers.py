@@ -1984,6 +1984,37 @@ async def dashboard_autoselect_save(request: Request, config: str = Form(...)):
 # and trigger hot-reload of the in-memory config so no restart is needed.
 # ---------------------------------------------------------------------------
 
+def _preserve_unsent_config_keys(existing: dict | None, incoming: dict) -> dict:
+    """
+    Keep keys inside a provider's *_config blocks that the client did not send.
+
+    The dashboard posts its whole in-memory provider object, but some keys are
+    only ever written server-side by the credential upload endpoint — e.g.
+    claude_config.cli_credentials_file, which the upload sets and the UI has no
+    field for. A page loaded before such an upload holds a stale config, so a
+    plain replace silently drops those keys on the next save.
+
+    Only merges into a *_config dict the client actually sent. If it omits the
+    block entirely (e.g. the provider type changed), the block is left to go, so
+    this cannot resurrect config for a type the provider no longer is.
+    """
+    if not isinstance(existing, dict) or not isinstance(incoming, dict):
+        return incoming
+    for key, existing_block in existing.items():
+        if not key.endswith('_config') or not isinstance(existing_block, dict):
+            continue
+        incoming_block = incoming.get(key)
+        if not isinstance(incoming_block, dict):
+            continue
+        for sub_key, sub_value in existing_block.items():
+            if sub_key not in incoming_block:
+                incoming_block[sub_key] = sub_value
+                logger.info(
+                    f"api_provider_save: preserved {key}.{sub_key} not sent by client"
+                )
+    return incoming
+
+
 @router.post("/dashboard/api/provider")
 async def api_provider_save(request: Request):
     """Create or update a single provider"""
@@ -2013,6 +2044,9 @@ async def api_provider_save(request: Request):
                 full_config = json.load(f)
             if 'providers' not in full_config or not isinstance(full_config['providers'], dict):
                 full_config['providers'] = {}
+            provider_config = _preserve_unsent_config_keys(
+                full_config['providers'].get(provider_id), provider_config
+            )
             full_config['providers'][provider_id] = provider_config
             save_path = Path.home() / '.aisbf' / 'providers.json'
             save_path.parent.mkdir(parents=True, exist_ok=True)

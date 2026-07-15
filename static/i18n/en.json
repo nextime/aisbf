@@ -156,6 +156,8 @@
     "cli_mode_active": "Claude CLI Mode Active",
     "use_cli_mode": "Use Claude CLI mode",
     "upload_cli_creds": "Override: Upload CLI Credentials File",
+    "cli_credentials_file": "CLI Credentials File Path",
+    "cli_credentials_file_desc": "Path to the Claude CLI .credentials.json used for CLI mode. Set automatically when you upload a file above; leave empty to derive credentials from the OAuth2 tokens.",
     "provider_label": "Provider",
     "model_name": "Model Name",
     "weight": "Weight",

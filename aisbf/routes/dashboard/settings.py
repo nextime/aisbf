@@ -1777,6 +1777,9 @@ async def dashboard_provider_upload_chunk(
                 "complete": True,
                 "message": "File uploaded successfully",
                 "file_path": str(file_path),
+                # Same tilde form written into providers.json above, so a client
+                # mirroring this into its config posts back an identical value.
+                "config_path": str(file_path).replace(str(Path.home()), '~'),
                 "stored_filename": stored_filename
             })
 

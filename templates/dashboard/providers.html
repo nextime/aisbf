@@ -788,6 +788,16 @@ async function uploadClaudeCliFile(providerKey, file) {
             if (result.complete) {
                 statusEl.innerHTML = `<div style="color: #4ade80; display: flex; align-items: center; gap: 6px;"><span style="font-size: 1.1em;">&#10003;</span> ${window.i18n.interpolate(window.i18n.t('providers.cli_creds_saved'), {name: file.name})}</div>`;
                 showToast(window.i18n.interpolate(window.i18n.t('providers.cli_creds_saved'), {name: file.name}), 'success');
+                // Mirror the path the server just stored, so a later save of this
+                // page does not post a config that lacks it.
+                const storedPath = result.config_path || result.file_path;
+                if (storedPath) {
+                    if (!providersData[providerKey].claude_config) {
+                        providersData[providerKey].claude_config = {};
+                    }
+                    providersData[providerKey].claude_config.cli_credentials_file = storedPath;
+                    setTimeout(() => renderProvidersList(), 2500);
+                }
                 return;
             }
         }
@@ -1284,6 +1294,16 @@ function renderProviderDetails(key) {
                             Optional — upload a <code style="background:var(--bg-panel);padding:1px 4px;border-radius:3px;">~/.claude/.credentials.json</code>
                             to use a specific account. Path saved in
                             <code style="background:var(--bg-panel);padding:1px 4px;border-radius:3px;">claude_config.cli_credentials_file</code>.
+                        </small>
+                    </div>
+
+                    <div class="form-group">
+                        <label>${window.i18n.t('providers.cli_credentials_file')}</label>
+                        <input type="text" value="${claudeConfig.cli_credentials_file || ''}"
+                               onchange="updateClaudeConfig('${key}', 'cli_credentials_file', this.value)"
+                               placeholder="~/.claude/.credentials.json">
+                        <small style="color: var(--color-muted); display: block; margin-top: 5px;">
+                            ${window.i18n.t('providers.cli_credentials_file_desc')}
                         </small>
                     </div>
                     <div id="claude-cli-upload-status-${key}" style="margin-top: 10px;"></div>
