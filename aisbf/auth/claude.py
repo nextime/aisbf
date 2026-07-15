@@ -100,17 +100,68 @@ class ClaudeAuth:
             logger.warning(f"ClaudeAuth initialized without TLS fingerprinting (curl_cffi not available) - credentials: {self.credentials_file}")
             logger.warning("Install curl_cffi for better Cloudflare bypass: pip install curl_cffi")
     
+    @staticmethod
+    def normalize_tokens(tokens: Optional[Dict]) -> Optional[Dict]:
+        """
+        Accept the Claude CLI's .credentials.json schema as well as our own.
+
+        A CLI credentials file dropped in as the provider's credentials file is
+        a reasonable thing to do — the tokens are equivalent, only the spelling
+        differs — but every reader here looks for `access_token`, so an
+        unconverted file loads fine and then reports "invalid or missing".
+
+        CLI schema:   claudeAiOauth.accessToken, .refreshToken,
+                      .expiresAt (ms int), .scopes (list), .subscriptionType,
+                      .rateLimitTier
+        AISBF schema: access_token, refresh_token, expires_at (seconds float),
+                      scope (space-separated str)
+
+        This is the inverse of
+        ClaudeProviderHandler._oauth_tokens_to_cli_credentials(); keep the two
+        in step. Anything already in AISBF shape is returned untouched.
+        """
+        if not isinstance(tokens, dict):
+            return tokens
+        oauth = tokens.get('claudeAiOauth')
+        if not isinstance(oauth, dict):
+            return tokens
+
+        expires_at_ms = oauth.get('expiresAt') or 0
+        scopes = oauth.get('scopes') or []
+        normalized = {
+            'access_token': oauth.get('accessToken', ''),
+            'refresh_token': oauth.get('refreshToken', ''),
+            # CLI stores milliseconds; every expiry comparison here is in seconds
+            'expires_at': (expires_at_ms / 1000.0) if expires_at_ms else 0,
+            'scope': ' '.join(scopes) if isinstance(scopes, list) else (scopes or ''),
+        }
+        # Carried so a later conversion back to CLI shape keeps the real values
+        # instead of falling back to its defaults.
+        if oauth.get('subscriptionType'):
+            normalized['subscription_type'] = oauth['subscriptionType']
+        if oauth.get('rateLimitTier'):
+            normalized['rate_limit_tier'] = oauth['rateLimitTier']
+        if tokens.get('trustedDeviceToken'):
+            normalized['trusted_device_token'] = tokens['trustedDeviceToken']
+        return normalized
+
     def _load_credentials(self) -> Optional[Dict]:
         """Load credentials from file if they exist."""
         if self.credentials_file.exists():
             try:
                 with open(self.credentials_file, 'r') as f:
                     tokens = json.load(f)
-                logger.info("Loaded existing Claude credentials")
-                return tokens
             except Exception as e:
                 logger.warning(f"Failed to load credentials: {e}")
                 return None
+            if isinstance(tokens, dict) and 'claudeAiOauth' in tokens:
+                tokens = self.normalize_tokens(tokens)
+                logger.info(
+                    "Loaded Claude CLI-format credentials, normalized to AISBF schema"
+                )
+            else:
+                logger.info("Loaded existing Claude credentials")
+            return tokens
         return None
     
     def _save_credentials(self, data: Dict):
