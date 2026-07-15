@@ -38,6 +38,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
+from .providers.base import is_provider_disabled_cheap
 from .config import config
 from .studio import infer_model_capabilities
 from .studio_adapters import effective_studio_adapter, infer_studio_adapter_profile, adapt_studio_payload_with_profile
@@ -3239,10 +3240,21 @@ class RotationHandler:
                 skipped_providers.append(provider_id)
                 continue
             
+            # Cheap pre-check: skip providers that are already disabled — manually
+            # (dashboard toggle) or by an auto-disable cooldown — BEFORE building the
+            # handler and validating credentials, which for some provider types
+            # performs a network round-trip. This keeps disabled providers from being
+            # contacted at all and makes a dashboard enable/disable take effect on the
+            # very next request.
+            if is_provider_disabled_cheap(provider_id, self.user_id):
+                logger.warning(f"  [SKIPPED] Provider {provider_id} is disabled (manual toggle or cooldown)")
+                skipped_providers.append(provider_id)
+                continue
+
             # Get API key: first from provider config, then from rotation config
             api_key = self._get_api_key(provider_id, provider.get('api_key'))
-            
-            # Check if provider is rate limited/deactivated
+
+            # Check if provider is rate limited/deactivated (authoritative check)
             provider_handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
             if provider_handler.is_rate_limited():
                 logger.warning(f"  [SKIPPED] Provider {provider_id} is rate limited/deactivated")
@@ -4009,8 +4021,6 @@ class RotationHandler:
                     tried_models.append(current_model)
                     continue
 
-                handler.record_failure()
-
                 # Increment retry count for this model
                 model_retry_counts[model_key] = retry_count + 1
 
@@ -4019,14 +4029,23 @@ class RotationHandler:
                 logger.error(f"Model retry count: {model_retry_counts[model_key]}")
 
                 # Non-retryable errors (e.g. HTTP 400/401/403/404/422 — bad request,
-                # unsupported model, auth failure) will fail identically if we retry
-                # the same provider, so don't waste attempts: move straight to the
-                # next provider by weight. Only transient errors (5xx, timeouts,
-                # network) are worth retrying on the same model.
+                # unsupported model, auth failure) are client/configuration problems,
+                # NOT provider-health problems: the provider is up and answering, it
+                # just rejected this particular request. They will fail identically if
+                # we retry the same provider, so don't waste attempts — move straight to
+                # the next provider by weight. Crucially, do NOT record a failure here:
+                # counting it would trip the consecutive-failure auto-disable and pull a
+                # perfectly healthy provider out of the rotation for the whole cooldown
+                # (e.g. a rotation pointing codex at an unsupported model name would
+                # disable codex after 3 requests). Only transient errors (5xx, timeouts,
+                # network) count against provider health and are worth retrying.
                 if self._is_non_retryable_error(e):
-                    logger.warning(f"Non-retryable error on {model_name} (provider: {provider_id}); skipping to next provider by weight (transparent to client)")
+                    logger.warning(f"Non-retryable error on {model_name} (provider: {provider_id}); skipping to next provider by weight (not counted as a provider failure, transparent to client)")
                     tried_models.append(current_model)
                     continue
+
+                # Transient/retryable error: count it against the provider's health.
+                handler.record_failure()
 
                 # If this is the first failure for this model, allow retry with rate limiting
                 if model_retry_counts[model_key] < 2:
@@ -5104,8 +5123,13 @@ class RotationHandler:
                 error_dict = {"error": str(e)}
                 yield f"data: {json.dumps(error_dict)}\n\n".encode('utf-8')
             except Exception as e:
-                # CoderAI warm-up (no broker session) is transient — don't disable it.
-                if not _is_coderai_warmup_error(e):
+                # Don't count non-provider-health errors against the provider:
+                #  - CoderAI warm-up (no broker session) is transient.
+                #  - Non-retryable client/config errors (HTTP 400/401/403/404/422 —
+                #    bad request, unsupported model, auth) mean the provider is up and
+                #    simply rejected this request; disabling it would pull a healthy
+                #    provider out of rotation for the whole cooldown.
+                if not _is_coderai_warmup_error(e) and not self._is_non_retryable_error(e):
                     handler.record_failure()
                 latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                 self._record_dashboard_proxy_event(

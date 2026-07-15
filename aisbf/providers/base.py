@@ -35,6 +35,50 @@ from ..batching import get_request_batcher
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
 
+def is_provider_disabled_cheap(provider_id: str, user_id: Optional[int] = None) -> bool:
+    """Return True if a provider is currently disabled — either manually (via the
+    dashboard toggle) or by an auto-disable cooldown — WITHOUT constructing the
+    handler or validating credentials.
+
+    Building a handler validates credentials, which for some provider types
+    (e.g. kiro/kilo) performs a network round-trip. The rotation/autoselect scan
+    uses this to skip already-disabled providers *before* paying that cost, so a
+    disabled provider is never contacted and a dashboard enable/disable toggle
+    takes effect on the very next request. It reads the same cache/DB keys the
+    handler uses, so it stays in sync with is_rate_limited().
+
+    Fails safe: any cache/DB error returns False so a hiccup can never wrongly
+    hide a provider — the authoritative is_rate_limited() check still runs after.
+    """
+    # 1) Manual disable (dashboard toggle): cache fast-path, DB is source of truth.
+    scope = user_id if user_id is not None else 'global'
+    manual_key = f"aisbf:provider_manual_disabled:{scope}:{provider_id}"
+    try:
+        from ..cache import get_cache_manager
+        cached = get_cache_manager().get(manual_key)
+    except Exception:
+        cached = None
+    if cached is not None:
+        if bool(cached):
+            return True
+    else:
+        try:
+            db = DatabaseRegistry.get_config_database()
+            if db and db.is_provider_manually_disabled(user_id, provider_id):
+                return True
+        except Exception:
+            pass
+    # 2) Auto-disable cooldown (failure threshold / usage limits).
+    try:
+        from ..cache import get_cache_manager
+        disabled_until = get_cache_manager().get(f"aisbf:provider_disabled:{provider_id}")
+        if disabled_until and disabled_until > time.time():
+            return True
+    except Exception:
+        pass
+    return False
+
+
 class RateLimitError(Exception):
     """Raised when a provider signals a rate limit, regardless of HTTP status code (e.g. 429, 402)."""
     def __init__(self, message: str, status_code: int = None):
