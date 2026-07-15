@@ -12,7 +12,7 @@ from aisbf.studio import build_studio_catalog, stamp_inferred_capabilities, seri
 from aisbf.studio_adapters import serialize_studio_adapter_choices, serialize_studio_adapter_profile_choices, effective_studio_adapter, infer_studio_adapter_profile
 from aisbf.studio_services import studio_service
 from aisbf.app.templates import url_for, get_base_url
-from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_provider, _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path, _autoselect_json_path, _claude_cli_mode
+from aisbf.app.startup import _reload_global_config, _apply_condense_defaults_provider, _apply_condense_defaults_rotation, _providers_json_path, _rotations_json_path, _autoselect_json_path
 from aisbf.app.middleware import _is_local_client
 from aisbf.app.model_cache import fetch_provider_models
 from aisbf.routes.auth import require_dashboard_auth, require_api_auth, require_api_admin, require_admin
@@ -23,6 +23,9 @@ router = APIRouter()
 _config = None
 _templates = None
 _server_config = None
+# Injected by init(); imported from startup it would bind a copy of False at
+# import time, before detection has run.
+_claude_cli_mode = False
 
 logger = logging.getLogger(__name__)
 
@@ -309,11 +312,12 @@ def _resource_change_event(existing_config: dict | None, new_config: dict | None
         return f"{base_saved}_updated"
     return base_removed
 
-def init(config, templates, server_config=None):
-    global _config, _templates, _server_config
+def init(config, templates, server_config=None, claude_cli_mode=False):
+    global _config, _templates, _server_config, _claude_cli_mode
     _config = config
     _templates = templates
     _server_config = server_config
+    _claude_cli_mode = claude_cli_mode
 
 
 def _get_templates():

@@ -28,7 +28,6 @@ _original_argv = None
 payment_service = None
 _initialized = False
 _server_ip_blocked: bool = False
-_claude_cli_mode = False
 _user_handlers_cache = {}
 tor_service = None
 _cache_refresh_task = None

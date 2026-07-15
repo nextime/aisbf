@@ -26,7 +26,9 @@ import time
 import random
 import os
 import json
+import shlex
 import shutil
+import sys
 import tempfile
 import logging as _logging
 from typing import Dict, List, Optional, Union, Any, Tuple
@@ -34,6 +36,25 @@ from anthropic import Anthropic
 from ..models import Model
 from ..config import config
 from .base import BaseProviderHandler, AnthropicFormatConverter, AISBF_DEBUG
+
+# MCP server name for the tool shim; the CLI exposes its tools as
+# mcp__<server>__<tool>, so this prefix is what we strip back off when
+# converting a tool_use block into an OpenAI tool_call.
+MCP_SHIM_SERVER = 'aisbf'
+MCP_TOOL_PREFIX = f'mcp__{MCP_SHIM_SERVER}__'
+
+# Each request starts a fresh CLI session, so earlier tool calls and their
+# results can only be replayed as text.  Without this the model re-runs a tool
+# it has already been given the answer for.
+TOOL_REPLAY_INSTRUCTIONS = (
+    'The conversation contains a transcript of tool use. A line of the form '
+    '"[called tool NAME with arguments ...]" is a tool call that was already '
+    'made on your behalf, and "[result of tool NAME: ...]" is the real value '
+    'that tool returned. Treat those results as authoritative and current: use '
+    'them to answer directly, and do not call a tool again to obtain a result '
+    'that is already present in the transcript. Only call a tool when you need '
+    'information the transcript does not already contain.'
+)
 
 
 class ClaudeCliSessionManager:
@@ -345,14 +366,27 @@ class ClaudeProviderHandler(BaseProviderHandler):
             return None
 
     def _messages_to_cli_prompt(self, messages: List[Dict],
-                                 tools: Optional[List[Dict]] = None) -> str:
+                                 tools: Optional[List[Dict]] = None) -> Tuple[str, str]:
         """
-        Convert an OpenAI-style messages list (plus optional tool definitions)
-        to a flat text prompt for the claude CLI sent via stdin.
-        System messages and tool definitions are included as a prefix.
+        Convert an OpenAI-style messages list into a
+        ``(system_prompt, conversation_prompt)`` pair for the claude CLI.
+
+        System messages are returned separately so the caller can pass them via
+        the CLI's ``--system-prompt`` flag, which the CLI applies as a real
+        system prompt.  Inlining them into the user turn (the previous
+        behaviour) left them as ordinary user text that the model could ignore.
+
+        Tool *definitions* are not rendered here — the MCP shim registers them
+        with the CLI so the model can call them for real.  Past tool calls and
+        their results are replayed as text: each request starts a fresh CLI
+        session (--no-session-persistence), so without the replay the model
+        would never see the result and would call the same tool forever.
         """
         system_parts: List[str] = []
         turn_parts: List[str] = []
+        # tool_call_id -> function name, so a tool result can name its call
+        call_names: Dict[str, str] = {}
+        saw_tool_result = False
 
         for msg in messages:
             role = msg.get('role', '')
@@ -366,6 +400,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     elif isinstance(block, str):
                         fragments.append(block)
                 content = '\n'.join(fragments)
+            elif content is None:
+                content = ''
             elif not isinstance(content, str):
                 content = str(content)
 
@@ -374,19 +410,141 @@ class ClaudeProviderHandler(BaseProviderHandler):
             elif role == 'user':
                 turn_parts.append(f'Human: {content}')
             elif role == 'assistant':
-                turn_parts.append(f'Assistant: {content}')
+                tool_calls = msg.get('tool_calls') or []
+                rendered = [content] if content else []
+                for call in tool_calls:
+                    fn = call.get('function', {}) or {}
+                    name = fn.get('name', '')
+                    call_names[call.get('id', '')] = name
+                    rendered.append(
+                        f'[called tool {name} with arguments {fn.get("arguments", "{}")}]'
+                    )
+                if rendered:
+                    turn_parts.append('Assistant: ' + '\n'.join(rendered))
+            elif role == 'tool':
+                name = call_names.get(msg.get('tool_call_id', ''), '') or msg.get('name', '')
+                label = f'tool {name}' if name else 'tool'
+                turn_parts.append(f'[result of {label}: {content}]')
+                saw_tool_result = True
 
-        if tools:
-            tools_json = json.dumps(tools, ensure_ascii=False)
-            system_parts.append(
-                f'Available tools (respond with tool_use blocks as needed):\n{tools_json}'
-            )
+        if saw_tool_result:
+            # Replayed results are only text, so the model treats them as
+            # hearsay and calls the tool again unless told otherwise.
+            system_parts.append(TOOL_REPLAY_INSTRUCTIONS)
 
-        parts: List[str] = []
-        if system_parts:
-            parts.append('[System Instructions: ' + '\n'.join(system_parts) + ']')
-        parts.extend(turn_parts)
-        return '\n\n'.join(parts)
+        return '\n\n'.join(system_parts), '\n\n'.join(turn_parts)
+
+    @staticmethod
+    def _strip_mcp_prefix(name: str) -> str:
+        """
+        Map a CLI tool name back to the name the caller asked for.
+
+        The CLI namespaces MCP tools as mcp__<server>__<tool>; the client only
+        knows the bare function name it sent us.
+        """
+        if name.startswith(MCP_TOOL_PREFIX):
+            return name[len(MCP_TOOL_PREFIX):]
+        return name
+
+    @staticmethod
+    def _write_mcp_shim_config(tools: List[Dict], workdir: str) -> str:
+        """
+        Write the tool definitions and an --mcp-config pointing at the shim.
+
+        Returns the path of the MCP config file.  Caller owns ``workdir`` and is
+        responsible for removing it.
+        """
+        tools_path = os.path.join(workdir, 'tools.json')
+        with open(tools_path, 'w') as fh:
+            json.dump(tools, fh)
+
+        shim_path = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                 'claude_mcp_shim.py')
+        config = {
+            'mcpServers': {
+                MCP_SHIM_SERVER: {
+                    'command': sys.executable,
+                    'args': [shim_path],
+                    'env': {'AISBF_MCP_TOOLS_FILE': tools_path},
+                },
+            },
+        }
+        config_path = os.path.join(workdir, 'mcp.json')
+        with open(config_path, 'w') as fh:
+            json.dump(config, fh)
+        return config_path
+
+    @staticmethod
+    def _build_cli_cmd(model: str, system_prompt: str = '',
+                       mcp_config: str = '') -> List[str]:
+        """
+        Build the claude CLI argv.
+
+        The flag set is deliberate and each entry matters:
+          -p                          non-interactive print mode
+          --output-format stream-json machine-readable event stream
+          --input-format stream-json  prompt is fed as JSON on stdin (see below)
+          --permission-prompt-tool stdio
+          --verbose                   required for full stream-json events
+          --dangerously-skip-permissions
+          --tools ''                  disable every built-in tool.  MCP tools are
+                                      registered separately and survive this.
+          --disallowedTools 'mcp__*'  keep the host's MCP servers out of the
+                                      broker's session
+
+        With --input-format stream-json the CLI ignores any prompt passed as an
+        argv positional; it is only read from stdin.
+
+        When ``mcp_config`` is set the caller's tools are served by the MCP shim
+        and --disallowedTools 'mcp__*' must be dropped: it is a blanket deny that
+        also blocks the shim (deny beats --allowedTools, so there is no way to
+        keep it and still expose the tools).  --strict-mcp-config preserves the
+        isolation instead by loading *only* our config and ignoring every MCP
+        server configured on the host.
+        """
+        cmd = [
+            'stdbuf', '-oL',
+            'claude', '-p',
+            '--output-format', 'stream-json',
+            '--input-format', 'stream-json',
+            '--permission-prompt-tool', 'stdio',
+            '--verbose',
+            '--dangerously-skip-permissions',
+            '--tools', '',
+            # Emits token-level deltas for streaming, and — needed by both paths
+            # — the message_delta event whose stop_reason marks the end of a
+            # tool-calling message.  Without it there is no reliable signal that
+            # every tool_use in a turn has arrived.
+            '--include-partial-messages',
+            '--no-session-persistence',
+        ]
+        if mcp_config:
+            cmd += ['--mcp-config', mcp_config, '--strict-mcp-config']
+        else:
+            cmd += ['--disallowedTools', 'mcp__*']
+        if system_prompt:
+            cmd += ['--system-prompt', system_prompt]
+        if model:
+            cmd += ['--model', model]
+        return cmd
+
+    @staticmethod
+    def _cli_stdin_message(prompt: str) -> str:
+        """
+        Frame a prompt as a stream-json stdin message.
+
+        The CLI expects the Anthropic message envelope
+        ``{"type": "user", "message": {"role": "user", "content": [...]}}``.
+        Any other shape is silently discarded, which is why CLI mode previously
+        produced no output at all.
+        """
+        return json.dumps({
+            'type': 'user',
+            'message': {
+                'role': 'user',
+                'content': [{'type': 'text', 'text': prompt}],
+            },
+        }) + '\n'
 
     async def _cli_discover_models(self, config_dir: str) -> List['Model']:
         """
@@ -408,17 +566,21 @@ class ClaudeProviderHandler(BaseProviderHandler):
             "Give me only a JSON list without any other comment or word "
             "except for the list of the model IDs."
         )
+        # Plain question, no tools needed: disable the built-ins and keep the
+        # host's MCP servers out so discovery stays fast and side-effect free.
         cmd = [
             'claude', '-p', prompt,
             '--output-format', 'json',
             '--dangerously-skip-permissions',
+            '--tools', '',
+            '--disallowedTools', 'mcp__*',
             '--no-session-persistence',
         ]
 
         logger.info(
             "ClaudeCliMode: model discovery subprocess\n"
             f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
-            + ' '.join(cmd)
+            + ' '.join(shlex.quote(c) for c in cmd)
         )
 
         process = await asyncio.create_subprocess_exec(
@@ -525,11 +687,18 @@ class ClaudeProviderHandler(BaseProviderHandler):
 
         return models
 
-    async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str):
+    async def _handle_cli_streaming_request(self, prompt: str, model: str, config_dir: str,
+                                             system_prompt: str = '',
+                                             tools: Optional[List[Dict]] = None):
         """
         Spawn a claude CLI subprocess, stream its JSON output, and yield
         OpenAI-compatible SSE chunks.  Multiple parallel calls each get their
         own subprocess; the config_dir is shared (read-only at runtime).
+
+        When ``tools`` are supplied they are served to the CLI by the MCP shim,
+        which makes the model emit real tool_use blocks.  Those are emitted as
+        OpenAI tool_calls and the turn then ends, because the client — not the
+        broker — executes tools (see claude_mcp_shim for the details).
         """
         logger = _logging.getLogger(__name__)
         clean_model = model.split('/')[-1] if '/' in model else model
@@ -538,29 +707,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
         env['CLAUDE_CONFIG_DIR'] = config_dir
         env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
 
-        cmd = [
-            'stdbuf', '-oL',
-            'claude', '-p',
-            '--input-format', 'stream-json',
-            '--output-format', 'stream-json',
-            '--include-partial-messages',
-            '--tools', '',
-            '--dangerously-skip-permissions',
-            '--no-session-persistence',
-            '--verbose',
-        ]
-        if clean_model:
-            cmd += ['--model', clean_model]
+        mcp_workdir = tempfile.mkdtemp(prefix='aisbf_claude_mcp_') if tools else ''
+        mcp_config = self._write_mcp_shim_config(tools, mcp_workdir) if tools else ''
 
-        stdin_payload: Dict = {
-            'type': 'user_message',
-            'content': [{'type': 'text', 'text': prompt}],
-        }
-
-        input_msg = json.dumps(stdin_payload) + '\n'
+        cmd = self._build_cli_cmd(clean_model, system_prompt, mcp_config=mcp_config)
+        input_msg = self._cli_stdin_message(prompt)
 
         # Log a shell-replicable command for debugging
-        cmd_str = ' '.join(cmd)
+        cmd_str = ' '.join(shlex.quote(c) for c in cmd)
         logger.info(
             f"ClaudeCliMode: launching subprocess model={clean_model} dir={config_dir}\n"
             f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
@@ -587,6 +741,8 @@ class ClaudeProviderHandler(BaseProviderHandler):
         # { block_index: {"id": ..., "name": ..., "arguments": ""} }
         tool_blocks: dict = {}
         tool_header_sent: set = set()
+        # tool_use ids already emitted incrementally via input_json_delta
+        streamed_tool_ids: set = set()
         cli_prev_text_len: int = 0
 
         try:
@@ -612,18 +768,35 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     logger.debug(f"ClaudeCliMode: non-JSON line: {line_str}")
                     continue
 
+                # The CLI wraps raw Anthropic stream events in a stream_event
+                # envelope: {"type": "stream_event", "event": {...}}.  Unwrap it
+                # so the content_block_* / message_stop branches below see the
+                # real event type.
+                if data.get('type') == 'stream_event':
+                    data = data.get('event', {})
+
                 event_type = data.get('type')
 
                 if event_type == 'content_block_start':
                     cb = data.get('content_block', {})
                     if cb.get('type') == 'tool_use':
                         idx = data.get('index', 0)
+                        tc_id = cb.get('id', f'call_{idx}')
                         tool_blocks[idx] = {
-                            'id': cb.get('id', f'call_{idx}'),
-                            'name': cb.get('name', ''),
+                            'id': tc_id,
+                            'name': self._strip_mcp_prefix(cb.get('name', '')),
                             'arguments': '',
+                            # OpenAI tool_calls are indexed by position in the
+                            # tool_calls array; `idx` is an Anthropic content
+                            # block index that also counts text/thinking blocks,
+                            # so emitting it directly would leave holes that
+                            # break client-side accumulation.
+                            'seq': len(tool_blocks),
                         }
-                        logger.debug(f"ClaudeCliMode: tool_use block started idx={idx} name={cb.get('name')}")
+                        # Remember the id so the `assistant` event below does not
+                        # re-emit arguments already streamed.
+                        streamed_tool_ids.add(tc_id)
+                        logger.debug(f"ClaudeCliMode: tool_use block started idx={idx} seq={tool_blocks[idx]['seq']} name={cb.get('name')}")
 
                 elif event_type == 'content_block_delta':
                     delta = data.get('delta', {})
@@ -634,6 +807,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         if not text:
                             continue
 
+                        # Count text streamed here so the cumulative `assistant`
+                        # event below does not re-emit it.
+                        cli_prev_text_len += len(text)
+
                         if first_chunk:
                             yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})}\n\n'
                             first_chunk = False
@@ -643,18 +820,19 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     elif delta.get('type') == 'input_json_delta' and idx in tool_blocks:
                         partial = delta.get('partial_json', '')
                         tool_blocks[idx]['arguments'] += partial
+                        seq = tool_blocks[idx]['seq']
 
                         # Emit streaming tool_calls delta
                         if idx not in tool_header_sent:
                             tool_header_sent.add(idx)
                             if first_chunk:
-                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": None, "tool_calls": [{"index": idx, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": None, "tool_calls": [{"index": seq, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
                                 first_chunk = False
                             else:
-                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": idx, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": seq, "id": tool_blocks[idx]["id"], "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": ""}}]}, "finish_reason": None}]})}\n\n'
 
                         if partial:
-                            yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": idx, "function": {"arguments": partial}}]}, "finish_reason": None}]})}\n\n'
+                            yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"tool_calls": [{"index": seq, "function": {"arguments": partial}}]}, "finish_reason": None}]})}\n\n'
 
                 elif event_type == 'assistant':
                     # Claude CLI stream-json format: partial or final assistant message
@@ -667,19 +845,27 @@ class ClaudeProviderHandler(BaseProviderHandler):
                         if btype == 'text':
                             last_text += block.get('text', '')
                         elif btype == 'tool_use':
-                            # Tool call in assistant event — register and emit if not yet seen
+                            # Fallback for a tool_use that never came through as
+                            # content_block deltas; emits the complete input in
+                            # one chunk.
                             tc_id = block.get('id', f'call_{len(tool_blocks)}')
-                            if tc_id not in tool_header_sent:
+                            tool_name = self._strip_mcp_prefix(block.get('name', ''))
+                            if tc_id not in streamed_tool_ids and tc_id not in tool_header_sent:
                                 tool_header_sent.add(tc_id)
-                                idx = len(tool_blocks)
-                                tool_blocks[idx] = {
+                                streamed_tool_ids.add(tc_id)
+                                # Key by a synthetic block index that cannot
+                                # collide with a real content block index.
+                                block_key = f'assistant:{tc_id}'
+                                seq = len(tool_blocks)
+                                tool_blocks[block_key] = {
                                     'id': tc_id,
-                                    'name': block.get('name', ''),
+                                    'name': tool_name,
                                     'arguments': json.dumps(block.get('input', {}), ensure_ascii=False),
+                                    'seq': seq,
                                 }
                                 role_delta = {'role': 'assistant', 'content': None} if first_chunk else {}
                                 first_chunk = False
-                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {**role_delta, "tool_calls": [{"index": idx, "id": tc_id, "type": "function", "function": {"name": tool_blocks[idx]["name"], "arguments": tool_blocks[idx]["arguments"]}}]}, "finish_reason": None}]})}\n\n'
+                                yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {**role_delta, "tool_calls": [{"index": seq, "id": tc_id, "type": "function", "function": {"name": tool_name, "arguments": tool_blocks[block_key]["arguments"]}}]}, "finish_reason": None}]})}\n\n'
                     if last_text:
                         # Content is cumulative; emit only new characters
                         new_text = last_text[cli_prev_text_len:]
@@ -689,6 +875,19 @@ class ClaudeProviderHandler(BaseProviderHandler):
                                 yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"role": "assistant", "content": ""}, "finish_reason": None}]})}\n\n'
                                 first_chunk = False
                             yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {"content": new_text}, "finish_reason": None}]})}\n\n'
+
+                elif event_type == 'message_delta':
+                    # stop_reason == 'tool_use' means every tool_use block in
+                    # this message has arrived.  This — not the first tool_use —
+                    # is where the turn ends: the CLI emits one assistant event
+                    # per content block, so breaking earlier would drop any
+                    # sibling calls the model made in parallel.
+                    if data.get('delta', {}).get('stop_reason') == 'tool_use':
+                        logger.info(
+                            f"ClaudeCliMode: {len(tool_blocks)} tool call(s) emitted, "
+                            "ending turn for client execution"
+                        )
+                        break
 
                 elif event_type == 'result':
                     result_text = data.get('result', '')
@@ -701,8 +900,10 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     break
 
                 elif event_type == 'message_stop':
+                    # End of one assistant message, not necessarily end of turn.
+                    # The CLI's `result` event is the authoritative terminator,
+                    # so keep reading until it arrives.
                     logger.debug("ClaudeCliMode: received message_stop")
-                    break
 
                 else:
                     logger.debug(f"ClaudeCliMode: unhandled event type={event_type}")
@@ -725,14 +926,25 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     process.kill()
                 except Exception:
                     pass
+            if mcp_workdir:
+                shutil.rmtree(mcp_workdir, ignore_errors=True)
 
         finish_reason = 'tool_calls' if tool_blocks else 'stop'
         yield f'data: {json.dumps({"id": completion_id, "object": "chat.completion.chunk", "created": created_time, "model": f"{self.provider_id}/{clean_model}", "choices": [{"index": 0, "delta": {}, "finish_reason": finish_reason}]})}\n\n'
         yield 'data: [DONE]\n\n'
 
     async def _handle_cli_request(self, prompt: str, model: str, config_dir: str,
+                                   system_prompt: str = '',
                                    tools: Optional[List[Dict]] = None) -> dict:
-        """Non-streaming CLI request using --output-format json with prompt via stdin."""
+        """
+        Non-streaming CLI request.
+
+        Uses the same stream-json transport as the streaming path and collects
+        the final `result` event, rather than --output-format json.  The old
+        implementation passed the caller's tool definitions to --tools, but that
+        flag only selects built-in tools by name; a JSON blob there registers
+        nothing.  Tools are served by the MCP shim instead.
+        """
         logger = _logging.getLogger(__name__)
         clean_model = model.split('/')[-1] if '/' in model else model
 
@@ -740,21 +952,17 @@ class ClaudeProviderHandler(BaseProviderHandler):
         env['CLAUDE_CONFIG_DIR'] = config_dir
         env['CLAUDE_CODE_USE_KEYCHAIN'] = 'false'
 
-        cmd = [
-            'claude', '-p',
-            '--output-format', 'json',
-            '--dangerously-skip-permissions',
-            '--no-session-persistence',
-        ]
-        if tools:
-            cmd += ['--tools', json.dumps(tools, ensure_ascii=False)]
-        if clean_model:
-            cmd += ['--model', clean_model]
+        mcp_workdir = tempfile.mkdtemp(prefix='aisbf_claude_mcp_') if tools else ''
+        mcp_config = self._write_mcp_shim_config(tools, mcp_workdir) if tools else ''
+
+        cmd = self._build_cli_cmd(clean_model, system_prompt, mcp_config=mcp_config)
+        input_msg = self._cli_stdin_message(prompt)
 
         logger.info(
             f"ClaudeCliMode: non-streaming subprocess model={clean_model} dir={config_dir}\n"
             f"  Replicate with: CLAUDE_CONFIG_DIR={config_dir} CLAUDE_CODE_USE_KEYCHAIN=false "
-            + ' '.join(cmd) + f" <<'EOF'\n{prompt[:200]}...\nEOF"
+            + ' '.join(shlex.quote(c) for c in cmd)
+            + f" <<'EOF'\n{input_msg.strip()}\nEOF"
         )
 
         process = await asyncio.create_subprocess_exec(
@@ -765,45 +973,137 @@ class ClaudeProviderHandler(BaseProviderHandler):
             stderr=asyncio.subprocess.PIPE,
         )
 
-        try:
-            stdout_bytes, stderr_bytes = await asyncio.wait_for(
-                process.communicate(input=prompt.encode()), timeout=120.0
-            )
-        except asyncio.TimeoutError:
-            logger.error("ClaudeCliMode: non-streaming subprocess timed out")
-            process.kill()
-            await process.wait()
-            return {
-                'id': f'chatcmpl-cli-{int(time.time())}',
-                'object': 'chat.completion',
-                'created': int(time.time()),
-                'model': f'{self.provider_id}/{clean_model}',
-                'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': 'Request timed out.'}, 'finish_reason': 'stop'}],
-                'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
-            }
+        process.stdin.write(input_msg.encode())
+        await process.stdin.drain()
+        process.stdin.close()
 
-        if stderr_bytes:
-            logger.debug(f"ClaudeCliMode: stderr:\n{stderr_bytes.decode('utf-8', errors='replace')[:2000]}")
-
-        stdout_str = stdout_bytes.decode('utf-8', errors='replace').strip()
-        logger.debug(f"ClaudeCliMode: raw output: {stdout_str[:500]}")
-
+        # stream-json output is newline-delimited JSON.  Read it incrementally
+        # rather than via communicate(): a tool_use has to end the turn, and
+        # waiting for exit would let the CLI call the shim and act on its
+        # sentinel result.
         result_text = ''
+        assistant_text = ''
+        usage = {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0}
+        tool_calls: List[Dict] = []
+        seen_tool_ids: set = set()
+        timed_out = False
+
         try:
-            data = json.loads(stdout_str)
-            if data.get('is_error'):
-                logger.warning(f"ClaudeCliMode: CLI returned error: {data.get('result', '')[:200]}")
-            result_text = data.get('result', '')
-        except json.JSONDecodeError:
-            result_text = stdout_str
+            while True:
+                try:
+                    raw = await asyncio.wait_for(process.stdout.readline(), timeout=120.0)
+                except asyncio.TimeoutError:
+                    logger.error("ClaudeCliMode: non-streaming subprocess timed out")
+                    timed_out = True
+                    break
+                if not raw:
+                    break
+
+                line = raw.decode('utf-8', errors='replace').strip()
+                if not line:
+                    continue
+                try:
+                    data = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+
+                if data.get('type') == 'stream_event':
+                    event = data.get('event', {})
+                    # See the streaming path: stop_reason == 'tool_use' is the
+                    # only reliable marker that every parallel tool_use in the
+                    # message has arrived.
+                    if (event.get('type') == 'message_delta'
+                            and event.get('delta', {}).get('stop_reason') == 'tool_use'):
+                        logger.info(
+                            f"ClaudeCliMode: {len(tool_calls)} tool call(s) emitted, "
+                            "ending turn for client execution"
+                        )
+                        break
+                    continue
+
+                dtype = data.get('type')
+                if dtype == 'assistant':
+                    # One assistant event per content block, so accumulate
+                    # across events and dedupe by tool_use id.
+                    for block in data.get('message', {}).get('content', []):
+                        if not isinstance(block, dict):
+                            continue
+                        if block.get('type') == 'text':
+                            assistant_text += block.get('text', '')
+                        elif block.get('type') == 'tool_use':
+                            tc_id = block.get('id', f'call_{len(tool_calls)}')
+                            if tc_id in seen_tool_ids:
+                                continue
+                            seen_tool_ids.add(tc_id)
+                            tool_calls.append({
+                                'id': tc_id,
+                                'type': 'function',
+                                'function': {
+                                    'name': self._strip_mcp_prefix(block.get('name', '')),
+                                    'arguments': json.dumps(block.get('input', {}),
+                                                            ensure_ascii=False),
+                                },
+                            })
+                elif dtype == 'result':
+                    if data.get('is_error'):
+                        logger.warning(
+                            f"ClaudeCliMode: CLI returned error: {str(data.get('result', ''))[:200]}"
+                        )
+                    result_text = data.get('result', '') or ''
+                    raw_usage = data.get('usage', {}) or {}
+                    prompt_tokens = (
+                        raw_usage.get('input_tokens', 0)
+                        + raw_usage.get('cache_read_input_tokens', 0)
+                        + raw_usage.get('cache_creation_input_tokens', 0)
+                    )
+                    completion_tokens = raw_usage.get('output_tokens', 0)
+                    usage = {
+                        'prompt_tokens': prompt_tokens,
+                        'completion_tokens': completion_tokens,
+                        'total_tokens': prompt_tokens + completion_tokens,
+                    }
+                    break
+        finally:
+            try:
+                stderr_bytes = await asyncio.wait_for(process.stderr.read(), timeout=2.0)
+                if stderr_bytes:
+                    logger.debug(
+                        f"ClaudeCliMode: stderr:\n"
+                        f"{stderr_bytes.decode('utf-8', errors='replace')[:2000]}"
+                    )
+            except Exception:
+                pass
+            try:
+                process.terminate()
+                await asyncio.wait_for(process.wait(), timeout=5.0)
+            except Exception:
+                try:
+                    process.kill()
+                except Exception:
+                    pass
+            if mcp_workdir:
+                shutil.rmtree(mcp_workdir, ignore_errors=True)
+
+        if timed_out and not (result_text or assistant_text or tool_calls):
+            result_text = 'Request timed out.'
+
+        message: Dict[str, Any] = {'role': 'assistant'}
+        if tool_calls:
+            # A tool-calling turn carries no user-visible text.
+            message['content'] = assistant_text or None
+            message['tool_calls'] = tool_calls
+            finish_reason = 'tool_calls'
+        else:
+            message['content'] = result_text or assistant_text
+            finish_reason = 'stop'
 
         return {
             'id': f'chatcmpl-cli-{int(time.time())}',
             'object': 'chat.completion',
             'created': int(time.time()),
             'model': f'{self.provider_id}/{clean_model}',
-            'choices': [{'index': 0, 'message': {'role': 'assistant', 'content': result_text}, 'finish_reason': 'stop'}],
-            'usage': {'prompt_tokens': 0, 'completion_tokens': 0, 'total_tokens': 0},
+            'choices': [{'index': 0, 'message': message, 'finish_reason': finish_reason}],
+            'usage': usage,
         }
 
     @staticmethod
@@ -1591,14 +1891,20 @@ class ClaudeProviderHandler(BaseProviderHandler):
             if cli_creds is not None:
                 logger.info(f"ClaudeProviderHandler: using CLI subprocess mode for model {model}")
                 anthropic_tools = self._convert_tools_to_anthropic(tools) if tools else None
-                prompt = self._messages_to_cli_prompt(messages)
+                system_prompt, prompt = self._messages_to_cli_prompt(messages, tools=anthropic_tools)
                 config_dir = await ClaudeCliSessionManager.get_config_dir(
                     self.user_id, self.provider_id, cli_creds
                 )
                 if stream:
-                    return self._handle_cli_streaming_request(prompt, model, config_dir, tools=anthropic_tools)
+                    return self._handle_cli_streaming_request(
+                        prompt, model, config_dir,
+                        system_prompt=system_prompt, tools=anthropic_tools,
+                    )
                 else:
-                    return await self._handle_cli_request(prompt, model, config_dir, tools=anthropic_tools)
+                    return await self._handle_cli_request(
+                        prompt, model, config_dir,
+                        system_prompt=system_prompt, tools=anthropic_tools,
+                    )
         # ── Fall through to HTTP API mode ────────────────────────────────
 
         logger.info(f"ClaudeProviderHandler: Handling request for model {model} (Direct HTTP mode)")
