@@ -469,6 +469,14 @@ class ClaudeProviderHandler(BaseProviderHandler):
                     'command': sys.executable,
                     'args': [shim_path],
                     'env': {'AISBF_MCP_TOOLS_FILE': tools_path},
+                    # Without this the CLI connects --mcp-config servers "fully
+                    # async (nonblocking)" and starts the turn without waiting.
+                    # Losing that race registers zero tools, and the model then
+                    # describes tool calls in prose ("[Tool: list_dir]") instead
+                    # of emitting tool_use — a silent wrong answer, not an error.
+                    # alwaysLoad puts the shim on the CLI's blocking path, so
+                    # the tools are always registered before the first request.
+                    'alwaysLoad': True,
                 },
             },
         }
