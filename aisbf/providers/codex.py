@@ -21,6 +21,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 Why did the programmer quit his job? Because he didn't get arrays!
 """
+import base64
 import json
 import logging
 import time
@@ -35,6 +36,7 @@ from ..config import config
 from ..utils import count_messages_tokens
 from .base import (
     BaseProviderHandler,
+    RateLimitError,
     AISBF_DEBUG,
     adapt_request_for_unsupported_param,
     apply_max_tokens_param,
@@ -220,19 +222,91 @@ class CodexProviderHandler(BaseProviderHandler):
             save_callback=lambda creds: self._save_oauth2_to_db(creds)
         )
     
+    def _raise_if_usage_limited(self, status_code: int, body: bytes, headers=None) -> None:
+        """Turn a Codex usage-limit refusal into RateLimitError without disabling us.
+
+        A 429 from the ChatGPT backend is per-quota-bucket, not a provider fault:
+        x-codex-active-limit says which bucket refused, and the account routinely
+        still serves requests from another one. In one hour of production traffic
+        this provider returned 1888 × 200 interleaved with 1282 × 429. Recording
+        those 429s as failures tripped the three-strikes cooldown and made aisbf
+        reject everything itself for five minutes at a time — including the
+        majority that would have succeeded.
+
+        So: surface the upstream refusal to the caller, and leave the provider
+        enabled so the next request is actually attempted.
+        """
+        if status_code != 429:
+            return
+        detail = ''
+        try:
+            payload = json.loads(body or b'{}')
+            error = payload.get('error') or {}
+            detail = error.get('type') or error.get('message') or ''
+        except Exception:
+            detail = (body or b'').decode('utf-8', 'replace')[:200]
+
+        bucket = (headers or {}).get('x-codex-active-limit') if headers else None
+        logger.warning(
+            f"[{self.provider_id}] Upstream usage limit ({detail or '429'}"
+            f"{f', bucket={bucket}' if bucket else ''}) — passing 429 through, provider stays enabled"
+        )
+        # record_429 lets the adaptive limiter widen the request spacing on its own.
+        try:
+            self.adaptive_limiter.record_429(0)
+        except Exception:
+            pass
+        raise RateLimitError(
+            f"Provider {self.provider_id} upstream usage limit reached: {detail or '429 Too Many Requests'}",
+            status_code=429,
+        )
+
+    @staticmethod
+    def _account_id_from_credentials(credentials: Optional[Dict]) -> Optional[str]:
+        """Resolve the ChatGPT account id the request should be billed to.
+
+        The login flow only sometimes writes tokens.account_id — in practice it is
+        often null — but the id_token always carries chatgpt_account_id in its
+        OpenAI auth claim. Without it the ChatGPT-Account-ID header is omitted and
+        the backend picks a workspace itself, so an account belonging to several
+        workspaces cannot be steered at the one the operator configured. Fall back
+        to the claim rather than sending nothing.
+        """
+        tokens = (credentials or {}).get('tokens') or {}
+        account_id = tokens.get('account_id')
+        if account_id:
+            return account_id
+        id_token = tokens.get('id_token')
+        if not id_token:
+            return None
+        try:
+            payload = id_token.split('.')[1]
+            payload += '=' * (-len(payload) % 4)
+            claims = json.loads(base64.urlsafe_b64decode(payload))
+            return claims.get('https://api.openai.com/auth', {}).get('chatgpt_account_id')
+        except Exception as e:
+            logger.debug(f"CodexProviderHandler: could not read account id from id_token: {e}")
+            return None
+
     async def _get_valid_api_key(self) -> str:
         """Get a valid API key, refreshing OAuth2 if needed."""
         # If we have an API key, use it (prefer passed api_key, then stored config)
         if self.api_key:
             return self.api_key
-        
+
         # Try OAuth2 token
         token = await self.oauth2.get_valid_token_with_refresh()
         if token:
             # Extract account ID from credentials if available
-            if self.oauth2.credentials and self.oauth2.credentials.get('tokens'):
-                self._account_id = self.oauth2.credentials['tokens'].get('account_id')
-            
+            self._account_id = self._account_id_from_credentials(self.oauth2.credentials)
+            if self._account_id:
+                logger.info(f"[{self.provider_id}] Billing requests to ChatGPT account {self._account_id}")
+            else:
+                logger.warning(
+                    f"[{self.provider_id}] No ChatGPT account id available — the backend will "
+                    f"choose the workspace, which may not be the configured one"
+                )
+
             # Switch to ChatGPT backend if OAuth2 is now authenticated
             if not self._use_api_key_mode and self.base_url != "https://chatgpt.com/backend-api":
                 self.base_url = "https://chatgpt.com/backend-api"
@@ -660,6 +734,7 @@ class CodexProviderHandler(BaseProviderHandler):
                         f"CodexProviderHandler: Streaming error {response.status_code}: "
                         f"{error_body.decode('utf-8')}"
                     )
+                    self._raise_if_usage_limited(response.status_code, error_body, response.headers)
                     response.raise_for_status()
 
                 async for event in self._parse_sse_stream(response):
@@ -818,6 +893,7 @@ class CodexProviderHandler(BaseProviderHandler):
                     error_body = await response.aread()
                     logger.error(f"CodexProviderHandler: Error response status: {response.status_code}")
                     logger.error(f"CodexProviderHandler: Error response body: {error_body.decode('utf-8')}")
+                    self._raise_if_usage_limited(response.status_code, error_body, response.headers)
 
                 response.raise_for_status()
 
@@ -893,6 +969,10 @@ class CodexProviderHandler(BaseProviderHandler):
             
             return response
                 
+        except RateLimitError:
+            # An upstream quota refusal is not a provider fault — leave the failure
+            # counter alone so the next request is still attempted.
+            raise
         except Exception as e:
             logger.error(f"CodexProviderHandler: Error: {str(e)}", exc_info=True)
             self.record_failure()

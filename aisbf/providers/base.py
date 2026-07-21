@@ -34,6 +34,12 @@ from ..batching import get_request_batcher
 # Check if debug mode is enabled
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
+# Request spacing state, keyed by "provider:user" (and ":model" for per-model
+# limits). Process-wide because a handler instance lives for exactly one request,
+# so per-instance timestamps can never space anything apart. See _throttle().
+_rate_limit_last_request: Dict[str, float] = {}
+_rate_limit_locks: Dict[str, asyncio.Lock] = {}
+
 
 # Newer OpenAI models (reasoning models and the GPT-5/codex families) rejected the
 # legacy `max_tokens` parameter and only accept `max_completion_tokens`. Older
@@ -1669,60 +1675,57 @@ class BaseProviderHandler:
         logger.error(f"Disabled until: {self.error_tracking['disabled_until']}")
         logger.error(f"Provider will be automatically re-enabled after cooldown")
 
-    async def apply_rate_limit(self, rate_limit: Optional[float] = None):
-        """Apply rate limiting by waiting if necessary, using adaptive rate limiting."""
+    async def _throttle(self, slot: str, rate_limit: float, label: str):
+        """Space requests sharing `slot` at least `rate_limit` seconds apart.
+
+        The timestamp lives in a process-wide registry rather than on the handler
+        because get_provider_handler() builds a fresh handler for every request:
+        an instance attribute is always 0 on arrival, so the spacing never applied
+        and a configured rate_limit did nothing at all. The lock is what makes the
+        limit hold under concurrency — without it, N simultaneous requests all
+        read the same stale timestamp, decide no wait is due, and burst together.
+        """
         import logging
         logger = logging.getLogger(__name__)
-        
-        # Use adaptive rate limiter if enabled
+
+        lock = _rate_limit_locks.setdefault(slot, asyncio.Lock())
+        async with lock:
+            last_time = _rate_limit_last_request.get(slot, 0)
+            required_wait = rate_limit - (time.time() - last_time)
+            if required_wait > 0:
+                logger.info(
+                    f"[RateLimit] {label}: waiting {required_wait:.2f}s "
+                    f"(limit: {rate_limit:.3f}s between requests, adaptive: {self.adaptive_limiter.enabled})"
+                )
+                await asyncio.sleep(required_wait)
+            _rate_limit_last_request[slot] = time.time()
+
+    def _effective_rate_limit(self, rate_limit: Optional[float]) -> Optional[float]:
+        """Combine the caller's limit with the adaptive one, taking the wider."""
         if self.adaptive_limiter.enabled:
             adaptive_limit = self.adaptive_limiter.get_rate_limit()
-            
             if rate_limit is None:
-                rate_limit = adaptive_limit
-            else:
-                # Use the higher of the two (more conservative)
-                rate_limit = max(rate_limit, adaptive_limit)
-        elif rate_limit is None:
-            rate_limit = self.rate_limit
+                return adaptive_limit
+            # Use the higher of the two (more conservative)
+            return max(rate_limit, adaptive_limit)
+        if rate_limit is None:
+            return self.rate_limit
+        return rate_limit
 
+    async def apply_rate_limit(self, rate_limit: Optional[float] = None):
+        """Apply rate limiting by waiting if necessary, using adaptive rate limiting."""
+        rate_limit = self._effective_rate_limit(rate_limit)
         if rate_limit and rate_limit > 0:
-            current_time = time.time()
-            time_since_last_request = current_time - self.last_request_time
-            required_wait = rate_limit - time_since_last_request
-
-            if required_wait > 0:
-                logger.info(f"[RateLimit] Provider {self.provider_id}: waiting {required_wait:.2f}s (adaptive: {self.adaptive_limiter.enabled})")
-                await asyncio.sleep(required_wait)
-
+            slot = f"{self.provider_id}:{self.user_id}"
+            await self._throttle(slot, rate_limit, f"Provider {self.provider_id}")
             self.last_request_time = time.time()
 
     async def apply_model_rate_limit(self, model: str, rate_limit: Optional[float] = None):
         """Apply rate limiting for a specific model, using adaptive rate limiting."""
-        import logging
-        logger = logging.getLogger(__name__)
-        
-        # Use adaptive rate limiter if enabled
-        if self.adaptive_limiter.enabled:
-            adaptive_limit = self.adaptive_limiter.get_rate_limit()
-            
-            if rate_limit is None:
-                rate_limit = adaptive_limit
-            else:
-                rate_limit = max(rate_limit, adaptive_limit)
-        elif rate_limit is None:
-            rate_limit = self.rate_limit
-
+        rate_limit = self._effective_rate_limit(rate_limit)
         if rate_limit and rate_limit > 0:
-            current_time = time.time()
-            last_time = self.model_last_request_time.get(model, 0)
-            time_since_last_request = current_time - last_time
-            required_wait = rate_limit - time_since_last_request
-
-            if required_wait > 0:
-                logger.info(f"[RateLimit] Model {model}: waiting {required_wait:.2f}s (adaptive: {self.adaptive_limiter.enabled})")
-                await asyncio.sleep(required_wait)
-
+            slot = f"{self.provider_id}:{self.user_id}:{model}"
+            await self._throttle(slot, rate_limit, f"Model {model}")
             self.model_last_request_time[model] = time.time()
 
     def record_failure(self):

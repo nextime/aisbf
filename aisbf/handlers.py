@@ -80,6 +80,28 @@ def _is_coderai_warmup_error(error) -> bool:
     return 'No active CoderAI broker session' in str(error or '')
 
 
+def _is_upstream_rate_limit(error) -> bool:
+    """True when the upstream refused on quota rather than the provider breaking.
+
+    A 429 says one quota bucket is exhausted right now; it says nothing about
+    whether the next request will succeed, and providers routinely keep serving
+    from another bucket while one is capped. Counting these toward the
+    three-strikes cooldown makes aisbf reject traffic itself that the upstream
+    would have answered, so they are excluded from failure recording.
+    """
+    if isinstance(error, RateLimitError):
+        return True
+    status = getattr(getattr(error, 'response', None), 'status_code', None)
+    if status == 429:
+        return True
+    return '429 Too Many Requests' in str(error or '') or 'usage_limit_reached' in str(error or '')
+
+
+def _should_record_failure(error) -> bool:
+    """Whether an exception should count against the provider's failure budget."""
+    return not _is_coderai_warmup_error(error) and not _is_upstream_rate_limit(error)
+
+
 def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
     """Reject the request with 503 when the provider is disabled, saying why.
 
@@ -995,8 +1017,7 @@ class RequestHandler:
             logger.info(f"=== RequestHandler.handle_chat_completion END ===")
             return response
         except Exception as e:
-            # CoderAI warm-up (no broker session) is transient — don't disable it.
-            if not _is_coderai_warmup_error(e):
+            if _should_record_failure(e):
                 handler.record_failure()
 
             # Record failed request analytics
@@ -1048,7 +1069,11 @@ class RequestHandler:
                     )
             except Exception as analytics_error:
                 logger.warning(f"Analytics recording for failed request failed: {analytics_error}")
-            
+
+            # Forward an upstream quota refusal as a 429 so the caller can back off
+            # or fail over on a real signal instead of a generic server error.
+            if _is_upstream_rate_limit(e):
+                raise HTTPException(status_code=429, detail=str(e))
             raise HTTPException(status_code=500, detail=str(e))
 
     async def handle_streaming_chat_completion(self, request: Request, provider_id: str, request_data: Dict):
@@ -1734,8 +1759,7 @@ class RequestHandler:
                     logger.warning(f"Analytics recording for streaming request failed: {analytics_error}")
                 
             except Exception as e:
-                # CoderAI warm-up (no broker session) is transient — don't disable it.
-                if not _is_coderai_warmup_error(e):
+                if _should_record_failure(e):
                     handler.record_failure()
 
                 # Record analytics for failed streaming request
@@ -2241,7 +2265,7 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for audio transcription {provider_id}: {market_error}")
             return result
         except Exception as e:
-            if not _is_coderai_warmup_error(e):
+            if _should_record_failure(e):
                 handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -2275,7 +2299,7 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for text to speech {provider_id}: {market_error}")
             return result
         except Exception as e:
-            if not _is_coderai_warmup_error(e):
+            if _should_record_failure(e):
                 handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -2319,7 +2343,7 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for image generation {provider_id}: {market_error}")
             return result
         except Exception as e:
-            if not _is_coderai_warmup_error(e):
+            if _should_record_failure(e):
                 handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -2353,7 +2377,7 @@ class RequestHandler:
                 logger.warning(f"Market settlement failed for embeddings {provider_id}: {market_error}")
             return result
         except Exception as e:
-            if not _is_coderai_warmup_error(e):
+            if _should_record_failure(e):
                 handler.record_failure()
             raise HTTPException(status_code=500, detail=str(e))
     
@@ -5157,7 +5181,7 @@ class RotationHandler:
                 #    bad request, unsupported model, auth) mean the provider is up and
                 #    simply rejected this request; disabling it would pull a healthy
                 #    provider out of rotation for the whole cooldown.
-                if not _is_coderai_warmup_error(e) and not self._is_non_retryable_error(e):
+                if _should_record_failure(e) and not self._is_non_retryable_error(e):
                     handler.record_failure()
                 latency_ms = (time.time() - request_start_time) * 1000 if request_start_time else 0
                 self._record_dashboard_proxy_event(
