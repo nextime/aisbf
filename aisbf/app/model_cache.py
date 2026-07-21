@@ -3,6 +3,7 @@ Provider model fetching, caching, and background refresh.
 Extracted from main.py.
 """
 import time
+import hashlib
 import logging
 import asyncio
 from typing import Optional
@@ -42,6 +43,37 @@ def _cache_key_for_provider(provider_id: str, user_id: Optional[int] = None) -> 
     return f"{provider_id}:{user_id}" if user_id is not None else provider_id
 
 
+def _auth_fingerprint(provider_config) -> str:
+    """Short digest of a provider's credentials, or '' when it has none.
+
+    Two providers that share a type and endpoint only return the same model list
+    when they authenticate as the same account. Codex/Kiro/Kilo providers each
+    point at one shared upstream URL but carry their own OAuth credentials file,
+    so keying the endpoint cache on type+endpoint alone made them serve whichever
+    provider happened to populate the entry first — an OAuth ChatGPT provider
+    would inherit an API-key provider's model list, contexts and all.
+    """
+    if provider_config is None:
+        return ''
+    material = []
+    api_key = getattr(provider_config, 'api_key', None)
+    if api_key:
+        material.append(str(api_key))
+    for attr in dir(provider_config):
+        if not attr.endswith('_config'):
+            continue
+        sub = getattr(provider_config, attr, None)
+        if not isinstance(sub, dict):
+            continue
+        for field in ('credentials_file', 'api_key', 'token', 'account_id', 'issuer'):
+            value = sub.get(field)
+            if value:
+                material.append(f"{attr}.{field}={value}")
+    if not material:
+        return ''
+    return hashlib.sha256('|'.join(sorted(material)).encode()).hexdigest()[:16]
+
+
 def _endpoint_cache_key(provider_config) -> Optional[str]:
     if provider_config is None:
         return None
@@ -49,7 +81,7 @@ def _endpoint_cache_key(provider_config) -> Optional[str]:
     endpoint = getattr(provider_config, 'endpoint', '') or ''
     if not prov_type and not endpoint:
         return None
-    return f"{prov_type}:{endpoint}"
+    return f"{prov_type}:{endpoint}:{_auth_fingerprint(provider_config)}"
 
 
 def _get_cached_provider_models(cache_key: str) -> Optional[list]:
@@ -66,9 +98,17 @@ def invalidate_provider_cache(provider_id: str, user_id: Optional[int] = None) -
     cache_key = _cache_key_for_provider(provider_id, user_id)
     _model_cache.pop(cache_key, None)
     _model_cache_timestamps.pop(cache_key, None)
-    # Also drop the endpoint-level cache so a different user_id doesn't serve stale data
+    # Also drop the endpoint-level cache so a different user_id doesn't serve stale data.
+    # The endpoint key never contains the provider id, so resolve this provider's own
+    # key from its config rather than relying on a substring match that only ever hit
+    # by coincidence (e.g. an endpoint URL that happened to embed the provider name).
+    try:
+        from aisbf.config import config as _global_config
+        own_key = _endpoint_cache_key(_global_config.get_provider(provider_id))
+    except Exception:
+        own_key = None
     for key in list(_endpoint_model_cache.keys()):
-        if key.startswith(f"coderai:") or provider_id in key:
+        if key.startswith('coderai:') or key == own_key or provider_id in key:
             _endpoint_model_cache.pop(key, None)
 
 

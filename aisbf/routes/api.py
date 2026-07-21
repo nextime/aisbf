@@ -8,6 +8,7 @@ from aisbf.database import DatabaseRegistry
 from aisbf.app.model_cache import get_provider_models, _refresh_provider_usage_if_stale, _background_tasks
 from aisbf.studio_services import studio_service
 from aisbf.context import get_context_config_for_model
+from aisbf.utils import get_max_request_tokens_for_model
 
 router = APIRouter()
 _config = None
@@ -270,6 +271,72 @@ def _resolve_autoselect_context(autoselect_config) -> Optional[int]:
     return best
 
 
+def _configured_context_size(model_name: str, provider_config) -> Optional[int]:
+    """Context window explicitly configured for a model, or None.
+
+    Deliberately not get_context_config_for_model(): that helper ends in
+    _infer_context_size_from_model(), whose generic fallback is 8192. That is the
+    right answer when sizing a request we are about to send, but publishing it in
+    /v1/models would overwrite a real fetched context window (272000) with a
+    guess. Only configuration the operator actually wrote may override the
+    upstream listing, so this stops at the two explicit steps.
+    """
+    if provider_config is None:
+        return None
+    if isinstance(provider_config, dict):
+        models = provider_config.get('models') or []
+        provider_default = provider_config.get('default_context_size')
+    else:
+        models = getattr(provider_config, 'models', None) or []
+        provider_default = getattr(provider_config, 'default_context_size', None)
+
+    for model in models:
+        name = model.get('name') if isinstance(model, dict) else getattr(model, 'name', None)
+        if name != model_name:
+            continue
+        size = model.get('context_size') if isinstance(model, dict) else getattr(model, 'context_size', None)
+        if size:
+            return size
+        break
+    return provider_default or None
+
+
+def _apply_provider_context_config(models: list, provider_config) -> None:
+    """Stamp the provider's configured context/token limits onto its model entries.
+
+    Rotations and autoselects already advertise a resolved context window, but
+    provider models were published exactly as the upstream API (or its cache)
+    returned them. A provider configured with default_context_size never showed
+    it in /v1/models, so clients that size their context from the model listing
+    fell back to their own default and refused to run.
+
+    Explicit configuration wins over the fetched value — it is the only way to
+    correct a model whose upstream listing understates its window.
+    """
+    for entry in models:
+        model_name = entry.get('model_name') or entry.get('name')
+        if not model_name:
+            continue
+        try:
+            ctx = _configured_context_size(model_name, provider_config)
+        except Exception as e:
+            logger.debug(f"Could not resolve context for model {entry.get('id')}: {e}")
+            continue
+        if not ctx:
+            # Fetched listings set only context_window; mirror it so clients
+            # reading either field see the same number.
+            ctx = entry.get('context_window') or entry.get('context_length') or entry.get('context_size')
+        if ctx:
+            entry['context_size'] = ctx
+            entry['context_length'] = ctx
+            entry['context_window'] = ctx
+        if entry.get('max_request_tokens') is None:
+            try:
+                entry['max_request_tokens'] = get_max_request_tokens_for_model(model_name, provider_config)
+            except Exception:
+                pass
+
+
 async def _build_model_list(request: Request) -> dict:
     """Shared model listing logic used by all /models endpoints."""
     all_models = []
@@ -287,6 +354,7 @@ async def _build_model_list(request: Request) -> dict:
     for provider_id, provider_config in _config.providers.items():
         try:
             provider_models = await get_provider_models(provider_id, provider_config, _config, user_id=user_id)
+            _apply_provider_context_config(provider_models, provider_config)
             all_models.extend(provider_models)
         except Exception as e:
             logger.warning(f"Error listing models for provider {provider_id}: {e}")
