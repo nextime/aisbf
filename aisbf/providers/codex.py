@@ -222,6 +222,17 @@ class CodexProviderHandler(BaseProviderHandler):
             save_callback=lambda creds: self._save_oauth2_to_db(creds)
         )
     
+    # Reasoning models apply a reasoning effort server-side, which
+    # /v1/chat/completions refuses to combine with function tools.
+    _REASONING_MODEL_PREFIXES = ('gpt-5', 'o1', 'o3', 'o4', 'codex-')
+
+    def _needs_responses_api(self, model: str, tools: Optional[List[Dict]]) -> bool:
+        """True when this request must go to /v1/responses instead of chat completions."""
+        if not tools:
+            return False
+        model_lower = (model or '').lower()
+        return any(model_lower.startswith(prefix) for prefix in self._REASONING_MODEL_PREFIXES)
+
     def _raise_if_usage_limited(self, status_code: int, body: bytes, headers=None) -> None:
         """Turn a Codex usage-limit refusal into RateLimitError without disabling us.
 
@@ -362,6 +373,35 @@ class CodexProviderHandler(BaseProviderHandler):
         tool_choice: Optional[Union[str, Dict]] = None,
     ) -> Union[Dict, object]:
         """Handle request using standard OpenAI Chat Completions API."""
+        if self._needs_responses_api(model, tools):
+            # /v1/chat/completions rejects function tools on a reasoning model:
+            # "Function tools with reasoning_effort are not supported ... use
+            # /v1/responses or set reasoning_effort to 'none'". The reasoning
+            # effort is applied server-side, so there is nothing to strip from
+            # the payload — the endpoint itself is the problem. Go to
+            # /v1/responses, which supports tools and reasoning together, rather
+            # than turning reasoning off on a provider chosen for it.
+            logger.info(
+                f"CodexProviderHandler: {model} sent tools — using the Responses API "
+                f"so reasoning and function tools can coexist"
+            )
+            return await self._handle_request_responses_api(
+                url=f"{self.base_url.rstrip('/')}/responses",
+                headers={
+                    "Authorization": f"Bearer {self.client.api_key}",
+                    "Content-Type": "application/json",
+                    "Accept": "text/event-stream",
+                },
+                label="API Key (Responses)",
+                model=model,
+                messages=messages,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                stream=stream,
+                tools=tools,
+                tool_choice=tool_choice,
+            )
+
         # Build request parameters
         request_params = {
             "model": model,
@@ -856,9 +896,40 @@ class CodexProviderHandler(BaseProviderHandler):
         tools: Optional[List[Dict]] = None,
         tool_choice: Optional[Union[str, Dict]] = None,
     ) -> Union[Dict, object]:
-        """Handle request using ChatGPT Responses API."""
+        """Handle request using the ChatGPT backend's Responses API."""
         api_key = await self._get_valid_api_key()
+        return await self._handle_request_responses_api(
+            url=f"{self.base_url}/codex/responses",
+            headers=self._build_headers(api_key, str(uuid.uuid4())),
+            label="OAuth2",
+            model=model,
+            messages=messages,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            stream=stream,
+            tools=tools,
+            tool_choice=tool_choice,
+        )
 
+    async def _handle_request_responses_api(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        label: str,
+        model: str,
+        messages: List[Dict],
+        max_tokens: Optional[int] = None,
+        temperature: Optional[float] = 1.0,
+        stream: Optional[bool] = False,
+        tools: Optional[List[Dict]] = None,
+        tool_choice: Optional[Union[str, Dict]] = None,
+    ) -> Union[Dict, object]:
+        """Run a request against a Responses API endpoint and adapt the result.
+
+        Shared by both modes: the ChatGPT backend (/codex/responses, OAuth) and
+        the public OpenAI API (/v1/responses, API key) speak the same protocol,
+        so only the URL and auth headers differ.
+        """
         request_payload = self._build_responses_request(
             model=model,
             messages=messages,
@@ -867,11 +938,8 @@ class CodexProviderHandler(BaseProviderHandler):
             tools=tools,
             tool_choice=tool_choice,
         )
-        conversation_id = str(uuid.uuid4())
-        headers = self._build_headers(api_key, conversation_id)
-        url = f"{self.base_url}/codex/responses"
 
-        logger.info(f"CodexProviderHandler: Sending {'streaming' if stream else 'non-streaming'} OAuth2 request to {url}")
+        logger.info(f"CodexProviderHandler: Sending {'streaming' if stream else 'non-streaming'} {label} request to {url}")
         if AISBF_DEBUG:
             logger.info(f"CodexProviderHandler: Request payload: {json.dumps(request_payload, indent=2)}")
             logger.info(f"CodexProviderHandler: Request headers: {json.dumps({k: v for k, v in headers.items() if k.lower() != 'authorization'}, indent=2)}")
@@ -974,8 +1042,11 @@ class CodexProviderHandler(BaseProviderHandler):
             # counter alone so the next request is still attempted.
             raise
         except Exception as e:
+            # Deliberately no record_failure() here. The caller in handlers.py
+            # records the failure for every provider, so doing it here too counted
+            # a single failed request twice and tripped the three-strikes cooldown
+            # after two requests instead of three.
             logger.error(f"CodexProviderHandler: Error: {str(e)}", exc_info=True)
-            self.record_failure()
             raise e
 
     async def get_models(self) -> List[Model]:
