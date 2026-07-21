@@ -24,8 +24,10 @@ Why did the programmer quit his job? Because he didn't get arrays!
 import base64
 import json
 import logging
+import os
 import time
 import uuid
+from pathlib import Path
 from typing import Dict, List, Optional, Union, AsyncIterator, Tuple
 
 from openai import OpenAI
@@ -352,11 +354,39 @@ class CodexProviderHandler(BaseProviderHandler):
                         )
                         logger.info(f"CodexProviderHandler: Updated endpoint in database for user {self.user_id}: {new_endpoint}")
                 else:
-                    # Global provider: update in config file
-                    config.save_providers()
-                    logger.info(f"CodexProviderHandler: Updated endpoint in config file: {new_endpoint}")
+                    # Global provider: rewrite providers.json in place.
+                    #
+                    # This used to call config.save_providers(), which does not
+                    # exist — the AttributeError was swallowed by the except
+                    # below and logged as a warning, so the correction only ever
+                    # lived in memory and every restart re-ran it against the
+                    # same stale file. Merge into the on-disk document rather
+                    # than serialising the whole config object, so a concurrent
+                    # dashboard edit is not clobbered by stale in-memory state.
+                    from ..app.startup import _providers_json_path
+
+                    config_path = _providers_json_path()
+                    with open(config_path) as f:
+                        full_config = json.load(f)
+                    providers = full_config.get('providers')
+                    if not isinstance(providers, dict):
+                        providers = full_config
+                    if self.provider_id not in providers:
+                        logger.warning(
+                            f"CodexProviderHandler: {self.provider_id} not present in {config_path}; "
+                            f"endpoint updated in memory only"
+                        )
+                        return
+                    providers[self.provider_id]['endpoint'] = new_endpoint
+                    save_path = Path.home() / '.aisbf' / 'providers.json'
+                    save_path.parent.mkdir(parents=True, exist_ok=True)
+                    tmp_path = save_path.with_suffix('.json.tmp')
+                    with open(tmp_path, 'w') as f:
+                        json.dump(full_config, f, indent=2)
+                    os.replace(tmp_path, save_path)
+                    logger.info(f"CodexProviderHandler: Updated endpoint in {save_path}: {new_endpoint}")
         except Exception as e:
-            logger.warning(f"CodexProviderHandler: Failed to update endpoint in configuration: {e}")
+            logger.warning(f"CodexProviderHandler: Failed to update endpoint in configuration: {e}", exc_info=True)
     
     # =========================================================================
     # API Key Mode Methods (Standard OpenAI API)
