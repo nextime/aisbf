@@ -33,7 +33,13 @@ import httpx
 from ..models import Model
 from ..config import config
 from ..utils import count_messages_tokens
-from .base import BaseProviderHandler, AISBF_DEBUG
+from .base import (
+    BaseProviderHandler,
+    AISBF_DEBUG,
+    adapt_request_for_unsupported_param,
+    apply_max_tokens_param,
+    apply_temperature_param,
+)
 from ..auth.codex import CodexOAuth2
 
 logger = logging.getLogger(__name__)
@@ -286,14 +292,14 @@ class CodexProviderHandler(BaseProviderHandler):
         request_params = {
             "model": model,
             "messages": [],
-            "temperature": temperature,
             "stream": stream
         }
-        
-        # Only add max_tokens if it's not None
-        if max_tokens is not None:
-            request_params["max_tokens"] = max_tokens
-        
+
+        # Add temperature and the output-token limit only in the form this
+        # model accepts (see the helpers for why they differ per model).
+        apply_temperature_param(request_params, model, temperature)
+        apply_max_tokens_param(request_params, model, max_tokens)
+
         # Build messages with all fields
         for msg in messages:
             message = {"role": msg["role"]}
@@ -318,7 +324,20 @@ class CodexProviderHandler(BaseProviderHandler):
         if tool_choice is not None:
             request_params["tool_choice"] = tool_choice
 
-        response = self.client.chat.completions.create(**request_params)
+        # Retry once per adaptable parameter (max_tokens, temperature) when the
+        # upstream rejects it; adapt_request_for_unsupported_param returns None
+        # for any other error, which we re-raise.
+        for _ in range(2):
+            try:
+                response = self.client.chat.completions.create(**request_params)
+                break
+            except Exception as e:
+                adaptation = adapt_request_for_unsupported_param(request_params, model, e)
+                if adaptation is None:
+                    raise
+                logger.info(f"CodexProviderHandler: {model} rejected a parameter, retrying ({adaptation})")
+        else:
+            response = self.client.chat.completions.create(**request_params)
         return response
     
     # =========================================================================

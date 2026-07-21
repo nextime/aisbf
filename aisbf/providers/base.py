@@ -35,6 +35,107 @@ from ..batching import get_request_batcher
 AISBF_DEBUG = os.environ.get('AISBF_DEBUG', '').lower() in ('true', '1', 'yes')
 
 
+# Newer OpenAI models (reasoning models and the GPT-5/codex families) rejected the
+# legacy `max_tokens` parameter and only accept `max_completion_tokens`. Older
+# models (gpt-4o, gpt-4.1, gpt-3.5, and most OpenAI-compatible third-party
+# endpoints) still expect `max_tokens`, so we cannot simply rename it everywhere.
+_MAX_COMPLETION_TOKENS_PREFIXES = (
+    'o1', 'o3', 'o4', 'gpt-5', 'codex-', 'gpt-image',
+)
+
+# Models discovered at runtime to reject a parameter, so the retry below is paid
+# at most once per model name per process.
+_max_completion_tokens_models = set()
+_no_temperature_models = set()
+
+
+def _normalize_model_name(model: str) -> str:
+    """Strip vendor/route prefixes ('openai/gpt-5', 'azure/o3') and date suffixes."""
+    name = (model or '').strip().lower()
+    if '/' in name:
+        name = name.rsplit('/', 1)[1]
+    return name
+
+
+def model_requires_max_completion_tokens(model: str) -> bool:
+    name = _normalize_model_name(model)
+    if name in _max_completion_tokens_models:
+        return True
+    return name.startswith(_MAX_COMPLETION_TOKENS_PREFIXES)
+
+
+def apply_max_tokens_param(request_params: Dict, model: str, max_tokens: Optional[int]) -> None:
+    """Set the output-token limit under whichever name the model accepts."""
+    if max_tokens is None:
+        return
+    if model_requires_max_completion_tokens(model):
+        request_params['max_completion_tokens'] = max_tokens
+    else:
+        request_params['max_tokens'] = max_tokens
+
+
+def apply_temperature_param(request_params: Dict, model: str, temperature: Optional[float]) -> None:
+    """Set `temperature` only when the model accepts the requested value.
+
+    Reasoning models accept the default (1) but reject any other value, and some
+    deployments reject the parameter outright. In both cases we omit it rather
+    than fail the request — the upstream then applies its own default, which is
+    exactly the value those models insist on.
+    """
+    if temperature is None:
+        return
+    if model_rejects_temperature(model, temperature):
+        import logging
+        logging.warning(
+            f"Model '{model}' does not accept temperature={temperature}; "
+            f"omitting it, so the upstream default (1) applies instead"
+        )
+        return
+    request_params['temperature'] = temperature
+
+
+def model_rejects_temperature(model: str, temperature: Optional[float]) -> bool:
+    name = _normalize_model_name(model)
+    if name in _no_temperature_models:
+        return True
+    if temperature is None or float(temperature) == 1.0:
+        return False
+    return name.startswith(_MAX_COMPLETION_TOKENS_PREFIXES)
+
+
+def adapt_request_for_unsupported_param(request_params: Dict, model: str, exc: Exception) -> Optional[str]:
+    """Rewrite a request that the upstream rejected over an unsupported parameter.
+
+    The prefix heuristics above cannot know every model that dropped support
+    (new releases, custom deployments, proxies), so we also learn from the error
+    and remember the model, making the retry a once-per-model cost.
+
+    Returns a short description of what was changed, or None when the error is
+    unrelated — in which case the caller must re-raise instead of retrying.
+    """
+    message = str(exc).lower()
+    name = _normalize_model_name(model)
+
+    if 'max_completion_tokens' in message and 'max_tokens' in request_params:
+        request_params['max_completion_tokens'] = request_params.pop('max_tokens')
+        _max_completion_tokens_models.add(name)
+        return 'max_tokens -> max_completion_tokens'
+
+    if ('temperature' in message and 'temperature' in request_params and
+            ('not supported' in message or 'unsupported' in message or
+             'does not support' in message)):
+        dropped = request_params.pop('temperature')
+        _no_temperature_models.add(name)
+        import logging
+        logging.warning(
+            f"Model '{model}' rejected temperature={dropped}; retrying without it, "
+            f"so the upstream default applies instead"
+        )
+        return 'dropped temperature'
+
+    return None
+
+
 def is_provider_disabled_cheap(provider_id: str, user_id: Optional[int] = None) -> bool:
     """Return True if a provider is currently disabled — either manually (via the
     dashboard toggle) or by an auto-disable cooldown — WITHOUT constructing the
