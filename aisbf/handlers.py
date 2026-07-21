@@ -25,6 +25,7 @@ Request handlers for AISBF.
 import asyncio
 import base64
 import json
+import logging
 import re
 import uuid
 import hashlib
@@ -77,6 +78,39 @@ def _is_coderai_warmup_error(error) -> bool:
     The marker string is CoderAI-specific, so this is safe to check on any path.
     """
     return 'No active CoderAI broker session' in str(error or '')
+
+
+def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
+    """Reject the request with 503 when the provider is disabled, saying why.
+
+    is_rate_limited() collapses three very different states — the dashboard
+    disable toggle, the failure cooldown and the usage-limit cooldown — into one
+    boolean. Returning a bare "Provider temporarily unavailable" with no log line
+    made a provider that had simply been toggled off in the dashboard look
+    identical to an upstream outage, with nothing in debug.log to tell them
+    apart. Log the reason and put it in the response detail.
+    """
+    if not handler.is_rate_limited():
+        return
+
+    if handler.is_manually_disabled():
+        reason = "manually disabled from the dashboard (re-enable it there)"
+    else:
+        now = time.time()
+        cooldown_until = handler.error_tracking.get('disabled_until') if getattr(handler, 'error_tracking', None) else None
+        usage_until = getattr(handler, '_usage_disabled_until', None)
+        if cooldown_until and cooldown_until > now:
+            reason = f"in failure cooldown for another {int(cooldown_until - now)}s"
+        elif usage_until and usage_until > now:
+            reason = f"disabled by a usage limit for another {int(usage_until - now)}s"
+        else:
+            reason = "temporarily unavailable"
+
+    logging.getLogger(__name__).warning(
+        f"[{provider_id}] Rejecting request with 503: provider is {reason}"
+    )
+    raise HTTPException(status_code=503, detail=f"Provider '{provider_id}' is {reason}")
+
 
 # Registry for proxied content — shared across all RequestHandler instances.
 # Values: {"type": "broker", "provider_id": str, "path": str}
@@ -678,8 +712,7 @@ class RequestHandler:
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
 
         try:
             model = request_data.get('model')
@@ -1042,8 +1075,7 @@ class RequestHandler:
 
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
 
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
 
         # Generate system_fingerprint for this request
         # If seed is present in request, generate unique fingerprint per request
@@ -2196,8 +2228,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
         
         try:
             await handler.apply_rate_limit()
@@ -2231,8 +2262,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
         
         try:
             await handler.apply_rate_limit()
@@ -2272,8 +2302,7 @@ class RequestHandler:
 
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
 
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
 
         try:
             await handler.apply_rate_limit()
@@ -2311,8 +2340,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
-        if handler.is_rate_limited():
-            raise HTTPException(status_code=503, detail="Provider temporarily unavailable")
+        _raise_if_provider_unavailable(handler, provider_id)
         
         try:
             await handler.apply_rate_limit()
