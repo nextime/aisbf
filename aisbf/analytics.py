@@ -23,6 +23,7 @@ Why did the programmer quit his job? Because he didn't get arrays!
 Token Usage Analytics module for AISBF.
 """
 import json
+import asyncio
 from decimal import Decimal
 import csv
 import io
@@ -357,21 +358,64 @@ class Analytics:
         self._latencies[provider_id]['min_ms'] = min(self._latencies[provider_id]['min_ms'], latency_ms)
         self._latencies[provider_id]['max_ms'] = max(self._latencies[provider_id]['max_ms'], latency_ms)
         
-        # Persist to database
+        # Persist to database OFF the event loop.  record_token_usage() opens a MySQL
+        # connection and runs a blocking INSERT; calling it inline here (this method runs
+        # synchronously inside async request handlers) stalled the event loop long enough
+        # for the CoderAI broker WebSocket keepalive to time out (1011) under load and
+        # forced reconnects.  Nothing awaits the result, so fire-and-forget in a worker
+        # thread is safe.
         if tokens_used > 0:
             logger.info(f"Analytics.record_request: Recording to DB - provider={provider_id}, latency_ms={latency_ms}, success={success}, prompt={prompt_tokens}, completion={completion_tokens}, cost={actual_cost}")
+            self._persist_token_usage(
+                provider_id, model_name, tokens_used, user_id, success, latency_ms,
+                error_type, token_id, prompt_tokens, completion_tokens, actual_cost,
+                rotation_id, autoselect_id, analytics_kind,
+            )
+
+    def _persist_token_usage(self, *args):
+        """Write a token_usage row without blocking the caller's event loop.
+
+        When a running loop is present (the normal request path) the blocking DB write
+        is dispatched to a thread pool and NOT awaited — analytics is pure side-effect
+        logging that nothing downstream waits on.  With no loop (sync scripts/tests) it
+        runs inline so behaviour is unchanged there."""
+        provider_id = args[0]
+
+        # args positional order matches record_token_usage(); pull out what the
+        # per-user write also needs.
+        model_name = args[1]
+        tokens_used = args[2]
+        user_id = args[3]
+        token_id = args[7]
+
+        def _write():
             try:
-                self.db.record_token_usage(provider_id, model_name, tokens_used, user_id, success, latency_ms, error_type, token_id, prompt_tokens, completion_tokens, actual_cost, rotation_id, autoselect_id, analytics_kind)
+                self.db.record_token_usage(*args)
                 logger.info(f"✅ Analytics recording completed successfully for {provider_id}")
             except Exception as e:
                 logger.error(f"❌ Analytics recording FAILED for {provider_id}: {e}")
                 import traceback
                 logger.error(f"Traceback: {traceback.format_exc()}")
-
-            # Also record user token usage if this was an API token request
+            # Also record user token usage if this was an API token request.
             if user_id is not None and token_id is not None:
-                self.db.record_user_token_usage(user_id, token_id, provider_id, model_name, tokens_used)
-    
+                try:
+                    self.db.record_user_token_usage(user_id, token_id, provider_id, model_name, tokens_used)
+                except Exception as e:
+                    logger.error(f"❌ Per-user token usage recording FAILED for {provider_id}: {e}")
+
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+        if loop is None:
+            _write()
+            return
+        executor = getattr(self.db, 'executor', None)
+        # Fire-and-forget: the returned future is intentionally not awaited.  _write()
+        # swallows all exceptions so the future always resolves cleanly (no "exception
+        # never retrieved" warnings).
+        loop.run_in_executor(executor, _write)
+
     def get_provider_stats(
         self,
         provider_id: str,

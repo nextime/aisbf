@@ -144,7 +144,25 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
             if queued is not None:
                 await websocket.send_text(json.dumps(queued))
 
+    # Process response frames on a dedicated worker so a slow publish_response (cache
+    # writes, metric recording) can never delay the receive loop from reading and
+    # answering the next heartbeat. A single worker draining a FIFO queue preserves
+    # streaming chunk order.
+    publish_queue: asyncio.Queue = asyncio.Queue()
+
+    async def _process_publish_queue() -> None:
+        while True:
+            msg = await publish_queue.get()
+            try:
+                await broker.touch(session.session_id)
+                await broker.publish_response(msg)
+            except Exception:
+                logger.error("CoderAI broker publish handler failed", exc_info=True)
+            finally:
+                publish_queue.task_done()
+
     queue_task = asyncio.create_task(_drain_broker_queue())
+    publish_task = asyncio.create_task(_process_publish_queue())
     try:
         while True:
             raw = await websocket.receive_text()
@@ -171,7 +189,8 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
                 asyncio.create_task(_broker_refresh_models(session.provider_id, owner_user_id))
                 continue
             if op == "heartbeat":
-                await broker.touch(session.session_id, metadata=message.get("payload") or {})
+                # Answer the keepalive immediately; the TTL touch (which does off-loop
+                # cache I/O) happens after so a slow refresh can't delay the reply.
                 await websocket.send_text(json.dumps({
                     "v": 1,
                     "request_id": message.get("request_id"),
@@ -179,17 +198,22 @@ async def _coderai_broker_websocket_impl(websocket: WebSocket, scope_name: str):
                     "event": "heartbeat",
                     "payload": {"ts": int(time.time())},
                 }))
+                await broker.touch(session.session_id, metadata=message.get("payload") or {})
                 continue
-            await broker.touch(session.session_id)
-            await broker.publish_response(message)
+            # Hand response frames to the worker and immediately loop back to reading,
+            # so heartbeats/register are never queued behind response processing.
+            publish_queue.put_nowait(message)
     except WebSocketDisconnect:
         logger.info(f"CoderAI broker disconnected provider={provider_id} client={client_id}")
     except Exception as e:
         logger.error(f"CoderAI broker websocket error: {e}", exc_info=True)
     finally:
         queue_task.cancel()
+        publish_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await queue_task
+        with contextlib.suppress(asyncio.CancelledError):
+            await publish_task
         await broker.unregister(session.session_id)
         await broker.fail_session_requests(session.session_id, f"CoderAI session '{session.session_id}' disconnected")
 
