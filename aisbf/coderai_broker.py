@@ -255,12 +255,19 @@ class CoderAIBroker:
 
     # -------------------------------------------------- shared cache helpers
 
-    def _store_session_cache(self, session: CoderAISession) -> None:
+    def _build_session_cache_payload(self, session: CoderAISession) -> tuple[str, dict]:
+        """Build the (meta_key, payload) for the shared cache – pure in-memory work."""
         payload = self._serialize_session(session)
         payload["metadata"] = dict(payload.get("metadata") or {})
         payload["metadata"]["broker_node_id"] = self._node_id
         payload["metadata"]["connection_state"] = "connected" if not session.closed else "disconnected"
         meta_key = self._session_meta_key(session.provider_id, session.client_id)
+        return meta_key, payload
+
+    def _flush_session_cache(self, meta_key: str, payload: dict) -> None:
+        """Write the session payload + index to the shared cache.  This performs
+        synchronous Redis round-trips and MUST be run off the event loop when on a hot
+        path (see touch())."""
         self._cache.broker_set(meta_key, payload, ttl=SESSION_TTL_SECONDS)
         # Keep a global index of all live session meta keys so list_sessions
         # can enumerate them without a Redis SCAN.
@@ -270,6 +277,12 @@ class CoderAIBroker:
         if meta_key not in index:
             index.append(meta_key)
             self._cache.broker_set(self._session_index_key(), index, ttl=SESSION_TTL_SECONDS * 10)
+
+    def _store_session_cache(self, session: CoderAISession) -> None:
+        """Synchronous store – used by low-frequency paths (register / periodic
+        heartbeat_loop) where a durable write before returning is fine."""
+        meta_key, payload = self._build_session_cache_payload(session)
+        self._flush_session_cache(meta_key, payload)
 
     def _mark_session_offline_cache(self, provider_id: str, client_id: str) -> None:
         """Write a closed=True tombstone so remote nodes see the disconnect immediately."""
@@ -392,8 +405,12 @@ class CoderAIBroker:
                 session.metadata.update(self._normalize_hardware_metadata(metadata))
             if capabilities:
                 session.capabilities = dict(capabilities)
-            self._store_session_cache(session)
-            return session
+            meta_key, payload = self._build_session_cache_payload(session)
+        # touch() runs for EVERY inbound WebSocket frame (heartbeat / response). Flush
+        # the shared-cache TTL refresh in a worker thread so its synchronous Redis I/O
+        # can't stall the event loop / WebSocket keepalive under load.
+        await asyncio.to_thread(self._flush_session_cache, meta_key, payload)
+        return session
 
     # ------------------------------------------------------- session queries
 
@@ -720,7 +737,11 @@ class CoderAIBroker:
             return
         await self._record_request_metric(request_id, message)
         # Write to shared cache so the requesting node (possibly remote) can poll it.
-        self._cache.broker_set(self._reply_key(request_id), message, ttl=REPLY_TTL_SECONDS)
+        # Run the synchronous Redis write in a thread so it doesn't block the event loop
+        # (awaited here to preserve ordering; the loop stays free during the I/O).
+        await asyncio.to_thread(
+            self._cache.broker_set, self._reply_key(request_id), message, REPLY_TTL_SECONDS
+        )
         # Also resolve any local Future for the fast-path case.
         await self.resolve_response(message)
 
@@ -742,7 +763,11 @@ class CoderAIBroker:
             return
 
         # Slow path: push chunk to the shared cache list for the remote requester.
-        self._cache.broker_push(self._reply_key(request_id), message, ttl=REPLY_TTL_SECONDS)
+        # Offload the synchronous Redis push so a stream of chunks can't block the loop;
+        # awaited to keep chunk ordering intact.
+        await asyncio.to_thread(
+            self._cache.broker_push, self._reply_key(request_id), message, REPLY_TTL_SECONDS
+        )
 
     async def finish_stream(self, request_id: str) -> None:
         """Remove a streaming request's pending state once the consumer has drained

@@ -22,40 +22,107 @@ Why did the programmer quit his job? Because he didn't get arrays!
 
 Utility functions for AISBF.
 """
+import hashlib
+import logging
+import threading
+from collections import OrderedDict
 from typing import Dict, List, Optional
 from langchain_text_splitters import TokenTextSplitter
 from .config import config
+
+logger = logging.getLogger(__name__)
+
+# tiktoken's BPE tokenizer is CPU-bound and was being run several times per request
+# on the *same* large message list (each pass re-encoding tens of KB), blocking the
+# asyncio event loop.  Two caches remove that cost:
+#   * _ENCODING_BY_MODEL avoids re-resolving/loading the encoding object per call.
+#   * _TOKEN_COUNT_CACHE memoizes the total for identical (model, messages) inputs so
+#     the repeated per-request calls collapse to a single BPE pass.
+# count_messages_tokens is a pure function of its inputs, so memoization is safe.
+_ENCODING_BY_MODEL: Dict[str, object] = {}
+_TOKEN_COUNT_CACHE: "OrderedDict[str, int]" = OrderedDict()
+_TOKEN_COUNT_CACHE_MAX = 1024
+_TOKEN_COUNT_LOCK = threading.Lock()
+
+
+def _get_encoding(model: str):
+    """Return a cached tiktoken encoding for the model (loaded at most once per name)."""
+    enc = _ENCODING_BY_MODEL.get(model)
+    if enc is not None:
+        return enc
+    import tiktoken
+    # OpenAI models use cl100k_base encoding
+    if model.startswith(('gpt-', 'text-', 'davinci-', 'ada-', 'babbage-', 'curie-')):
+        try:
+            enc = tiktoken.encoding_for_model(model)
+        except KeyError:
+            # Fallback to cl100k_base if model not found
+            enc = tiktoken.get_encoding("cl100k_base")
+    else:
+        # Default encoding for other models
+        enc = tiktoken.get_encoding("cl100k_base")
+    _ENCODING_BY_MODEL[model] = enc
+    return enc
+
+
+def _messages_cache_key(messages: List[Dict], model: str) -> str:
+    """Cheap content hash of (model, messages).  Hashing is O(n) but far cheaper than a
+    BPE encode pass, so a cache hit that skips re-encoding is a clear win."""
+    h = hashlib.blake2b(digest_size=16)
+    h.update(model.encode('utf-8', 'ignore'))
+    for msg in messages:
+        content = msg.get('content', '')
+        if not content:
+            h.update(b'\x00')
+            continue
+        if isinstance(content, str):
+            h.update(b'\x01')
+            h.update(content.encode('utf-8', 'ignore'))
+        elif isinstance(content, list):
+            h.update(b'\x02')
+            for item in content:
+                if isinstance(item, dict):
+                    text = item.get('text', '')
+                    if text:
+                        h.update(text.encode('utf-8', 'ignore'))
+                elif isinstance(item, str):
+                    h.update(item.encode('utf-8', 'ignore'))
+                h.update(b'\x1f')
+        h.update(b'\x1e')
+    return h.hexdigest()
 
 
 def count_messages_tokens(messages: List[Dict], model: str) -> int:
     """
     Count the total number of tokens in a list of messages.
-    
-    This function uses tiktoken for accurate token counting.
-    
+
+    This function uses tiktoken for accurate token counting.  Results are memoized on
+    (model, messages) content so the several calls made per request collapse to one
+    BPE pass and stop starving the event loop.
+
     Args:
         messages: List of message dictionaries with 'role' and 'content' keys
         model: Model name to determine encoding
-    
+
     Returns:
         Total token count across all messages
     """
-    import tiktoken
-    import logging
-    logger = logging.getLogger(__name__)
-    
-    # Select encoding based on model
-    # OpenAI models use cl100k_base encoding
-    if model.startswith(('gpt-', 'text-', 'davinci-', 'ada-', 'babbage-', 'curie-')):
-        try:
-            encoding = tiktoken.encoding_for_model(model)
-        except KeyError:
-            # Fallback to cl100k_base if model not found
-            encoding = tiktoken.get_encoding("cl100k_base")
-    else:
-        # Default encoding for other models
-        encoding = tiktoken.get_encoding("cl100k_base")
-    
+    cache_key = None
+    try:
+        cache_key = _messages_cache_key(messages, model)
+    except Exception:
+        # Never let cache-key construction break token counting.
+        cache_key = None
+
+    if cache_key is not None:
+        with _TOKEN_COUNT_LOCK:
+            cached = _TOKEN_COUNT_CACHE.get(cache_key)
+            if cached is not None:
+                _TOKEN_COUNT_CACHE.move_to_end(cache_key)
+                return cached
+
+    encoding = _get_encoding(model)
+
     total_tokens = 0
     for msg in messages:
         content = msg.get('content', '')
@@ -71,7 +138,14 @@ def count_messages_tokens(messages: List[Dict], model: str) -> int:
                             total_tokens += len(encoding.encode(text, disallowed_special=()))
                     elif isinstance(item, str):
                         total_tokens += len(encoding.encode(item, disallowed_special=()))
-    
+
+    if cache_key is not None:
+        with _TOKEN_COUNT_LOCK:
+            _TOKEN_COUNT_CACHE[cache_key] = total_tokens
+            _TOKEN_COUNT_CACHE.move_to_end(cache_key)
+            while len(_TOKEN_COUNT_CACHE) > _TOKEN_COUNT_CACHE_MAX:
+                _TOKEN_COUNT_CACHE.popitem(last=False)
+
     logger.debug(f"Token count for model {model}: {total_tokens}")
     return total_tokens
 

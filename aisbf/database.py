@@ -26,6 +26,7 @@ import json
 import hashlib
 import time
 import copy
+import contextlib
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timedelta
@@ -55,10 +56,12 @@ def _verify_password(password: str, stored_hash: str) -> bool:
 
 try:
     import mysql.connector as _mysql_connector
+    from mysql.connector import pooling as _mysql_pooling
     MYSQL_AVAILABLE = True
 except ImportError:
     MYSQL_AVAILABLE = False
     _mysql_connector = None
+    _mysql_pooling = None
 
 logger = logging.getLogger(__name__)
 
@@ -90,16 +93,24 @@ class _MySQLConnectionWrapper:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is None:
-            self._conn.commit()
+            try:
+                self._conn.commit()
+            except Exception:
+                pass
         else:
             try:
                 self._conn.rollback()
             except Exception:
                 pass
-        # Connection is intentionally left open: cursor and conn variables in the
-        # calling function remain valid after the with-block exits (matching SQLite's
-        # context-manager behaviour).  The connection is closed by GC when the caller
-        # function returns and conn goes out of scope.
+        # Release the connection deterministically instead of waiting for GC.  For a
+        # pooled connection, close() returns it to the pool for reuse (avoiding a fresh
+        # TCP+auth handshake per query on the event loop); for a direct fallback
+        # connection it closes the socket.  No caller uses conn/cursor after the
+        # with-block, so this is safe.
+        try:
+            self._conn.close()
+        except Exception:
+            pass
         return False
 
     # Forward attribute access so the wrapper can be used directly as well
@@ -141,13 +152,44 @@ class DatabaseManager:
         self.database_type = database_type
         self.db_type = self.db_config.get('type', 'sqlite').lower()
         self.executor = get_db_executor()
-        
+        self._mysql_pool = None
+
         if self.db_type == 'mysql':
             if not MYSQL_AVAILABLE:
                 raise ImportError("MySQL connector not available. Install mysql-connector-python.")
+            self._init_mysql_pool()
 
         self._initialize_database()
         logger.info(f"Database initialized: {self.db_type}")
+
+    def _init_mysql_pool(self) -> None:
+        """Create a MySQL connection pool so queries reuse warm connections instead
+        of paying a fresh TCP+auth handshake per call on the event loop.  Pool
+        creation failures are non-fatal: _get_connection() falls back to direct
+        connections so the DB stays usable even if MySQL is briefly unreachable at
+        startup."""
+        if _mysql_pooling is None:
+            return
+        try:
+            pool_size = int(self.db_config.get('mysql_pool_size', 16) or 16)
+        except (TypeError, ValueError):
+            pool_size = 16
+        pool_size = max(1, min(pool_size, 32))  # mysql.connector hard-caps pool_size at 32
+        try:
+            self._mysql_pool = _mysql_pooling.MySQLConnectionPool(
+                pool_name=f"aisbf_{self.database_type}",
+                pool_size=pool_size,
+                pool_reset_session=True,
+                host=self.db_config['mysql_host'],
+                port=self.db_config['mysql_port'],
+                user=self.db_config['mysql_user'],
+                password=self.db_config['mysql_password'],
+                database=self.db_config['mysql_database'],
+            )
+            logger.info(f"MySQL connection pool initialized (size={pool_size})")
+        except Exception as e:
+            self._mysql_pool = None
+            logger.warning(f"MySQL pool init failed ({e}); falling back to per-call connections")
 
     def _get_connection(self):
         """Get a database connection based on the configured type."""
@@ -155,6 +197,22 @@ class DatabaseManager:
             db_path = Path(self.db_config['sqlite_path']).expanduser()
             return sqlite3.connect(str(db_path))
         elif self.db_type == 'mysql':
+            # Preferred path: borrow a warm connection from the pool.  ping(reconnect=True)
+            # revives a connection the server dropped (MySQL wait_timeout) so callers never
+            # see a stale socket.  Pool exhaustion or any error falls through to a direct
+            # connection so a request is never rejected just because the pool is busy.
+            if self._mysql_pool is not None:
+                try:
+                    conn = self._mysql_pool.get_connection()
+                    try:
+                        conn.ping(reconnect=True, attempts=2, delay=0)
+                    except Exception:
+                        with contextlib.suppress(Exception):
+                            conn.close()
+                        raise
+                    return _MySQLConnectionWrapper(conn)
+                except Exception as pool_err:
+                    logger.debug(f"MySQL pool unavailable ({pool_err}); using direct connection")
             try:
                 conn = _mysql_connector.connect(
                     host=self.db_config['mysql_host'],
