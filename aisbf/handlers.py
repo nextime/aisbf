@@ -545,6 +545,7 @@ class RequestHandler:
         # Process each chunk and collect responses
         all_responses = []
         combined_content = ""
+        combined_tool_calls = []
         total_prompt_tokens = 0
         total_completion_tokens = 0
         created_time = int(time_module.time())
@@ -573,14 +574,21 @@ class RequestHandler:
                 if isinstance(chunk_response, dict):
                     choices = chunk_response.get('choices', [])
                     if choices:
-                        content = choices[0].get('message', {}).get('content', '')
-                        combined_content += content
-                        
+                        chunk_message = choices[0].get('message') or {}
+                        # Tool-call responses carry content=None (the key exists, so a
+                        # .get default won't kick in) – coalesce to '' or the += raises
+                        # TypeError, which records a provider failure and can disable
+                        # the provider even though upstream returned 200.
+                        combined_content += chunk_message.get('content') or ''
+                        chunk_tool_calls = chunk_message.get('tool_calls')
+                        if chunk_tool_calls:
+                            combined_tool_calls.extend(chunk_tool_calls)
+
                         # Accumulate token usage
                         usage = chunk_response.get('usage', {})
                         total_prompt_tokens += usage.get('prompt_tokens', 0)
                         total_completion_tokens += usage.get('completion_tokens', 0)
-                
+
                 all_responses.append(chunk_response)
                 logger.info(f"Chunk {chunk_idx + 1} processed successfully")
                 
@@ -593,7 +601,16 @@ class RequestHandler:
                 else:
                     raise e
         
-        # Build combined response
+        # Build combined response.  Tool calls from any chunk must be passed through
+        # (chunk 0 is the one sent with tools) or agent clients would receive an
+        # empty completion and stall.
+        combined_message = {"role": "assistant", "content": combined_content}
+        finish_reason = "stop"
+        if combined_tool_calls:
+            combined_message["tool_calls"] = combined_tool_calls
+            if not combined_content:
+                combined_message["content"] = None
+            finish_reason = "tool_calls"
         combined_response = {
             "id": response_id,
             "object": "chat.completion",
@@ -601,11 +618,8 @@ class RequestHandler:
             "model": model,
             "choices": [{
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": combined_content
-                },
-                "finish_reason": "stop"
+                "message": combined_message,
+                "finish_reason": finish_reason
             }],
             "usage": {
                 "prompt_tokens": total_prompt_tokens,
@@ -615,7 +629,7 @@ class RequestHandler:
             "aisbf_chunked": True,
             "aisbf_total_chunks": len(message_chunks)
         }
-        
+
         logger.info(f"=== CHUNKED REQUEST HANDLING END ===")
         logger.info(f"Combined content length: {len(combined_content)} characters")
         logger.info(f"Total chunks processed: {len(all_responses)}")
@@ -3032,6 +3046,7 @@ class RotationHandler:
         # Process each chunk and collect responses
         all_responses = []
         combined_content = ""
+        combined_tool_calls = []
         total_prompt_tokens = 0
         total_completion_tokens = 0
         created_time = int(time_module.time())
@@ -3060,9 +3075,16 @@ class RotationHandler:
                 if isinstance(chunk_response, dict):
                     choices = chunk_response.get('choices', [])
                     if choices:
-                        content = choices[0].get('message', {}).get('content', '')
-                        combined_content += content
-                        
+                        chunk_message = choices[0].get('message') or {}
+                        # Tool-call responses carry content=None (the key exists, so a
+                        # .get default won't kick in) – coalesce to '' or the += raises
+                        # TypeError, which records a provider failure and can disable
+                        # the provider even though upstream returned 200.
+                        combined_content += chunk_message.get('content') or ''
+                        chunk_tool_calls = chunk_message.get('tool_calls')
+                        if chunk_tool_calls:
+                            combined_tool_calls.extend(chunk_tool_calls)
+
                         # Accumulate token usage
                         usage = chunk_response.get('usage', {})
                         chunk_total_tokens = usage.get('total_tokens', 0)
@@ -3086,7 +3108,16 @@ class RotationHandler:
                 else:
                     raise e
         
-        # Build combined response
+        # Build combined response.  Tool calls from any chunk must be passed through
+        # (chunk 0 is the one sent with tools) or agent clients would receive an
+        # empty completion and stall.
+        combined_message = {"role": "assistant", "content": combined_content}
+        finish_reason = "stop"
+        if combined_tool_calls:
+            combined_message["tool_calls"] = combined_tool_calls
+            if not combined_content:
+                combined_message["content"] = None
+            finish_reason = "tool_calls"
         combined_response = {
             "id": response_id,
             "object": "chat.completion",
@@ -3094,11 +3125,8 @@ class RotationHandler:
             "model": model_name,
             "choices": [{
                 "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": combined_content
-                },
-                "finish_reason": "stop"
+                "message": combined_message,
+                "finish_reason": finish_reason
             }],
             "usage": {
                 "prompt_tokens": total_prompt_tokens,
@@ -3108,7 +3136,7 @@ class RotationHandler:
             "aisbf_chunked": True,
             "aisbf_total_chunks": len(message_chunks)
         }
-        
+
         logger.info(f"=== ROTATION CHUNKED REQUEST HANDLING END ===")
         logger.info(f"Combined content length: {len(combined_content)} characters")
         logger.info(f"Total chunks processed: {len(all_responses)}")
