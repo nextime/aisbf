@@ -4630,6 +4630,45 @@ class RotationHandler:
                     }
                     yield f"data: {json.dumps(notice_chunk)}\n\n".encode('utf-8')
 
+                if isinstance(response, dict):
+                    # Complete non-streamed completion handed to the streaming path
+                    # (e.g. the chunked-request handler always returns a plain dict).
+                    # Iterating a dict yields its KEYS as string "chunks" and clients
+                    # blow up ('str' object has no attribute 'choices') – synthesize a
+                    # proper single-chunk SSE stream from it instead.
+                    first_choice = (response.get('choices') or [{}])[0]
+                    message = first_choice.get('message') or {}
+                    delta = {"role": "assistant"}
+                    if message.get('content') is not None:
+                        delta['content'] = message.get('content')
+                        accumulated_response_text = message.get('content') or ""
+                    tool_calls = message.get('tool_calls')
+                    if tool_calls:
+                        # Streaming tool_calls carry a per-entry index.
+                        delta['tool_calls'] = [
+                            {**tc, 'index': i} if isinstance(tc, dict) and 'index' not in tc else tc
+                            for i, tc in enumerate(tool_calls)
+                        ]
+                    synth_chunk = {
+                        "id": response.get('id') or f"chatcmpl-{provider_id}-{int(time.time())}",
+                        "object": "chat.completion.chunk",
+                        "created": response.get('created') or int(time.time()),
+                        "model": response.get('model') or model_name,
+                        "system_fingerprint": system_fingerprint,
+                        "choices": [{
+                            "index": 0,
+                            "delta": delta,
+                            "finish_reason": first_choice.get('finish_reason') or "stop",
+                        }],
+                    }
+                    if isinstance(response.get('usage'), dict):
+                        synth_chunk['usage'] = response['usage']
+                        final_usage = response['usage']
+                    logger.info("Synthesized SSE stream from non-streaming dict response (chunked fallback)")
+                    yield f"data: {json.dumps(synth_chunk)}\n\n".encode('utf-8')
+                    yield b"data: [DONE]\n\n"
+                    return
+
                 if is_google_provider:
                     # Handle Google's streaming response
                     # Google provider returns an async generator
