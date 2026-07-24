@@ -1382,8 +1382,30 @@ class ResponseCache:
         if isinstance(temperature, (int, float)):
             temperature = round(temperature * 4) / 4  # Round to nearest 0.25
 
-        # Create message content hash for semantic deduplication
-        # Include only the text content of messages, ignore metadata
+        # Create message content hash for semantic deduplication.
+        # Include the text AND any attached media (images/video/audio) so two
+        # requests that share a prompt but carry different attachments never
+        # collapse to the same key. Vision/multimodal callers commonly send a
+        # fixed instruction with a varying image; hashing text alone would make
+        # every image reuse the first image's cached answer.
+        def _media_ref(part: dict) -> str:
+            """Stable string identity for a non-text multimodal part."""
+            for media_key in ('image_url', 'video_url', 'audio_url'):
+                media = part.get(media_key)
+                if isinstance(media, dict):
+                    url = media.get('url')
+                    if url:
+                        return f"{media_key}:{url}"
+                elif isinstance(media, str) and media:
+                    return f"{media_key}:{media}"
+            # input_audio / file style parts: fold in the whole part deterministically.
+            if part.get('type') in ('input_audio', 'file', 'input_image'):
+                try:
+                    return f"{part.get('type')}:{json.dumps(part, sort_keys=True)}"
+                except Exception:
+                    return f"{part.get('type')}:{part}"
+            return ''
+
         message_texts = []
         for msg in messages:
             if isinstance(msg, dict):
@@ -1391,11 +1413,16 @@ class ResponseCache:
                 content = msg.get('content', '')
                 # Handle both string and list content (for multimodal)
                 if isinstance(content, list):
-                    # For multimodal content, extract text parts
+                    # For multimodal content, extract text parts and media identities
                     text_parts = []
                     for part in content:
-                        if isinstance(part, dict) and part.get('type') == 'text':
-                            text_parts.append(part.get('text', ''))
+                        if isinstance(part, dict):
+                            if part.get('type') == 'text':
+                                text_parts.append(part.get('text', ''))
+                            else:
+                                ref = _media_ref(part)
+                                if ref:
+                                    text_parts.append(ref)
                         elif isinstance(part, str):
                             text_parts.append(part)
                     content = ' '.join(text_parts)
