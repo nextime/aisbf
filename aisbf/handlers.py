@@ -39,7 +39,6 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
-from .providers.base import is_provider_disabled_cheap
 from .config import config
 from .studio import infer_model_capabilities
 from .studio_adapters import effective_studio_adapter, infer_studio_adapter_profile, adapt_studio_payload_with_profile
@@ -106,14 +105,15 @@ def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
     """Reject a direct request with 503 only when the provider is genuinely
     unavailable, saying why.
 
-    is_rate_limited() collapses three very different states — the dashboard
-    disable toggle, the failure cooldown and the usage-limit cooldown — into one
-    boolean. Those are NOT equivalent for a direct call:
+    is_rate_limited() collapses three very different states — the legacy global
+    manual-disable flag, the failure cooldown and the usage-limit cooldown — into
+    one boolean. Those are NOT equivalent for a direct call:
 
-    * The dashboard "disable" toggle only removes a provider from *rotation* and
-      *autoselect* (those scans call is_provider_disabled_cheap, which honours the
-      manual flag). A direct request that names the provider/model explicitly must
-      still go through — manually disabling a provider must never take it offline
+    * Disabling a provider is now expressed per rotation entry (``enabled: false``
+      in that rotation's config), honoured by the rotation scan. The legacy global
+      manual-disable flag no longer gates anything: not direct calls, not rotation.
+      A direct request that names the provider/model explicitly must always go
+      through — disabling a provider for a rotation must never take it offline
       across the whole API.
     * A failure cooldown or a usage-limit cooldown is a real availability problem:
       calling upstream would just fail again, so a direct call is still rejected,
@@ -142,6 +142,21 @@ def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
         f"[{provider_id}] Rejecting request with 503: provider is {reason}"
     )
     raise HTTPException(status_code=503, detail=f"Provider '{provider_id}' is {reason}")
+
+
+def _provider_in_availability_cooldown(handler) -> bool:
+    """True only when the provider is in a genuine auto-disable cooldown — a
+    failure-threshold cooldown or a usage-limit cooldown.
+
+    Deliberately excludes the manual dashboard flag (is_manually_disabled): that
+    flag is now rotation-*membership* only, expressed per rotation entry via
+    ``enabled: false``. It must never knock a provider out of a rotation it is
+    still a member of, nor out of other rotations, nor out of direct calls.
+    """
+    now = time.time()
+    failure_until = handler.error_tracking.get('disabled_until') if getattr(handler, 'error_tracking', None) else None
+    usage_until = getattr(handler, '_usage_disabled_until', None)
+    return bool((failure_until and failure_until > now) or (usage_until and usage_until > now))
 
 
 # Registry for proxied content — shared across all RequestHandler instances.
@@ -3330,25 +3345,28 @@ class RotationHandler:
                 skipped_providers.append(provider_id)
                 continue
             
-            # Cheap pre-check: skip providers that are already disabled — manually
-            # (dashboard toggle) or by an auto-disable cooldown — BEFORE building the
-            # handler and validating credentials, which for some provider types
-            # performs a network round-trip. This keeps disabled providers from being
-            # contacted at all and makes a dashboard enable/disable take effect on the
-            # very next request.
-            if is_provider_disabled_cheap(provider_id, self.user_id):
-                logger.warning(f"  [SKIPPED] Provider {provider_id} is disabled (manual toggle or cooldown)")
+            # Per-rotation membership: a provider entry disabled *in this rotation*
+            # (enabled: false) is skipped. This is the ONLY way to disable a provider
+            # for a rotation — it does not touch the provider in other rotations or in
+            # direct API calls. Cheap check, so we never build the handler (which for
+            # some provider types performs a credential-validation network round-trip)
+            # for an entry the operator turned off here.
+            if provider.get('enabled') is False:
+                logger.info(f"  [SKIPPED] Provider {provider_id} is disabled in this rotation (enabled=false)")
                 skipped_providers.append(provider_id)
                 continue
 
             # Get API key: first from provider config, then from rotation config
             api_key = self._get_api_key(provider_id, provider.get('api_key'))
 
-            # Check if provider is rate limited/deactivated (authoritative check)
+            # Authoritative availability check: skip only on a genuine auto-disable
+            # cooldown (failure threshold / usage limit). The manual dashboard flag is
+            # intentionally NOT consulted here — disabling for a rotation is expressed
+            # per entry above, so a manually-disabled provider is still usable in any
+            # rotation that lists it as enabled.
             provider_handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
-            if provider_handler.is_rate_limited():
-                logger.warning(f"  [SKIPPED] Provider {provider_id} is rate limited/deactivated")
-                logger.warning(f"  Reason: Provider has exceeded failure threshold or is in cooldown period")
+            if _provider_in_availability_cooldown(provider_handler):
+                logger.warning(f"  [SKIPPED] Provider {provider_id} is in an auto-disable cooldown (failure threshold or usage limit)")
                 skipped_providers.append(provider_id)
                 continue
             
