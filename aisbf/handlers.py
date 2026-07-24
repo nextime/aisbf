@@ -103,30 +103,40 @@ def _should_record_failure(error) -> bool:
 
 
 def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
-    """Reject the request with 503 when the provider is disabled, saying why.
+    """Reject a direct request with 503 only when the provider is genuinely
+    unavailable, saying why.
 
     is_rate_limited() collapses three very different states — the dashboard
     disable toggle, the failure cooldown and the usage-limit cooldown — into one
-    boolean. Returning a bare "Provider temporarily unavailable" with no log line
-    made a provider that had simply been toggled off in the dashboard look
-    identical to an upstream outage, with nothing in debug.log to tell them
-    apart. Log the reason and put it in the response detail.
+    boolean. Those are NOT equivalent for a direct call:
+
+    * The dashboard "disable" toggle only removes a provider from *rotation* and
+      *autoselect* (those scans call is_provider_disabled_cheap, which honours the
+      manual flag). A direct request that names the provider/model explicitly must
+      still go through — manually disabling a provider must never take it offline
+      across the whole API.
+    * A failure cooldown or a usage-limit cooldown is a real availability problem:
+      calling upstream would just fail again, so a direct call is still rejected,
+      with the reason logged and echoed in the response detail.
     """
     if not handler.is_rate_limited():
         return
 
-    if handler.is_manually_disabled():
-        reason = "manually disabled from the dashboard (re-enable it there)"
+    now = time.time()
+    cooldown_until = handler.error_tracking.get('disabled_until') if getattr(handler, 'error_tracking', None) else None
+    usage_until = getattr(handler, '_usage_disabled_until', None)
+    in_failure_cooldown = bool(cooldown_until and cooldown_until > now)
+    in_usage_cooldown = bool(usage_until and usage_until > now)
+
+    # The only remaining reason is_rate_limited() can be true is the manual
+    # dashboard toggle, which is rotation-only — let the direct call proceed.
+    if not in_failure_cooldown and not in_usage_cooldown:
+        return
+
+    if in_failure_cooldown:
+        reason = f"in failure cooldown for another {int(cooldown_until - now)}s"
     else:
-        now = time.time()
-        cooldown_until = handler.error_tracking.get('disabled_until') if getattr(handler, 'error_tracking', None) else None
-        usage_until = getattr(handler, '_usage_disabled_until', None)
-        if cooldown_until and cooldown_until > now:
-            reason = f"in failure cooldown for another {int(cooldown_until - now)}s"
-        elif usage_until and usage_until > now:
-            reason = f"disabled by a usage limit for another {int(usage_until - now)}s"
-        else:
-            reason = "temporarily unavailable"
+        reason = f"disabled by a usage limit for another {int(usage_until - now)}s"
 
     logging.getLogger(__name__).warning(
         f"[{provider_id}] Rejecting request with 503: provider is {reason}"
