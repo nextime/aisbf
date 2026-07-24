@@ -455,7 +455,7 @@ function renderRotationProviders(rotationKey) {
 
         const body = `
             <div style="display:flex; justify-content:flex-end; align-items:center; gap:6px; margin-bottom:10px;">
-                ${(_pid && !META_PROVIDERS.includes(_pid)) ? `<button type="button" class="btn btn-secondary provider-toggle-btn" data-provider="${escHtmlAttr(_pid)}" onclick="toggleProviderDisabled(this)" style="padding:5px 10px;font-size:12px;">${window.i18n.t('rotations.disable') || 'Disable'}</button>` : ''}
+                ${(_pid && !META_PROVIDERS.includes(_pid)) ? `<button type="button" class="btn btn-secondary provider-toggle-btn" data-rotation="${escHtmlAttr(rotationKey)}" data-pindex="${providerIndex}" data-disabled="${provider.enabled === false ? '1' : '0'}" onclick="toggleProviderDisabled(this)" style="padding:5px 10px;font-size:12px;background:${provider.enabled === false ? '#198754' : ''};">${provider.enabled === false ? (window.i18n.t('rotations.enable') || 'Enable') : (window.i18n.t('rotations.disable') || 'Disable')}</button>` : ''}
                 <button type="button" class="btn btn-secondary" onclick="removeRotationProvider('${safeKey}', ${providerIndex})" style="background: #dc3545; padding: 5px 10px; font-size: 12px;">${window.i18n.t('rotations.remove')}</button>
             </div>
 
@@ -485,26 +485,18 @@ function renderRotationProviders(rotationKey) {
     applyProviderToggleStates();
 }
 
-// --- Manual provider disable/enable -------------------------------------
-let providerManualStatus = {};
-
-async function loadProviderManualStatus() {
-    try {
-        const r = await fetch(`${BASE_PATH}/dashboard/api/providers/manual-status`);
-        if (!r.ok) return;
-        const data = await r.json();
-        if (data && data.success) {
-            providerManualStatus = data.statuses || {};
-            applyProviderToggleStates();
-        }
-    } catch (e) { /* non-fatal */ }
-}
+// --- Per-rotation provider disable/enable -------------------------------
+// Disabling is membership in THIS rotation only: it flips `enabled` on the
+// provider entry inside this rotation's config and persists it. It never touches
+// the provider in other rotations or in direct API calls.
 
 function applyProviderToggleStates() {
     document.querySelectorAll('.provider-toggle-btn').forEach(btn => {
-        const pid = btn.getAttribute('data-provider');
-        const st = providerManualStatus[pid] || {};
-        _setToggleBtn(btn, !!st.manual_disabled);
+        const rotationKey = btn.getAttribute('data-rotation');
+        const pindex = parseInt(btn.getAttribute('data-pindex'), 10);
+        const rot = rotationsConfig.rotations[rotationKey];
+        const provider = rot && rot.providers && rot.providers[pindex];
+        _setToggleBtn(btn, !!(provider && provider.enabled === false));
     });
 }
 
@@ -519,30 +511,50 @@ function _setToggleBtn(btn, disabled) {
     }
 }
 
-async function toggleProviderDisabled(btn) {
-    const pid = btn.getAttribute('data-provider');
-    if (!pid) return;
-    const currentlyDisabled = btn.dataset.disabled === '1';
-    const action = currentlyDisabled ? 'manual-enable' : 'manual-disable';
-    btn.disabled = true;
+// POST the current rotation config without navigating away (used by the instant
+// per-entry disable toggle). Returns true on success.
+async function persistRotationsSilent() {
     try {
-        const r = await fetch(`${BASE_PATH}/dashboard/api/provider/${encodeURIComponent(pid)}/${action}`, { method: 'POST' });
-        const data = await r.json();
-        if (data && data.success) {
-            providerManualStatus[pid] = { ...(providerManualStatus[pid] || {}), manual_disabled: !!data.manual_disabled };
-            // Update every toggle button for this provider (it may appear in several rotations).
-            document.querySelectorAll(`.provider-toggle-btn[data-provider="${CSS.escape(pid)}"]`).forEach(b => _setToggleBtn(b, !!data.manual_disabled));
-        } else {
-            alert((data && data.error) || 'Action failed');
+        const orderedRotations = {};
+        rotationMasterOrder.forEach(k => { if (rotationsConfig.rotations[k]) orderedRotations[k] = rotationsConfig.rotations[k]; });
+        const response = await fetch(rotationsData.saveUrl, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+            body: 'config=' + encodeURIComponent(JSON.stringify({ ...rotationsConfig, rotations: orderedRotations }, null, 2))
+        });
+        return response.ok;
+    } catch (e) {
+        return false;
+    }
+}
+
+async function toggleProviderDisabled(btn) {
+    const rotationKey = btn.getAttribute('data-rotation');
+    const pindex = parseInt(btn.getAttribute('data-pindex'), 10);
+    const rot = rotationsConfig.rotations[rotationKey];
+    if (!rot || !rot.providers || !rot.providers[pindex]) return;
+    const provider = rot.providers[pindex];
+    // Currently enabled (enabled !== false) → this click disables it, and vice versa.
+    const willDisable = provider.enabled !== false;
+    btn.disabled = true;
+    // Optimistically flip, persist, revert on failure.
+    provider.enabled = willDisable ? false : true;
+    _setToggleBtn(btn, willDisable);
+    try {
+        const ok = await persistRotationsSilent();
+        if (!ok) {
+            provider.enabled = willDisable ? true : false;
+            _setToggleBtn(btn, !willDisable);
+            alert('Failed to save rotation change');
         }
     } catch (e) {
+        provider.enabled = willDisable ? true : false;
+        _setToggleBtn(btn, !willDisable);
         alert('Request failed: ' + e);
     } finally {
         btn.disabled = false;
     }
 }
-
-document.addEventListener('DOMContentLoaded', () => setTimeout(loadProviderManualStatus, 600));
 
 function renderRotationModels(rotationKey, providerIndex) {
     const container = document.getElementById(`models-${rotationKey}-${providerIndex}`);
