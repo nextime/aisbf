@@ -411,8 +411,19 @@ class KiloProviderHandler(BaseProviderHandler):
             return response
         except Exception as e:
             import logging
+            from .base import is_request_scoped_error, extract_http_status
             logging.error(f"KiloProviderHandler: Error: {str(e)}", exc_info=True)
-            self.record_failure()
+            # A per-request error (bad input, or the chosen model lacking an image
+            # endpoint → 404 "No endpoints found that support image input", or a
+            # 429 rate limit) says nothing about provider health. Counting it toward
+            # the three-strike cooldown would take kilo offline for every request.
+            if is_request_scoped_error(e):
+                logging.warning(
+                    f"KiloProviderHandler: request-scoped error (status={extract_http_status(e)}) "
+                    f"not counted toward the provider failure budget"
+                )
+            else:
+                self.record_failure()
             raise e
 
     async def _handle_streaming_request(self, request_params: Dict, token: str, model: str):
@@ -462,8 +473,13 @@ class KiloProviderHandler(BaseProviderHandler):
                         error_json if 'error_json' in locals() else error_message,
                         dict(response.headers)
                     )
-                
-                self.record_failure()
+
+                # Request-scoped statuses (bad input, unsupported capability, rate
+                # limit) must not trip the provider failure cooldown — see
+                # is_request_scoped_status. Only genuine provider faults count.
+                from .base import is_request_scoped_status
+                if not is_request_scoped_status(response.status_code):
+                    self.record_failure()
                 raise Exception(f"Kilo API streaming error ({response.status_code}): {error_message}")
         except Exception:
             await streaming_client.aclose()

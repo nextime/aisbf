@@ -39,6 +39,7 @@ from fastapi import HTTPException, Request
 from fastapi.responses import JSONResponse, StreamingResponse, Response
 from .models import ChatCompletionRequest, ChatCompletionResponse
 from .providers import get_provider_handler, RateLimitError
+from .providers.base import is_request_scoped_error
 from .config import config
 from .studio import infer_model_capabilities
 from .studio_adapters import effective_studio_adapter, infer_studio_adapter_profile, adapt_studio_payload_with_profile
@@ -97,8 +98,18 @@ def _is_upstream_rate_limit(error) -> bool:
 
 
 def _should_record_failure(error) -> bool:
-    """Whether an exception should count against the provider's failure budget."""
-    return not _is_coderai_warmup_error(error) and not _is_upstream_rate_limit(error)
+    """Whether an exception should count against the provider's failure budget.
+
+    Excludes coderai warm-up errors, upstream rate limits, and request-scoped
+    errors (bad input / unsupported capability such as a 404 "No endpoints found
+    that support image input") — none of which indicate the provider is unhealthy,
+    so they must not trip the cooldown that disables it for all traffic.
+    """
+    return (
+        not _is_coderai_warmup_error(error)
+        and not _is_upstream_rate_limit(error)
+        and not is_request_scoped_error(error)
+    )
 
 
 def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
