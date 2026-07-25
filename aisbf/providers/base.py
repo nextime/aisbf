@@ -193,6 +193,53 @@ class RateLimitError(Exception):
         self.status_code = status_code
 
 
+# HTTP statuses that describe a problem with THIS request — bad input, an
+# unsupported capability for the chosen model, or a rate limit — rather than the
+# provider being unhealthy. They must not count toward the consecutive-failure
+# budget that disables the whole provider: otherwise a handful of request-scoped
+# errors (e.g. a model that lacks an image endpoint returning 404 "No endpoints
+# found that support image input", or a bad image returning 400) take the whole
+# provider offline for every request for the cooldown window.
+_REQUEST_SCOPED_STATUSES = frozenset({400, 404, 413, 415, 422, 429})
+
+
+def is_request_scoped_status(status) -> bool:
+    """True when an HTTP status code is about the request, not provider health."""
+    try:
+        return int(status) in _REQUEST_SCOPED_STATUSES
+    except (TypeError, ValueError):
+        return False
+
+
+def extract_http_status(error) -> Optional[int]:
+    """Best-effort HTTP status code from a provider exception."""
+    status = getattr(error, 'status_code', None)
+    if status is None:
+        status = getattr(getattr(error, 'response', None), 'status_code', None)
+    try:
+        return int(status) if status is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def is_request_scoped_error(error) -> bool:
+    """True when the error is about the specific request (bad input / unsupported
+    capability / rate limit) rather than the provider's health, so it must not
+    count toward the failure cooldown that disables the whole provider.
+
+    Falls back to message sniffing for handlers that wrap the upstream error in a
+    plain Exception without preserving the status code (e.g. the streaming path).
+    """
+    if is_request_scoped_status(extract_http_status(error)):
+        return True
+    text = str(error or '')
+    return (
+        'No endpoints found that support image input' in text
+        or 'Cannot decode visions' in text
+        or '429 Too Many Requests' in text
+    )
+
+
 class AnthropicFormatConverter:
     """
     Shared utility class for converting between OpenAI and Anthropic message formats.
