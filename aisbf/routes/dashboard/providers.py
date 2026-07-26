@@ -2284,7 +2284,13 @@ async def api_provider_usage(request: Request, provider_id: str):
         logger.warning(f"api_provider_usage error for {provider_id}: {e}")
         if cached:
             return JSONResponse({"success": True, "supported": True, "usage": cached['usage_data'], "stale": True})
-        return JSONResponse({"success": False, "error": str(e)}, status_code=500)
+        # A usage-fetch failure — invalid/expired credentials, provider offline,
+        # or an upstream error — is an expected soft condition for a monitoring
+        # poll, not a server error. Returning 500 spammed the dashboard (which
+        # polls every provider's usage on a timer) with 500s for any provider
+        # whose credentials are stale. Degrade gracefully: 200 with usage:None
+        # and an 'unavailable' flag so the UI can render an offline state.
+        return JSONResponse({"success": True, "supported": True, "usage": None, "unavailable": True, "error": str(e)})
 
 
 @router.post("/dashboard/api/rotation")
