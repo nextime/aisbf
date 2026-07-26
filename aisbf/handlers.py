@@ -196,24 +196,20 @@ def _provider_rl_check(bucket: str, window_seconds: int, max_requests: int) -> t
 
 
 def _provider_rl_limits(provider_config) -> tuple:
-    """Extract (rpm, rph) client rate limits from a provider config (object or dict)."""
+    """Extract (rps, rpm, rph) client rate limits from a provider config (object or dict)."""
     if provider_config is None:
-        return 0, 0
+        return 0, 0, 0
     if isinstance(provider_config, dict):
-        rpm = provider_config.get('client_rate_limit_rpm', 0)
-        rph = provider_config.get('client_rate_limit_rph', 0)
+        get = provider_config.get
     else:
-        rpm = getattr(provider_config, 'client_rate_limit_rpm', 0)
-        rph = getattr(provider_config, 'client_rate_limit_rph', 0)
-    try:
-        rpm = int(rpm or 0)
-    except (TypeError, ValueError):
-        rpm = 0
-    try:
-        rph = int(rph or 0)
-    except (TypeError, ValueError):
-        rph = 0
-    return rpm, rph
+        get = lambda k, d=0: getattr(provider_config, k, d)
+    out = []
+    for key in ('client_rate_limit_rps', 'client_rate_limit_rpm', 'client_rate_limit_rph'):
+        try:
+            out.append(int(get(key, 0) or 0))
+        except (TypeError, ValueError):
+            out.append(0)
+    return tuple(out)
 
 
 def _enforce_provider_client_rate_limit(provider_id: str, provider_config) -> None:
@@ -224,8 +220,8 @@ def _enforce_provider_client_rate_limit(provider_id: str, provider_config) -> No
     the provider's upstream quota. 0 = unlimited (the default), so providers
     without a configured limit are unaffected.
     """
-    rpm, rph = _provider_rl_limits(provider_config)
-    for window, limit, label in ((60, rpm, "per-minute"), (3600, rph, "per-hour")):
+    rps, rpm, rph = _provider_rl_limits(provider_config)
+    for window, limit, label in ((1, rps, "per-second"), (60, rpm, "per-minute"), (3600, rph, "per-hour")):
         allowed, retry_after = _provider_rl_check(f"provider:{provider_id}:{window}", window, limit)
         if not allowed:
             logging.getLogger(__name__).warning(

@@ -1811,6 +1811,10 @@ function renderProviderDetails(key) {
         ${subPanel(`providers:${key}:ratelimit`, window.i18n.t('providers.rate_limit_section') || 'Rate Limiting', `
         <div style="border-left: 3px solid #4a9eff; padding-left: 12px;">
             <div class="form-group">
+                <label>${window.i18n.t('providers.client_rate_limit_rps') || 'Max client requests per second'} (0 = unlimited)</label>
+                <input type="number" min="0" value="${provider.client_rate_limit_rps || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rps', this.value ? parseInt(this.value) : 0)">
+            </div>
+            <div class="form-group">
                 <label>${window.i18n.t('providers.client_rate_limit_rpm') || 'Max client requests per minute'} (0 = unlimited)</label>
                 <input type="number" min="0" value="${provider.client_rate_limit_rpm || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rpm', this.value ? parseInt(this.value) : 0)">
             </div>
