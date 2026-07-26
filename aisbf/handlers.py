@@ -3846,11 +3846,24 @@ class RotationHandler:
                     continue
 
             logger.info(f"Getting provider handler for {provider_id}")
-            handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
+            try:
+                handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
+            except Exception as e:
+                logger.warning(f"Provider {provider_id} handler build failed ({e}); failing over to next model")
+                tried_models.append(current_model)
+                continue
             logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
-            if handler.is_rate_limited():
-                logger.warning(f"Provider {provider_id} is rate limited, skipping to next model")
+            # Only a genuine auto-disable cooldown (failure threshold / usage limit)
+            # skips a provider here. The manual dashboard flag is rotation-membership
+            # only (honoured by enabled:false in the scan), so it must NOT block
+            # dispatch — otherwise the scan marks a manually-flagged provider available
+            # but dispatch skips it. Crucially, mark the skipped model as tried so
+            # failover advances to the next provider instead of re-selecting this same
+            # one every retry (which exhausted max_retries and returned 429).
+            if _provider_in_availability_cooldown(handler):
+                logger.warning(f"Provider {provider_id} is in an auto-disable cooldown, failing over to next model")
+                tried_models.append(current_model)
                 continue
             
             # Check token rate limits for this model
