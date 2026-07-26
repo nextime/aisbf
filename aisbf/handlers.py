@@ -3446,7 +3446,17 @@ class RotationHandler:
             # intentionally NOT consulted here — disabling for a rotation is expressed
             # per entry above, so a manually-disabled provider is still usable in any
             # rotation that lists it as enabled.
-            provider_handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
+            #
+            # Building the handler can raise (e.g. a provider with invalid/expired
+            # credentials raises ValueError during credential validation). That must
+            # NOT crash the whole rotation with a 500 — it just means this provider is
+            # unusable right now, so skip it and let the rotation try the next one.
+            try:
+                provider_handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
+            except Exception as e:
+                logger.warning(f"  [SKIPPED] Provider {provider_id} unavailable: handler build failed ({e})")
+                skipped_providers.append(provider_id)
+                continue
             if _provider_in_availability_cooldown(provider_handler):
                 logger.warning(f"  [SKIPPED] Provider {provider_id} is in an auto-disable cooldown (failure threshold or usage limit)")
                 skipped_providers.append(provider_id)
