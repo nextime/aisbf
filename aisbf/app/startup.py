@@ -137,6 +137,25 @@ def setup_logging():
     ):
         logging.getLogger(noisy_logger).setLevel(logging.INFO if AISBF_DEBUG else logging.WARNING)
 
+    # HTTP client libraries emit extremely high-volume DEBUG traces (every
+    # connection open/close/send/receive). Beyond the noise, httpcore logs a
+    # connection-close trace from the OpenAI client's __del__ finalizer; under
+    # load that finalizer runs during a garbage-collection pause that can land
+    # mid-flush of aisbf.log, re-entering the same file handler and raising
+    # "RuntimeError: reentrant call inside BufferedWriter" — which cascades and
+    # blocks the asyncio event loop (the server keeps the port bound but stops
+    # accepting connections). Pin these to WARNING regardless of debug mode so a
+    # finalizer can never emit a DEBUG/INFO record into the reentrant path.
+    for http_logger in (
+        'httpcore',
+        'httpcore.connection',
+        'httpcore.http11',
+        'httpcore.http2',
+        'httpx',
+        'openai',
+    ):
+        logging.getLogger(http_logger).setLevel(logging.WARNING)
+
     bpf = BrokenPipeFilter()
     for h in (file_handler, error_handler, console_handler):
         h.addFilter(bpf)
