@@ -170,6 +170,75 @@ def _provider_in_availability_cooldown(handler) -> bool:
     return bool((failure_until and failure_until > now) or (usage_until and usage_until > now))
 
 
+# Per-provider client rate limiting — a global sliding window (all clients
+# combined) that bounds how many requests are forwarded to a given provider,
+# protecting the upstream from hammering (e.g. a client exhausting a per-IP
+# free-model quota). Configured per provider via client_rate_limit_rpm/rph.
+_provider_rl_state: dict = {}  # bucket -> list[timestamps]
+_provider_rl_lock = threading.Lock()
+
+
+def _provider_rl_check(bucket: str, window_seconds: int, max_requests: int) -> tuple:
+    """Sliding-window check+record. Returns (allowed, retry_after_seconds)."""
+    if max_requests <= 0:
+        return True, 0
+    now = time.time()
+    cutoff = now - window_seconds
+    with _provider_rl_lock:
+        ts = [t for t in _provider_rl_state.get(bucket, []) if t > cutoff]
+        if len(ts) >= max_requests:
+            retry_after = int(ts[0] + window_seconds - now) + 1
+            _provider_rl_state[bucket] = ts
+            return False, retry_after
+        ts.append(now)
+        _provider_rl_state[bucket] = ts
+        return True, 0
+
+
+def _provider_rl_limits(provider_config) -> tuple:
+    """Extract (rpm, rph) client rate limits from a provider config (object or dict)."""
+    if provider_config is None:
+        return 0, 0
+    if isinstance(provider_config, dict):
+        rpm = provider_config.get('client_rate_limit_rpm', 0)
+        rph = provider_config.get('client_rate_limit_rph', 0)
+    else:
+        rpm = getattr(provider_config, 'client_rate_limit_rpm', 0)
+        rph = getattr(provider_config, 'client_rate_limit_rph', 0)
+    try:
+        rpm = int(rpm or 0)
+    except (TypeError, ValueError):
+        rpm = 0
+    try:
+        rph = int(rph or 0)
+    except (TypeError, ValueError):
+        rph = 0
+    return rpm, rph
+
+
+def _enforce_provider_client_rate_limit(provider_id: str, provider_config) -> None:
+    """Reject with 429 when this provider's global client rate limit is exceeded.
+
+    A cheap gate meant to run before the handler is built / the upstream is
+    called, so a hammering client is turned away at the door and never consumes
+    the provider's upstream quota. 0 = unlimited (the default), so providers
+    without a configured limit are unaffected.
+    """
+    rpm, rph = _provider_rl_limits(provider_config)
+    for window, limit, label in ((60, rpm, "per-minute"), (3600, rph, "per-hour")):
+        allowed, retry_after = _provider_rl_check(f"provider:{provider_id}:{window}", window, limit)
+        if not allowed:
+            logging.getLogger(__name__).warning(
+                f"[{provider_id}] Rejecting request with 429: provider {label} client "
+                f"rate limit ({limit}) reached; retry in {retry_after}s"
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Provider '{provider_id}' {label} request limit reached. Retry in {retry_after}s.",
+                headers={"Retry-After": str(retry_after)},
+            )
+
+
 # Registry for proxied content — shared across all RequestHandler instances.
 # Values: {"type": "broker", "provider_id": str, "path": str}
 #      or {"type": "http",   "url": str}
@@ -784,6 +853,7 @@ class RequestHandler:
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         logger.info(f"Provider handler obtained: {handler.__class__.__name__}")
 
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
 
         try:
@@ -1150,6 +1220,7 @@ class RequestHandler:
 
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
 
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
 
         # Generate system_fingerprint for this request
@@ -2302,6 +2373,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
         
         try:
@@ -2336,6 +2408,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
         
         try:
@@ -2376,6 +2449,7 @@ class RequestHandler:
 
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
 
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
 
         try:
@@ -2414,6 +2488,7 @@ class RequestHandler:
         
         handler = get_provider_handler(provider_id, api_key, user_id=self.user_id)
         
+        _enforce_provider_client_rate_limit(provider_id, self._get_provider_config(provider_id))
         _raise_if_provider_unavailable(handler, provider_id)
         
         try:

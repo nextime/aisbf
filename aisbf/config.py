@@ -109,6 +109,11 @@ class ProviderConfig(BaseModel):
     type: str
     api_key_required: bool
     rate_limit: float = 0.0
+    # Per-provider client rate limit: a global cap (all clients combined) on
+    # requests forwarded to this provider, protecting the upstream from hammering
+    # (e.g. exhausting a per-IP free-model quota). 0 = unlimited.
+    client_rate_limit_rpm: int = 0   # max client requests per minute to this provider
+    client_rate_limit_rph: int = 0   # max client requests per hour to this provider
     api_key: Optional[str] = None  # Optional API key in provider config
     models: Optional[List[ProviderModelConfig]] = None  # Optional list of models with their configs
     auth_config: Optional[Dict] = None  # Unified provider authentication configuration (for all provider types)

@@ -1489,7 +1489,20 @@ function renderProviderDetails(key) {
                 </optgroup>
             </select>
         </div>
-        
+
+        <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">
+            <h4 style="margin: 0 0 15px 0; color: var(--color-link);">${window.i18n.t('providers.rate_limit_section') || 'Rate Limiting'}</h4>
+            <div class="form-group">
+                <label>${window.i18n.t('providers.client_rate_limit_rpm') || 'Max client requests per minute'} (0 = unlimited)</label>
+                <input type="number" min="0" value="${provider.client_rate_limit_rpm || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rpm', this.value ? parseInt(this.value) : 0)">
+            </div>
+            <div class="form-group">
+                <label>${window.i18n.t('providers.client_rate_limit_rph') || 'Max client requests per hour'} (0 = unlimited)</label>
+                <input type="number" min="0" value="${provider.client_rate_limit_rph || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rph', this.value ? parseInt(this.value) : 0)">
+            </div>
+            <small style="color: var(--color-muted); display: block;">Global cap (all clients combined) on requests to this provider. Excess requests get HTTP 429 before the upstream is called — protects the provider from hammering. 0 = unlimited.</small>
+        </div>
+
         ${authFieldsHtml}
         
         <div style="background: var(--bg-panel); padding: 15px; border-radius: 5px; margin: 15px 0; border-left: 3px solid #4a9eff;">

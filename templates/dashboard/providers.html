@@ -1807,7 +1807,21 @@ function renderProviderDetails(key) {
                 </optgroup>
             </select>
         </div>
-        
+
+        ${subPanel(`providers:${key}:ratelimit`, window.i18n.t('providers.rate_limit_section') || 'Rate Limiting', `
+        <div style="border-left: 3px solid #4a9eff; padding-left: 12px;">
+            <div class="form-group">
+                <label>${window.i18n.t('providers.client_rate_limit_rpm') || 'Max client requests per minute'} (0 = unlimited)</label>
+                <input type="number" min="0" value="${provider.client_rate_limit_rpm || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rpm', this.value ? parseInt(this.value) : 0)">
+            </div>
+            <div class="form-group">
+                <label>${window.i18n.t('providers.client_rate_limit_rph') || 'Max client requests per hour'} (0 = unlimited)</label>
+                <input type="number" min="0" value="${provider.client_rate_limit_rph || 0}" onchange="updateProvider('${key}', 'client_rate_limit_rph', this.value ? parseInt(this.value) : 0)">
+            </div>
+            <small style="color: var(--color-muted); display: block;">Global cap (all clients combined) on requests forwarded to this provider. Excess requests get HTTP 429 before the upstream is called — protects the provider from hammering (e.g. exhausting a per-IP free-model quota). 0 = unlimited.</small>
+        </div>
+        `, {open: false})}
+
         ${subPanel(`providers:${key}:auth`, window.i18n.t('providers.authentication') || 'Authentication', authFieldsHtml, {open: true})}
 
         ${subPanel(`providers:${key}:pricing`, window.i18n.t('providers.pricing_section'), `
