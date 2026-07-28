@@ -116,19 +116,17 @@ def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
     """Reject a direct request with 503 only when the provider is genuinely
     unavailable, saying why.
 
-    is_rate_limited() collapses three very different states — the legacy global
-    manual-disable flag, the failure cooldown and the usage-limit cooldown — into
-    one boolean. Those are NOT equivalent for a direct call:
+    is_rate_limited() reports the failure cooldown and the usage-limit cooldown.
+    Both are real availability problems: calling upstream would just fail again, so
+    a direct call is rejected, with the reason logged and echoed in the response
+    detail.
 
-    * Disabling a provider is now expressed per rotation entry (``enabled: false``
-      in that rotation's config), honoured by the rotation scan. The legacy global
-      manual-disable flag no longer gates anything: not direct calls, not rotation.
-      A direct request that names the provider/model explicitly must always go
-      through — disabling a provider for a rotation must never take it offline
-      across the whole API.
-    * A failure cooldown or a usage-limit cooldown is a real availability problem:
-      calling upstream would just fail again, so a direct call is still rejected,
-      with the reason logged and echoed in the response detail.
+    Disabling a provider is expressed per rotation entry (``enabled: false`` in that
+    rotation's config), honoured by the rotation scan. The legacy global
+    manual-disable flag gates nothing — not direct calls, not rotation — and
+    is_rate_limited() no longer consults it. A direct request that names the
+    provider/model explicitly must always go through: disabling a provider for a
+    rotation must never take it offline across the whole API.
     """
     if not handler.is_rate_limited():
         return
@@ -139,8 +137,8 @@ def _raise_if_provider_unavailable(handler, provider_id: str) -> None:
     in_failure_cooldown = bool(cooldown_until and cooldown_until > now)
     in_usage_cooldown = bool(usage_until and usage_until > now)
 
-    # The only remaining reason is_rate_limited() can be true is the manual
-    # dashboard toggle, which is rotation-only — let the direct call proceed.
+    # Race guard: the cooldown can lapse between is_rate_limited() above and the
+    # re-read here. Nothing else makes is_rate_limited() true, so let the call proceed.
     if not in_failure_cooldown and not in_usage_cooldown:
         return
 
@@ -4254,6 +4252,24 @@ class RotationHandler:
                 # network) count against provider health and are worth retrying.
                 if self._is_non_retryable_error(e):
                     logger.warning(f"Non-retryable error on {model_name} (provider: {provider_id}); skipping to next provider by weight (not counted as a provider failure, transparent to client)")
+                    tried_models.append(current_model)
+                    continue
+
+                # A provider that is already in an availability cooldown raises
+                # Exception("Provider rate limited") from its own gate
+                # (BaseProviderHandler.is_rate_limited) before any upstream call.
+                # That error is our own state echoing back, not evidence the provider
+                # is unhealthy. Recording it would push disabled_until another full
+                # cooldown into the future on every attempt, so under steady traffic
+                # the cooldown could never elapse and the provider would stay disabled
+                # forever (observed in production: a failure counter in the hundreds
+                # against a threshold of 3, with the cooldown never once expiring).
+                # Fail over and leave the cooldown to expire on its own.
+                if _provider_in_availability_cooldown(handler):
+                    logger.warning(
+                        f"Provider {provider_id} is still in an availability cooldown; failing over "
+                        f"to the next provider (not counted as a failure, cooldown left to expire)"
+                    )
                     tried_models.append(current_model)
                     continue
 
