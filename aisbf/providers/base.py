@@ -1565,9 +1565,18 @@ class BaseProviderHandler:
         return bool(getattr(self, '_manual_disabled', False))
 
     def is_rate_limited(self) -> bool:
-        # Manual disable takes precedence and never auto-expires.
-        if getattr(self, '_manual_disabled', False):
-            return True
+        # NB: the legacy global manual-disable flag is deliberately NOT consulted
+        # here. Disabling a provider is expressed per rotation entry
+        # (``enabled: false``) and honoured by the rotation scan; the global flag
+        # gates nothing. Treating it as "rate limited" was actively harmful: every
+        # provider's handle_request() calls this method and raises
+        # Exception("Provider rate limited") when it is true, before any upstream
+        # call. The rotation scan (which correctly ignores the manual flag) would
+        # still select the provider, that synthetic error was then counted as a
+        # transient failure, and three of them armed a real failure cooldown — so a
+        # manually-flagged provider was permanently evicted from every rotation it
+        # belonged to, reported to clients as an upstream 429.
+        # Use is_manually_disabled() when you actually want the manual flag.
         disabled_until = self.error_tracking.get('disabled_until')
         if disabled_until:
             if disabled_until > time.time():

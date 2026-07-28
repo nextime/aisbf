@@ -2190,7 +2190,8 @@ async def api_providers_manual_status(request: Request):
             manual = handler.is_manually_disabled()
             statuses[pid] = {
                 "manual_disabled": manual,
-                # rate_limited includes the manual flag; expose the cooldown-only state too
+                # rate_limited is cooldown-only (failure or usage limit); the manual
+                # flag is reported separately above and no longer gates requests.
                 "rate_limited": handler.is_rate_limited(),
             }
         except Exception:
