@@ -615,8 +615,23 @@ class CodexOAuth2:
             return None
     
     def is_authenticated(self) -> bool:
-        """Check if user is authenticated with valid token."""
-        return self.get_valid_token() is not None
+        """Whether these credentials can still produce an access token.
+
+        An expired *cached* access token is not a reason to call the provider
+        unusable: every request path refreshes through
+        get_valid_token_with_refresh() and writes the new tokens back.  But
+        validate_credentials() is synchronous, cannot await that, and used to
+        ask get_valid_token(), which returns None the moment the cached token
+        goes stale.  get_provider_handler() then raised "credentials not valid
+        or not configured" and the provider was dropped from every rotation -
+        permanently, since nothing ever refreshes a provider it refuses to
+        build.  On aisbf.cloud all six codex providers were dead that way for
+        weeks with working refresh tokens sitting in the files beside them.
+        """
+        if self.get_valid_token() is not None:
+            return True
+        tokens = (self.credentials or {}).get("tokens") or {}
+        return bool(tokens.get("refresh_token"))
     
     def get_user_email(self) -> Optional[str]:
         """Get authenticated user's email from ID token."""
