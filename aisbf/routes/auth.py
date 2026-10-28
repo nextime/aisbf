@@ -4,7 +4,7 @@ from typing import Optional
 import time, logging, secrets, hashlib, os, re, hmac
 from pathlib import Path
 from datetime import datetime, timedelta
-from aisbf.database import DatabaseRegistry
+from aisbf.database import DatabaseRegistry, LastAdminError
 from aisbf.database import _hash_password as _db_hash_password, _verify_password as _db_verify_password
 from aisbf.app.startup import _login_rate_limit_check, _login_record_failure, _login_clear_failures, _send_admin_notification_email
 from aisbf.app.templates import url_for, get_base_url
@@ -906,7 +906,14 @@ async def dashboard_delete_account_confirm(request: Request, password: str = For
             return RedirectResponse(url=url_for(request, "/dashboard/delete-account?error=Incorrect password"), status_code=303)
 
         username = request.session.get('username', f'user #{user_id}')
-        db.delete_user(user_id)
+        try:
+            db.delete_user(user_id)
+        except LastAdminError:
+            return RedirectResponse(
+                url=url_for(request, "/dashboard/delete-account")
+                + "?error=You+are+the+last+admin.+Promote+another+account+to+admin+before+deleting+this+one.",
+                status_code=303
+            )
 
         _send_admin_notification_email(
             _config,

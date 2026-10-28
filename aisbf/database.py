@@ -65,6 +65,17 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
+
+class LastAdminError(RuntimeError):
+    """Raised when an operation would leave the installation with no admin.
+
+    Nothing recreates an admin from the dashboard, so losing the last one locks
+    everybody out of user management, settings and the market admin pages until
+    somebody writes a row by hand.  aisbf.cloud spent months in exactly that
+    state, so the database refuses the operation instead of trusting callers.
+    """
+
+
 # Global thread pool executor for database operations
 _db_executor = None
 
@@ -134,17 +145,20 @@ class DatabaseManager:
             db_config: Database configuration dictionary. If None, uses default SQLite config.
         """
         if db_config is None:
-            # Default SQLite configuration
+            # Default SQLite configuration.  The cache database gets its own file
+            # and schema name so a config-less fallback can never land cache rows
+            # in the permanent database.
+            is_cache = database_type == 'cache'
             aisbf_dir = Path.home() / '.aisbf'
             aisbf_dir.mkdir(exist_ok=True)
             self.db_config = {
                 'type': 'sqlite',
-                'sqlite_path': str(aisbf_dir / 'aisbf.db'),
+                'sqlite_path': str(aisbf_dir / ('cache.db' if is_cache else 'aisbf.db')),
                 'mysql_host': 'localhost',
                 'mysql_port': 3306,
                 'mysql_user': 'aisbf',
                 'mysql_password': '',
-                'mysql_database': 'aisbf'
+                'mysql_database': 'aisbf_cache' if is_cache else 'aisbf'
             }
         else:
             self.db_config = db_config
@@ -1770,13 +1784,48 @@ class DatabaseManager:
         msg = str(exc).lower()
         return 'no such table' in msg or "doesn't exist" in msg
 
+    def is_last_active_admin(self, user_id: int) -> bool:
+        """Whether this user is the only active admin left.
+
+        Args:
+            user_id: User ID to test
+
+        Returns:
+            True when the user is an active admin and no other active admin exists.
+        """
+        with self._get_connection() as conn:
+            cursor = conn.cursor()
+            placeholder = '?' if self.db_type == 'sqlite' else '%s'
+            cursor.execute(
+                f'SELECT role, is_active FROM users WHERE id = {placeholder}',
+                (user_id,),
+            )
+            row = cursor.fetchone()
+            if not row or row[0] != 'admin' or not row[1]:
+                return False
+            cursor.execute(
+                f"SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 "
+                f'AND id <> {placeholder}',
+                (user_id,),
+            )
+            return cursor.fetchone()[0] == 0
+
     def delete_user(self, user_id: int):
         """
         Delete a user and all their related rows across every child table.
 
         Args:
             user_id: User ID to delete
+
+        Raises:
+            LastAdminError: if this would remove the last active admin.
         """
+        if self.is_last_active_admin(user_id):
+            raise LastAdminError(
+                f'user {user_id} is the last active admin; promote another '
+                'account to admin before deleting this one'
+            )
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
@@ -1806,7 +1855,18 @@ class DatabaseManager:
             role: New role (optional)
             is_active: New active status (optional)
             display_name: New display name (optional)
+
+        Raises:
+            LastAdminError: if this would demote or deactivate the last active admin.
         """
+        demoting = role is not None and role != 'admin'
+        deactivating = is_active is not None and not is_active
+        if (demoting or deactivating) and self.is_last_active_admin(user_id):
+            raise LastAdminError(
+                f'user {user_id} is the last active admin; promote another '
+                'account to admin before changing this one'
+            )
+
         with self._get_connection() as conn:
             cursor = conn.cursor()
             placeholder = '?' if self.db_type == 'sqlite' else '%s'
@@ -5699,52 +5759,18 @@ def initialize_database(db_config: Optional[Dict[str, Any]] = None):
     logger.info("Database initialized and old records cleaned up")
 
 
-# Now modify DatabaseManager constructor to accept type parameter
-def DatabaseManager__init__(self, db_config: Optional[Dict[str, Any]] = None, database_type: str = DatabaseRegistry.TYPE_CONFIG):
-    """
-    Initialize the database manager.
-
-    Args:
-        db_config: Database configuration dictionary. If None, uses default SQLite config.
-        database_type: TYPE_CONFIG for permanent user data, TYPE_CACHE for temporary cache
-    """
-    self.database_type = database_type
-    
-    if db_config is None:
-        # Default SQLite configuration
-        aisbf_dir = Path.home() / '.aisbf'
-        aisbf_dir.mkdir(exist_ok=True)
-        if database_type == DatabaseRegistry.TYPE_CONFIG:
-            db_path = str(aisbf_dir / 'aisbf.db')
-        else:
-            db_path = str(aisbf_dir / 'cache.db')
-            
-        self.db_config = {
-            'type': 'sqlite',
-            'sqlite_path': db_path,
-            'mysql_host': 'localhost',
-            'mysql_port': 3306,
-            'mysql_user': 'aisbf',
-            'mysql_password': '',
-            'mysql_database': 'aisbf' if database_type == DatabaseRegistry.TYPE_CONFIG else 'aisbf_cache'
-        }
-    else:
-        self.db_config = db_config
-
-    self.db_type = self.db_config.get('type', 'sqlite').lower()
-    self.executor = get_db_executor()
-
-    if self.db_type == 'mysql':
-        # Import the module-level MYSQL_AVAILABLE flag
-        import aisbf.database as db_module
-        if not db_module.MYSQL_AVAILABLE:
-            logger.error(f"❌ DEBUG: MySQL connector not available!")
-            raise ImportError("MySQL connector not available. Install mysql-connector-python.")
-        logger.info(f"✅ DEBUG: MySQL connector available, proceeding...")
-
-    self._initialize_database()
-    logger.info(f"Database initialized: {self.db_type} [TYPE: {self.database_type}]")
-DatabaseManager.__init__ = DatabaseManager__init__
+# NOTE: a copy of DatabaseManager.__init__ used to be defined here and patched
+# over the real constructor.  It predated connection pooling and never set
+# self._mysql_pool, so every MySQL-backed manager raised
+#   AttributeError: 'DatabaseManager' object has no attribute '_mysql_pool'
+# on its first query.  In main.py that exception is swallowed by the
+# "Failed to initialize database" handler, which leaves the registry empty, so
+# the next (config-less) get_config_database() call silently registered the
+# DEFAULT SQLITE database instead.  A MySQL deployment therefore moved itself
+# to an empty ~/.aisbf/aisbf.db without saying so: on aisbf.cloud that happened
+# on 2026-07-22 and stranded three months of users in the wrong database.
+# The real constructor above already handles both backends and the cache path,
+# so the patch is gone rather than repaired.
 
 
 # ============================================================

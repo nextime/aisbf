@@ -4,7 +4,7 @@ from typing import Optional
 import json, logging, os, time, re
 from pathlib import Path
 from datetime import datetime, timedelta
-from aisbf.database import DatabaseRegistry
+from aisbf.database import DatabaseRegistry, LastAdminError
 from aisbf.database import _hash_password as _db_hash_password
 from aisbf import __version__
 from aisbf.app.templates import url_for, get_base_url
@@ -1031,6 +1031,8 @@ async def dashboard_users_delete(request: Request, user_id: int):
     try:
         db.delete_user(user_id)
         return JSONResponse({"success": True})
+    except LastAdminError as e:
+        return JSONResponse({"success": False, "error": str(e)}, status_code=409)
     except Exception as e:
         return JSONResponse({"success": False, "error": str(e)}, status_code=500)
 
